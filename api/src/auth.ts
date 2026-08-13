@@ -49,7 +49,7 @@ authRouter.post('/login', async (req, res) => {
     return res.status(400).json({ error: 'E-mail en wachtwoord verplicht' });
   }
   const result = await pool.query(
-    `select id, email, is_sysadmin
+    `select id, email, is_sysadmin, must_change_password
      from users
      where email = $1 and password_hash = crypt($2, password_hash)`,
     [email, password]
@@ -71,7 +71,16 @@ authRouter.post('/login', async (req, res) => {
     { expiresIn: '12h' }
   );
   const tenantRoles = await fetchTenantRoles(user.id);
-  res.json({ token, user: { id: user.id, email: user.email, isSysadmin: user.is_sysadmin, tenantRoles } });
+  res.json({
+    token,
+    user: {
+      id: user.id,
+      email: user.email,
+      isSysadmin: user.is_sysadmin,
+      mustChangePassword: user.must_change_password,
+      tenantRoles,
+    },
+  });
 });
 
 async function fetchTenantRoles(userId: number) {
@@ -92,7 +101,40 @@ async function fetchTenantRoles(userId: number) {
 
 authRouter.get('/me', requireAuth, async (req: AuthedRequest, res) => {
   const tenantRoles = req.user!.isSysadmin ? [] : await fetchTenantRoles(req.user!.id);
-  res.json({ user: { ...req.user, tenantRoles } });
+  const mcp = await pool.query('select must_change_password from users where id = $1', [req.user!.id]);
+  res.json({ user: { ...req.user, mustChangePassword: mcp.rows[0]?.must_change_password ?? false, tenantRoles } });
+});
+
+// POST /api/auth/change-password — zelfbediening: elke ingelogde gebruiker mag
+// zijn/haar eigen wachtwoord wijzigen (huidig wachtwoord verplicht ter
+// verificatie). Zet ook must_change_password terug op false, zodat de
+// afgedwongen wijzig-wachtwoord-flow (frontend, na een door een sysadmin gezet
+// tijdelijk wachtwoord) hierna niet opnieuw verschijnt. Dit is de eerste en
+// enige plek waar een gebruiker zelf zijn wachtwoord kan wijzigen — voorheen kon
+// dat alleen rechtstreeks in de database (zie oudere versie van deze README).
+authRouter.post('/change-password', requireAuth, async (req: AuthedRequest, res) => {
+  const b = (req.body ?? {}) as Record<string, unknown>;
+  const currentPassword = typeof b.currentPassword === 'string' ? b.currentPassword : '';
+  const newPassword = typeof b.newPassword === 'string' ? b.newPassword : '';
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({ error: 'Huidig en nieuw wachtwoord zijn verplicht.' });
+  }
+  if (newPassword.length < 8) {
+    return res.status(400).json({ error: 'Nieuw wachtwoord moet minstens 8 tekens zijn.' });
+  }
+  const check = await pool.query(
+    'select 1 from users where id = $1 and password_hash = crypt($2, password_hash)',
+    [req.user!.id, currentPassword]
+  );
+  if (check.rows.length === 0) {
+    return res.status(401).json({ error: 'Huidig wachtwoord is onjuist.' });
+  }
+  await pool.query(
+    `update users set password_hash = crypt($1, gen_salt('bf')), must_change_password = false where id = $2`,
+    [newPassword, req.user!.id]
+  );
+  const tenantRoles = req.user!.isSysadmin ? [] : await fetchTenantRoles(req.user!.id);
+  res.json({ user: { ...req.user, mustChangePassword: false, tenantRoles } });
 });
 
 // Heartbeat: zolang de tab open is stuurt de frontend dit elke minuut (zie

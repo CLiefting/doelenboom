@@ -51,10 +51,10 @@ Er is één seed-gebruiker die sysadmin is (toegang tot alle tenants — zie
 - E-mail: `admin@code072.nl`
 - Wachtwoord: `changeme`
 
-**Verander dit wachtwoord voordat deze omgeving buiten je eigen laptop draait.** Er is
-in v1 nog geen wachtwoord-wijzig-scherm; dat kan direct in de database via
-`update users set password_hash = crypt('nieuw-wachtwoord', gen_salt('bf')) where
-email = 'admin@code072.nl';`.
+**Verander dit wachtwoord voordat deze omgeving buiten je eigen laptop draait** — via
+"Wachtwoord wijzigen" naast "Uitloggen" op het overzichtsscherm (zie "Gebruikersbeheer
+& rollen" verderop), of direct in de database via `update users set password_hash =
+crypt('nieuw-wachtwoord', gen_salt('bf')) where email = 'admin@code072.nl';`.
 
 ## Structuur
 
@@ -271,8 +271,23 @@ loggen.
 naast hun e-mailadres op het overzichtsscherm (`PickerPage.tsx` →
 `UserManagementPage.tsx`). Sysadmins zien daar alle tenants (en kunnen nieuwe
 aanmaken) en alle accounts; tenant-admins zien alleen de tenant(s) waar zij
-admin van zijn en kunnen daar leden toevoegen/wijzigen/verwijderen (incl. een
-gloednieuw account aanmaken als het e-mailadres nog niet bestaat).
+admin van zijn. **Klik op een tenant om de ledenlijst (met rol admin/gebruiker)
+te openen** — daar zit ook het formulier om een nieuw lid toe te voegen (met een
+rol-dropdown), inclusief een gloednieuw account aanmaken als het e-mailadres nog
+niet bestaat.
+
+**Wachtwoord wijzigen.** Elke ingelogde gebruiker kan zijn/haar eigen wachtwoord
+wijzigen via "Wachtwoord wijzigen" naast "Uitloggen" op het overzichtsscherm
+(`POST /api/auth/change-password`, huidig wachtwoord verplicht ter verificatie).
+Daarnaast heeft `users` een `must_change_password`-vlag: staat die aan (standaard
+zo bij een door een sysadmin aangemaakt account, of na een wachtwoord-reset via
+Gebruikersbeheer → Alle accounts → "Wachtwoord resetten"), dan blokkeert de app
+na login volledig met een verplicht wachtwoordwijzig-scherm totdat de gebruiker
+zelf een nieuw wachtwoord heeft gekozen. Dit is een UX-gate aan de kant van de
+frontend (`App.tsx`), geen extra serverside autorisatiegrens — de API blijft in
+de tussentijd gewoon bruikbaar met het oude wachtwoord als iemand de flow zou
+omzeilen; voor dit interne beheertool is dat een bewuste, expliciet afgewogen
+keuze (zie Backlog als dit ooit strenger moet).
 
 **API-endpoints:**
 - `GET/POST/PUT/DELETE /api/users(/:id)` — accountbeheer zelf (sysadmin-only) —
@@ -296,9 +311,10 @@ hieronder: de sandbox heeft geen Docker/Postgres, dus dit is alleen via
 Voor sommige tenants (bv. demo-/testomgevingen) wil je dat de data verdwijnt zodra
 er niemand meer mee bezig is, in plaats van dat die blijft rondslingeren. Dat is
 per tenant instelbaar via `tenants.wipe_on_empty` (standaard uit) en
-`tenants.session_timeout_minutes` (standaard 30) — nu alleen te zetten via
-`PUT /api/tenants/:id` (body `{ "wipeOnEmpty": true, "sessionTimeoutMinutes": 30 }`)
-of rechtstreeks in de database; er is nog geen instellingenscherm in de UI.
+`tenants.session_timeout_minutes` (standaard 30) — in te stellen via
+Gebruikersbeheer → tenant selecteren → "Instellingen van ..." (sysadmin of
+tenant-admin van die tenant), of rechtstreeks via `PUT /api/tenants/:id` (body
+`{ "wipeOnEmpty": true, "sessionTimeoutMinutes": 30 }`).
 
 **Hoe "actief" gemeten wordt.** Een JWT is stateless — de server weet niet uit
 zichzelf of een browser nog open staat. Daarom komt er bij elke login een rij in
@@ -341,6 +357,17 @@ en de TypeScript-compilatie is schoon, maar een end-to-end test (inloggen, wacht
 tot de timeout verstrijkt, verifiëren dat de wipe echt afgaat) moet nog bij jou
 lokaal gebeuren na `docker compose down -v`.
 
+**Controleren of het echt werkt: `/dbstat`.** Losse, sysadmin-only URL
+(`http://localhost:5173/dbstat`, `web/src/pages/DbStatPage.tsx` +
+`GET /api/dbstat`) die per tenant alle doelenbomen toont met het aantal
+elementen/relaties/tags/organisatieonderdelen/imports erin — een doelenboom
+zonder elementen/relaties/tags/organisatieonderdelen krijgt een "leeg"-badge.
+Vraagt zelf om inloggen (dezelfde sessie als de hoofdapp, via `useSession.ts`)
+en toont "Geen toegang" voor niet-sysadmins. Geen aparte routerbibliotheek —
+`main.tsx` kiest puur op `window.location.pathname` welk React-component
+gerenderd wordt; dit werkt omdat Vite's devserver (zoals dit project draait)
+onbekende paden standaard laat terugvallen op `index.html`.
+
 ## Ontwikkelstatus (v1, lokaal)
 
 Gebouwd en getest: auth, tenants/doelenbomen-CRUD (TypeScript-compilatie),
@@ -367,11 +394,10 @@ jou lokaal. Let op de schema-wijziging hierboven (Cluster PPT) als je al eerder 
 gedraaid.
 
 Gebruikersbeheer/rollen (sysadmin/admin/gebruiker, zie hierboven) is inmiddels
-gebouwd, incl. tenant aanmaken vanuit de UI (sysadmin) en leden beheren
-(sysadmin/tenant-admin) — ook dit nog niet end-to-end tegen een echte database
+gebouwd, incl. tenant aanmaken vanuit de UI (sysadmin), leden beheren
+(sysadmin/tenant-admin), en zelf je wachtwoord wijzigen (incl. de afgedwongen
+wijzig-flow na een reset) — ook dit nog niet end-to-end tegen een echte database
 getest.
 
-Nog niet gebouwd: eigen wachtwoord wijzigen vanuit de UI (kan nu alleen door een
-sysadmin via Gebruikersbeheer, of rechtstreeks in de database), doelenboom
-aanmaken vanuit de UI (kan nu alleen via de API), behoud van de
-`Toelichting`-kolom op Element-Tag-relaties.
+Nog niet gebouwd: doelenboom aanmaken vanuit de UI (kan nu alleen via de API),
+behoud van de `Toelichting`-kolom op Element-Tag-relaties.

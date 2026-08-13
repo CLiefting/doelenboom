@@ -8,12 +8,14 @@ export default function PickerPage({
   onSelect,
   onLogoutRequest,
   onUsersRequest,
+  onChangePasswordRequest,
 }: {
   token: string;
   user: User;
   onSelect: (d: DoelenboomSummary) => void;
   onLogoutRequest: () => void;
   onUsersRequest: () => void;
+  onChangePasswordRequest: () => void;
 }) {
   const canManageUsers = user.isSysadmin || user.tenantRoles.some((r) => r.role === 'admin');
   const [items, setItems] = useState<DoelenboomSummary[] | null>(null);
@@ -34,19 +36,29 @@ export default function PickerPage({
   }
 
   return (
-    <main style={{ fontFamily: 'system-ui, sans-serif', padding: '2rem', maxWidth: 720, margin: '0 auto' }}>
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-        <h1 style={{ margin: 0, color: '#203864' }}>Doelenboom</h1>
-        <div style={{ fontSize: 14, color: '#6c6f76' }}>
-          {user.email}
-          {canManageUsers && (
-            <button onClick={onUsersRequest} style={{ marginLeft: 12, border: 'none', background: 'none', color: '#2F5597', cursor: 'pointer' }}>
-              Gebruikersbeheer
+    <main style={{ fontFamily: 'system-ui, sans-serif', padding: '2rem', maxWidth: 780, margin: '0 auto' }}>
+      <header style={{ marginBottom: '2rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+          <h1 style={{ margin: 0, color: '#203864' }}>Doelenboom</h1>
+          <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+            <span style={{ fontSize: 13, color: '#9aa0a8', marginRight: 4 }}>{user.email}</span>
+            {canManageUsers && (
+              <button onClick={onUsersRequest} style={navLinkStyle()}>
+                Gebruikersbeheer
+              </button>
+            )}
+            {user.isSysadmin && (
+              <a href="/dbstat" style={navLinkStyle()}>
+                DB-status
+              </a>
+            )}
+            <button onClick={onChangePasswordRequest} style={navLinkStyle()}>
+              Wachtwoord wijzigen
             </button>
-          )}
-          <button onClick={onLogoutRequest} style={{ marginLeft: 12, border: 'none', background: 'none', color: '#2F5597', cursor: 'pointer' }}>
-            Uitloggen
-          </button>
+            <button onClick={onLogoutRequest} style={navLinkStyle('danger')}>
+              Uitloggen
+            </button>
+          </div>
         </div>
       </header>
 
@@ -81,4 +93,23 @@ export default function PickerPage({
       ))}
     </main>
   );
+}
+
+// Gedeelde stijl voor alle acties in de header (zowel <button> als <a>, vandaar
+// geen border/background-reset via een CSS-class maar gewoon dezelfde inline
+// stijl) — een pil met zichtbare rand i.p.v. losse onderstreepte tekstlinks,
+// zodat ze er als groep bij elkaar horen en niet raar afbreken bij weinig ruimte.
+function navLinkStyle(kind: 'default' | 'danger' = 'default'): React.CSSProperties {
+  return {
+    display: 'inline-block',
+    padding: '5px 12px',
+    borderRadius: 999,
+    border: '1px solid #e4e6ea',
+    background: '#f7f8fa',
+    color: kind === 'danger' ? '#DC3545' : '#2F5597',
+    fontSize: 13,
+    fontWeight: 500,
+    textDecoration: 'none',
+    cursor: 'pointer',
+  };
 }
