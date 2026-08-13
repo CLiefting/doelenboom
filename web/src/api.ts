@@ -1,0 +1,118 @@
+export const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:4000';
+
+export class ApiError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+async function request<T>(path: string, options: RequestInit = {}, token?: string | null): Promise<T> {
+  const headers: Record<string, string> = { ...(options.headers as Record<string, string> | undefined) };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  if (options.body && !(options.body instanceof FormData) && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json';
+  }
+
+  const res = await fetch(`${API_URL}${path}`, { ...options, headers });
+  if (!res.ok) {
+    let message = res.statusText;
+    try {
+      const body = await res.json();
+      message = body.error ?? body.detail ?? message;
+    } catch {
+      // response had geen JSON-body
+    }
+    throw new ApiError(res.status, message);
+  }
+  if (res.status === 204) return undefined as T;
+  return (await res.json()) as T;
+}
+
+export const api = {
+  login: (email: string, password: string) =>
+    request<{ token: string; user: import('./types').User }>('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    }),
+
+  doelenbomen: (token: string) => request<import('./types').DoelenboomSummary[]>('/api/doelenbomen', {}, token),
+
+  tree: (token: string, id: number | string) =>
+    request<import('./types').TreeResponse>(`/api/doelenbomen/${id}/tree`, {}, token),
+
+  imports: (token: string, doelenboomId: number | string) =>
+    request<import('./types').ImportSummary[]>(`/api/doelenbomen/${doelenboomId}/imports`, {}, token),
+
+  importDetail: (token: string, importId: number | string) =>
+    request<import('./types').ImportDetail>(`/api/imports/${importId}`, {}, token),
+
+  uploadImport: (token: string, doelenboomId: number | string, file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    return request<import('./types').ImportSummary>(`/api/doelenbomen/${doelenboomId}/imports`, {
+      method: 'POST',
+      body: form,
+    }, token);
+  },
+
+  publishImport: (token: string, importId: number | string) =>
+    request<{ status: string; elementCount: number; edgeCount: number }>(`/api/imports/${importId}/publish`, {
+      method: 'POST',
+    }, token),
+
+  heartbeat: (token: string) => request<void>('/api/auth/heartbeat', { method: 'POST' }, token),
+
+  logoutPreview: (token: string) =>
+    request<{ wouldWipe: import('./types').WipeCandidate[] }>('/api/auth/logout-preview', {}, token),
+
+  logout: (token: string) =>
+    request<{ wiped: import('./types').WipeCandidate[] }>('/api/auth/logout', { method: 'POST' }, token),
+
+  // --- Tenants ---
+  tenants: (token: string) => request<import('./types').TenantSummary[]>('/api/tenants', {}, token),
+
+  createTenant: (token: string, slug: string, name: string) =>
+    request<import('./types').TenantSummary>('/api/tenants', {
+      method: 'POST',
+      body: JSON.stringify({ slug, name }),
+    }, token),
+
+  updateTenantSettings: (token: string, tenantId: number, patch: { wipeOnEmpty?: boolean; sessionTimeoutMinutes?: number }) =>
+    request<import('./types').TenantSummary>(`/api/tenants/${tenantId}`, {
+      method: 'PUT',
+      body: JSON.stringify(patch),
+    }, token),
+
+  // --- Tenant-leden (rol admin/gebruiker binnen één tenant) ---
+  tenantMembers: (token: string, tenantId: number) =>
+    request<import('./types').TenantMember[]>(`/api/tenants/${tenantId}/members`, {}, token),
+
+  addTenantMember: (token: string, tenantId: number, body: { email: string; password?: string; role: 'admin' | 'gebruiker' }) =>
+    request<{ userId: number; email: string; role: string }>(`/api/tenants/${tenantId}/members`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }, token),
+
+  updateTenantMemberRole: (token: string, tenantId: number, userId: number, role: 'admin' | 'gebruiker') =>
+    request<{ userId: number; role: string }>(`/api/tenants/${tenantId}/members/${userId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ role }),
+    }, token),
+
+  removeTenantMember: (token: string, tenantId: number, userId: number) =>
+    request<void>(`/api/tenants/${tenantId}/members/${userId}`, { method: 'DELETE' }, token),
+
+  // --- Gebruikersaccounts (sysadmin-only) ---
+  users: (token: string) => request<import('./types').UserSummary[]>('/api/users', {}, token),
+
+  createUser: (token: string, body: { email: string; password: string; isSysadmin?: boolean }) =>
+    request<import('./types').UserSummary>('/api/users', { method: 'POST', body: JSON.stringify(body) }, token),
+
+  updateUser: (token: string, userId: number, body: { email?: string; password?: string; isSysadmin?: boolean }) =>
+    request<import('./types').UserSummary>(`/api/users/${userId}`, { method: 'PUT', body: JSON.stringify(body) }, token),
+
+  deleteUser: (token: string, userId: number) =>
+    request<void>(`/api/users/${userId}`, { method: 'DELETE' }, token),
+};

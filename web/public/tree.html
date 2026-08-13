@@ -1,0 +1,2673 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Doelenboom - Future Proof Bewaken &amp; Beveiligen</title>
+<style>
+  :root { --navy: #002855; --accent: #ff5a1f; --focus: #7a2ee6; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Calibri", "Segoe UI", Arial, sans-serif;
+    background: #f4f5f7;
+    margin: 0;
+    padding: 30px 20px 60px;
+    color: #1a1a1a;
+  }
+  h1 { text-align: center; font-size: 22px; color: var(--navy); margin: 0 0 4px; }
+  .subtitle { text-align: center; color: #555; font-size: 13px; margin: 0 0 6px; }
+  .hint { text-align: center; color: #888; font-size: 12px; margin: 0 0 18px; font-style: italic; }
+  .legend {
+    display: flex; justify-content: center; flex-wrap: wrap; gap: 6px;
+    margin-bottom: 18px; font-size: 12px;
+  }
+  .legend-item {
+    display: flex; align-items: center; gap: 6px;
+    font: inherit; color: inherit; background: none; border: 1.5px solid transparent;
+    border-radius: 999px; padding: 4px 10px; margin: 0; cursor: pointer;
+    transition: opacity 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+  }
+  .legend-item:hover { background: #f0f1f3; border-color: #ddd; }
+  .legend-item:focus-visible { outline: 2px solid var(--navy); outline-offset: 1px; }
+  .legend-item.col-hidden { opacity: 0.4; }
+  .legend-item.col-hidden .legend-label { text-decoration: line-through; }
+  .legend.disabled .legend-item { pointer-events: none; cursor: default; }
+  .swatch {
+    width: 14px; height: 14px; border-radius: 3px;
+    border: 1px solid rgba(0,0,0,0.2); display: inline-block; flex: 0 0 auto;
+  }
+  .tag-org-filter {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: center;
+    gap: 5px 8px; margin: 0 0 18px; font-size: 11px;
+  }
+  .tof-label { font-weight: 700; color: #9299a6; margin-right: 2px; text-transform: uppercase; font-size: 10px; letter-spacing: 0.03em; }
+  .chip-filter {
+    border: 1.5px solid #d5d9e0; background: #fff; color: #445; border-radius: 999px;
+    padding: 3px 11px; font: inherit; font-size: 11px; cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  }
+  .chip-filter:hover { background: #f0f1f3; border-color: #bbb; }
+  .chip-filter.chip-filter-active { background: #ffd166; border-color: #d9a520; color: #3a2c00; font-weight: 700; }
+  .page-header { position: relative; }
+
+  .topbar {
+    position: sticky; top: 0; z-index: 50;
+    margin: -30px -20px 24px -20px;
+    padding: 10px 20px;
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    background: #ffffff; border-bottom: 1px solid #e2e4e8;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+  }
+  .topbar-brand { font-weight: 700; color: var(--navy); font-size: 14px; white-space: nowrap; }
+  .topbar-search {
+    display: flex; align-items: center; gap: 8px;
+    flex: 1 1 260px; min-width: 180px; justify-content: center;
+  }
+  .topbar-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .btn.btn-sm { padding: 6px 12px; font-size: 12.5px; }
+  .topbar-user { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  #topbar-user-text {
+    font-size: 12.5px; color: #556; white-space: nowrap;
+    padding: 5px 12px; border-radius: 999px; background: #f0f1f3; border: 1px solid #dfe3e8;
+  }
+  #topbar-user-text:empty { display: none; }
+  @media (max-width: 860px) {
+    .topbar { justify-content: center; }
+    .topbar-user { margin-left: 0; }
+  }
+
+  .search-input-wrap { position: relative; display: flex; align-items: center; }
+  .search-input {
+    font-family: inherit; font-size: 13.5px; padding: 9px 34px 9px 14px;
+    border-radius: 999px; border: 1.5px solid #ccc; width: 260px; max-width: 60vw;
+    outline: none; transition: border-color 0.15s ease;
+  }
+  .search-input:focus { border-color: var(--navy); }
+  .search-clear-btn {
+    position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+    width: 22px; height: 22px; border-radius: 50%; border: none; background: #e2e4e8;
+    color: #555; font-size: 13px; line-height: 1; cursor: pointer; display: none;
+    align-items: center; justify-content: center;
+  }
+  .search-clear-btn.visible { display: flex; }
+  .search-clear-btn:hover { background: #c9ccd2; }
+  .search-count { font-size: 12px; color: #666; text-align: right; }
+  .search-count.has-query { color: var(--navy); font-weight: 600; }
+  .node.search-hit {
+    box-shadow: 0 0 0 3px #ffb703, 0 0 0 7px rgba(255,183,3,0.35), 0 3px 8px rgba(0,0,0,0.3);
+    opacity: 1;
+  }
+  .node.search-miss { opacity: 0.2; }
+
+  .controls {
+    display: flex; justify-content: center; align-items: center; gap: 10px;
+    flex-wrap: wrap; margin-bottom: 22px;
+  }
+  .btn {
+    font-family: inherit; font-size: 13px; font-weight: 600;
+    padding: 9px 16px; border-radius: 999px; border: 1.5px solid var(--navy);
+    background: #ffffff; color: var(--navy); cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease, opacity 0.15s ease;
+  }
+  .btn:hover:not(:disabled) { background: var(--navy); color: #fff; transform: translateY(-1px); }
+  .btn:disabled { opacity: 0.35; cursor: default; }
+  .btn.ghost { border-color: #bbb; color: #777; }
+  .btn.ghost:hover:not(:disabled) { background: #777; color: #fff; }
+  .btn.back-btn { border-color: var(--focus); color: var(--focus); }
+  .btn.back-btn:hover:not(:disabled) { background: var(--focus); color: #fff; }
+
+  .export-modal-backdrop {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.35);
+    z-index: 100; align-items: center; justify-content: center;
+  }
+  .export-modal-backdrop.visible { display: flex; }
+  .export-modal {
+    background: #fff; border-radius: 12px; padding: 24px 28px; max-width: 380px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+  }
+  .export-modal h3 { margin: 0 0 10px; color: var(--navy); }
+  .export-modal p { font-size: 13px; color: #444; margin: 0 0 16px; line-height: 1.4; }
+  .export-modal-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .export-modal-status { margin-top: 12px !important; font-size: 12px !important; color: #777 !important; }
+
+  .element-modal-backdrop {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.35);
+    z-index: 100; align-items: center; justify-content: center;
+  }
+  .element-modal-backdrop.visible { display: flex; }
+  .element-modal {
+    background: #fff; border-radius: 12px; padding: 24px 28px; max-width: 420px; width: 90vw;
+    max-height: 85vh; overflow-y: auto; box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+  }
+  .element-modal h3 { margin: 0 0 14px; color: var(--navy); }
+  .element-modal label {
+    display: block; font-size: 12.5px; font-weight: 600; color: #444; margin-bottom: 12px;
+  }
+  .element-modal input, .element-modal select, .element-modal textarea {
+    display: block; width: 100%; margin-top: 4px; padding: 8px 10px; border-radius: 6px;
+    border: 1.5px solid #ccc; font: inherit; font-size: 13.5px; box-sizing: border-box;
+  }
+  .element-modal textarea { resize: vertical; }
+  .element-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+  .element-modal-status { font-size: 12px; color: #DC3545; min-height: 16px; margin: 4px 0 10px; }
+  .element-modal-hint { font-size: 11.5px; color: #888; margin: 0 0 14px; }
+  .req-mark { color: var(--accent); font-weight: 700; }
+  .field-note { font-weight: 400; color: #999; text-transform: none; letter-spacing: normal; font-size: 11px; }
+  .field-with-picker { position: relative; display: flex; gap: 6px; align-items: center; margin-top: 4px; }
+  .field-with-picker input { margin-top: 0 !important; flex: 1 1 auto; min-width: 0; }
+  .value-picker-btn {
+    flex: 0 0 auto; padding: 8px 11px; border-radius: 6px; border: 1.5px solid #ccc;
+    background: #fff; color: #666; font-weight: 700; cursor: pointer; line-height: 1;
+  }
+  .value-picker-btn:hover { background: #f0f1f3; color: var(--navy); }
+  .value-picker-popover {
+    position: absolute; z-index: 110; top: calc(100% + 4px); left: 0; right: 0;
+    max-height: 180px; overflow-y: auto; background: #fff; border: 1px solid #d5d9e0;
+    border-radius: 8px; box-shadow: 0 6px 18px rgba(0,0,0,0.15); padding: 4px;
+  }
+  .value-picker-item {
+    display: block; width: 100%; text-align: left; padding: 6px 8px; border-radius: 5px;
+    border: none; background: none; font: inherit; font-size: 12.5px; color: #333; cursor: pointer;
+  }
+  .value-picker-item:hover { background: #eef0f3; }
+  .value-picker-empty { padding: 8px; font-size: 12px; color: #999; font-style: italic; }
+
+  .dp-crud-actions { display: flex; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 1px solid #eee; }
+
+  /* Rol 'gebruiker' (alleen lezen) — verbergt alle schrijf-acties. Zie
+     applyRole() verderop: body krijgt de class 'read-only' zodra het init-
+     bericht vanuit React binnenkomt met role !== 'admin'. De API is de echte
+     autorisatiegrens (rbac.ts) — dit is puur UI. */
+  body.read-only .crud-only { display: none !important; }
+
+  .dp-connections { margin-top: 14px; padding-top: 14px; border-top: 1px solid #eee; }
+  .dp-connections-title {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;
+    color: #999; margin-bottom: 8px;
+  }
+  .conn-row {
+    display: flex; align-items: center; gap: 6px; padding: 5px 0; font-size: 12.5px;
+    border-bottom: 1px solid #f4f5f7; flex-wrap: wrap;
+  }
+  .conn-arrow { color: #9299a6; font-weight: 700; }
+  .conn-label { flex: 1 1 auto; min-width: 0; color: #333; }
+  .conn-weight { font-size: 10.5px; background: #eef0f3; border-radius: 999px; padding: 2px 8px; color: #556; }
+  .conn-actions { display: flex; gap: 4px; flex: 0 0 auto; }
+  .edge-modal-static-label {
+    font-size: 13px; color: #333; background: #f7f8fa; border-radius: 6px;
+    padding: 8px 10px; margin: 0 0 14px;
+  }
+
+  .btn.danger { border-color: #DC3545; color: #DC3545; }
+  .btn.danger:hover:not(:disabled) { background: #DC3545; color: #fff; }
+
+  .confirm-modal-backdrop {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4);
+    z-index: 200; align-items: center; justify-content: center;
+  }
+  .confirm-modal-backdrop.visible { display: flex; }
+  .confirm-modal {
+    background: #fff; border-radius: 12px; padding: 24px 28px; max-width: 380px; width: 90vw;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+  }
+  .confirm-modal h3 { margin: 0 0 10px; color: var(--navy); font-size: 16px; }
+  .confirm-modal p { margin: 0 0 18px; font-size: 13.5px; color: #444; line-height: 1.5; }
+
+  .app-toast {
+    display: none; position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%);
+    max-width: 90vw; z-index: 300; padding: 12px 20px; border-radius: 8px;
+    font-size: 13.5px; font-weight: 600; color: #fff; box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+  }
+  .app-toast.visible { display: block; }
+  .app-toast.error { background: #DC3545; }
+  .app-toast.ok { background: #2E7D5B; }
+
+  .ref-manage-bar { display: flex; justify-content: center; margin: -10px 0 18px; }
+  .btn.btn-xs { padding: 3px 9px; font-size: 11.5px; }
+
+  .ref-modal-backdrop {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.35);
+    z-index: 100; align-items: center; justify-content: center;
+  }
+  .ref-modal-backdrop.visible { display: flex; }
+  .ref-modal {
+    background: #fff; border-radius: 12px; padding: 22px 26px; max-width: 480px; width: 90vw;
+    max-height: 85vh; overflow-y: auto; box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+  }
+  .ref-modal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+  .ref-modal-header h3 { margin: 0; color: var(--navy); font-size: 16px; }
+  .ref-modal-close {
+    border: none; background: none; font-size: 18px; line-height: 1; color: #888; cursor: pointer;
+    padding: 4px;
+  }
+  .ref-modal-close:hover { color: #333; }
+  .ref-modal-section { margin-top: 18px; padding-top: 16px; border-top: 1px solid #eee; }
+  .ref-modal-section:first-of-type { margin-top: 10px; }
+  .ref-modal-section h4 { margin: 0 0 10px; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.03em; color: #9299a6; }
+  .ref-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+  .ref-list-empty { font-size: 12.5px; color: #999; font-style: italic; margin: 0 0 12px; }
+  .ref-list-item {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    background: #f7f8fa; border-radius: 8px; padding: 7px 10px;
+  }
+  .ref-list-item-main { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .ref-list-item-main strong { font-size: 13px; color: #222; }
+  .ref-list-item-meta { font-size: 11.5px; color: #666; }
+  .ref-list-item-code { font-size: 10.5px; color: #9299a6; }
+  .ref-list-item-actions { display: flex; gap: 6px; flex: 0 0 auto; }
+  .ref-form { display: flex; flex-direction: column; gap: 8px; }
+  .ref-form-row { display: flex; gap: 8px; }
+  .ref-form input {
+    padding: 7px 10px; border-radius: 6px; border: 1.5px solid #ccc; font: inherit; font-size: 13px;
+    width: 100%; box-sizing: border-box;
+  }
+  .ref-form-row input { flex: 1 1 0; min-width: 0; }
+  .ref-form-actions { display: flex; justify-content: flex-end; gap: 8px; }
+  .ref-modal-status { font-size: 12px; color: #DC3545; min-height: 16px; margin: 12px 0 0; }
+
+  /* Workspace: canvas (left) + detail panel sidebar (right) */
+  .workspace { display: flex; gap: 20px; align-items: flex-start; }
+
+  /* Focus detail panel */
+  .detail-panel {
+    display: none;
+    flex: 0 0 340px; width: 340px; box-sizing: border-box; background: #ffffff;
+    border-radius: 12px; border-top: 5px solid var(--focus);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.12); padding: 20px 24px;
+    position: sticky; top: 20px; max-height: 75vh; overflow-y: auto;
+  }
+  .detail-panel.visible { display: block; }
+  .dp-meta { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .dp-code {
+    color: #fff; font-weight: 700; font-size: 12px; padding: 3px 10px;
+    border-radius: 999px; letter-spacing: 0.02em;
+  }
+  .dp-type { color: #777; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+  .dp-title { font-size: 19px; font-weight: 700; color: var(--navy); margin: 0 0 10px; }
+  .dp-desc { font-size: 14px; line-height: 1.55; color: #333; margin: 0 0 16px; }
+  .dp-grid {
+    display: grid; grid-template-columns: 1fr;
+    gap: 12px; border-top: 1px solid #eee; padding-top: 14px;
+  }
+  .dp-field { display: flex; flex-direction: column; gap: 3px; }
+  .dp-field label {
+    font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.03em; color: #999;
+  }
+  .dp-field span { font-size: 13px; color: #222; white-space: normal; word-break: break-word; line-height: 1.4; }
+  .dp-field.empty span { color: #bbb; font-style: italic; }
+  .dp-chip-row { display: flex; flex-wrap: wrap; gap: 5px; }
+  .dp-chip {
+    display: inline-block; font-size: 11.5px; padding: 3px 10px; border-radius: 999px;
+    background: #eef0f3; color: #333; border: 1px solid #dde1e7;
+  }
+  .dp-chip.org-primair { background: #dcE8ff; border-color: #9fc0ee; color: #0d3a6b; }
+  .dp-chip.org-ondersteunend { background: #f0f1f3; border-color: #d5d9e0; color: #444; }
+  .dp-chip.org-betrokken { background: #fdf1e0; border-color: #edcd94; color: #6b4c0d; }
+
+  /* Project status + products panel, shown below the tree */
+  .project-panel {
+    display: none;
+    margin-top: 20px; background: #ffffff;
+    border-radius: 12px; border-top: 5px solid var(--focus);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.12); padding: 20px 26px;
+  }
+  .project-panel.visible { display: block; }
+  .pp-header { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+  .pp-header .dp-code {
+    color: #fff; font-weight: 700; font-size: 12px; padding: 3px 10px;
+    border-radius: 999px; letter-spacing: 0.02em;
+  }
+  .pp-name { font-size: 16px; font-weight: 700; color: var(--navy); }
+  .dp-project-title {
+    font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;
+    color: #999; margin-bottom: 8px;
+  }
+  .dp-badges { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+  .status-badge, .rag-badge {
+    display: inline-flex; align-items: center; gap: 4px; color: #fff; font-size: 11.5px;
+    font-weight: 700; padding: 3px 10px; border-radius: 999px; letter-spacing: 0.01em; white-space: nowrap;
+  }
+  .dp-status-note { font-size: 12.5px; color: #444; line-height: 1.45; margin-bottom: 4px; }
+  .dp-status-date { font-size: 11px; color: #999; }
+  .dp-empty-note { font-size: 12.5px; color: #bbb; font-style: italic; }
+  .dp-products-title {
+    font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;
+    color: #999; margin: 18px 0 10px;
+  }
+  .products-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px;
+  }
+  .product-item { background: #f7f8fa; border-radius: 8px; padding: 10px 12px; }
+  .product-name { font-size: 13px; font-weight: 700; color: #222; margin-bottom: 2px; }
+  .product-desc { font-size: 12px; color: #555; margin-bottom: 6px; line-height: 1.4; }
+  .product-progress-wrap { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .product-progress-bar { flex: 1; height: 6px; border-radius: 999px; background: #e2e4e8; overflow: hidden; }
+  .product-progress-fill { height: 100%; background: var(--navy); border-radius: 999px; }
+  .product-pct { font-size: 11.5px; font-weight: 700; color: #444; min-width: 34px; text-align: right; }
+  .product-dates { font-size: 11px; color: #777; }
+  .product-remark { font-size: 11.5px; color: #666; font-style: italic; margin-top: 4px; }
+
+  @media (max-width: 1024px) {
+    .project-panel { padding: 16px 18px; }
+    .products-grid { grid-template-columns: 1fr; }
+  }
+
+  .canvas-wrap {
+    flex: 1 1 auto; min-width: 0;
+    overflow: auto; max-height: 75vh; background: #ffffff; border-radius: 10px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08); padding: 24px 30px;
+  }
+  .board { position: relative; min-width: fit-content; }
+  .columns {
+    display: flex; align-items: stretch; gap: 40px; position: relative; z-index: 1;
+    margin-top: 40px;
+  }
+  .column {
+    display: flex; flex-direction: column; align-items: center;
+    width: 150px; flex: 0 0 150px;
+    transition: opacity 0.25s ease, max-width 0.25s ease, margin 0.25s ease, width 0.25s ease;
+  }
+  .column.narrow { width: 180px; flex-basis: 180px; }
+  .column.hidden {
+    opacity: 0; max-width: 0; width: 0; flex-basis: 0; margin: 0; pointer-events: none;
+    overflow: hidden; height: 0; max-height: 0;
+  }
+  .col-header {
+    position: sticky; top: 0; z-index: 10;
+    font-weight: 700; font-size: 12px; text-align: center; color: var(--navy);
+    background: #ffffff; border-top: 3px solid; padding: 6px 0 10px; margin-bottom: 4px; line-height: 1.3;
+    width: 150px; white-space: nowrap;
+    box-shadow: 0 6px 6px -6px rgba(0,0,0,0.15);
+  }
+  .column.narrow .col-header { width: 180px; }
+  .col-hide-btn {
+    position: absolute; top: 2px; right: 2px; z-index: 11;
+    width: 16px; height: 16px; line-height: 14px; padding: 0;
+    border: 1px solid #dfe3e8; border-radius: 50%; background: #ffffff; color: #7a8699;
+    font-size: 9px; cursor: pointer;
+  }
+  .col-hide-btn:hover { background: #eef0f3; color: var(--navy); border-color: #c5cad3; }
+  .col-hint {
+    display: block; font-weight: 400; font-style: italic; font-size: 10px;
+    color: #7a8699; margin-top: 4px; line-height: 1.25; white-space: normal;
+  }
+  .col-nodes {
+    display: flex; flex-direction: column; gap: 8px; justify-content: center;
+    flex: 1; width: 150px; margin-top: 14px;
+  }
+  .column.narrow .col-nodes { width: 180px; gap: 5px; }
+  .node {
+    border: 1px solid var(--navy); border-radius: 6px;
+    display: flex; align-items: center; justify-content: center; text-align: center;
+    line-height: 1.2; padding: 6px 8px; min-height: 34px;
+    font-family: "Calibri", Arial, sans-serif;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.15); cursor: pointer;
+    transition: box-shadow 0.15s ease, opacity 0.15s ease;
+    position: relative;
+  }
+  .node:hover { box-shadow: 0 3px 6px rgba(0,0,0,0.25); }
+  .node.dimmed { opacity: 0.25; }
+  .node-tag-dot {
+    position: absolute; top: 3px; right: 3px; width: 6px; height: 6px; border-radius: 50%;
+    background: #ffd166; border: 1px solid rgba(0,0,0,0.3); pointer-events: none;
+  }
+  .node-rag-dot {
+    position: absolute; top: 3px; left: 3px; width: 8px; height: 8px; border-radius: 50%;
+    border: 1px solid rgba(0,0,0,0.35); pointer-events: none; box-shadow: 0 0 0 1px rgba(255,255,255,0.6);
+  }
+  .node.tag-active { box-shadow: 0 0 0 3px #ffd166, 0 1px 2px rgba(0,0,0,0.15); }
+  .node.tag-dimmed { opacity: 0.22; }
+  .node.active {
+    box-shadow: 0 0 0 3px var(--accent), 0 0 0 6px rgba(255,90,31,0.3), 0 3px 8px rgba(0,0,0,0.3);
+  }
+  .node.is-selected {
+    box-shadow: 0 0 0 3px var(--accent), 0 0 0 8px rgba(255,90,31,0.4), 0 3px 10px rgba(0,0,0,0.35);
+  }
+  .node.node-hidden { display: none; }
+  .node.focus-target {
+    box-shadow: 0 0 0 3px var(--focus), 0 0 0 8px rgba(122,46,230,0.35), 0 3px 10px rgba(0,0,0,0.35);
+  }
+  svg.connectors {
+    position: absolute; left: 0; top: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 0; overflow: visible;
+  }
+  .edge {
+    fill: none; stroke: #9aa5b1; stroke-width: 1.3;
+    transition: stroke 0.15s ease, stroke-width 0.15s ease, opacity 0.2s ease;
+  }
+  .edge.active-edge { stroke: var(--accent); stroke-width: 2.6; opacity: 1; }
+  .edge.dimmed { opacity: 0.15; }
+  .edge.edge-primair { stroke-width: 1.8; }
+  .edge.edge-ondersteunend { stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.75; }
+  .edge.edge-ondersteunend.active-edge { stroke-dasharray: none; opacity: 1; }
+  .col-arrow-line { stroke: var(--navy); stroke-width: 2.2; }
+  .col-arrow-head { fill: var(--navy); }
+
+  #col-arrows { position: absolute; left: 0; top: 0; width: 100%; height: 100%; z-index: 2; pointer-events: none; }
+  .col-arrow-label {
+    position: absolute; transform: translate(-50%, -50%);
+    background: #ffffff; padding: 0 8px; font-size: 11px; font-weight: 700;
+    font-style: italic; color: var(--navy); white-space: nowrap;
+  }
+
+  /* Hover tooltip */
+  #hover-tooltip {
+    position: fixed; z-index: 1000; max-width: 300px;
+    background: #ffffff; color: #1a1a1a; border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.25), 0 0 0 1px rgba(0,0,0,0.06);
+    padding: 12px 14px; font-size: 12.5px; line-height: 1.45;
+    pointer-events: none; opacity: 0; transform: translateY(4px);
+    transition: opacity 0.12s ease, transform 0.12s ease;
+    border-top: 4px solid var(--navy);
+  }
+  #hover-tooltip.visible { opacity: 1; transform: translateY(0); }
+  #hover-tooltip .tt-meta {
+    display: flex; align-items: center; gap: 6px; margin-bottom: 4px;
+    font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em;
+    color: #ffffff;
+  }
+  #hover-tooltip .tt-code {
+    background: var(--navy); padding: 1px 7px; border-radius: 999px;
+  }
+  #hover-tooltip .tt-type { color: #7a7a7a; text-transform: none; font-weight: 600; letter-spacing: 0; }
+  #hover-tooltip .tt-name { font-weight: 700; color: var(--navy); margin-bottom: 5px; font-size: 13px; }
+  #hover-tooltip .tt-desc { color: #333; }
+  #hover-tooltip .tt-tags, #hover-tooltip .tt-orgs { margin-top: 6px; font-size: 11px; color: #667; }
+  #hover-tooltip .tt-tags b, #hover-tooltip .tt-orgs b { color: var(--navy); }
+
+  footer { text-align: center; color: #888; font-size: 11px; margin-top: 24px; }
+
+  /* Touch-friendly tap targets, no double-tap zoom delay on interactive elements */
+  .node, .btn { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+  .canvas-wrap { -webkit-overflow-scrolling: touch; }
+
+  /* Tablet (iPad portrait/landscape) */
+  @media (max-width: 1024px) {
+    body { padding: 22px 14px 50px; }
+    .canvas-wrap { max-height: 68vh; padding: 18px 20px; }
+    .workspace { flex-direction: column; }
+    .detail-panel {
+      width: 100%; max-width: 100%; flex-basis: auto;
+      position: static; top: auto; max-height: none; overflow-y: visible;
+    }
+    .page-header { padding-right: 0; }
+    .search-bar {
+      position: static; flex-direction: row; justify-content: center; align-items: center;
+      margin: 12px 0 4px; gap: 10px;
+    }
+    .search-count { text-align: left; }
+  }
+
+  /* Phone (iPhone 12 and similar) */
+  @media (max-width: 600px) {
+    body { padding: 16px 10px 44px; }
+    h1 { font-size: 18px; }
+    .subtitle { font-size: 12px; }
+    .hint { font-size: 10.5px; padding: 0 6px; }
+    .legend { gap: 8px 12px; font-size: 10.5px; margin-bottom: 14px; }
+    .swatch { width: 11px; height: 11px; }
+    .controls { gap: 8px; margin-bottom: 16px; }
+    .btn { font-size: 11.5px; padding: 9px 12px; }
+    .detail-panel { padding: 14px 16px; border-radius: 10px; margin-bottom: 16px; }
+    .dp-title { font-size: 16px; }
+    .dp-desc { font-size: 12.5px; }
+    .dp-grid { grid-template-columns: 1fr; gap: 8px; }
+    .dp-field { white-space: normal; }
+    .canvas-wrap { max-height: 62vh; padding: 14px; border-radius: 8px; }
+    .columns { margin-top: 34px; gap: 26px; }
+    #hover-tooltip { max-width: 78vw; font-size: 11.5px; padding: 10px 12px; }
+    footer { font-size: 10px; padding: 0 10px; }
+  }
+</style>
+</head>
+<body>
+  <div class="topbar" id="topbar">
+    <div class="topbar-brand">Doelenboom</div>
+    <div class="topbar-search">
+      <div class="search-input-wrap">
+        <input type="text" class="search-input" id="search-input" placeholder="Zoek op code, naam of omschrijving&hellip;" autocomplete="off">
+        <button class="search-clear-btn" id="search-clear-btn" title="Wis zoekopdracht" aria-label="Wis zoekopdracht">&times;</button>
+      </div>
+      <span class="search-count" id="search-count"></span>
+    </div>
+    <div class="topbar-actions">
+      <button class="btn ghost btn-sm" id="export-svg-btn" type="button">&#8681; Exporteer als SVG</button>
+      <button class="btn ghost btn-sm crud-only" id="nav-import-btn" type="button">Excel importeren</button>
+      <button class="btn ghost btn-sm" id="export-xlsx-btn" type="button">&#8681; Exporteer als Excel</button>
+    </div>
+    <div class="topbar-user">
+      <span id="topbar-user-text" title="Ingelogd als"></span>
+      <button class="btn ghost btn-sm" id="logout-btn" type="button">Uitloggen</button>
+    </div>
+  </div>
+
+  <div class="page-header">
+    <h1 id="app-title">Doelenboom</h1>
+    <p class="subtitle" id="app-subtitle"></p>
+    <p class="hint">Klik op een vak om het volledige verbonden pad te markeren. Houd de muis boven een vak voor de omschrijving. Dubbelklik om in te zoomen op dat element, &eacute;&eacute;n niveau erboven en alle onderliggende elementen.</p>
+  </div>
+
+  <div class="legend"></div>
+  <div class="tag-org-filter" id="tag-org-filter"></div>
+  <div class="ref-manage-bar crud-only">
+    <button type="button" class="btn ghost btn-sm" id="manage-tags-orgs-btn">Tags &amp; organisatieonderdelen beheren</button>
+  </div>
+
+  <div class="controls">
+    <button class="btn ghost" id="expand-left-btn" type="button">&#9664; Kolom links tonen</button>
+    <button class="btn ghost" id="show-all-btn" type="button">Toon alle kolommen</button>
+    <button class="btn ghost" id="reset-btn" type="button">&#8635; Alleen Missie</button>
+    <button class="btn ghost crud-only" id="new-element-btn" type="button">+ Nieuw element</button>
+    <button class="btn back-btn" id="back-btn" style="display:none;">&#8592; Terug naar vorig scherm</button>
+    <button class="btn ghost" id="nav-picker-btn" type="button">&#8592; Terug naar overzicht</button>
+  </div>
+
+  <div class="export-modal-backdrop" id="export-modal-backdrop">
+    <div class="export-modal">
+      <div id="export-step-format">
+        <h3>Excel exporteren</h3>
+        <p>Welk formaat wil je gebruiken?</p>
+        <div class="export-modal-actions">
+          <button class="btn ghost" type="button" id="export-format-oud">Oud formaat</button>
+          <button class="btn" type="button" id="export-format-nieuw">Nieuw formaat</button>
+          <button class="btn ghost" type="button" id="export-modal-cancel-1">Annuleren</button>
+        </div>
+      </div>
+      <div id="export-step-mode" style="display:none;">
+        <h3>Excel exporteren</h3>
+        <p>Wil je een lege template (alleen kolomkoppen) of een export met de huidige data van deze doelenboom?</p>
+        <div class="export-modal-actions">
+          <button class="btn ghost" type="button" id="export-modal-template">Lege template</button>
+          <button class="btn" type="button" id="export-modal-data">Met huidige data</button>
+          <button class="btn ghost" type="button" id="export-modal-back">&#8592; Terug</button>
+        </div>
+      </div>
+      <p class="export-modal-status" id="export-modal-status"></p>
+    </div>
+  </div>
+
+  <div class="element-modal-backdrop" id="element-modal-backdrop">
+    <div class="element-modal">
+      <h3 id="element-modal-title">Nieuw element</h3>
+      <p class="element-modal-hint">Velden met <span class="req-mark">*</span> zijn verplicht.</p>
+      <form id="element-form">
+        <label>Type <span class="req-mark">*</span>
+          <select id="element-field-type">
+            <option value="Project">Project</option>
+            <option value="Capability">Capability</option>
+            <option value="Operationele benefit">Operationele benefit</option>
+            <option value="Sub-benefit">Sub-benefit</option>
+            <option value="Programmabaat">Programmabaat</option>
+            <option value="Strategische benefit">Strategische benefit</option>
+            <option value="Strategisch doel">Strategisch doel</option>
+            <option value="Missie">Missie</option>
+          </select>
+        </label>
+        <label>Code <span class="req-mark">*</span> <span class="field-note">(automatisch voorgesteld, mag je aanpassen)</span>
+          <input type="text" id="element-field-code" autocomplete="off" required>
+        </label>
+        <label>Naam <span class="req-mark">*</span>
+          <input type="text" id="element-field-name" autocomplete="off" required>
+        </label>
+        <label>Uitgebreide beschrijving
+          <textarea id="element-field-description" rows="3"></textarea>
+        </label>
+        <label>Mogelijke KPI / indicator
+          <input type="text" id="element-field-kpi" autocomplete="off">
+        </label>
+        <label>Taakveld
+          <div class="field-with-picker">
+            <input type="text" id="element-field-taakveld" autocomplete="off">
+            <button type="button" class="value-picker-btn" id="element-taakveld-picker-btn" title="Kies uit bestaande waarden">&hellip;</button>
+          </div>
+        </label>
+        <label>Sub-taakveld
+          <div class="field-with-picker">
+            <input type="text" id="element-field-subtaakveld" autocomplete="off">
+            <button type="button" class="value-picker-btn" id="element-subtaakveld-picker-btn" title="Kies uit bestaande waarden">&hellip;</button>
+          </div>
+        </label>
+        <p class="element-modal-status" id="element-modal-status"></p>
+        <div class="element-modal-actions">
+          <button type="button" class="btn ghost" id="element-modal-cancel">Annuleren</button>
+          <button type="submit" class="btn" id="element-modal-save">Opslaan</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="ref-modal-backdrop" id="ref-modal-backdrop">
+    <div class="ref-modal">
+      <div class="ref-modal-header">
+        <h3>Tags &amp; organisatieonderdelen beheren</h3>
+        <button type="button" class="ref-modal-close" id="ref-modal-close" aria-label="Sluiten">&times;</button>
+      </div>
+
+      <section class="ref-modal-section">
+        <h4>Tags</h4>
+        <div class="ref-list" id="tags-list"></div>
+        <form id="tag-form" class="ref-form crud-only">
+          <div class="ref-form-row">
+            <input type="text" id="tag-field-name" placeholder="Naam" autocomplete="off" required>
+            <input type="text" id="tag-field-categorie" placeholder="Categorie (optioneel)" autocomplete="off">
+          </div>
+          <input type="text" id="tag-field-omschrijving" placeholder="Omschrijving (optioneel)" autocomplete="off">
+          <div class="ref-form-actions">
+            <button type="button" class="btn ghost btn-sm" id="tag-form-cancel" style="display:none;">Annuleren</button>
+            <button type="submit" class="btn btn-sm" id="tag-form-submit">+ Tag toevoegen</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="ref-modal-section">
+        <h4>Organisatieonderdelen</h4>
+        <div class="ref-list" id="orgunits-list"></div>
+        <form id="orgunit-form" class="ref-form crud-only">
+          <input type="text" id="orgunit-field-name" placeholder="Naam" autocomplete="off" required>
+          <input type="text" id="orgunit-field-omschrijving" placeholder="Omschrijving (optioneel)" autocomplete="off">
+          <div class="ref-form-actions">
+            <button type="button" class="btn ghost btn-sm" id="orgunit-form-cancel" style="display:none;">Annuleren</button>
+            <button type="submit" class="btn btn-sm" id="orgunit-form-submit">+ Organisatieonderdeel toevoegen</button>
+          </div>
+        </form>
+      </section>
+
+      <p class="ref-modal-status" id="ref-modal-status"></p>
+    </div>
+  </div>
+
+  <div class="element-modal-backdrop" id="edge-modal-backdrop">
+    <div class="element-modal">
+      <h3 id="edge-modal-title">Nieuwe relatie</h3>
+      <p class="edge-modal-static-label" id="edge-modal-static-label" style="display:none;"></p>
+      <form id="edge-form">
+        <label>Richting
+          <select id="edge-field-direction">
+            <option value="out">Dit element &rarr; ander element</option>
+            <option value="in">Ander element &rarr; dit element</option>
+          </select>
+        </label>
+        <label>Type van het andere element
+          <select id="edge-field-other-type">
+            <option value="Project">Project</option>
+            <option value="Capability">Capability</option>
+            <option value="Operationele benefit">Operationele benefit</option>
+            <option value="Sub-benefit">Sub-benefit</option>
+            <option value="Programmabaat">Programmabaat</option>
+            <option value="Strategische benefit">Strategische benefit</option>
+            <option value="Strategisch doel">Strategisch doel</option>
+            <option value="Missie">Missie</option>
+          </select>
+        </label>
+        <label>Ander element <span class="req-mark">*</span>
+          <select id="edge-field-other"></select>
+        </label>
+        <label>Relatietype
+          <select id="edge-field-weight">
+            <option value="">(geen)</option>
+            <option value="primair">Primair</option>
+            <option value="ondersteunend">Ondersteunend</option>
+          </select>
+        </label>
+        <label>Toelichting
+          <textarea id="edge-field-toelichting" rows="2"></textarea>
+        </label>
+        <p class="element-modal-status" id="edge-modal-status"></p>
+        <div class="element-modal-actions">
+          <button type="button" class="btn ghost" id="edge-modal-cancel">Annuleren</button>
+          <button type="submit" class="btn" id="edge-modal-save">Opslaan</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="confirm-modal-backdrop" id="confirm-modal-backdrop">
+    <div class="confirm-modal">
+      <h3 id="confirm-modal-title">Weet je het zeker?</h3>
+      <p id="confirm-modal-message"></p>
+      <div class="element-modal-actions">
+        <button type="button" class="btn ghost" id="confirm-modal-cancel">Annuleren</button>
+        <button type="button" class="btn danger" id="confirm-modal-ok">Verwijderen</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="app-toast" id="app-toast"></div>
+
+  <div class="workspace">
+  <div class="canvas-wrap">
+    <div class="board" id="board">
+      <svg class="connectors" id="connectors"></svg>
+      <div id="col-arrows"></div>
+      <div class="columns" id="columns"></div>
+    </div>
+  </div>
+  <div class="detail-panel" id="detail-panel"></div>
+  </div>
+  <div class="project-panel" id="project-panel"></div>
+  <footer id="app-footer"></footer>
+
+  <div id="hover-tooltip"></div>
+
+<script>
+function runApp(data) {
+  const { DETAILS, EDGES, TOELICHTING, PROJECT_STATUS, PRODUCTS, TAGS, ELEMENT_TAGS, ORGS, OB_ORG } = data;
+  const COL_ORDER = ["project", "cap", "obe", "sub", "prog", "strat", "doel", "missie"];
+  const COL_LABELS = {"project": "Project", "cap": "Capability", "obe": "Operationele benefit", "sub": "Sub-benefit FPBB", "prog": "Programmabaat FPBB", "strat": "Strategisch benefit B&B", "doel": "Strategisch doel", "missie": "Missie KMar"};
+  const COL_COLORS = {"project": "#3E6FA6", "cap": "#6B4C8A", "obe": "#C05A2C", "sub": "#B8862E", "prog": "#2E7D5B", "strat": "#8FAADC", "doel": "#2F5597", "missie": "#203864"};
+  const COL_ARROWS = [{"from": "project", "to": "cap", "label": "ontwikkelt"}, {"from": "cap", "to": "obe", "label": "ondersteunt"}, {"from": "obe", "to": "sub", "label": "realiseert"}, {"from": "sub", "to": "prog", "label": "versterkt"}, {"from": "prog", "to": "strat", "label": "draagt bij aan"}, {"from": "strat", "to": "doel", "label": "ondersteunt"}, {"from": "doel", "to": "missie", "label": "geeft invulling aan"}];
+
+  const columnsEl = document.getElementById('columns');
+  const boardEl = document.getElementById('board');
+  const canvasWrapEl = document.querySelector('.canvas-wrap');
+  const svg = document.getElementById('connectors');
+  const colArrowsEl = document.getElementById('col-arrows');
+  const legendEl = document.querySelector('.legend');
+  const showAllBtn = document.getElementById('show-all-btn');
+  const resetBtn = document.getElementById('reset-btn');
+  const expandLeftBtn = document.getElementById('expand-left-btn');
+  const backBtn = document.getElementById('back-btn');
+  const detailPanel = document.getElementById('detail-panel');
+  const projectPanelEl = document.getElementById('project-panel');
+  const tooltipEl = document.getElementById('hover-tooltip');
+  const searchInput = document.getElementById('search-input');
+  const searchClearBtn = document.getElementById('search-clear-btn');
+  const searchCountEl = document.getElementById('search-count');
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+
+  function normalizeSearch(s) {
+    return (s || '').toString().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  }
+  const SEARCH_INDEX = {};
+  Object.keys(DETAILS).forEach(id => {
+    const d = DETAILS[id];
+    const ps = PROJECT_STATUS[id];
+    const extra = ps ? [ps.projectstatus, ps.rag, ps.toelichting] : [];
+    const tagNames = (ELEMENT_TAGS[id] || []).map(t => TAGS[t] && TAGS[t].name);
+    const orgNames = (OB_ORG[id] || []).map(r => ORGS[r.org] && ORGS[r.org].name);
+    SEARCH_INDEX[id] = normalizeSearch([d.code, d.name, d.desc, d.taakveld, d.subtaakveld, d.kpi, d.parent, ...extra, ...tagNames, ...orgNames].filter(Boolean).join(' | '));
+  });
+
+  function defaultHiddenCols() {
+    return new Set(COL_ORDER.slice(0, -1)); // everything except the last (Missie) starts hidden
+  }
+
+  let hiddenCols = defaultHiddenCols();
+  let edgeEls = [];
+  let currentEffectiveEdges = [];
+  let selectedId = null;
+  let activeNodeIds = new Set();
+  let activeEdgeKeys = new Set();
+  let focusId = null;
+  let prevHiddenCols = null;
+
+  function applyVisibility() {
+    if (focusId !== null) return;
+
+    document.querySelectorAll('.column').forEach(col => {
+      col.classList.toggle('hidden', hiddenCols.has(col.dataset.key));
+    });
+    document.querySelectorAll('.legend-item').forEach(item => {
+      const isHidden = hiddenCols.has(item.dataset.key);
+      item.classList.toggle('col-hidden', isHidden);
+      item.setAttribute('aria-pressed', isHidden ? 'false' : 'true');
+    });
+    updateExpandLeftBtnState();
+
+    deselect();
+    hideTooltip();
+    requestAnimationFrame(() => setTimeout(() => { drawEdges(); drawColumnArrows(); }, 280));
+  }
+
+  // Leftmost currently-visible column index in COL_ORDER, or COL_ORDER.length if none visible.
+  function leftmostVisibleIndex() {
+    for (let i = 0; i < COL_ORDER.length; i++) {
+      if (!hiddenCols.has(COL_ORDER[i])) return i;
+    }
+    return COL_ORDER.length;
+  }
+
+  function updateExpandLeftBtnState() {
+    if (!expandLeftBtn) return;
+    const idx = leftmostVisibleIndex();
+    const canExpand = idx > 0;
+    expandLeftBtn.disabled = !canExpand;
+    expandLeftBtn.classList.toggle('disabled', !canExpand);
+  }
+
+  function expandOneColumnLeft() {
+    if (focusId !== null) return;
+    const idx = leftmostVisibleIndex();
+    if (idx <= 0) return; // already fully expanded (or nothing to anchor from)
+    if (idx >= COL_ORDER.length) {
+      // nothing visible at all: reveal the rightmost column first
+      hiddenCols.delete(COL_ORDER[COL_ORDER.length - 1]);
+    } else {
+      hiddenCols.delete(COL_ORDER[idx - 1]);
+    }
+    applyVisibility();
+  }
+
+  document.querySelectorAll('.legend-item').forEach(item => {
+    item.addEventListener('click', () => {
+      if (focusId !== null) return;
+      const key = item.dataset.key;
+      if (hiddenCols.has(key)) hiddenCols.delete(key); else hiddenCols.add(key);
+      applyVisibility();
+    });
+  });
+
+  // Small hide (x) button directly on each column header, mirroring the legend toggle
+  // but discoverable at the point of use.
+  document.querySelectorAll('.column').forEach(col => {
+    const header = col.querySelector('.col-header');
+    if (!header) return;
+    const hideBtn = document.createElement('button');
+    hideBtn.type = 'button';
+    hideBtn.className = 'col-hide-btn';
+    hideBtn.setAttribute('aria-label', 'Verberg deze kolom');
+    hideBtn.title = 'Verberg deze kolom';
+    hideBtn.textContent = '✕';
+    hideBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (focusId !== null) return;
+      hiddenCols.add(col.dataset.key);
+      applyVisibility();
+    });
+    header.appendChild(hideBtn);
+  });
+
+  // Small dot marker on nodes that carry one or more tags, hover/detail panel show the full list.
+  document.querySelectorAll('.node').forEach(n => {
+    const tagIds = ELEMENT_TAGS[n.dataset.id] || [];
+    if (!tagIds.length) return;
+    const dot = document.createElement('span');
+    dot.className = 'node-tag-dot';
+    dot.title = tagIds.map(t => TAGS[t] && TAGS[t].name).filter(Boolean).join(', ');
+    n.appendChild(dot);
+  });
+
+  // ---- Tags / organisatieonderdelen filter: click a chip to highlight all elements carrying it ----
+  let activeTagFilter = null; // { kind: 'tag'|'org', id: string }
+
+  function elementsForTag(tagId) {
+    return Object.keys(ELEMENT_TAGS).filter(id => (ELEMENT_TAGS[id] || []).includes(tagId));
+  }
+  function elementsForOrg(orgId) {
+    return Object.keys(OB_ORG).filter(id => (OB_ORG[id] || []).some(r => r.org === orgId));
+  }
+
+  function applyTagFilter() {
+    document.querySelectorAll('.node').forEach(n => n.classList.remove('tag-active', 'tag-dimmed'));
+    document.querySelectorAll('.chip-filter').forEach(el => el.classList.remove('chip-filter-active'));
+    if (!activeTagFilter) return;
+
+    const ids = activeTagFilter.kind === 'tag' ? elementsForTag(activeTagFilter.id) : elementsForOrg(activeTagFilter.id);
+    const idSet = new Set(ids);
+
+    let changed = false;
+    ids.forEach(id => {
+      const el = document.querySelector('.node[data-id="' + id + '"]');
+      if (!el) return;
+      const key = el.closest('.column').dataset.key;
+      if (hiddenCols.has(key)) { hiddenCols.delete(key); changed = true; }
+    });
+    if (changed) { applyVisibility(); }
+
+    document.querySelectorAll('.node').forEach(n => {
+      const on = idSet.has(n.dataset.id);
+      n.classList.toggle('tag-active', on);
+      n.classList.toggle('tag-dimmed', !on);
+    });
+    const btn = document.querySelector('.chip-filter[data-kind="' + activeTagFilter.kind + '"][data-value="' + activeTagFilter.id + '"]');
+    if (btn) btn.classList.add('chip-filter-active');
+  }
+
+  document.querySelectorAll('.chip-filter').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const kind = btn.dataset.kind, id = btn.dataset.value;
+      if (activeTagFilter && activeTagFilter.kind === kind && activeTagFilter.id === id) {
+        activeTagFilter = null;
+      } else {
+        activeTagFilter = { kind, id };
+      }
+      applyTagFilter();
+    });
+  });
+
+  expandLeftBtn.addEventListener('click', expandOneColumnLeft);
+  showAllBtn.addEventListener('click', () => {
+    if (focusId !== null) return;
+    hiddenCols.clear();
+    applyVisibility();
+  });
+  resetBtn.addEventListener('click', () => {
+    if (focusId !== null) return;
+    hiddenCols = defaultHiddenCols();
+    applyVisibility();
+  });
+  backBtn.addEventListener('click', exitFocus);
+  updateExpandLeftBtnState();
+
+  // ---- Geometry: (re)draw connector lines + column-relation arrows from live DOM positions ----
+  // Walk EDGES through any hidden-column nodes so two visible columns end up
+  // connected directly when the column(s) between them are toggled off.
+  function computeEffectiveEdges() {
+    const nodeVisible = {};
+    document.querySelectorAll('.node').forEach(n => {
+      const col = n.closest('.column');
+      nodeVisible[n.dataset.id] = !col.classList.contains('hidden') && !n.classList.contains('node-hidden');
+    });
+
+    const forward = {};
+    EDGES.forEach(e => { (forward[e.source] = forward[e.source] || []).push(e); });
+
+    const effective = [];
+    const seen = new Set();
+
+    function walk(nodeId, originId, hopCount) {
+      (forward[nodeId] || []).forEach(e => {
+        if (nodeVisible[e.target] === undefined) return;
+        if (nodeVisible[e.target]) {
+          const key = originId + '|' + e.target;
+          if (!seen.has(key)) {
+            seen.add(key);
+            effective.push({ source: originId, target: e.target, weight: (hopCount === 0 ? e.weight : undefined) });
+          }
+        } else {
+          walk(e.target, originId, hopCount + 1);
+        }
+      });
+    }
+
+    Object.keys(nodeVisible).forEach(nodeId => {
+      if (!nodeVisible[nodeId]) return;
+      walk(nodeId, nodeId, 0);
+    });
+
+    return effective;
+  }
+
+  function drawEdges() {
+    const boardRect = boardEl.getBoundingClientRect();
+    svg.setAttribute('width', boardRect.width);
+    svg.setAttribute('height', boardRect.height);
+    svg.innerHTML = '';
+    edgeEls = [];
+
+    const nodeRects = {};
+    document.querySelectorAll('.node').forEach(n => {
+      const col = n.closest('.column');
+      if (col.classList.contains('hidden') || n.classList.contains('node-hidden')) return;
+      const r = n.getBoundingClientRect();
+      nodeRects[n.dataset.id] = {
+        right: r.right - boardRect.left,
+        left: r.left - boardRect.left,
+        midY: r.top + r.height / 2 - boardRect.top,
+      };
+    });
+
+    currentEffectiveEdges = computeEffectiveEdges();
+
+    currentEffectiveEdges.forEach(e => {
+      const s = nodeRects[e.source];
+      const t = nodeRects[e.target];
+      if (!s || !t) return;
+      const sx = s.right, sy = s.midY, tx = t.left, ty = t.midY;
+      const midx = (sx + tx) / 2;
+      const path = document.createElementNS(SVG_NS, 'path');
+      path.setAttribute('d', `M ${sx} ${sy} C ${midx} ${sy}, ${midx} ${ty}, ${tx} ${ty}`);
+      let cls = 'edge';
+      if (e.weight === 'primair') cls += ' edge-primair';
+      else if (e.weight === 'ondersteunend') cls += ' edge-ondersteunend';
+      path.setAttribute('class', cls);
+      path.dataset.source = e.source;
+      path.dataset.target = e.target;
+      const toel = TOELICHTING[e.source + '|' + e.target];
+      if (toel) {
+        const title = document.createElementNS(SVG_NS, 'title');
+        title.textContent = (e.weight === 'primair' ? 'Primair: ' : e.weight === 'ondersteunend' ? 'Ondersteunend: ' : '') + toel;
+        path.appendChild(title);
+      }
+      svg.appendChild(path);
+      edgeEls.push(path);
+    });
+
+    applyHighlightToDOM();
+  }
+
+  function drawColumnArrows() {
+    const boardRect = boardEl.getBoundingClientRect();
+    colArrowsEl.innerHTML = '';
+
+    COL_ARROWS.forEach(rel => {
+      const fromCol = document.querySelector('.column[data-key="' + rel.from + '"]');
+      const toCol = document.querySelector('.column[data-key="' + rel.to + '"]');
+      if (!fromCol || !toCol) return;
+      if (fromCol.classList.contains('hidden') || toCol.classList.contains('hidden')) return;
+
+      const fromHeader = fromCol.querySelector('.col-header');
+      const toHeader = toCol.querySelector('.col-header');
+      const fr = fromHeader.getBoundingClientRect();
+      const tr = toHeader.getBoundingClientRect();
+      // Use the (non-sticky) row container for the vertical position: sticky headers
+      // report their "stuck" viewport position once scrolled, which no longer matches
+      // the row's actual document position and would misplace the arrows.
+      const columnsRect = columnsEl.getBoundingClientRect();
+
+      const x1 = fr.right - boardRect.left + 4;
+      const x2 = tr.left - boardRect.left - 4;
+      if (x2 - x1 < 20) return;
+      const y = columnsRect.top - boardRect.top - 16;
+
+      const headLen = 9;
+      const line = document.createElementNS(SVG_NS, 'line');
+      line.setAttribute('x1', x1);
+      line.setAttribute('y1', y);
+      line.setAttribute('x2', x2 - headLen);
+      line.setAttribute('y2', y);
+      line.setAttribute('class', 'col-arrow-line');
+      svg.appendChild(line);
+
+      const head = document.createElementNS(SVG_NS, 'polygon');
+      head.setAttribute('points',
+        `${x2},${y} ${x2 - headLen},${y - 5} ${x2 - headLen},${y + 5}`);
+      head.setAttribute('class', 'col-arrow-head');
+      svg.appendChild(head);
+
+      const label = document.createElement('div');
+      label.className = 'col-arrow-label';
+      label.style.left = ((x1 + x2) / 2) + 'px';
+      label.style.top = y + 'px';
+      label.textContent = rel.label;
+      colArrowsEl.appendChild(label);
+    });
+  }
+
+  window.addEventListener('resize', () => { drawEdges(); drawColumnArrows(); });
+
+  // ---- Click-to-highlight full connected path ----
+  function computeActiveSets(id) {
+    const forward = {}, backward = {};
+    currentEffectiveEdges.forEach(e => {
+      (forward[e.source] = forward[e.source] || []).push(e.target);
+      (backward[e.target] = backward[e.target] || []).push(e.source);
+    });
+    const nodes = new Set([id]);
+    const edgeKeys = new Set();
+    (function walk(cur) {
+      (forward[cur] || []).forEach(next => {
+        edgeKeys.add(cur + '|' + next);
+        if (!nodes.has(next)) { nodes.add(next); walk(next); }
+      });
+    })(id);
+    (function walk(cur) {
+      (backward[cur] || []).forEach(prev => {
+        edgeKeys.add(prev + '|' + cur);
+        if (!nodes.has(prev)) { nodes.add(prev); walk(prev); }
+      });
+    })(id);
+    return { nodes, edgeKeys };
+  }
+
+  function applyHighlightToDOM() {
+    document.querySelectorAll('.node').forEach(n => {
+      const nid = n.dataset.id;
+      if (selectedId === null) {
+        n.classList.remove('active', 'dimmed', 'is-selected');
+      } else {
+        n.classList.toggle('active', activeNodeIds.has(nid) && nid !== selectedId);
+        n.classList.toggle('is-selected', nid === selectedId);
+        n.classList.toggle('dimmed', !activeNodeIds.has(nid));
+      }
+    });
+    edgeEls.forEach(e => {
+      const key = e.dataset.source + '|' + e.dataset.target;
+      if (selectedId === null) {
+        e.classList.remove('active-edge', 'dimmed');
+      } else {
+        const on = activeEdgeKeys.has(key);
+        e.classList.toggle('active-edge', on);
+        e.classList.toggle('dimmed', !on);
+      }
+    });
+  }
+
+  function refreshGeometrySoon() {
+    requestAnimationFrame(() => setTimeout(() => { drawEdges(); drawColumnArrows(); }, 180));
+  }
+
+  function selectNode(id) {
+    selectedId = id;
+    const sets = computeActiveSets(id);
+    activeNodeIds = sets.nodes;
+    activeEdgeKeys = sets.edgeKeys;
+    applyHighlightToDOM();
+    refreshGeometrySoon();
+  }
+
+  function deselect() {
+    selectedId = null;
+    activeNodeIds = new Set();
+    activeEdgeKeys = new Set();
+    applyHighlightToDOM();
+  }
+
+  columnsEl.addEventListener('click', (ev) => {
+    const node = ev.target.closest('.node');
+    if (!node) { deselect(); return; }
+    const id = node.dataset.id;
+    if (selectedId === id) { deselect(); } else { selectNode(id); }
+  });
+
+  // ---- Detail panel (shown while zoomed in on an element) ----
+  function fieldHtml(label, value) {
+    const has = value && String(value).trim().length > 0;
+    return '<div class="dp-field' + (has ? '' : ' empty') + '">' +
+      '<label>' + label + '</label>' +
+      '<span>' + (has ? value : '&mdash;') + '</span></div>';
+  }
+
+  function tagsChipsHtml(id) {
+    const tagIds = ELEMENT_TAGS[id] || [];
+    if (!tagIds.length) return '';
+    const chips = tagIds.map(t => '<span class="dp-chip">' + (TAGS[t] ? TAGS[t].name : t) + '</span>').join('');
+    return '<div class="dp-field"><label>Tags</label><div class="dp-chip-row">' + chips + '</div></div>';
+  }
+
+  function orgChipsHtml(id) {
+    const rels = OB_ORG[id] || [];
+    if (!rels.length) return '';
+    const chips = rels.map(r => {
+      const name = ORGS[r.org] ? ORGS[r.org].name : r.org;
+      const relCls = 'org-' + (r.relatietype || '').toLowerCase();
+      const title = [r.relatietype, r.toelichting, r.status].filter(Boolean).join(' — ');
+      return '<span class="dp-chip ' + relCls + '" title="' + title.replace(/"/g, '&quot;') + '">' + name + '</span>';
+    }).join('');
+    return '<div class="dp-field"><label>Organisatieonderdelen</label><div class="dp-chip-row">' + chips + '</div></div>';
+  }
+
+  function taakveldLine(d) {
+    const t = (d.taakveld || '').trim();
+    const s = (d.subtaakveld || '').trim();
+    if (t && s) return t + ' / ' + s;
+    if (t) return t;
+    if (s) return s;
+    return '';
+  }
+
+  const RAG_COLORS = { 'rood': '#DC3545', 'oranje': '#FD7E14', 'groen': '#28A745' };
+  const STATUS_COLORS = {
+    'backlog': '#9AA5B1', 'actief': '#2F5597', 'on-hold': '#D9822B',
+    'gereed': '#2E7D5B', 'vervallen': '#6c6f76'
+  };
+  function titleCase(s) {
+    return s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : s;
+  }
+
+  function projectSectionHtml(id) {
+    const ps = PROJECT_STATUS[id];
+    if (!ps) return '';
+
+    let html = '<div class="dp-project-title">Projectstatus</div>';
+
+    const hasStatus = ps.projectstatus || ps.rag;
+    if (hasStatus) {
+      html += '<div class="dp-badges">';
+      if (ps.projectstatus) {
+        const key = ps.projectstatus.toLowerCase();
+        const col = STATUS_COLORS[key] || '#B5BAC2';
+        html += '<span class="status-badge" style="background:' + col + '">' + titleCase(ps.projectstatus) + '</span>';
+      }
+      if (ps.rag) {
+        const key = ps.rag.toLowerCase();
+        const col = RAG_COLORS[key] || '#B5BAC2';
+        html += '<span class="rag-badge" style="background:' + col + '">&#9679; ' + titleCase(ps.rag) + '</span>';
+      }
+      html += '</div>';
+      if (ps.toelichting) {
+        html += '<div class="dp-status-note">' + ps.toelichting + '</div>';
+      }
+      if (ps.datum) {
+        html += '<div class="dp-status-date">Gerapporteerd op ' + ps.datum + '</div>';
+      }
+    } else {
+      html += '<div class="dp-empty-note">Nog geen status gerapporteerd.</div>';
+    }
+
+    const tagsHtml = tagsChipsHtml(id);
+    const orgHtml = orgChipsHtml(id);
+    if (tagsHtml || orgHtml) {
+      html += '<div class="dp-grid" style="border-top:none;padding-top:0;margin-top:12px;">' + tagsHtml + orgHtml + '</div>';
+    }
+
+    const products = PRODUCTS[id] || [];
+    html += '<div class="dp-products-title">Producten / deliverables' + (products.length ? ' (' + products.length + ')' : '') + '</div>';
+    if (products.length === 0) {
+      html += '<div class="dp-empty-note">Nog geen producten gekoppeld aan dit project.</div>';
+    } else {
+      html += '<div class="products-grid">';
+      products.forEach(p => {
+        const pct = Math.max(0, Math.min(100, Number(p.pct) || 0));
+        html += '<div class="product-item">' +
+          '<div class="product-name">' + (p.name || p.id) + '</div>' +
+          (p.omschrijving ? '<div class="product-desc">' + p.omschrijving + '</div>' : '') +
+          '<div class="product-progress-wrap">' +
+            '<div class="product-progress-bar"><div class="product-progress-fill" style="width:' + pct + '%"></div></div>' +
+            '<span class="product-pct">' + pct + '%</span>' +
+          '</div>' +
+          '<div class="product-dates">' +
+            (p.verwacht ? 'Verwacht: ' + p.verwacht : 'Verwachte opleverdatum onbekend') +
+            (p.werkelijk ? ' &middot; Opgeleverd: ' + p.werkelijk : '') +
+          '</div>' +
+          (p.opmerking ? '<div class="product-remark">' + p.opmerking + '</div>' : '') +
+          '</div>';
+      });
+      html += '</div>';
+    }
+
+    return html;
+  }
+
+  function renderProjectPanel(id, color) {
+    const ps = PROJECT_STATUS[id];
+    if (!ps) {
+      projectPanelEl.classList.remove('visible');
+      projectPanelEl.innerHTML = '';
+      return;
+    }
+    const d = DETAILS[id];
+    projectPanelEl.innerHTML =
+      '<div class="pp-header"><span class="dp-code" style="background:' + color + '">' + d.code + '</span>' +
+      '<span class="pp-name">' + d.name + '</span></div>' +
+      projectSectionHtml(id);
+    projectPanelEl.classList.add('visible');
+  }
+
+  function ragBadgeHtml(id) {
+    const ps = PROJECT_STATUS[id];
+    if (!ps || !ps.rag) return '';
+    const key = ps.rag.toLowerCase();
+    const col = RAG_COLORS[key] || '#B5BAC2';
+    return '<span class="rag-badge" style="background:' + col + '">&#9679; ' + titleCase(ps.rag) + '</span>';
+  }
+
+  function connectionsHtml(id) {
+    function rowHtml(e, dir) {
+      const otherId = dir === 'out' ? e.target : e.source;
+      const other = DETAILS[otherId];
+      const label = other ? (other.code + ' — ' + other.name) : otherId;
+      const arrow = dir === 'out' ? '&rarr;' : '&larr;';
+      const weightLabel = e.weight === 'primair' ? 'Primair' : e.weight === 'ondersteunend' ? 'Ondersteunend' : '';
+      return '<div class="conn-row">' +
+        '<span class="conn-arrow">' + arrow + '</span>' +
+        '<span class="conn-label">' + escapeHtml(label) + '</span>' +
+        (weightLabel ? '<span class="conn-weight">' + weightLabel + '</span>' : '') +
+        '<span class="conn-actions crud-only">' +
+          '<button type="button" class="btn ghost btn-xs conn-edit-btn" data-source="' + escapeHtml(e.source) + '" data-target="' + escapeHtml(e.target) + '">Bewerken</button>' +
+          '<button type="button" class="btn ghost btn-xs conn-delete-btn" data-source="' + escapeHtml(e.source) + '" data-target="' + escapeHtml(e.target) + '">Verwijderen</button>' +
+        '</span></div>';
+    }
+    const outgoing = EDGES.filter((e) => e.source === id);
+    const incoming = EDGES.filter((e) => e.target === id);
+    const rows = outgoing.map((e) => rowHtml(e, 'out')).concat(incoming.map((e) => rowHtml(e, 'in')));
+    return '<div class="dp-connections">' +
+      '<div class="dp-connections-title"><span>Verbindingen (' + rows.length + ')</span>' +
+        '<button type="button" class="btn ghost btn-xs dp-add-conn-btn crud-only" data-code="' + escapeHtml(id) + '">+ Relatie</button>' +
+      '</div>' +
+      (rows.length ? rows.join('') : '<p class="ref-list-empty">Geen verbindingen.</p>') +
+      '</div>';
+  }
+
+  function renderDetailPanel(id, color) {
+    const d = DETAILS[id];
+    if (!d) { detailPanel.classList.remove('visible'); detailPanel.innerHTML = ''; return; }
+    detailPanel.style.borderTopColor = color;
+    detailPanel.innerHTML =
+      '<div class="dp-meta"><span class="dp-code" style="background:' + color + '">' + d.code + '</span>' +
+      '<span class="dp-type">' + d.type + '</span>' + ragBadgeHtml(id) + '</div>' +
+      '<div class="dp-title">' + d.name + '</div>' +
+      '<div class="dp-desc">' + (d.desc || '') + '</div>' +
+      '<div class="dp-grid">' +
+        fieldHtml('Bovenliggend element', d.parent) +
+        fieldHtml('Mogelijke KPI / indicator', d.kpi) +
+        fieldHtml('Taakveld / Sub-taakveld', taakveldLine(d)) +
+        tagsChipsHtml(id) +
+        orgChipsHtml(id) +
+      '</div>' +
+      connectionsHtml(id) +
+      '<div class="dp-crud-actions crud-only">' +
+        '<button type="button" class="btn ghost btn-sm dp-edit-btn" data-code="' + escapeHtml(d.code) + '">Bewerken</button>' +
+        '<button type="button" class="btn ghost btn-sm dp-delete-btn" data-code="' + escapeHtml(d.code) + '">Verwijderen</button>' +
+      '</div>';
+    detailPanel.classList.add('visible');
+  }
+
+  // ---- Double-click focus mode: element + 1 level up + all levels of children ----
+  function computeFocusSet(id) {
+    const forward = {}, backward = {};
+    EDGES.forEach(e => {
+      (forward[e.source] = forward[e.source] || []).push(e.target);
+      (backward[e.target] = backward[e.target] || []).push(e.source);
+    });
+
+    const keep = new Set([id]);
+    (forward[id] || []).forEach(parent => keep.add(parent));
+    (function walk(cur) {
+      (backward[cur] || []).forEach(child => {
+        if (!keep.has(child)) { keep.add(child); walk(child); }
+      });
+    })(id);
+    return keep;
+  }
+
+  function enterFocus(node) {
+    const id = node.dataset.id;
+    if (focusId === null) {
+      prevHiddenCols = new Set(hiddenCols);
+    }
+    focusId = id;
+    deselect();
+    hideTooltip();
+
+    const colorKey = node.closest('.column').dataset.key;
+    const color = COL_COLORS[colorKey] || '#002855';
+    renderDetailPanel(id, color);
+    renderProjectPanel(id, color);
+
+    const keep = computeFocusSet(id);
+    document.querySelectorAll('.node').forEach(n => {
+      n.classList.toggle('node-hidden', !keep.has(n.dataset.id));
+      n.classList.toggle('focus-target', n.dataset.id === id);
+    });
+    document.querySelectorAll('.column').forEach(col => {
+      const anyVisible = Array.from(col.querySelectorAll('.node'))
+        .some(n => !n.classList.contains('node-hidden'));
+      col.classList.toggle('hidden', !anyVisible);
+    });
+
+    legendEl.classList.add('disabled');
+    showAllBtn.disabled = true;
+    resetBtn.disabled = true;
+    expandLeftBtn.disabled = true;
+    backBtn.style.display = '';
+
+    requestAnimationFrame(() => setTimeout(() => { drawEdges(); drawColumnArrows(); }, 280));
+  }
+
+  function exitFocus() {
+    focusId = null;
+    document.querySelectorAll('.node').forEach(n => n.classList.remove('node-hidden', 'focus-target'));
+    detailPanel.classList.remove('visible');
+    detailPanel.innerHTML = '';
+    projectPanelEl.classList.remove('visible');
+    projectPanelEl.innerHTML = '';
+    hiddenCols = (prevHiddenCols !== null) ? prevHiddenCols : defaultHiddenCols();
+    prevHiddenCols = null;
+    legendEl.classList.remove('disabled');
+    showAllBtn.disabled = false;
+    resetBtn.disabled = false;
+    backBtn.style.display = 'none';
+    applyVisibility(); // also refreshes expandLeftBtn state
+  }
+
+  columnsEl.addEventListener('dblclick', (ev) => {
+    const node = ev.target.closest('.node');
+    if (!node) return;
+    enterFocus(node);
+  });
+
+  // ---- Hover tooltip with extended description ----
+  function showTooltip(node, clientX, clientY) {
+    const d = DETAILS[node.dataset.id];
+    if (!d) return;
+    const colorKey = node.closest('.column').dataset.key;
+    const color = COL_COLORS[colorKey] || '#002855';
+    tooltipEl.style.borderTopColor = color;
+    const tagIds = ELEMENT_TAGS[node.dataset.id] || [];
+    const orgRels = OB_ORG[node.dataset.id] || [];
+    let extraHtml = '';
+    if (tagIds.length) {
+      extraHtml += '<div class="tt-tags"><b>Tags:</b> ' +
+        tagIds.map(t => (TAGS[t] ? TAGS[t].name : t)).join(', ') + '</div>';
+    }
+    if (orgRels.length) {
+      extraHtml += '<div class="tt-orgs"><b>Organisatieonderdelen:</b> ' +
+        orgRels.map(r => (ORGS[r.org] ? ORGS[r.org].name : r.org)).join(', ') + '</div>';
+    }
+    tooltipEl.innerHTML =
+      '<div class="tt-meta"><span class="tt-code" style="background:' + color + '">' + d.code + '</span>' +
+      '<span class="tt-type">' + d.type + '</span></div>' +
+      '<div class="tt-name">' + d.name + '</div>' +
+      '<div class="tt-desc">' + d.desc + '</div>' + extraHtml;
+    positionTooltip(clientX, clientY);
+    tooltipEl.classList.add('visible');
+  }
+
+  function positionTooltip(clientX, clientY) {
+    const offset = 16;
+    const rect = tooltipEl.getBoundingClientRect();
+    let left = clientX + offset;
+    let top = clientY + offset;
+    const vw = window.innerWidth, vh = window.innerHeight;
+    if (left + rect.width + 12 > vw) left = clientX - rect.width - offset;
+    if (top + rect.height + 12 > vh) top = clientY - rect.height - offset;
+    if (left < 8) left = 8;
+    if (top < 8) top = 8;
+    tooltipEl.style.left = left + 'px';
+    tooltipEl.style.top = top + 'px';
+  }
+
+  function hideTooltip() {
+    tooltipEl.classList.remove('visible');
+  }
+
+  columnsEl.addEventListener('mouseover', (ev) => {
+    const node = ev.target.closest('.node');
+    if (node) showTooltip(node, ev.clientX, ev.clientY);
+  });
+  columnsEl.addEventListener('mousemove', (ev) => {
+    const node = ev.target.closest('.node');
+    if (node) positionTooltip(ev.clientX, ev.clientY);
+  });
+  columnsEl.addEventListener('mouseout', (ev) => {
+    const node = ev.target.closest('.node');
+    if (node && !node.contains(ev.relatedTarget)) hideTooltip();
+  });
+  canvasWrapEl.addEventListener('scroll', hideTooltip);
+
+  let touchTooltipTimer = null;
+  columnsEl.addEventListener('touchstart', (ev) => {
+    const node = ev.target.closest('.node');
+    if (!node) return;
+    const touch = ev.touches[0];
+    showTooltip(node, touch.clientX, touch.clientY);
+    clearTimeout(touchTooltipTimer);
+    touchTooltipTimer = setTimeout(hideTooltip, 3500);
+  }, { passive: true });
+  document.addEventListener('touchstart', (ev) => {
+    if (!ev.target.closest('.node')) hideTooltip();
+  }, { passive: true });
+
+  // ---- Search: highlight matching elements, auto-reveal their column ----
+  function clearSearchState() {
+    document.querySelectorAll('.node').forEach(n => {
+      n.classList.remove('search-hit', 'search-miss');
+    });
+    searchClearBtn.classList.remove('visible');
+    searchCountEl.textContent = '';
+    searchCountEl.classList.remove('has-query');
+  }
+
+  function runSearch() {
+    const raw = searchInput.value;
+    searchClearBtn.classList.toggle('visible', raw.length > 0);
+
+    if (raw.trim() === '') {
+      clearSearchState();
+      return;
+    }
+
+    if (focusId !== null) exitFocus();
+    deselect();
+
+    const q = normalizeSearch(raw.trim());
+    const matchIds = Object.keys(SEARCH_INDEX).filter(id => SEARCH_INDEX[id].indexOf(q) !== -1);
+    const matchSet = new Set(matchIds);
+
+    searchCountEl.classList.add('has-query');
+    if (matchIds.length === 0) {
+      searchCountEl.textContent = 'Geen resultaten';
+    } else {
+      searchCountEl.textContent = matchIds.length + ' van ' + Object.keys(DETAILS).length + ' elementen gevonden';
+    }
+
+    // Auto-reveal every column that contains at least one match
+    if (matchIds.length > 0) {
+      let changed = false;
+      matchIds.forEach(id => {
+        const el = document.querySelector('.node[data-id="' + id + '"]');
+        if (!el) return;
+        const key = el.closest('.column').dataset.key;
+        if (hiddenCols.has(key)) { hiddenCols.delete(key); changed = true; }
+      });
+      if (changed) applyVisibility();
+    }
+
+    document.querySelectorAll('.node').forEach(n => {
+      const isMatch = matchSet.has(n.dataset.id);
+      n.classList.toggle('search-hit', isMatch);
+      n.classList.toggle('search-miss', !isMatch);
+    });
+  }
+
+  searchInput.addEventListener('input', runSearch);
+  searchInput.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape') {
+      searchInput.value = '';
+      runSearch();
+      searchInput.blur();
+    }
+  });
+  searchClearBtn.addEventListener('click', () => {
+    searchInput.value = '';
+    runSearch();
+    searchInput.focus();
+  });
+
+  // Small RAG-status marker on every Project node (top-left corner dot).
+  document.querySelectorAll('.node').forEach(n => {
+    const ps = PROJECT_STATUS[n.dataset.id];
+    if (!ps || !ps.rag) return;
+    const col = RAG_COLORS[ps.rag.toLowerCase()];
+    if (!col) return;
+    const dot = document.createElement('span');
+    dot.className = 'node-rag-dot';
+    dot.style.background = col;
+    dot.title = 'RAG: ' + titleCase(ps.rag);
+    n.appendChild(dot);
+  });
+
+  // ---- SVG-export van de volledige boom (huidige zichtbare stand) ----
+  function nodeTextLines(node) {
+    const clone = node.cloneNode(true);
+    clone.querySelectorAll('.node-tag-dot, .node-rag-dot').forEach(el => el.remove());
+    clone.querySelectorAll('br').forEach(br => br.replaceWith('\n'));
+    return clone.textContent.split('\n').map(s => s.trim());
+  }
+
+  function wrapLine(ctx, text, maxWidth) {
+    if (!text) return [''];
+    if (ctx.measureText(text).width <= maxWidth) return [text];
+    const words = text.split(' ');
+    const lines = [];
+    let cur = '';
+    words.forEach(w => {
+      const test = cur ? cur + ' ' + w : w;
+      if (ctx.measureText(test).width > maxWidth && cur) {
+        lines.push(cur);
+        cur = w;
+      } else {
+        cur = test;
+      }
+    });
+    if (cur) lines.push(cur);
+    return lines;
+  }
+
+  function exportSVG() {
+    const boardRect = boardEl.getBoundingClientRect();
+    const W = Math.ceil(boardRect.width);
+    const H = Math.ceil(boardRect.height);
+
+    const out = document.createElementNS(SVG_NS, 'svg');
+    out.setAttribute('xmlns', SVG_NS);
+    out.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+    out.setAttribute('width', W);
+    out.setAttribute('height', H);
+    out.setAttribute('font-family', 'Calibri, Arial, sans-serif');
+
+    const bg = document.createElementNS(SVG_NS, 'rect');
+    bg.setAttribute('x', 0); bg.setAttribute('y', 0);
+    bg.setAttribute('width', W); bg.setAttribute('height', H);
+    bg.setAttribute('fill', '#ffffff');
+    out.appendChild(bg);
+
+    // Edges + column-relation arrows: clone the live connector SVG, resolving computed
+    // style into explicit presentation attributes so the file is self-contained.
+    Array.from(svg.children).forEach(el => {
+      const tag = el.tagName.toLowerCase();
+      const cs = getComputedStyle(el);
+      const clone = el.cloneNode(false);
+      clone.removeAttribute('class');
+      if (tag === 'path') {
+        clone.setAttribute('stroke', cs.stroke);
+        clone.setAttribute('stroke-width', cs.strokeWidth);
+        clone.setAttribute('fill', 'none');
+        clone.setAttribute('opacity', cs.opacity);
+        const dash = cs.strokeDasharray;
+        if (dash && dash !== 'none') clone.setAttribute('stroke-dasharray', dash);
+      } else if (tag === 'line') {
+        clone.setAttribute('stroke', cs.stroke);
+        clone.setAttribute('stroke-width', cs.strokeWidth);
+      } else if (tag === 'polygon') {
+        clone.setAttribute('fill', cs.fill);
+      }
+      out.appendChild(clone);
+    });
+
+    // Column-relation arrow labels (HTML divs) -> SVG text with a white backing rect.
+    const canvasMeasure = document.createElement('canvas').getContext('2d');
+    document.querySelectorAll('.col-arrow-label').forEach(label => {
+      const r = label.getBoundingClientRect();
+      const cx = r.left + r.width / 2 - boardRect.left;
+      const cy = r.top + r.height / 2 - boardRect.top;
+      canvasMeasure.font = '700 11px Calibri, Arial, sans-serif';
+      const tw = canvasMeasure.measureText(label.textContent).width;
+      const rect = document.createElementNS(SVG_NS, 'rect');
+      rect.setAttribute('x', cx - tw / 2 - 6);
+      rect.setAttribute('y', cy - 9);
+      rect.setAttribute('width', tw + 12);
+      rect.setAttribute('height', 18);
+      rect.setAttribute('fill', '#ffffff');
+      out.appendChild(rect);
+      const t = document.createElementNS(SVG_NS, 'text');
+      t.setAttribute('x', cx);
+      t.setAttribute('y', cy + 4);
+      t.setAttribute('text-anchor', 'middle');
+      t.setAttribute('font-size', '11');
+      t.setAttribute('font-weight', '700');
+      t.setAttribute('font-style', 'italic');
+      t.setAttribute('fill', '#002855');
+      t.textContent = label.textContent;
+      out.appendChild(t);
+    });
+
+    // Column headers.
+    document.querySelectorAll('.col-header').forEach(header => {
+      const col = header.closest('.column');
+      if (col.classList.contains('hidden')) return;
+      const r = header.getBoundingClientRect();
+      const t = document.createElementNS(SVG_NS, 'text');
+      t.setAttribute('x', r.left + r.width / 2 - boardRect.left);
+      t.setAttribute('y', r.top - boardRect.top + 16);
+      t.setAttribute('text-anchor', 'middle');
+      t.setAttribute('font-size', '12');
+      t.setAttribute('font-weight', '700');
+      t.setAttribute('fill', '#002855');
+      t.textContent = header.childNodes[0] ? header.childNodes[0].textContent.trim() : '';
+      out.appendChild(t);
+    });
+
+    // Nodes: rect + wrapped, vertically centered text + RAG/tag corner markers.
+    document.querySelectorAll('.node').forEach(node => {
+      const col = node.closest('.column');
+      if (col.classList.contains('hidden') || node.classList.contains('node-hidden')) return;
+      const r = node.getBoundingClientRect();
+      const x = r.left - boardRect.left, y = r.top - boardRect.top;
+      const w = r.width, h = r.height;
+
+      const g = document.createElementNS(SVG_NS, 'g');
+
+      const rect = document.createElementNS(SVG_NS, 'rect');
+      rect.setAttribute('x', x); rect.setAttribute('y', y);
+      rect.setAttribute('width', w); rect.setAttribute('height', h);
+      rect.setAttribute('rx', 6);
+      rect.setAttribute('fill', node.style.background || '#002855');
+      rect.setAttribute('stroke', '#002855');
+      rect.setAttribute('stroke-width', '1');
+      g.appendChild(rect);
+
+      const fontSize = parseFloat(node.style.fontSize) || 10;
+      const textColor = node.style.color || '#ffffff';
+      canvasMeasure.font = fontSize + 'px Calibri, Arial, sans-serif';
+      const padX = 8;
+      const maxTextWidth = Math.max(10, w - padX * 2);
+      const rawLines = nodeTextLines(node);
+      let wrapped = [];
+      rawLines.forEach(line => { wrapped = wrapped.concat(wrapLine(canvasMeasure, line, maxTextWidth)); });
+
+      const lineHeight = fontSize * 1.25;
+      const totalHeight = wrapped.length * lineHeight;
+      let startY = y + h / 2 - totalHeight / 2 + fontSize * 0.85;
+
+      const text = document.createElementNS(SVG_NS, 'text');
+      text.setAttribute('x', x + w / 2);
+      text.setAttribute('text-anchor', 'middle');
+      text.setAttribute('font-size', fontSize);
+      text.setAttribute('fill', textColor);
+      wrapped.forEach((line, i) => {
+        const tspan = document.createElementNS(SVG_NS, 'tspan');
+        tspan.setAttribute('x', x + w / 2);
+        tspan.setAttribute('y', startY + i * lineHeight);
+        tspan.textContent = line;
+        text.appendChild(tspan);
+      });
+      g.appendChild(text);
+
+      const ragDot = node.querySelector('.node-rag-dot');
+      if (ragDot) {
+        const c = document.createElementNS(SVG_NS, 'circle');
+        c.setAttribute('cx', x + 7); c.setAttribute('cy', y + 7); c.setAttribute('r', 4);
+        c.setAttribute('fill', ragDot.style.background);
+        c.setAttribute('stroke', '#ffffff'); c.setAttribute('stroke-width', '1');
+        g.appendChild(c);
+      }
+      const tagDot = node.querySelector('.node-tag-dot');
+      if (tagDot) {
+        const c = document.createElementNS(SVG_NS, 'circle');
+        c.setAttribute('cx', x + w - 6); c.setAttribute('cy', y + 6); c.setAttribute('r', 3);
+        c.setAttribute('fill', '#ffd166');
+        c.setAttribute('stroke', 'rgba(0,0,0,0.3)'); c.setAttribute('stroke-width', '1');
+        g.appendChild(c);
+      }
+
+      out.appendChild(g);
+    });
+
+    const serializer = new XMLSerializer();
+    const svgString = '<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n' + serializer.serializeToString(out);
+    const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'doelenboom.svg';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
+
+  const exportSvgBtn = document.getElementById('export-svg-btn');
+  if (exportSvgBtn) exportSvgBtn.addEventListener('click', exportSVG);
+
+  const navPickerBtn = document.getElementById('nav-picker-btn');
+  if (navPickerBtn) navPickerBtn.addEventListener('click', () => {
+    window.parent.postMessage({ type: 'doelenboom-navigate', target: 'picker' }, PARENT_ORIGIN);
+  });
+  const navImportBtn = document.getElementById('nav-import-btn');
+  if (navImportBtn) navImportBtn.addEventListener('click', () => {
+    window.parent.postMessage({ type: 'doelenboom-navigate', target: 'import' }, PARENT_ORIGIN);
+  });
+  const logoutBtn = document.getElementById('logout-btn');
+  if (logoutBtn) logoutBtn.addEventListener('click', () => {
+    window.parent.postMessage({ type: 'doelenboom-navigate', target: 'logout' }, PARENT_ORIGIN);
+  });
+
+  // ---- Excel-export: eerst formaat (oud/nieuw) kiezen, dan template/data ----
+  const exportXlsxBtn = document.getElementById('export-xlsx-btn');
+  const exportModalBackdrop = document.getElementById('export-modal-backdrop');
+  const exportModalStatus = document.getElementById('export-modal-status');
+  const exportStepFormat = document.getElementById('export-step-format');
+  const exportStepMode = document.getElementById('export-step-mode');
+  let exportFormat = null;
+
+  function openExportModal() {
+    exportFormat = null;
+    exportStepFormat.style.display = '';
+    exportStepMode.style.display = 'none';
+    exportModalStatus.textContent = '';
+    exportModalBackdrop.classList.add('visible');
+  }
+
+  function closeExportModal() {
+    exportModalBackdrop.classList.remove('visible');
+    exportModalStatus.textContent = '';
+  }
+
+  function chooseExportFormat(fmt) {
+    exportFormat = fmt;
+    exportStepFormat.style.display = 'none';
+    exportStepMode.style.display = '';
+  }
+
+  function backToFormatStep() {
+    exportStepFormat.style.display = '';
+    exportStepMode.style.display = 'none';
+  }
+
+  async function downloadExport(mode) {
+    exportModalStatus.textContent = 'Bezig met genereren…';
+    try {
+      const res = await fetch(
+        apiUrl + '/api/doelenbomen/' + doelenboomId + '/export?format=' + exportFormat + '&mode=' + mode,
+        { headers: { Authorization: 'Bearer ' + authToken } }
+      );
+      if (!res.ok) throw new Error('Export mislukt (HTTP ' + res.status + ')');
+      const blob = await res.blob();
+      const disposition = res.headers.get('Content-Disposition') || '';
+      const match = disposition.match(/filename="([^"]+)"/);
+      const filename = match ? match[1] : ('doelenboom_' + exportFormat + '_' + mode + '.xlsx');
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      closeExportModal();
+    } catch (err) {
+      exportModalStatus.textContent = err && err.message ? err.message : 'Onbekende fout bij exporteren.';
+    }
+  }
+
+  if (exportXlsxBtn) exportXlsxBtn.addEventListener('click', openExportModal);
+  const exportFormatOudBtn = document.getElementById('export-format-oud');
+  if (exportFormatOudBtn) exportFormatOudBtn.addEventListener('click', () => chooseExportFormat('oud'));
+  const exportFormatNieuwBtn = document.getElementById('export-format-nieuw');
+  if (exportFormatNieuwBtn) exportFormatNieuwBtn.addEventListener('click', () => chooseExportFormat('nieuw'));
+  const exportModalBackBtn = document.getElementById('export-modal-back');
+  if (exportModalBackBtn) exportModalBackBtn.addEventListener('click', backToFormatStep);
+  const exportModalCancel1Btn = document.getElementById('export-modal-cancel-1');
+  if (exportModalCancel1Btn) exportModalCancel1Btn.addEventListener('click', closeExportModal);
+  const exportModalTemplateBtn = document.getElementById('export-modal-template');
+  if (exportModalTemplateBtn) exportModalTemplateBtn.addEventListener('click', () => downloadExport('template'));
+  const exportModalDataBtn = document.getElementById('export-modal-data');
+  if (exportModalDataBtn) exportModalDataBtn.addEventListener('click', () => downloadExport('data'));
+  if (exportModalBackdrop) exportModalBackdrop.addEventListener('click', (ev) => {
+    if (ev.target === exportModalBackdrop) closeExportModal();
+  });
+
+  // ---- Element-CRUD: "+ Nieuw element", en Bewerken/Verwijderen vanuit het
+  // detail-paneel (fase 1 — tags/organisatieonderdelen en relaties volgen later).
+  // Na een geslaagde create/update/delete herladen we het iframe: dat triggert de
+  // bestaande ready/init-handshake met de React-ouder opnieuw (fris token, geen
+  // dubbel geregistreerde event-listeners zoals bij het opnieuw aanroepen van
+  // runApp() zou gebeuren).
+  const newElementBtn = document.getElementById('new-element-btn');
+  const elementModalBackdrop = document.getElementById('element-modal-backdrop');
+  const elementModalTitle = document.getElementById('element-modal-title');
+  const elementForm = document.getElementById('element-form');
+  const elementModalStatus = document.getElementById('element-modal-status');
+  const elementModalCancelBtn = document.getElementById('element-modal-cancel');
+  const elementFieldType = document.getElementById('element-field-type');
+  const elementFieldCode = document.getElementById('element-field-code');
+  const elementFieldName = document.getElementById('element-field-name');
+  const elementFieldDescription = document.getElementById('element-field-description');
+  const elementFieldKpi = document.getElementById('element-field-kpi');
+  const elementFieldTaakveld = document.getElementById('element-field-taakveld');
+  const elementFieldSubtaakveld = document.getElementById('element-field-subtaakveld');
+  let elementModalMode = 'create';
+  let elementModalOriginalCode = null;
+  let elementCodeAutoFilled = false;
+
+  function setElementModalStatus(text, kind) {
+    elementModalStatus.textContent = text || '';
+    elementModalStatus.style.color = kind === 'ok' ? '#2E7D5B' : kind === 'busy' ? '#777' : '#DC3545';
+  }
+
+  // Simpele, transparante autonummering per type (P1, C1, OB1, ...) — geen poging
+  // om de historische, per-tak-uiteenlopende codeschema's uit de Excel-brondata
+  // (bv. "A1", "M1") na te bootsen, want dat zou gokken zijn. De voorgestelde code
+  // staat gewoon zichtbaar in het veld en is altijd aan te passen vóór het opslaan.
+  const TYPE_CODE_PREFIX = {
+    'Project': 'P', 'Capability': 'C', 'Operationele benefit': 'OB', 'Sub-benefit': 'SB',
+    'Programmabaat': 'PB', 'Strategische benefit': 'STB', 'Strategisch doel': 'SD', 'Missie': 'M',
+  };
+  function suggestElementCode(type) {
+    const prefix = TYPE_CODE_PREFIX[type] || 'X';
+    const re = new RegExp('^' + prefix + '(\\d+)$');
+    let max = 0;
+    Object.keys(DETAILS).forEach((code) => {
+      const m = re.exec(code);
+      if (m) max = Math.max(max, parseInt(m[1], 10));
+    });
+    return prefix + (max + 1);
+  }
+
+  function uniqueDetailValues(fieldKey) {
+    const set = new Set();
+    Object.keys(DETAILS).forEach((code) => {
+      const v = DETAILS[code][fieldKey];
+      if (v) set.add(v);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'nl'));
+  }
+
+  function attachValuePicker(inputEl, buttonEl, getValues) {
+    let popover = null;
+    function closePopover() {
+      if (popover) { popover.remove(); popover = null; }
+      document.removeEventListener('click', onDocClick, true);
+    }
+    function onDocClick(ev) {
+      if (popover && !popover.contains(ev.target) && ev.target !== buttonEl) closePopover();
+    }
+    buttonEl.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      if (popover) { closePopover(); return; }
+      const values = getValues();
+      popover = document.createElement('div');
+      popover.className = 'value-picker-popover';
+      popover.innerHTML = values.length
+        ? values.map((v) => '<button type="button" class="value-picker-item">' + escapeHtml(v) + '</button>').join('')
+        : '<div class="value-picker-empty">Nog geen waarden.</div>';
+      popover.addEventListener('click', (ev2) => {
+        const item = ev2.target.closest('.value-picker-item');
+        if (item) { inputEl.value = item.textContent; closePopover(); inputEl.focus(); }
+      });
+      buttonEl.parentElement.appendChild(popover);
+      setTimeout(() => document.addEventListener('click', onDocClick, true), 0);
+    });
+  }
+
+  const elementTaakveldPickerBtn = document.getElementById('element-taakveld-picker-btn');
+  if (elementTaakveldPickerBtn) attachValuePicker(elementFieldTaakveld, elementTaakveldPickerBtn, () => uniqueDetailValues('taakveld'));
+  const elementSubtaakveldPickerBtn = document.getElementById('element-subtaakveld-picker-btn');
+  if (elementSubtaakveldPickerBtn) attachValuePicker(elementFieldSubtaakveld, elementSubtaakveldPickerBtn, () => uniqueDetailValues('subtaakveld'));
+
+  elementFieldCode.addEventListener('input', () => { elementCodeAutoFilled = false; });
+  elementFieldType.addEventListener('change', () => {
+    if (elementModalMode === 'create' && (elementCodeAutoFilled || !elementFieldCode.value.trim())) {
+      elementFieldCode.value = suggestElementCode(elementFieldType.value);
+      elementCodeAutoFilled = true;
+    }
+  });
+
+  function openElementModal(mode, code) {
+    elementModalMode = mode;
+    elementModalOriginalCode = code || null;
+    setElementModalStatus('');
+    if (mode === 'edit' && code && DETAILS[code]) {
+      const d = DETAILS[code];
+      elementModalTitle.textContent = 'Element bewerken';
+      elementFieldType.value = d.type;
+      elementFieldCode.value = d.code;
+      elementCodeAutoFilled = false;
+      elementFieldName.value = d.name;
+      elementFieldDescription.value = d.desc || '';
+      elementFieldKpi.value = d.kpi || '';
+      elementFieldTaakveld.value = d.taakveld || '';
+      elementFieldSubtaakveld.value = d.subtaakveld || '';
+    } else {
+      elementModalTitle.textContent = 'Nieuw element';
+      elementForm.reset();
+      elementFieldType.value = 'Project';
+      elementFieldCode.value = suggestElementCode(elementFieldType.value);
+      elementCodeAutoFilled = true;
+    }
+    elementModalBackdrop.classList.add('visible');
+    elementFieldName.focus();
+  }
+
+  function closeElementModal() {
+    elementModalBackdrop.classList.remove('visible');
+  }
+
+  if (newElementBtn) newElementBtn.addEventListener('click', () => openElementModal('create'));
+  if (elementModalCancelBtn) elementModalCancelBtn.addEventListener('click', closeElementModal);
+  if (elementModalBackdrop) elementModalBackdrop.addEventListener('click', (ev) => {
+    if (ev.target === elementModalBackdrop) closeElementModal();
+  });
+
+  if (elementForm) elementForm.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const payload = {
+      type: elementFieldType.value,
+      code: elementFieldCode.value.trim(),
+      name: elementFieldName.value.trim(),
+      description: elementFieldDescription.value.trim(),
+      kpi: elementFieldKpi.value.trim(),
+      taakveld: elementFieldTaakveld.value.trim(),
+      subtaakveld: elementFieldSubtaakveld.value.trim(),
+    };
+    if (!payload.code || !payload.name) {
+      setElementModalStatus('Code en naam zijn verplicht.');
+      return;
+    }
+    setElementModalStatus('Bezig met opslaan…', 'busy');
+    try {
+      const isEdit = elementModalMode === 'edit';
+      const url = isEdit
+        ? apiUrl + '/api/doelenbomen/' + doelenboomId + '/elements/' + encodeURIComponent(elementModalOriginalCode)
+        : apiUrl + '/api/doelenbomen/' + doelenboomId + '/elements';
+      const res = await fetch(url, {
+        method: isEdit ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + authToken },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || ('Opslaan mislukt (HTTP ' + res.status + ')'));
+      }
+      setElementModalStatus('Opgeslagen, boom wordt herladen…', 'ok');
+      setTimeout(() => window.location.reload(), 400);
+    } catch (err) {
+      setElementModalStatus(err && err.message ? err.message : 'Onbekende fout bij opslaan.');
+    }
+  });
+
+  async function deleteElementByCode(code) {
+    if (!code) return;
+    const ok = await showConfirm(
+      'Element "' + code + '" verwijderen? Eventuele relaties, projectstatus, producten en tag-/organisatiekoppelingen ' +
+      'van dit element worden dan ook verwijderd.'
+    );
+    if (!ok) return;
+    try {
+      const res = await fetch(
+        apiUrl + '/api/doelenbomen/' + doelenboomId + '/elements/' + encodeURIComponent(code),
+        { method: 'DELETE', headers: { Authorization: 'Bearer ' + authToken } }
+      );
+      if (!res.ok && res.status !== 204) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || ('Verwijderen mislukt (HTTP ' + res.status + ')'));
+      }
+      window.location.reload();
+    } catch (err) {
+      showToast(err && err.message ? err.message : 'Onbekende fout bij verwijderen.', 'error');
+    }
+  }
+
+  detailPanel.addEventListener('click', (ev) => {
+    const editBtn = ev.target.closest('.dp-edit-btn');
+    if (editBtn) { openElementModal('edit', editBtn.dataset.code); return; }
+    const delBtn = ev.target.closest('.dp-delete-btn');
+    if (delBtn) { deleteElementByCode(delBtn.dataset.code); return; }
+    const addConnBtn = ev.target.closest('.dp-add-conn-btn');
+    if (addConnBtn) { openCreateEdgeModal(addConnBtn.dataset.code); return; }
+    const connEditBtn = ev.target.closest('.conn-edit-btn');
+    if (connEditBtn) { openEditEdgeModal(connEditBtn.dataset.source, connEditBtn.dataset.target); return; }
+    const connDelBtn = ev.target.closest('.conn-delete-btn');
+    if (connDelBtn) { deleteEdge(connDelBtn.dataset.source, connDelBtn.dataset.target); }
+  });
+
+  // ---- Fase 2: CRUD voor tags en organisatieonderdelen (de stamlijsten; koppelen
+  // aan een element is een relatie en hoort bij fase 3). Eén herbruikbare factory
+  // voor beide, want de vorm is identiek op de "categorie"-kolom na (alleen tags
+  // hebben die). Net als bij elementen: na opslaan/verwijderen herladen we de hele
+  // pagina i.p.v. runApp() opnieuw te draaien, om dubbel geregistreerde
+  // event-listeners op statische elementen te voorkomen.
+  const refModalBackdrop = document.getElementById('ref-modal-backdrop');
+  const refModalStatus = document.getElementById('ref-modal-status');
+  const manageRefBtn = document.getElementById('manage-tags-orgs-btn');
+  const refModalCloseBtn = document.getElementById('ref-modal-close');
+
+  function setRefModalStatus(text, kind) {
+    refModalStatus.textContent = text || '';
+    refModalStatus.style.color = kind === 'ok' ? '#2E7D5B' : kind === 'busy' ? '#777' : '#DC3545';
+  }
+
+  function setupRefCrud(opts) {
+    // opts: entityLabel, endpointSegment, dataObj, listContainerId, formId,
+    // nameFieldId, categorieFieldId (optioneel), omschrijvingFieldId, cancelBtnId,
+    // submitBtnId, withCategorie, deleteWarning
+    const form = document.getElementById(opts.formId);
+    const listContainer = document.getElementById(opts.listContainerId);
+    const nameField = document.getElementById(opts.nameFieldId);
+    const categorieField = opts.categorieFieldId ? document.getElementById(opts.categorieFieldId) : null;
+    const omschrijvingField = document.getElementById(opts.omschrijvingFieldId);
+    const cancelBtn = document.getElementById(opts.cancelBtnId);
+    const submitBtn = document.getElementById(opts.submitBtnId);
+    let editCode = null;
+
+    function render() {
+      const codes = Object.keys(opts.dataObj);
+      if (!codes.length) {
+        listContainer.innerHTML = '<p class="ref-list-empty">Nog geen items.</p>';
+        return;
+      }
+      listContainer.innerHTML = codes.map((code) => {
+        const item = opts.dataObj[code];
+        const metaParts = [];
+        if (opts.withCategorie && item.categorie) metaParts.push(item.categorie);
+        if (item.desc) metaParts.push(item.desc);
+        return '<div class="ref-list-item">' +
+          '<div class="ref-list-item-main"><strong>' + escapeHtml(item.name) + '</strong>' +
+          (metaParts.length ? '<span class="ref-list-item-meta">' + escapeHtml(metaParts.join(' · ')) + '</span>' : '') +
+          '<span class="ref-list-item-code">' + escapeHtml(code) + '</span></div>' +
+          '<div class="ref-list-item-actions crud-only">' +
+            '<button type="button" class="btn ghost btn-xs ref-edit-btn" data-code="' + escapeHtml(code) + '">Bewerken</button>' +
+            '<button type="button" class="btn ghost btn-xs ref-delete-btn" data-code="' + escapeHtml(code) + '">Verwijderen</button>' +
+          '</div></div>';
+      }).join('');
+    }
+
+    function resetForm() {
+      editCode = null;
+      form.reset();
+      submitBtn.textContent = '+ ' + opts.entityLabel + ' toevoegen';
+      cancelBtn.style.display = 'none';
+    }
+
+    function startEdit(code) {
+      const item = opts.dataObj[code];
+      if (!item) return;
+      editCode = code;
+      nameField.value = item.name || '';
+      if (categorieField) categorieField.value = item.categorie || '';
+      omschrijvingField.value = item.desc || '';
+      submitBtn.textContent = 'Wijzigingen opslaan';
+      cancelBtn.style.display = '';
+      nameField.focus();
+    }
+
+    async function remove(code) {
+      const item = opts.dataObj[code];
+      const ok = await showConfirm(
+        opts.entityLabel + ' "' + (item ? item.name : code) + '" verwijderen?' +
+        (opts.deleteWarning ? ' ' + opts.deleteWarning : '')
+      );
+      if (!ok) return;
+      try {
+        const res = await fetch(
+          apiUrl + '/api/doelenbomen/' + doelenboomId + '/' + opts.endpointSegment + '/' + encodeURIComponent(code),
+          { method: 'DELETE', headers: { Authorization: 'Bearer ' + authToken } }
+        );
+        if (!res.ok && res.status !== 204) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error || ('Verwijderen mislukt (HTTP ' + res.status + ')'));
+        }
+        window.location.reload();
+      } catch (err) {
+        showToast(err && err.message ? err.message : 'Onbekende fout bij verwijderen.', 'error');
+      }
+    }
+
+    if (cancelBtn) cancelBtn.addEventListener('click', resetForm);
+    if (listContainer) listContainer.addEventListener('click', (ev) => {
+      const editBtn = ev.target.closest('.ref-edit-btn');
+      if (editBtn) { startEdit(editBtn.dataset.code); return; }
+      const delBtn = ev.target.closest('.ref-delete-btn');
+      if (delBtn) { remove(delBtn.dataset.code); }
+    });
+    if (form) form.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const name = nameField.value.trim();
+      if (!name) { setRefModalStatus('Naam is verplicht.'); return; }
+      const payload = {
+        name,
+        omschrijving: omschrijvingField.value.trim(),
+      };
+      if (categorieField) payload.categorie = categorieField.value.trim();
+      setRefModalStatus('Bezig met opslaan…', 'busy');
+      try {
+        const isEdit = !!editCode;
+        const url = isEdit
+          ? apiUrl + '/api/doelenbomen/' + doelenboomId + '/' + opts.endpointSegment + '/' + encodeURIComponent(editCode)
+          : apiUrl + '/api/doelenbomen/' + doelenboomId + '/' + opts.endpointSegment;
+        const res = await fetch(url, {
+          method: isEdit ? 'PUT' : 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + authToken },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error || ('Opslaan mislukt (HTTP ' + res.status + ')'));
+        }
+        setRefModalStatus('Opgeslagen, boom wordt herladen…', 'ok');
+        setTimeout(() => window.location.reload(), 400);
+      } catch (err) {
+        setRefModalStatus(err && err.message ? err.message : 'Onbekende fout bij opslaan.');
+      }
+    });
+
+    return { render, resetForm };
+  }
+
+  const tagCrud = setupRefCrud({
+    entityLabel: 'Tag',
+    endpointSegment: 'tags',
+    dataObj: TAGS,
+    listContainerId: 'tags-list',
+    formId: 'tag-form',
+    nameFieldId: 'tag-field-name',
+    categorieFieldId: 'tag-field-categorie',
+    omschrijvingFieldId: 'tag-field-omschrijving',
+    cancelBtnId: 'tag-form-cancel',
+    submitBtnId: 'tag-form-submit',
+    withCategorie: true,
+    deleteWarning: 'Koppelingen met elementen worden dan ook verwijderd.',
+  });
+
+  const orgUnitCrud = setupRefCrud({
+    entityLabel: 'Organisatieonderdeel',
+    endpointSegment: 'org-units',
+    dataObj: ORGS,
+    listContainerId: 'orgunits-list',
+    formId: 'orgunit-form',
+    nameFieldId: 'orgunit-field-name',
+    omschrijvingFieldId: 'orgunit-field-omschrijving',
+    cancelBtnId: 'orgunit-form-cancel',
+    submitBtnId: 'orgunit-form-submit',
+    withCategorie: false,
+    deleteWarning: 'Koppelingen met elementen worden dan ook verwijderd.',
+  });
+
+  function openRefModal() {
+    setRefModalStatus('');
+    tagCrud.resetForm();
+    orgUnitCrud.resetForm();
+    tagCrud.render();
+    orgUnitCrud.render();
+    refModalBackdrop.classList.add('visible');
+  }
+  function closeRefModal() {
+    refModalBackdrop.classList.remove('visible');
+  }
+  if (manageRefBtn) manageRefBtn.addEventListener('click', openRefModal);
+  if (refModalCloseBtn) refModalCloseBtn.addEventListener('click', closeRefModal);
+  if (refModalBackdrop) refModalBackdrop.addEventListener('click', (ev) => {
+    if (ev.target === refModalBackdrop) closeRefModal();
+  });
+
+  // ---- Fase 3: CRUD voor verbindingen (edges). Opgeroepen vanuit het detail-paneel:
+  // "+ Relatie" opent create-modus met dit element als anker (richting kiesbaar),
+  // "Bewerken" op een bestaande verbinding staat alleen relatietype/toelichting toe
+  // (bron/doel wijzigen zou feitelijk een nieuwe relatie zijn — dat doe je door de
+  // oude te verwijderen en een nieuwe aan te maken).
+  const edgeModalBackdrop = document.getElementById('edge-modal-backdrop');
+  const edgeModalTitle = document.getElementById('edge-modal-title');
+  const edgeModalStaticLabel = document.getElementById('edge-modal-static-label');
+  const edgeForm = document.getElementById('edge-form');
+  const edgeModalStatus = document.getElementById('edge-modal-status');
+  const edgeModalCancelBtn = document.getElementById('edge-modal-cancel');
+  const edgeFieldDirection = document.getElementById('edge-field-direction');
+  const edgeFieldDirectionLabel = edgeFieldDirection.closest('label');
+  const edgeFieldOtherType = document.getElementById('edge-field-other-type');
+  const edgeFieldOtherTypeLabel = edgeFieldOtherType.closest('label');
+  const edgeFieldOther = document.getElementById('edge-field-other');
+  const edgeFieldOtherLabel = edgeFieldOther.closest('label');
+  const edgeFieldWeight = document.getElementById('edge-field-weight');
+  const edgeFieldToelichting = document.getElementById('edge-field-toelichting');
+  let edgeModalMode = 'create';
+  let edgeAnchorCode = null;
+  let edgeEditSource = null;
+  let edgeEditTarget = null;
+
+  function setEdgeModalStatus(text, kind) {
+    edgeModalStatus.textContent = text || '';
+    edgeModalStatus.style.color = kind === 'ok' ? '#2E7D5B' : kind === 'busy' ? '#777' : '#DC3545';
+  }
+
+  // Eerst filteren op Type (dropdown), dan pas de lijst met elementen van dat type
+  // tonen — anders is "Ander element" bij ~140 elementen onhandelbaar lang.
+  function populateOtherElementOptions(excludeCode, type) {
+    const codes = Object.keys(DETAILS)
+      .filter((c) => c !== excludeCode && (!type || DETAILS[c].type === type))
+      .sort((a, b) => a.localeCompare(b, 'nl'));
+    edgeFieldOther.innerHTML = codes.length
+      ? codes.map((c) => '<option value="' + escapeHtml(c) + '">' + escapeHtml(c + ' — ' + DETAILS[c].name) + '</option>').join('')
+      : '<option value="">(geen elementen van dit type)</option>';
+  }
+
+  function openCreateEdgeModal(anchorCode) {
+    edgeModalMode = 'create';
+    edgeAnchorCode = anchorCode;
+    edgeModalTitle.textContent = 'Nieuwe relatie';
+    edgeModalStaticLabel.style.display = 'none';
+    edgeFieldDirectionLabel.style.display = '';
+    edgeFieldOtherTypeLabel.style.display = '';
+    edgeFieldOtherLabel.style.display = '';
+    edgeFieldDirection.value = 'out';
+    const anchorType = DETAILS[anchorCode] ? DETAILS[anchorCode].type : 'Project';
+    edgeFieldOtherType.value = anchorType;
+    populateOtherElementOptions(anchorCode, anchorType);
+    edgeFieldWeight.value = '';
+    edgeFieldToelichting.value = '';
+    setEdgeModalStatus('');
+    edgeModalBackdrop.classList.add('visible');
+  }
+
+  edgeFieldOtherType.addEventListener('change', () => {
+    populateOtherElementOptions(edgeAnchorCode, edgeFieldOtherType.value);
+  });
+
+  function openEditEdgeModal(source, target) {
+    edgeModalMode = 'edit';
+    edgeEditSource = source;
+    edgeEditTarget = target;
+    edgeModalTitle.textContent = 'Relatie bewerken';
+    edgeFieldDirectionLabel.style.display = 'none';
+    edgeFieldOtherTypeLabel.style.display = 'none';
+    edgeFieldOtherLabel.style.display = 'none';
+    const sName = DETAILS[source] ? DETAILS[source].name : source;
+    const tName = DETAILS[target] ? DETAILS[target].name : target;
+    edgeModalStaticLabel.textContent = source + ' (' + sName + ')  →  ' + target + ' (' + tName + ')';
+    edgeModalStaticLabel.style.display = '';
+    const existing = EDGES.find((e) => e.source === source && e.target === target);
+    edgeFieldWeight.value = (existing && existing.weight) || '';
+    edgeFieldToelichting.value = TOELICHTING[source + '|' + target] || '';
+    setEdgeModalStatus('');
+    edgeModalBackdrop.classList.add('visible');
+  }
+
+  function closeEdgeModal() {
+    edgeModalBackdrop.classList.remove('visible');
+  }
+
+  if (edgeModalCancelBtn) edgeModalCancelBtn.addEventListener('click', closeEdgeModal);
+  if (edgeModalBackdrop) edgeModalBackdrop.addEventListener('click', (ev) => {
+    if (ev.target === edgeModalBackdrop) closeEdgeModal();
+  });
+
+  if (edgeForm) edgeForm.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const weight = edgeFieldWeight.value || null;
+    const toelichting = edgeFieldToelichting.value.trim();
+    setEdgeModalStatus('Bezig met opslaan…', 'busy');
+    try {
+      let url, method, body;
+      if (edgeModalMode === 'create') {
+        const other = edgeFieldOther.value;
+        if (!other) { setEdgeModalStatus('Kies een ander element.'); return; }
+        const source = edgeFieldDirection.value === 'out' ? edgeAnchorCode : other;
+        const target = edgeFieldDirection.value === 'out' ? other : edgeAnchorCode;
+        url = apiUrl + '/api/doelenbomen/' + doelenboomId + '/edges';
+        method = 'POST';
+        body = JSON.stringify({ source, target, weight, toelichting });
+      } else {
+        url = apiUrl + '/api/doelenbomen/' + doelenboomId + '/edges/' +
+          encodeURIComponent(edgeEditSource) + '/' + encodeURIComponent(edgeEditTarget);
+        method = 'PUT';
+        body = JSON.stringify({ weight, toelichting });
+      }
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + authToken },
+        body,
+      });
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}));
+        throw new Error(b.error || ('Opslaan mislukt (HTTP ' + res.status + ')'));
+      }
+      setEdgeModalStatus('Opgeslagen, boom wordt herladen…', 'ok');
+      setTimeout(() => window.location.reload(), 400);
+    } catch (err) {
+      setEdgeModalStatus(err && err.message ? err.message : 'Onbekende fout bij opslaan.');
+    }
+  });
+
+  async function deleteEdge(source, target) {
+    const sName = DETAILS[source] ? DETAILS[source].name : source;
+    const tName = DETAILS[target] ? DETAILS[target].name : target;
+    const ok = await showConfirm('Relatie "' + source + ' (' + sName + ') → ' + target + ' (' + tName + ')" verwijderen?');
+    if (!ok) return;
+    try {
+      const res = await fetch(
+        apiUrl + '/api/doelenbomen/' + doelenboomId + '/edges/' + encodeURIComponent(source) + '/' + encodeURIComponent(target),
+        { method: 'DELETE', headers: { Authorization: 'Bearer ' + authToken } }
+      );
+      if (!res.ok && res.status !== 204) {
+        const b = await res.json().catch(() => ({}));
+        throw new Error(b.error || ('Verwijderen mislukt (HTTP ' + res.status + ')'));
+      }
+      window.location.reload();
+    } catch (err) {
+      showToast(err && err.message ? err.message : 'Onbekende fout bij verwijderen.', 'error');
+    }
+  }
+
+  applyVisibility();
+}
+
+// ============================================================================
+// Doelenboom platform: dynamische data-laag.
+// Alles hierboven is de ongewijzigde interactie-/renderlogica uit doelenboom.html
+// (runApp). Hieronder: adapter van de live API-boom naar dezelfde datavorm, en
+// het bouwen van de kolommen/legenda/tag-org-filter HTML die voorheen statisch
+// in het bestand stond. Zie doelenboom_update_instructie.md voor de brondata-conventies.
+// ============================================================================
+
+let PARENT_ORIGIN = '*';
+let apiUrl = null, authToken = null, doelenboomId = null, userEmail = null;
+// 'admin' (kan wijzigen) of 'gebruiker' (alleen lezen) — bepaald door React op
+// basis van de tenant-rol van de ingelogde gebruiker (zie TreePage.tsx). De
+// daadwerkelijke autorisatie gebeurt sowieso op de API (rbac.ts) — dit hier
+// bepaalt alleen welke CRUD-knoppen zichtbaar zijn. Standaard 'gebruiker'
+// (veiligste optie) totdat het echte init-bericht binnenkomt.
+let userRole = 'gebruiker';
+
+function renderTopbarUser() {
+  const el = document.getElementById('topbar-user-text');
+  if (el) el.textContent = userEmail ? ('Ingelogd als ' + userEmail) : '';
+}
+
+function applyRole(role) {
+  userRole = role === 'admin' ? 'admin' : 'gebruiker';
+  document.body.classList.toggle('read-only', userRole !== 'admin');
+}
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
+// Eigen confirm/melding-UI i.p.v. de lelijke browser-systeemdialogen (window.confirm/
+// window.alert) — dit zijn simpele, statische elementen die al bij het laden van de
+// pagina bestaan, dus deze helpers zijn ook buiten runApp() bruikbaar.
+function showConfirm(message, okLabel) {
+  return new Promise((resolve) => {
+    const backdrop = document.getElementById('confirm-modal-backdrop');
+    const messageEl = document.getElementById('confirm-modal-message');
+    const okBtn = document.getElementById('confirm-modal-ok');
+    const cancelBtn = document.getElementById('confirm-modal-cancel');
+    if (!backdrop || !messageEl || !okBtn || !cancelBtn) { resolve(window.confirm(message)); return; }
+    messageEl.textContent = message;
+    okBtn.textContent = okLabel || 'Verwijderen';
+    backdrop.classList.add('visible');
+
+    function cleanup(result) {
+      backdrop.classList.remove('visible');
+      okBtn.removeEventListener('click', onOk);
+      cancelBtn.removeEventListener('click', onCancel);
+      backdrop.removeEventListener('click', onBackdropClick);
+      resolve(result);
+    }
+    function onOk() { cleanup(true); }
+    function onCancel() { cleanup(false); }
+    function onBackdropClick(ev) { if (ev.target === backdrop) cleanup(false); }
+
+    okBtn.addEventListener('click', onOk);
+    cancelBtn.addEventListener('click', onCancel);
+    backdrop.addEventListener('click', onBackdropClick);
+  });
+}
+
+let toastTimer = null;
+function showToast(message, kind) {
+  const el = document.getElementById('app-toast');
+  if (!el) { window.alert(message); return; }
+  el.textContent = message;
+  el.className = 'app-toast visible ' + (kind === 'error' ? 'error' : 'ok');
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.classList.remove('visible'); }, 4500);
+}
+
+const TYPE_TO_COLKEY = {
+  'Project': 'project', 'Capability': 'cap', 'Operationele benefit': 'obe',
+  'Sub-benefit': 'sub', 'Programmabaat': 'prog', 'Strategische benefit': 'strat',
+  'Strategisch doel': 'doel', 'Missie': 'missie',
+};
+const COLUMN_HINTS = {
+  project: 'Welke projecten ontwikkelen deze capability?',
+  cap: 'Welk vermogen wordt hiermee opgebouwd?',
+  obe: 'Welke operationele verbetering levert dit op? Wat verandert er in de dagelijkse uitvoering?',
+  sub: 'Welk direct effect ontstaat hierdoor?',
+  prog: 'Welke waarde levert dit aan FPBB?',
+  strat: 'Wat betekent dit voor B&B?',
+  doel: 'Welk doel ondersteunt dit?',
+  missie: 'Waarom doen we dit uiteindelijk?',
+};
+const NARROW_COLS = new Set(['project', 'cap']);
+
+function nodeFontSize(colKey) {
+  if (colKey === 'doel') return 12;
+  if (colKey === 'strat' || colKey === 'missie') return 10;
+  return 8;
+}
+
+function nodeInnerHtml(colKey, el) {
+  const name = escapeHtml(el.name);
+  if (colKey === 'missie') return 'MISSIE KMAR<br><br>' + name;
+  if (colKey === 'doel') return name;
+  return escapeHtml(el.code) + '<br>' + name;
+}
+
+function buildColumnsHtml(details, colOrder, colLabels, colColors) {
+  const byCol = {};
+  colOrder.forEach((k) => { byCol[k] = []; });
+  let unknownTypeCount = 0;
+  Object.keys(details).forEach((id) => {
+    const d = details[id];
+    const key = TYPE_TO_COLKEY[d.type];
+    if (!key || !byCol[key]) { unknownTypeCount += 1; return; } // onbekend type: overslaan, niet gokken
+    byCol[key].push(d);
+  });
+  if (unknownTypeCount) {
+    console.warn('[doelenboom] ' + unknownTypeCount + ' element(en) met een onbekend/niet-golden-thread Type overgeslagen.');
+  }
+
+  return colOrder.map((key, idx) => {
+    const nodesHtml = byCol[key].map((d) =>
+      '<div class="node" data-id="' + escapeHtml(d.code) + '" style="background:' + colColors[key] +
+      '; color:#FFFFFF; font-size:' + nodeFontSize(key) + 'px;">' + nodeInnerHtml(key, d) + '</div>'
+    ).join('');
+    const narrowCls = NARROW_COLS.has(key) ? ' narrow' : '';
+    return '<div class="column' + narrowCls + '" data-key="' + key + '" data-order="' + idx + '">' +
+      '<div class="col-header" style="border-top-color:' + colColors[key] + ';">' + escapeHtml(colLabels[key]) +
+      '<span class="col-hint">' + escapeHtml(COLUMN_HINTS[key] || '') + '</span></div>' +
+      '<div class="col-nodes">' + nodesHtml + '</div></div>';
+  }).join('');
+}
+
+function buildLegendHtml(colOrder, colLabels, colColors) {
+  return colOrder.map((key) =>
+    '<button class="legend-item" type="button" data-key="' + key + '">' +
+    '<span class="swatch" style="background:' + colColors[key] + '"></span>' +
+    '<span class="legend-label">' + escapeHtml(colLabels[key]) + '</span></button>'
+  ).join('');
+}
+
+function buildTagOrgFilterHtml(tags, orgs) {
+  let html = '';
+  const tagIds = Object.keys(tags);
+  if (tagIds.length) {
+    html += '<span class="tof-label">Tags</span>';
+    html += tagIds.map((id) => '<button class="chip-filter" type="button" data-kind="tag" data-value="' +
+      escapeHtml(id) + '">' + escapeHtml(tags[id].name) + '</button>').join('');
+  }
+  const orgIds = Object.keys(orgs);
+  if (orgIds.length) {
+    html += '<span class="tof-label">Organisatieonderdelen</span>';
+    html += orgIds.map((id) => '<button class="chip-filter" type="button" data-kind="org" data-value="' +
+      escapeHtml(id) + '">' + escapeHtml(orgs[id].name) + '</button>').join('');
+  }
+  return html;
+}
+
+// Zet de TreeResponse van de API (zie api/src/routes/tree.ts) om naar exact de
+// datavorm die runApp() verwacht (dezelfde vorm als voorheen de hardcoded
+// DETAILS/EDGES/TOELICHTING/PROJECT_STATUS/PRODUCTS/TAGS/ELEMENT_TAGS/ORGS/OB_ORG
+// const's in doelenboom.html). `code` fungeert nu als dataid (geen aparte
+// CODE_TO_DATAID-mapping meer nodig, in tegenstelling tot de oude hand-onderhouden HTML).
+function adaptTreeResponse(tree) {
+  const DETAILS = {};
+  tree.elements.forEach((el) => {
+    DETAILS[el.code] = {
+      code: el.code, type: el.type, name: el.name, desc: el.description || '',
+      parent: el.parent_text || '', kpi: el.kpi || '', taakveld: el.taakveld || '', subtaakveld: el.subtaakveld || '',
+    };
+  });
+
+  const EDGES = [];
+  const TOELICHTING = {};
+  (tree.edges || []).forEach((e) => {
+    EDGES.push({ source: e.source, target: e.target, weight: e.weight || undefined });
+    if (e.toelichting) TOELICHTING[e.source + '|' + e.target] = e.toelichting;
+  });
+
+  const PROJECT_STATUS = {};
+  Object.keys(tree.projectStatus || {}).forEach((id) => {
+    const ps = tree.projectStatus[id];
+    PROJECT_STATUS[id] = {
+      projectstatus: ps.projectstatus || '', rag: ps.rag || '',
+      toelichting: ps.toelichting || '', datum: ps.gerapporteerdOp || '',
+    };
+  });
+
+  const PRODUCTS = {};
+  Object.keys(tree.products || {}).forEach((id) => {
+    PRODUCTS[id] = (tree.products[id] || []).map((p) => ({
+      id: p.code, name: p.name, omschrijving: p.omschrijving,
+      pct: p.pctGereed, verwacht: p.verwachteDatum, werkelijk: p.werkelijkeDatum, opmerking: p.opmerking,
+    }));
+  });
+
+  const TAGS = {};
+  (tree.tags || []).forEach((t) => { TAGS[t.code] = { name: t.name, categorie: t.categorie, desc: t.omschrijving }; });
+
+  const ORGS = {};
+  (tree.orgUnits || []).forEach((o) => { ORGS[o.code] = { name: o.name, desc: o.omschrijving }; });
+
+  const ELEMENT_TAGS = tree.elementTags || {};
+  const OB_ORG = tree.obOrg || {};
+
+  return { DETAILS, EDGES, TOELICHTING, PROJECT_STATUS, PRODUCTS, TAGS, ELEMENT_TAGS, ORGS, OB_ORG };
+}
+
+function renderError(message) {
+  const columnsEl = document.getElementById('columns');
+  if (columnsEl) {
+    columnsEl.innerHTML = '<div style="padding:40px; color:#DC3545; font-family:system-ui,sans-serif; font-size:14px;">' +
+      escapeHtml(message) + '</div>';
+  }
+}
+
+function boot(tree) {
+  const COL_ORDER = ["project", "cap", "obe", "sub", "prog", "strat", "doel", "missie"];
+  const COL_LABELS = {"project": "Project", "cap": "Capability", "obe": "Operationele benefit", "sub": "Sub-benefit FPBB", "prog": "Programmabaat FPBB", "strat": "Strategisch benefit B&B", "doel": "Strategisch doel", "missie": "Missie KMar"};
+  const COL_COLORS = {"project": "#3E6FA6", "cap": "#6B4C8A", "obe": "#C05A2C", "sub": "#B8862E", "prog": "#2E7D5B", "strat": "#8FAADC", "doel": "#2F5597", "missie": "#203864"};
+
+  const data = adaptTreeResponse(tree);
+
+  document.querySelector('.legend').innerHTML = buildLegendHtml(COL_ORDER, COL_LABELS, COL_COLORS);
+  document.getElementById('tag-org-filter').innerHTML = buildTagOrgFilterHtml(data.TAGS, data.ORGS);
+  document.getElementById('columns').innerHTML = buildColumnsHtml(data.DETAILS, COL_ORDER, COL_LABELS, COL_COLORS);
+
+  const titleEl = document.getElementById('app-title');
+  if (titleEl) titleEl.textContent = 'Doelenboom — ' + tree.doelenboom.name;
+  const subtitleEl = document.getElementById('app-subtitle');
+  if (subtitleEl) subtitleEl.textContent = tree.doelenboom.tenant.name + ' — van missie tot capability';
+  const footerEl = document.getElementById('app-footer');
+  if (footerEl) {
+    footerEl.textContent = tree.doelenboom.tenant.name + ' · ' + tree.doelenboom.name +
+      ' · opgehaald op ' + new Date().toLocaleString('nl-NL');
+  }
+
+  runApp(data);
+}
+
+function fetchAndBoot() {
+  fetch(apiUrl + '/api/doelenbomen/' + doelenboomId + '/tree', {
+    headers: { Authorization: 'Bearer ' + authToken },
+  }).then((res) => {
+    if (!res.ok) throw new Error('Kon boom niet laden (HTTP ' + res.status + ')');
+    return res.json();
+  }).then(boot).catch((err) => renderError(err && err.message ? err.message : 'Onbekende fout bij laden van de boom.'));
+}
+
+window.addEventListener('message', (event) => {
+  if (!event.data || event.data.type !== 'doelenboom-init') return;
+  PARENT_ORIGIN = event.origin;
+  apiUrl = event.data.apiUrl;
+  authToken = event.data.token;
+  doelenboomId = event.data.doelenboomId;
+  userEmail = event.data.userEmail || null;
+  applyRole(event.data.role);
+  renderTopbarUser();
+  fetchAndBoot();
+});
+
+// Fallback voor standalone gebruik/debuggen buiten de React-app: als api/token/
+// doelenboom als querystring-parameters zijn meegegeven, meteen laden i.p.v. te
+// wachten op een postMessage-handshake. De echte app gebruikt altijd postMessage
+// (geen token in de URL/adresbalk/geschiedenis).
+(function initFromQuery() {
+  const params = new URLSearchParams(window.location.search);
+  const qApi = params.get('api');
+  const qToken = params.get('token');
+  const qId = params.get('doelenboom');
+  if (qApi && qToken && qId) {
+    apiUrl = qApi; authToken = qToken; doelenboomId = qId;
+    userEmail = params.get('user') || null;
+    // Standalone/debug-modus buiten de React-app: standaard 'admin' (tenzij
+    // expliciet ?role=gebruiker meegegeven), zodat lokaal testen van CRUD niet
+    // wordt gehinderd — dit pad wordt in productie nooit gebruikt (de React-app
+    // gebruikt altijd de postMessage-handshake hierboven).
+    applyRole(params.get('role') || 'admin');
+    renderTopbarUser();
+    fetchAndBoot();
+  }
+})();
+
+// Meldt aan de parent dat dit iframe klaar is om het init-bericht te ontvangen
+// (voorkomt een race condition als de parent eerder post dan onze listener actief is).
+window.parent.postMessage({ type: 'doelenboom-ready' }, '*');
+</script>
+</body>
+</html>

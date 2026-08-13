@@ -1,0 +1,117 @@
+import { pool } from './db.js';
+
+// "Tenant leegmaken bij vertrek laatste gebruiker" — zie db/init.sql (sessions,
+// tenants.wipe_on_empty/session_timeout_minutes) en de toelichting in README.md
+// onder "Sessies & automatisch leegmaken".
+//
+// Toegangsmodel (v2, sinds het rolmodel in db/init.sql): "iemand heeft toegang
+// tot tenant X" betekent nu echt "is sysadmin, óf heeft een rij in tenant_users
+// voor tenant X" (rol admin of gebruiker maakt hier niet uit — beide tellen als
+// actieve toegang; alleen schrijfrechten verschillen, zie rbac.ts).
+
+export type WipeCandidate = {
+  tenant: { id: number; slug: string; name: string };
+  doelenbomen: Array<{ id: number; slug: string; name: string }>;
+};
+
+// Is er op dit moment nog een sessie die toegang heeft tot deze tenant, gezien
+// zijn eigen session_timeout_minutes? Een sessie telt mee als: niet expliciet
+// beëindigd (ended_at is null), recent genoeg gezien (last_seen_at binnen de
+// timeout van déze tenant — vandaar per tenant een andere uitkomst mogelijk is),
+// en van een gebruiker met toegang. excludeSessionId sluit de sessie uit die net
+// aan het uitloggen is (die is op dat moment nog niet als ended_at gemarkeerd,
+// of we willen 'm sowieso negeren tijdens de preview).
+async function tenantHasActiveAccess(
+  tenantId: number,
+  timeoutMinutes: number,
+  excludeSessionId?: string
+): Promise<boolean> {
+  const result = await pool.query(
+    `select 1
+     from sessions s
+     join users u on u.id = s.user_id
+     where s.ended_at is null
+       and (
+         u.is_sysadmin = true
+         or exists (select 1 from tenant_users tu where tu.user_id = u.id and tu.tenant_id = $3)
+       )
+       and s.last_seen_at > now() - make_interval(mins => $1::int)
+       and ($2::uuid is null or s.id != $2)
+     limit 1`,
+    [timeoutMinutes, excludeSessionId ?? null, tenantId]
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+async function wipeDoelenboomData(doelenboomId: number): Promise<void> {
+  // Zelfde volgorde/aanpak als de "volledige vervanging" bij het publiceren van
+  // een import (routes/imports.ts): elements cascadet naar edges/project_status/
+  // products/element_tags/ob_org_relations. Doelenboom-rij zelf blijft bestaan.
+  await pool.query('delete from elements where doelenboom_id = $1', [doelenboomId]);
+  await pool.query('delete from tags where doelenboom_id = $1', [doelenboomId]);
+  await pool.query('delete from org_units where doelenboom_id = $1', [doelenboomId]);
+  await pool.query('delete from excel_imports where doelenboom_id = $1', [doelenboomId]);
+}
+
+// Bepaalt welke tenants (met hun doelenbomen) op dit moment "verlaten" zijn —
+// wipe_on_empty staat aan én er is geen actieve sessie meer met toegang. Als
+// commit=true wordt de data ook daadwerkelijk geleegd (en, indien sessionId
+// gegeven, die sessie eerst als beëindigd gemarkeerd). Met commit=false is dit
+// een pure preview (voor de "wil je exporteren?"-vraag bij uitloggen), zonder
+// bijeffecten.
+export async function previewOrCommitWipe(
+  sessionId: string | null,
+  commit: boolean
+): Promise<WipeCandidate[]> {
+  if (commit && sessionId) {
+    await pool.query('update sessions set ended_at = now() where id = $1 and ended_at is null', [sessionId]);
+  }
+
+  const tenantsResult = await pool.query(
+    'select id, slug, name, session_timeout_minutes from tenants where wipe_on_empty = true'
+  );
+
+  const candidates: WipeCandidate[] = [];
+  for (const t of tenantsResult.rows) {
+    // Bij commit is de uitloggende sessie al ended_at=now(), dus excludeSessionId
+    // is dan niet meer nodig; bij een preview (nog niet gecommit) sluiten we 'm
+    // wél expliciet uit, zodat de preview alvast toont wat er zou gebeuren.
+    const stillActive = await tenantHasActiveAccess(
+      t.id,
+      t.session_timeout_minutes,
+      commit ? undefined : sessionId ?? undefined
+    );
+    if (stillActive) continue;
+
+    const doelenbomenResult = await pool.query(
+      'select id, slug, name from doelenbomen where tenant_id = $1 order by name',
+      [t.id]
+    );
+    if (doelenbomenResult.rows.length === 0) continue;
+
+    candidates.push({
+      tenant: { id: t.id, slug: t.slug, name: t.name },
+      doelenbomen: doelenbomenResult.rows,
+    });
+  }
+
+  if (commit) {
+    for (const c of candidates) {
+      for (const d of c.doelenbomen) {
+        await wipeDoelenboomData(d.id);
+      }
+    }
+  }
+
+  return candidates;
+}
+
+// Periodieke sweep (elke minuut vanuit index.ts) — vangt browsers die zonder
+// uitloggen gesloten zijn: geen enkele sessie hoeft hiervoor expliciet beëindigd
+// te worden, tenantHasActiveAccess kijkt toch al naar last_seen_at t.o.v. de
+// (per-tenant instelbare) timeout. Let op: hier is niemand meer om een
+// Excel-export aan te bieden — dat kan alleen bij een expliciete logout
+// (zie routes/auth.ts: GET /api/auth/logout-preview).
+export async function sweepIdleTenants(): Promise<WipeCandidate[]> {
+  return previewOrCommitWipe(null, true);
+}

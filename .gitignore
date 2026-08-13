@@ -1,0 +1,9 @@
+node_modules
+dist
+.env
+*.log
+.DS_Store
+*.tsbuildinfo
+vite.config.ts.timestamp-*.mjs
+__pycache__
+*.pyc

@@ -1,0 +1,8 @@
+# Doelenboom: lokaal starten met "doelenboom -local -start"
+doelenboom() {
+  if [[ "$*" == *"-local"* && "$*" == *"-start"* ]]; then
+    ~/OneDrive/src/doelenboom/start.sh
+  else
+    echo "Gebruik: doelenboom -local -start"
+  fi
+}
