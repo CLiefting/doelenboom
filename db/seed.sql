@@ -7,15 +7,23 @@
 -- hieronder is vooral bedoeld voor handmatig herdraaien tijdens ontwikkeling).
 do $$
 begin
+  -- Losstaande guard (i.p.v. onderdeel van het tenant-blok hieronder): dit
+  -- bestand moet ook veilig herdraaid kunnen worden tegen een database die
+  -- al eerder is geïnitialiseerd -- bv. handmatig via psql om de Demo-tenant
+  -- alsnog toe te voegen aan een productie-database die oorspronkelijk met
+  -- een oudere seed is gestart (zie deploy/README.md). De sysadmin-account
+  -- bestaat dan al; alleen de tenant/doelenboom hieronder is dan nieuw.
+  if not exists (select 1 from users where email = 'admin@code072.nl') then
+    insert into users (email, password_hash, is_sysadmin)
+    values ('admin@code072.nl', crypt('changeme', gen_salt('bf')), true);
+  end if;
+
   if not exists (select 1 from tenants where slug = 'demo') then
 
     insert into tenants (slug, name) values ('demo', 'Demo');
 
     insert into doelenbomen (tenant_id, slug, name)
     select id, 'gezond-ouder', 'Gezond ouder' from tenants where slug = 'demo';
-
-    insert into users (email, password_hash, is_sysadmin)
-    values ('admin@code072.nl', crypt('changeme', gen_salt('bf')), true);
 
     -- elements
     insert into elements (doelenboom_id, code, type, name, description, parent_text, kpi, taakveld, subtaakveld, sort_order) values ((select id from doelenbomen where slug='gezond-ouder'), 'M1', 'Missie', 'Gezond ouder worden door gezamenlijk lichamelijk en geestelijk te blijven bewegen', 'De missie van het verzorgingshuis: bewoners zo lang en zo prettig mogelijk vitaal houden, samen — niet alleen door beweging, maar ook door sociale verbondenheid en geestelijke activiteit. Dit vormt het hoogste anker van de doelenboom: alle onderliggende doelen, benefits en programmabaten moeten hier aantoonbaar aan bijdragen.', '', '-', '', '', 0);
