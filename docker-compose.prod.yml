@@ -71,7 +71,16 @@ services:
       - traefik.http.routers.doelenboom.rule=Host(`doelenboom.code072.nl`)
       - traefik.http.routers.doelenboom.entrypoints=websecure
       - traefik.http.routers.doelenboom.tls.certresolver=le
-      - traefik.http.routers.doelenboom.middlewares=security-headers@file
+      # security-headers@file (uit code072-infra, gedeeld met WWspeur/de
+      # welkompagina) zet X-Frame-Options: DENY. Doelenboom laadt zijn eigen
+      # boomweergave (tree.html) in een same-origin iframe -- dat wordt door
+      # DENY ook geblokkeerd (DENY blokkeert ook same-origin framing, anders
+      # dan SAMEORIGIN). Vandaar een tweede, doelenboom-eigen middleware die
+      # ná security-headers@file draait en alleen díe ene header overschrijft
+      # naar SAMEORIGIN -- de rest (HSTS, nosniff) blijft ongewijzigd, en de
+      # andere apps op de gedeelde infra worden niet geraakt.
+      - traefik.http.routers.doelenboom.middlewares=security-headers@file,doelenboom-frameoptions@docker
+      - traefik.http.middlewares.doelenboom-frameoptions.headers.customFrameOptionsValue=SAMEORIGIN
       - traefik.http.services.doelenboom.loadbalancer.server.port=80
 
 networks:
