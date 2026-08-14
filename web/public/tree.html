@@ -830,7 +830,7 @@
 function runApp(data) {
   const { DETAILS, EDGES, TOELICHTING, PROJECT_STATUS, PRODUCTS, TAGS, ELEMENT_TAGS, ORGS, OB_ORG } = data;
   const COL_ORDER = ["project", "cap", "obe", "sub", "prog", "strat", "doel", "missie"];
-  const COL_LABELS = {"project": "Project", "cap": "Capability", "obe": "Operationele benefit", "sub": "Sub-benefit FPBB", "prog": "Programmabaat FPBB", "strat": "Strategisch benefit B&B", "doel": "Strategisch doel", "missie": "Missie KMar"};
+  const COL_LABELS = {"project": "Project", "cap": "Capability", "obe": "Operationele benefit", "sub": "Sub-benefit " + CURRENT_TENANT_NAME, "prog": "Programmabaat " + CURRENT_TENANT_NAME, "strat": "Strategisch benefit " + CURRENT_TENANT_NAME, "doel": "Strategisch doel", "missie": "Missie " + CURRENT_TENANT_NAME};
   const COL_COLORS = {"project": "#3E6FA6", "cap": "#6B4C8A", "obe": "#C05A2C", "sub": "#B8862E", "prog": "#2E7D5B", "strat": "#8FAADC", "doel": "#2F5597", "missie": "#203864"};
   const COL_ARROWS = [{"from": "project", "to": "cap", "label": "ontwikkelt"}, {"from": "cap", "to": "obe", "label": "ondersteunt"}, {"from": "obe", "to": "sub", "label": "realiseert"}, {"from": "sub", "to": "prog", "label": "versterkt"}, {"from": "prog", "to": "strat", "label": "draagt bij aan"}, {"from": "strat", "to": "doel", "label": "ondersteunt"}, {"from": "doel", "to": "missie", "label": "geeft invulling aan"}];
 
@@ -2550,6 +2550,11 @@ let userRole = 'gebruiker';
 // zodat exportStaticHtml() 'm kan inbakken in een losstaand HTML-bestand
 // zonder opnieuw te hoeven fetchen.
 let lastTreeResponse = null;
+// Naam van de huidige tenant (bv. "Demo", "KMar") — gezet in boot() zodra de
+// boomdata bekend is, gebruikt om de eerder hardgecodeerde "KMar"/"FPBB"/"B&B"-
+// labels (COL_LABELS, COLUMN_HINTS.prog/strat, nodeInnerHtml) dynamisch te maken
+// zodat elke tenant zijn eigen naam in de kolomlabels/knoop-badge ziet.
+let CURRENT_TENANT_NAME = '';
 
 function renderTopbarUser() {
   const avatarEl = document.getElementById('user-avatar');
@@ -2620,8 +2625,11 @@ const COLUMN_HINTS = {
   cap: 'Welk vermogen wordt hiermee opgebouwd?',
   obe: 'Welke operationele verbetering levert dit op? Wat verandert er in de dagelijkse uitvoering?',
   sub: 'Welk direct effect ontstaat hierdoor?',
-  prog: 'Welke waarde levert dit aan FPBB?',
-  strat: 'Wat betekent dit voor B&B?',
+  // prog/strat worden in boot() overschreven zodra de tenantnaam bekend is
+  // (dit object bestaat al bij het parsen van het script, dus kan hier nog
+  // geen CURRENT_TENANT_NAME gebruiken — die is dan nog leeg).
+  prog: 'Welke waarde levert dit aan de tenant?',
+  strat: 'Wat betekent dit voor de tenant?',
   doel: 'Welk doel ondersteunt dit?',
   missie: 'Waarom doen we dit uiteindelijk?',
 };
@@ -2635,7 +2643,7 @@ function nodeFontSize(colKey) {
 
 function nodeInnerHtml(colKey, el) {
   const name = escapeHtml(el.name);
-  if (colKey === 'missie') return 'MISSIE KMAR<br><br>' + name;
+  if (colKey === 'missie') return 'MISSIE ' + escapeHtml(CURRENT_TENANT_NAME.toUpperCase()) + '<br><br>' + name;
   if (colKey === 'doel') return name;
   return escapeHtml(el.code) + '<br>' + name;
 }
@@ -2752,9 +2760,15 @@ function renderError(message) {
 
 function boot(tree) {
   lastTreeResponse = tree;
+  CURRENT_TENANT_NAME = tree.doelenboom.tenant.name;
+  // COLUMN_HINTS.prog/strat bevatten de tenantnaam; dat object is al bij het
+  // parsen van het script aangemaakt (toen CURRENT_TENANT_NAME nog leeg was),
+  // dus hier alsnog bijwerken nu de echte naam bekend is.
+  COLUMN_HINTS.prog = 'Welke waarde levert dit aan ' + CURRENT_TENANT_NAME + '?';
+  COLUMN_HINTS.strat = 'Wat betekent dit voor ' + CURRENT_TENANT_NAME + '?';
 
   const COL_ORDER = ["project", "cap", "obe", "sub", "prog", "strat", "doel", "missie"];
-  const COL_LABELS = {"project": "Project", "cap": "Capability", "obe": "Operationele benefit", "sub": "Sub-benefit FPBB", "prog": "Programmabaat FPBB", "strat": "Strategisch benefit B&B", "doel": "Strategisch doel", "missie": "Missie KMar"};
+  const COL_LABELS = {"project": "Project", "cap": "Capability", "obe": "Operationele benefit", "sub": "Sub-benefit " + CURRENT_TENANT_NAME, "prog": "Programmabaat " + CURRENT_TENANT_NAME, "strat": "Strategisch benefit " + CURRENT_TENANT_NAME, "doel": "Strategisch doel", "missie": "Missie " + CURRENT_TENANT_NAME};
   const COL_COLORS = {"project": "#3E6FA6", "cap": "#6B4C8A", "obe": "#C05A2C", "sub": "#B8862E", "prog": "#2E7D5B", "strat": "#8FAADC", "doel": "#2F5597", "missie": "#203864"};
 
   const data = adaptTreeResponse(tree);
