@@ -20,8 +20,16 @@
 # zodat db/api/web elkaar nog steeds gewoon vinden zoals lokaal, én web+api
 # via code072-net ontdekt kunnen worden door Traefik/elkaar op de VPS.
 #
-# Gebruik (op de VPS):
-#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+# Gebruik: images worden LOKAAL gebouwd (niet op de VPS zelf — die deelt
+# resources met WWspeur's zware Puppeteer/Chromium-scans en heeft geen swap,
+# een --build daar bleek de server minutenlang vast te zetten). Op je Mac:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml build api web excel-service
+#   docker save doelenboom-api:latest doelenboom-web:latest doelenboom-excel-service:latest | gzip > doelenboom-images.tar.gz
+#   scp doelenboom-images.tar.gz charles@185.107.90.64:~/
+# Op de VPS (image al aanwezig via docker load, dus geen --build nodig):
+#   docker load < ~/doelenboom-images.tar.gz
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# Volledige toelichting: deploy/README.md.
 #
 # Vereist Docker Compose >= 2.24 voor de !override-tag (idem WWspeur).
 services:

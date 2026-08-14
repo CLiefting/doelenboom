@@ -27,6 +27,12 @@ services:
 
   excel-service:
     build: ./excel-service
+    # Vaste tag (i.p.v. de door compose afgeleide project-naam-tag) zodat een
+    # lokaal gebouwde image via `docker save`/`docker load` 1-op-1 op de VPS
+    # herbruikt kan worden — zie deploy/README.md ("Lokaal bouwen, VPS laadt
+    # alleen"). Dit voorkomt dat de VPS zelf npm/pip-builds moet draaien,
+    # wat op de gedeelde, resource-krappe server tot ernstige contentie leidde.
+    image: doelenboom-excel-service:latest
     restart: unless-stopped
     # Geen host-poort-mapping: alleen de api-container praat hiermee, via het
     # interne Docker-netwerk (http://excel-service:8000). Zo voorkomen we
@@ -34,6 +40,7 @@ services:
 
   api:
     build: ./api
+    image: doelenboom-api:latest
     restart: unless-stopped
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-doelenboom}:${POSTGRES_PASSWORD:-doelenboom}@db:5432/${POSTGRES_DB:-doelenboom}
@@ -50,6 +57,7 @@ services:
 
   web:
     build: ./web
+    image: doelenboom-web:latest
     restart: unless-stopped
     environment:
       VITE_API_URL: http://localhost:4000

@@ -18,6 +18,16 @@ Doelenboom krijgt een **eigen, geïsoleerde Postgres-container** binnen zijn
 eigen stack (niet de gedeelde `code072-infra`-Postgres die WWspeur gebruikt)
 — bewuste keuze, zie de toelichting bovenaan `docker-compose.prod.yml`.
 
+**Images worden lokaal gebouwd, niet op de VPS.** Bij de eerste deploy-poging
+bleek dat `up -d --build` op de VPS (tsc/vite-build voor `api`/`web`,
+`pip install` voor `excel-service`, allemaal parallel) de server minutenlang
+vrijwel onbereikbaar maakte, omdat WWspeur's backend daar tegelijk zware
+scan-batches draait (Puppeteer/Chromium, tot ruim 2GB RAM) en de VPS geen
+swap heeft. Daarom: `api`/`web`/`excel-service` bouw je op je eigen Mac (ruim
+voldoende resources, en concurreert met niets), en zet je als kant-en-klare
+images over naar de VPS — die hoeft dan alleen nog containers te *starten*,
+niet te *bouwen*. Zie stap 5 hieronder.
+
 ## 1. DNS (in Mijn Hostnet)
 
 `*.code072.nl` wijst al naar 185.107.90.64 (wildcard, zie
@@ -92,13 +102,42 @@ Vul in:
 Bewaar beide waarden in een password manager (zelfde gewoonte als bij
 WWspeur's `POSTGRES_PASSWORD`/`SECRET_KEY`).
 
-## 5. Stack starten (met de productie-overlay)
+## 5. Images bouwen (op je Mac) en overzetten naar de VPS
+
+**Op je Mac**, in je lokale `doelenboom`-checkout:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+cd ~/pad/naar/doelenboom   # je lokale dev-checkout, niet de VPS
+docker compose -f docker-compose.yml -f docker-compose.prod.yml build api web excel-service
+docker save doelenboom-api:latest doelenboom-web:latest doelenboom-excel-service:latest \
+  | gzip > doelenboom-images.tar.gz
+scp doelenboom-images.tar.gz charles@185.107.90.64:~/
+```
+
+De `build` gebruikt automatisch de productie-Dockerfiles/build-args uit
+`docker-compose.prod.yml` (nginx voor `web`, `VITE_API_URL=""`, etc.) omdat
+je 'm meegeeft — precies dezelfde images die anders op de VPS gebouwd zouden
+worden, alleen nu lokaal. `docker save`/`scp` duurt even (het archief is
+enkele honderden MB); dat is normaal.
+
+**Op de VPS**, na het overzetten:
+
+```bash
+ssh charles@185.107.90.64
+docker load < ~/doelenboom-images.tar.gz
+rm ~/doelenboom-images.tar.gz   # opgeruimd, images staan al in de lokale docker-store
+cd ~/doelenboom
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 docker compose -f docker-compose.yml -f docker-compose.prod.yml ps
 docker compose -f docker-compose.yml -f docker-compose.prod.yml logs -f api
 ```
+
+Bewust **geen** `--build` hier: de `image:`-tags in `docker-compose.yml`
+(`doelenboom-api:latest` etc.) zijn na `docker load` al aanwezig, dus compose
+gebruikt die direct en start alleen containers — geen tsc/vite/pip-build op
+de VPS zelf, dus geen concurrentie met wat WWspeur op datzelfde moment doet.
+Alleen `db` (`postgres:18-alpine`) wordt hier nog gewoon van Docker Hub
+gepulld — dat is een klein, kant-en-klaar image, geen build.
 
 Wacht tot `db` "healthy" is en `api`/`web` gestart zijn (`api`-logs tonen
 schema-aanmaak via `db/init.sql` + `db/seed.sql` op een verse database — zie
@@ -141,11 +180,34 @@ seed-account op `false` (zie `db/seed.sql`).
 
 ## Updates uitrollen
 
+Zelfde principe als de eerste deploy (stap 5): bouw de nieuwe images op je
+Mac, zet ze over, laad ze op de VPS, herstart alleen dan.
+
+**Op je Mac:**
 ```bash
-cd ~/doelenboom
-git pull
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+cd ~/pad/naar/doelenboom
+git pull   # zorg dat je lokale checkout de wijziging heeft die je wilt uitrollen
+docker compose -f docker-compose.yml -f docker-compose.prod.yml build api web excel-service
+docker save doelenboom-api:latest doelenboom-web:latest doelenboom-excel-service:latest \
+  | gzip > doelenboom-images.tar.gz
+scp doelenboom-images.tar.gz charles@185.107.90.64:~/
 ```
+
+**Op de VPS:**
+```bash
+ssh charles@185.107.90.64
+docker load < ~/doelenboom-images.tar.gz
+rm ~/doelenboom-images.tar.gz
+cd ~/doelenboom
+git pull   # voor eventuele niet-image-wijzigingen (docker-compose*.yml, db/init.sql, README's)
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+```
+
+Bewust geen `--build` op de VPS — zelfde reden als bij de eerste deploy. Was
+de wijziging alléén in `api`/`web`/`excel-service`-code, dan volstaat
+`docker load` + `up -d` (compose herstart alleen containers waarvan de image
+veranderd is). Alleen als `docker-compose.yml`/`docker-compose.prod.yml`
+zelf wijzigde, is de `git pull` op de VPS ook nodig vóór `up -d`.
 
 Een schemawijziging (`db/init.sql`) werkt **niet** met een simpele restart —
 die scripts draaien alleen bij de allereerste containerstart op een lege

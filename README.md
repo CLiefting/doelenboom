@@ -480,10 +480,17 @@ In het kort:
   gebruikt) — bewuste keuze bij het opzetten hiervan, zie de toelichting
   bovenaan `docker-compose.prod.yml`.
 
-**Nog niet getest tegen een echte VPS** (dit ontwikkel-sandbox heeft geen
-Docker beschikbaar) — wel geverifieerd: `api`'s productie-build (`npm run
-build` → `tsc`, schoon) en `web`'s productie-build (`vite build` met
-`VITE_API_URL=''`, schoon, en gecontroleerd dat de gebouwde JS-bundel geen
-`localhost:4000` meer bevat). De daadwerkelijke `docker compose -f ... -f
-docker-compose.prod.yml up -d --build` op de VPS, en de Traefik/DNS/
-certificaat-verificatie uit `deploy/README.md`, moet nog bij jou gebeuren.
+**Images worden lokaal gebouwd, niet op de VPS.** De VPS deelt resources met
+WWspeur's backend (Puppeteer/Chromium-scans, geen swap geconfigureerd) —
+bouwen op de VPS zelf bleek de server minutenlang vrijwel onbereikbaar te
+maken. Daarom: `docker compose -f docker-compose.yml -f
+docker-compose.prod.yml build` op je Mac, `docker save`/`scp`/`docker load`
+naar de VPS, en daar alleen `up -d` (geen `--build`). Volledige stappen in
+`deploy/README.md`.
+
+Geverifieerd (zonder Docker, in het ontwikkel-sandbox): `api`'s
+productie-build (`npm run build` → `tsc`, schoon) en `web`'s productie-build
+(`vite build` met `VITE_API_URL=''`, schoon, gecontroleerd dat de gebouwde
+JS-bundel geen `localhost:4000` meer bevat). De daadwerkelijke deploy op de
+VPS via bovenstaande stappen, en de Traefik/DNS/certificaat-verificatie uit
+`deploy/README.md`, moet nog bij jou gebeuren.
