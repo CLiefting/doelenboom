@@ -56,7 +56,11 @@ export default function LogoutFlow({
           finalize();
         } else {
           setWipeCandidates(wouldWipe);
-          setStep('export-offer');
+          // Alleen om een export vragen als er ook echt iets te exporteren valt
+          // (elementCount > 0 ergens) -- anders direct door naar de bevestiging
+          // met een simpele melding, zie de 'confirm'-stap hieronder.
+          const hasContent = wouldWipe.some((c) => c.doelenbomen.some((d) => d.elementCount > 0));
+          setStep(hasContent ? 'export-offer' : 'confirm');
         }
       })
       .catch((err) => {
@@ -84,6 +88,10 @@ export default function LogoutFlow({
   const allDoelenbomen = wipeCandidates.flatMap((c) =>
     c.doelenbomen.map((d) => ({ ...d, tenantName: c.tenant.name }))
   );
+  // Voor de exportvraag alleen doelenbomen tonen die ook echt iets bevatten --
+  // een exportknop aanbieden voor iets leegs heeft geen zin.
+  const exportableDoelenbomen = allDoelenbomen.filter((d) => d.elementCount > 0);
+  const hasAnyContent = exportableDoelenbomen.length > 0;
 
   if (step === 'checking') return null; // heel kort, geen flits van een lege modal nodig
 
@@ -113,7 +121,7 @@ export default function LogoutFlow({
               data automatisch geleegd. Wil je eerst een Excel-export downloaden?
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
-              {allDoelenbomen.map((d) => (
+              {exportableDoelenbomen.map((d) => (
                 <div key={d.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, background: '#f7f8fa', borderRadius: 8, padding: '8px 12px' }}>
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 700, color: '#222' }}>{d.name}</div>
@@ -139,17 +147,29 @@ export default function LogoutFlow({
 
         {(step === 'confirm' || step === 'busy') && (
           <>
-            <h3 style={{ margin: '0 0 10px', color: '#DC3545' }}>Let op: data wordt verwijderd</h3>
-            <p style={{ fontSize: 13.5, color: '#444', lineHeight: 1.5, margin: '0 0 16px' }}>
-              Als je nu uitlogt, wordt de data van{' '}
-              <strong>{allDoelenbomen.map((d) => d.name).join(', ')}</strong> definitief uit de applicatie
-              verwijderd. Dit kan niet ongedaan worden gemaakt.
-            </p>
+            {hasAnyContent ? (
+              <>
+                <h3 style={{ margin: '0 0 10px', color: '#DC3545' }}>Let op: data wordt verwijderd</h3>
+                <p style={{ fontSize: 13.5, color: '#444', lineHeight: 1.5, margin: '0 0 16px' }}>
+                  Als je nu uitlogt, wordt de data van{' '}
+                  <strong>{allDoelenbomen.map((d) => d.name).join(', ')}</strong> definitief uit de applicatie
+                  verwijderd. Dit kan niet ongedaan worden gemaakt.
+                </p>
+              </>
+            ) : (
+              <>
+                <h3 style={{ margin: '0 0 10px', color: '#203864' }}>Niets gewijzigd — data wordt verwijderd</h3>
+                <p style={{ fontSize: 13.5, color: '#444', lineHeight: 1.5, margin: '0 0 16px' }}>
+                  <strong>{allDoelenbomen.map((d) => d.name).join(', ')}</strong> {allDoelenbomen.length === 1 ? 'is' : 'zijn'} al leeg,
+                  er gaat dus niets verloren.
+                </p>
+              </>
+            )}
             {error && <p style={{ color: '#DC3545', fontSize: 12.5 }}>{error}</p>}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
               <button onClick={onCancel} disabled={step === 'busy'} style={btnStyle('ghost')}>Annuleren</button>
-              <button onClick={finalize} disabled={step === 'busy'} style={btnStyle('danger')}>
-                {step === 'busy' ? 'Bezig…' : 'Ja, uitloggen en verwijderen'}
+              <button onClick={finalize} disabled={step === 'busy'} style={btnStyle(hasAnyContent ? 'danger' : 'primary')}>
+                {step === 'busy' ? 'Bezig…' : hasAnyContent ? 'Ja, uitloggen en verwijderen' : 'Uitloggen'}
               </button>
             </div>
           </>

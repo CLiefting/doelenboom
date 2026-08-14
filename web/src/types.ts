@@ -59,7 +59,7 @@ export type SessionInfo = {
 
 export type WipeCandidate = {
   tenant: { id: number; slug: string; name: string };
-  doelenbomen: Array<{ id: number; slug: string; name: string }>;
+  doelenbomen: Array<{ id: number; slug: string; name: string; elementCount: number }>;
 };
 
 export type TenantSummary = {

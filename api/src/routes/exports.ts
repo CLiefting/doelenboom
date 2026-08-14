@@ -24,15 +24,23 @@ exportsRouter.get('/doelenbomen/:id/export', requireTenantRoleForDoelenboomParam
   const tree = await fetchTree(req.params.id);
   if (!tree) return res.status(404).json({ error: 'Doelenboom niet gevonden' });
 
+  const exportedAt = new Date();
   const meta = {
     doelenboom: tree.doelenboom.name,
     tenant: tree.doelenboom.tenant.name,
-    exportedAt: new Date().toISOString(),
+    exportedAt: exportedAt.toISOString(),
     exportedBy: req.user?.email ?? 'onbekend',
   };
 
   const body = JSON.stringify({ tree: mode === 'data' ? tree : null, meta });
-  const filename = `doelenboom_${tree.doelenboom.slug}_${format}_${mode}.xlsx`;
+  // Bestandsnaam: Doelenboom_<Tenant>_<slug>_<JJMMDD> — tenantnaam gesaneerd
+  // voor gebruik in een bestandsnaam (spaties/leestekens -> underscore).
+  const safeTenant = tree.doelenboom.tenant.name.replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  const jjmmdd =
+    String(exportedAt.getFullYear() % 100).padStart(2, '0') +
+    String(exportedAt.getMonth() + 1).padStart(2, '0') +
+    String(exportedAt.getDate()).padStart(2, '0');
+  const filename = `Doelenboom_${safeTenant}_${tree.doelenboom.slug}_${jjmmdd}.xlsx`;
 
   let upstream: Response;
   try {

@@ -11,7 +11,9 @@ import { pool } from './db.js';
 
 export type WipeCandidate = {
   tenant: { id: number; slug: string; name: string };
-  doelenbomen: Array<{ id: number; slug: string; name: string }>;
+  // elementCount: hiermee kan de frontend bij uitloggen de exportvraag
+  // overslaan als een doelenboom toch al leeg is (niets te exporteren/verliezen).
+  doelenbomen: Array<{ id: number; slug: string; name: string; elementCount: number }>;
 };
 
 // Is er op dit moment nog een sessie die toegang heeft tot deze tenant, gezien
@@ -84,7 +86,12 @@ export async function previewOrCommitWipe(
     if (stillActive) continue;
 
     const doelenbomenResult = await pool.query(
-      'select id, slug, name from doelenbomen where tenant_id = $1 order by name',
+      `select d.id, d.slug, d.name, count(e.id)::int as "elementCount"
+       from doelenbomen d
+       left join elements e on e.doelenboom_id = d.id
+       where d.tenant_id = $1
+       group by d.id, d.slug, d.name
+       order by d.name`,
       [t.id]
     );
     if (doelenbomenResult.rows.length === 0) continue;
