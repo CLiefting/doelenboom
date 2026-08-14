@@ -187,6 +187,53 @@ seed-account op `false` (zie `db/seed.sql`).
   `excel-service` resp. de eigen Postgres-container)
 - `/dbstat` en `/sessions` (als sysadmin) laden zonder errors
 
+## Demo-tenant bijladen op een al-lopende database
+
+`db/seed.sql` draait alleen automatisch bij de allereerste containerstart (lege
+`db_data`). Was jouw stack (zoals hier) al eerder gestart met een oudere
+seed-versie, dan komt de nieuwe tenant **Demo**/doelenboom **Gezond ouder** er
+niet vanzelf bij. Eenmalig, zonder iets te wissen (de `if not exists`-guard in
+`db/seed.sql` zorgt dat dit alleen de Demo-tenant toevoegt, andere tenants
+zoals `kmar` blijven ongewijzigd staan):
+
+```bash
+cd ~/doelenboom
+docker compose -f docker-compose.yml -f docker-compose.prod.yml exec -T db \
+  psql -U "${POSTGRES_USER:-doelenboom}" -d "${POSTGRES_DB:-doelenboom}" \
+  -v ON_ERROR_STOP=1 < db/seed.sql
+```
+
+## Nachtelijke reset van de Demo-doelenboom
+
+De Demo-doelenboom is bedoeld om vrij in te kunnen rondklikken/bewerken (alle
+leden van de tenant Demo hebben admin-rechten) — daarom wordt de inhoud elke
+nacht om 00:01 teruggezet naar de canonieke demo-data uit
+`deploy/reset-demo.sql` (een kopie van het demo-gedeelte van `db/seed.sql`,
+zonder de tenant/doelenboom zelf opnieuw aan te maken). Andere tenants worden
+niet geraakt.
+
+Eenmalig instellen op de VPS:
+
+```bash
+chmod +x ~/doelenboom/deploy/reset-demo.sh
+crontab -e
+```
+
+Voeg toe:
+```
+1 0 * * * /home/charles/doelenboom/deploy/reset-demo.sh >> /home/charles/doelenboom-demo-reset.log 2>&1
+```
+
+Handmatig testen (mag altijd, ook overdag):
+```bash
+~/doelenboom/deploy/reset-demo.sh
+tail -20 ~/doelenboom-demo-reset.log
+```
+
+Wijzig je later de demo-inhoud in `db/seed.sql`, werk dan ook
+`deploy/reset-demo.sql` bij (zelfde INSERT-blokken) — zie de toelichting
+bovenaan dat bestand.
+
 ## Updates uitrollen
 
 Zelfde principe als de eerste deploy (stap 5): bouw de nieuwe images op je
