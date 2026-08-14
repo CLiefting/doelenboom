@@ -61,17 +61,36 @@ async function wipeDoelenboomData(doelenboomId: number): Promise<void> {
 // gegeven, die sessie eerst als beëindigd gemarkeerd). Met commit=false is dit
 // een pure preview (voor de "wil je exporteren?"-vraag bij uitloggen), zonder
 // bijeffecten.
+//
+// requestingUser: bij een expliciete logout (vanuit routes/auth.ts) alleen
+// tenants tonen waar déze gebruiker ook echt lid van is (of alle tenants als
+// die sysadmin is) — anders kreeg een gebruiker zonder enige toegang tot bv.
+// tenant KMar bij het uitloggen tóch een wipe-melding voor KMar te zien, puur
+// omdat toevallig niemand anders op dat moment nog een actieve KMar-sessie
+// had. Bij de periodieke idle-sweep (sweepIdleTenants) is er geen specifieke
+// gebruiker die uitlogt, dus blijft dit param leeg en gelden alle
+// wipe_on_empty-tenants zoals voorheen.
 export async function previewOrCommitWipe(
   sessionId: string | null,
-  commit: boolean
+  commit: boolean,
+  requestingUser?: { id: number; isSysadmin: boolean }
 ): Promise<WipeCandidate[]> {
   if (commit && sessionId) {
     await pool.query('update sessions set ended_at = now() where id = $1 and ended_at is null', [sessionId]);
   }
 
-  const tenantsResult = await pool.query(
-    'select id, slug, name, session_timeout_minutes from tenants where wipe_on_empty = true'
-  );
+  const tenantsResult =
+    requestingUser && !requestingUser.isSysadmin
+      ? await pool.query(
+          `select t.id, t.slug, t.name, t.session_timeout_minutes
+           from tenants t
+           join tenant_users tu on tu.tenant_id = t.id
+           where t.wipe_on_empty = true and tu.user_id = $1`,
+          [requestingUser.id]
+        )
+      : await pool.query(
+          'select id, slug, name, session_timeout_minutes from tenants where wipe_on_empty = true'
+        );
 
   const candidates: WipeCandidate[] = [];
   for (const t of tenantsResult.rows) {

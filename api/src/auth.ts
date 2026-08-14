@@ -152,7 +152,10 @@ authRouter.post('/heartbeat', requireAuth, async (req: AuthedRequest, res) => {
 // De frontend gebruikt dit om, vóór het daadwerkelijke uitloggen, eerst een
 // Excel-export aan te bieden en daarna een expliciete waarschuwing te tonen.
 authRouter.get('/logout-preview', requireAuth, async (req: AuthedRequest, res) => {
-  const candidates = await previewOrCommitWipe(req.user!.sessionId, false);
+  const candidates = await previewOrCommitWipe(req.user!.sessionId, false, {
+    id: req.user!.id,
+    isSysadmin: req.user!.isSysadmin,
+  });
   res.json({ wouldWipe: candidates });
 });
 
@@ -160,6 +163,9 @@ authRouter.get('/logout-preview', requireAuth, async (req: AuthedRequest, res) =
 // toepassing) daadwerkelijk uit. Dit is bewust pas de tweede stap vanuit de
 // frontend: eerst logout-preview + bevestiging, dan pas dit endpoint.
 authRouter.post('/logout', requireAuth, async (req: AuthedRequest, res) => {
-  const wiped = await previewOrCommitWipe(req.user!.sessionId, true);
+  const wiped = await previewOrCommitWipe(req.user!.sessionId, true, {
+    id: req.user!.id,
+    isSysadmin: req.user!.isSysadmin,
+  });
   res.json({ wiped });
 });
