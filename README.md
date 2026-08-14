@@ -28,10 +28,11 @@ architectuurdiscussie.
 3. Open http://localhost:5173
 
 Bij de allereerste start voert Postgres automatisch `db/init.sql` (schema) en
-`db/seed.sql` (de huidige productiedata: tenant **KMar**, doelenboom **FPBB**, 123
-elementen, 284 relaties, tags, org-eenheden) uit — dit gebeurt alleen bij een lege
-`db_data`-volume. Wil je opnieuw vanaf nul, verwijder dan het volume: `docker compose
-down -v`.
+`db/seed.sql` uit — dit gebeurt alleen bij een lege `db_data`-volume. `db/seed.sql`
+bevat een fictieve demo-doelenboom ("Gezond ouder", tenant **Demo**, 21 elementen)
+voor een verzorgingshuis — bewust geen echte KMar/FPBB-productiedata (meer), zodat
+die niet per ongeluk op een gedeelde omgeving terechtkomt. Wil je opnieuw vanaf nul,
+verwijder dan het volume: `docker compose down -v`.
 
 **Schema-wijzigingen:** `project_status` heeft een kolom `cluster_ppt`, `tenants`
 heeft er `wipe_on_empty`/`session_timeout_minutes` bij gekregen plus een nieuwe
@@ -79,8 +80,9 @@ crypt('nieuw-wachtwoord', gen_salt('bf')) where email = 'admin@code072.nl';`.
   "Gebruikersbeheer & rollen"). De boomweergave zelf draait in `web/public/tree.html`
   (zie hieronder) — `TreePage.tsx` is alleen een dunne iframe-wrapper.
 - `db/init.sql` — volledig datamodel (12 tabellen, zie ERD).
-- `db/seed.sql` — huidige FPBB-productiedata, geëxporteerd uit de losstaande
-  `doelenboom.html`-tool die dit project voorafging.
+- `db/seed.sql` — fictieve demo-doelenboom ("Gezond ouder", tenant Demo) voor een
+  verzorgingshuis. Bewust geen echte klantdata (meer) — zie git-historie voor de
+  eerdere FPBB-productiedata-seed als referentie.
 
 ## Boomweergave: waarom een los `tree.html` in plaats van React-componenten
 
