@@ -7,3 +7,4 @@ dist
 vite.config.ts.timestamp-*.mjs
 __pycache__
 *.pyc
+doelenboom-images.tar.gz
