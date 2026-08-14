@@ -108,11 +108,20 @@ WWspeur's `POSTGRES_PASSWORD`/`SECRET_KEY`).
 
 ```bash
 cd ~/pad/naar/doelenboom   # je lokale dev-checkout, niet de VPS
-docker compose -f docker-compose.yml -f docker-compose.prod.yml build api web excel-service
+DOCKER_DEFAULT_PLATFORM=linux/amd64 docker compose -f docker-compose.yml -f docker-compose.prod.yml build api web excel-service
 docker save doelenboom-api:latest doelenboom-web:latest doelenboom-excel-service:latest \
   | gzip > doelenboom-images.tar.gz
 scp doelenboom-images.tar.gz charles@185.107.90.64:~/
 ```
+
+**`DOCKER_DEFAULT_PLATFORM=linux/amd64` is verplicht op een Apple
+Silicon-Mac** (M1/M2/M3/...): zonder die variabele bouwt Docker standaard
+voor `linux/arm64` (jouw Mac), terwijl de VPS `linux/amd64` is. De containers
+starten dan wel, maar crashen meteen in een restart-lus (exec-format-
+mismatch) — `docker compose ps` toont dan `Restarting` voor `api`/
+`excel-service`, en compose waarschuwt expliciet met "platform ... does not
+match the detected host platform". Op een Intel-Mac is de variabele niet
+nodig, maar schaadt ook niet.
 
 De `build` gebruikt automatisch de productie-Dockerfiles/build-args uit
 `docker-compose.prod.yml` (nginx voor `web`, `VITE_API_URL=""`, etc.) omdat
@@ -187,7 +196,7 @@ Mac, zet ze over, laad ze op de VPS, herstart alleen dan.
 ```bash
 cd ~/pad/naar/doelenboom
 git pull   # zorg dat je lokale checkout de wijziging heeft die je wilt uitrollen
-docker compose -f docker-compose.yml -f docker-compose.prod.yml build api web excel-service
+DOCKER_DEFAULT_PLATFORM=linux/amd64 docker compose -f docker-compose.yml -f docker-compose.prod.yml build api web excel-service
 docker save doelenboom-api:latest doelenboom-web:latest doelenboom-excel-service:latest \
   | gzip > doelenboom-images.tar.gz
 scp doelenboom-images.tar.gz charles@185.107.90.64:~/

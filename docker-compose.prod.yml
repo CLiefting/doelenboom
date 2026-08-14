@@ -23,12 +23,15 @@
 # Gebruik: images worden LOKAAL gebouwd (niet op de VPS zelf — die deelt
 # resources met WWspeur's zware Puppeteer/Chromium-scans en heeft geen swap,
 # een --build daar bleek de server minutenlang vast te zetten). Op je Mac:
-#   docker compose -f docker-compose.yml -f docker-compose.prod.yml build api web excel-service
+#   DOCKER_DEFAULT_PLATFORM=linux/amd64 docker compose -f docker-compose.yml -f docker-compose.prod.yml build api web excel-service
 #   docker save doelenboom-api:latest doelenboom-web:latest doelenboom-excel-service:latest | gzip > doelenboom-images.tar.gz
 #   scp doelenboom-images.tar.gz charles@185.107.90.64:~/
 # Op de VPS (image al aanwezig via docker load, dus geen --build nodig):
 #   docker load < ~/doelenboom-images.tar.gz
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# LET OP: de VPS draait linux/amd64, een Apple Silicon-Mac bouwt standaard
+# linux/arm64 — zonder DOCKER_DEFAULT_PLATFORM=linux/amd64 hierboven starten
+# api/excel-service niet (exec-format-mismatch, "Restarting" in een lus).
 # Volledige toelichting: deploy/README.md.
 #
 # Vereist Docker Compose >= 2.24 voor de !override-tag (idem WWspeur).
