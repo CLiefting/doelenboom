@@ -1,13 +1,18 @@
 services:
   db:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-doelenboom}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-doelenboom}
       POSTGRES_DB: ${POSTGRES_DB:-doelenboom}
     volumes:
-      - db_data:/var/lib/postgresql/data
+      # Vanaf de postgres-images v18 wordt één mount op /var/lib/postgresql
+      # verwacht (in plaats van direct op .../data erin): de image zet data dan
+      # zelf in een major-versie-specifieke submap (pg_ctlcluster-achtige opzet,
+      # met het oog op toekomstige pg_upgrade --link). Mounten op .../data zelf
+      # laat de v18-image weigeren te starten met een expliciete foutmelding.
+      - db_data:/var/lib/postgresql
       # Alle *.sql in ./db draaien alfabetisch bij de allereerste containerstart
       # (Postgres docker-entrypoint-initdb.d-conventie): init.sql (schema) vóór
       # seed.sql (databestand), dankzij de bestandsnaam-sortering.

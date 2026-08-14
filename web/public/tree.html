@@ -14,8 +14,6 @@
     padding: 30px 20px 60px;
     color: #1a1a1a;
   }
-  h1 { text-align: center; font-size: 22px; color: var(--navy); margin: 0 0 4px; }
-  .subtitle { text-align: center; color: #555; font-size: 13px; margin: 0 0 6px; }
   .hint { text-align: center; color: #888; font-size: 12px; margin: 0 0 18px; font-style: italic; }
   .legend {
     display: flex; justify-content: center; flex-wrap: wrap; gap: 6px;
@@ -53,27 +51,66 @@
   .topbar {
     position: sticky; top: 0; z-index: 50;
     margin: -30px -20px 24px -20px;
-    padding: 10px 20px;
-    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding: 8px 20px;
+    /* Grid i.p.v. flex, met de buitenste kolommen allebei 1fr (dus altijd even
+       breed) en de middelste kolom auto (precies zo breed als het zoekveld
+       zelf): zo staat het zoekveld écht in het midden van de hele balk, ook al
+       verschillen links (merk/titel) en rechts (knoppen + gebruiker) flink in
+       breedte. (Een 1fr-middenkolom zou het zoekveld alleen centreren binnen de
+       restruimte tussen links en rechts, niet op het midden van het scherm.) */
+    display: grid;
+    grid-template-columns: minmax(120px, 1fr) auto minmax(120px, 1fr);
+    align-items: center; gap: 12px;
     background: #ffffff; border-bottom: 1px solid #e2e4e8;
     box-shadow: 0 2px 10px rgba(0,0,0,0.08);
   }
-  .topbar-brand { font-weight: 700; color: var(--navy); font-size: 14px; white-space: nowrap; }
+  .topbar-brand-group { justify-self: start; display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .topbar-brand { display: flex; flex-direction: column; gap: 1px; line-height: 1.3; min-width: 0; }
+  .topbar-brand .topbar-title { font-weight: 700; color: var(--navy); font-size: 14px; white-space: nowrap; }
+  .topbar-brand .topbar-subtitle { font-weight: 400; color: #667; font-size: 11px; white-space: nowrap; }
   .topbar-search {
-    display: flex; align-items: center; gap: 8px;
-    flex: 1 1 260px; min-width: 180px; justify-content: center;
+    display: flex; align-items: center; justify-content: center; gap: 8px; min-width: 0;
   }
-  .topbar-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .topbar-right { justify-self: end; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
+  .topbar-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .topbar-divider { width: 1px; align-self: stretch; margin: 4px 0; background: #e2e4e8; }
   .btn.btn-sm { padding: 6px 12px; font-size: 12.5px; }
-  .topbar-user { margin-left: auto; display: flex; align-items: center; gap: 8px; }
-  #topbar-user-text {
-    font-size: 12.5px; color: #556; white-space: nowrap;
-    padding: 5px 12px; border-radius: 999px; background: #f0f1f3; border: 1px solid #dfe3e8;
+  /* Vierkante icoon-knop (SVG-export, account-avatar): zelfde ghost-stijl als
+     de tekstknoppen, maar compact vierkant i.p.v. horizontale pil-padding. */
+  .btn.btn-icon {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 32px; height: 32px; padding: 0; border-radius: 999px;
   }
-  #topbar-user-text:empty { display: none; }
+  .user-avatar {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px; border-radius: 50%;
+    background: var(--navy); color: #fff; font-size: 11px; font-weight: 700;
+  }
+  .btn.btn-icon.user-menu-btn:hover:not(:disabled) .user-avatar { color: var(--navy); }
+
+  .file-menu { position: relative; display: inline-block; }
+  .file-menu-dropdown {
+    display: none;
+    position: absolute; top: calc(100% + 4px); right: 0;
+    background: #fff; border: 1px solid #d0d4da; border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+    min-width: 190px; z-index: 100; padding: 4px;
+  }
+  .file-menu-dropdown.open { display: block; }
+  .file-menu-item {
+    display: block; width: 100%; text-align: left;
+    padding: 8px 12px; border: none; background: none; border-radius: 6px;
+    font: inherit; font-size: 13px; color: #333; cursor: pointer;
+  }
+  .file-menu-item:hover { background: #f0f1f3; }
+  .file-menu-separator { height: 1px; background: #e4e6ea; margin: 4px 6px; }
   @media (max-width: 860px) {
-    .topbar { justify-content: center; }
-    .topbar-user { margin-left: 0; }
+    /* Op smalle schermen is er geen ruimte meer voor drie nette kolommen —
+       terug naar een simpele, wrappende, gecentreerde rij (zoals vóór de
+       grid-layout hierboven). */
+    .topbar { display: flex; align-items: center; flex-wrap: wrap; justify-content: center; gap: 10px; }
+    .topbar-search { flex: 1 1 100%; order: 3; }
+    .topbar-right { justify-self: auto; }
   }
 
   .search-input-wrap { position: relative; display: flex; align-items: center; }
@@ -179,6 +216,12 @@
      bericht vanuit React binnenkomt met role !== 'admin'. De API is de echte
      autorisatiegrens (rbac.ts) — dit is puur UI. */
   body.read-only .crud-only { display: none !important; }
+
+  /* Losstaand geëxporteerd HTML-bestand (zie exportStaticHtml() verderop) —
+     verbergt alles wat een levende React-ouder/API-verbinding nodig heeft
+     (inloggegevens, "terug naar overzicht", Excel-import/-export). Werkt
+     samen met read-only hierboven (een export forceert altijd rol 'gebruiker'). */
+  body.standalone .iframe-only { display: none !important; }
 
   .dp-connections { margin-top: 14px; padding-top: 14px; border-top: 1px solid #eee; }
   .dp-connections-title {
@@ -503,8 +546,8 @@
   /* Phone (iPhone 12 and similar) */
   @media (max-width: 600px) {
     body { padding: 16px 10px 44px; }
-    h1 { font-size: 18px; }
-    .subtitle { font-size: 12px; }
+    .topbar-brand .topbar-title { font-size: 12.5px; }
+    .topbar-brand .topbar-subtitle { font-size: 10px; }
     .hint { font-size: 10.5px; padding: 0 6px; }
     .legend { gap: 8px 12px; font-size: 10.5px; margin-bottom: 14px; }
     .swatch { width: 11px; height: 11px; }
@@ -524,7 +567,15 @@
 </head>
 <body>
   <div class="topbar" id="topbar">
-    <div class="topbar-brand">Doelenboom</div>
+    <div class="topbar-brand-group">
+      <button class="btn ghost btn-icon iframe-only" id="nav-picker-btn" type="button" title="Terug naar overzicht" aria-label="Terug naar overzicht">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
+      </button>
+      <div class="topbar-brand">
+        <span class="topbar-title" id="app-title">Doelenboom</span>
+        <span class="topbar-subtitle" id="app-subtitle"></span>
+      </div>
+    </div>
     <div class="topbar-search">
       <div class="search-input-wrap">
         <input type="text" class="search-input" id="search-input" placeholder="Zoek op code, naam of omschrijving&hellip;" autocomplete="off">
@@ -532,20 +583,45 @@
       </div>
       <span class="search-count" id="search-count"></span>
     </div>
-    <div class="topbar-actions">
-      <button class="btn ghost btn-sm" id="export-svg-btn" type="button">&#8681; Exporteer als SVG</button>
-      <button class="btn ghost btn-sm crud-only" id="nav-import-btn" type="button">Excel importeren</button>
-      <button class="btn ghost btn-sm" id="export-xlsx-btn" type="button">&#8681; Exporteer als Excel</button>
-    </div>
-    <div class="topbar-user">
-      <span id="topbar-user-text" title="Ingelogd als"></span>
-      <button class="btn ghost btn-sm" id="logout-btn" type="button">Uitloggen</button>
+    <div class="topbar-right">
+      <div class="topbar-actions">
+        <button class="btn ghost btn-icon" id="export-svg-btn" type="button" title="Exporteer als SVG" aria-label="Exporteer als SVG">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+        </button>
+        <!-- Bestand-menu bevat alleen nog acties die een levende parent-app +
+             API nodig hebben (Excel-import/export) of die in een al-geëxporteerd
+             losstaand bestand geen zin hebben (nogmaals exporteren als HTML) — dus
+             is de hele knop+dropdown 'iframe-only' en verdwijnt 'm samen met zijn
+             items in standalone-modus, i.p.v. een lege dropdown-knop achter te
+             laten. "Exporteer als SVG" werkt overal en staat daarom los ernaast. -->
+        <div class="file-menu iframe-only" id="file-menu">
+          <button class="btn ghost btn-sm" id="file-menu-btn" type="button">Bestand &#9662;</button>
+          <div class="file-menu-dropdown" id="file-menu-dropdown">
+            <button type="button" class="file-menu-item crud-only" id="nav-import-btn">Importeer Excel</button>
+            <div class="file-menu-separator crud-only"></div>
+            <button type="button" class="file-menu-item" id="export-xlsx-btn">Exporteer als Excel</button>
+            <button type="button" class="file-menu-item" id="export-html-btn">Exporteer als HTML-bestand</button>
+          </div>
+        </div>
+      </div>
+      <div class="topbar-divider iframe-only"></div>
+      <!-- Account-dropdown i.p.v. losse "Ingelogd als ..."-pil + Uitlog-knop:
+           zelfde dropdown-stijl (file-menu*) als het Bestand-menu, voor een
+           strakkere, consistente topbar met minder losse blokjes naast elkaar.
+           Avatar-bolletje met initiaal i.p.v. het volledige e-mailadres — dat
+           staat nog wel als tooltip (title) op de knop. -->
+      <div class="file-menu iframe-only" id="user-menu">
+        <button class="btn ghost btn-icon user-menu-btn" id="user-menu-btn" type="button" title="Ingelogd als">
+          <span class="user-avatar" id="user-avatar"></span>
+        </button>
+        <div class="file-menu-dropdown" id="user-menu-dropdown">
+          <button type="button" class="file-menu-item" id="logout-btn">Uitloggen</button>
+        </div>
+      </div>
     </div>
   </div>
 
   <div class="page-header">
-    <h1 id="app-title">Doelenboom</h1>
-    <p class="subtitle" id="app-subtitle"></p>
     <p class="hint">Klik op een vak om het volledige verbonden pad te markeren. Houd de muis boven een vak voor de omschrijving. Dubbelklik om in te zoomen op dat element, &eacute;&eacute;n niveau erboven en alle onderliggende elementen.</p>
   </div>
 
@@ -561,7 +637,6 @@
     <button class="btn ghost" id="reset-btn" type="button">&#8635; Alleen Missie</button>
     <button class="btn ghost crud-only" id="new-element-btn" type="button">+ Nieuw element</button>
     <button class="btn back-btn" id="back-btn" style="display:none;">&#8592; Terug naar vorig scherm</button>
-    <button class="btn ghost" id="nav-picker-btn" type="button">&#8592; Terug naar overzicht</button>
   </div>
 
   <div class="export-modal-backdrop" id="export-modal-backdrop">
@@ -1763,10 +1838,81 @@ function runApp(data) {
   const exportSvgBtn = document.getElementById('export-svg-btn');
   if (exportSvgBtn) exportSvgBtn.addEventListener('click', exportSVG);
 
+  // Exporteert de huidige boom als één losstaand, offline werkend HTML-bestand
+  // (vergelijkbaar met het oorspronkelijke doelenboom.html, zie
+  // doelenboom_update_instructie.md) — puur client-side, geen API-endpoint
+  // nodig: haalt de eigen (ongewijzigde) paginabron op, zet daar de al-geladen
+  // boomdata vóór in als window.__STATIC_TREE__ (zie de bootstrap onderaan dit
+  // bestand, die dat blok als eerste checkt), en downloadt het resultaat.
+  function exportStaticHtml() {
+    if (!lastTreeResponse) {
+      showToast('De boom is nog niet geladen.', 'error');
+      return;
+    }
+    fetch(window.location.pathname, { cache: 'no-store' })
+      .then((res) => {
+        if (!res.ok) throw new Error('Kon eigen paginabron niet ophalen (HTTP ' + res.status + ')');
+        return res.text();
+      })
+      .then((sourceHtml) => {
+        const marker = '<script>';
+        const idx = sourceHtml.indexOf(marker);
+        if (idx === -1) throw new Error('Kon het scriptblok niet vinden in de paginabron.');
+        // '<' + '/script>' i.p.v. de letterlijke tekenreeks: anders sluit deze
+        // JS-string zelf per ongeluk het omringende <script>-blok van tree.html af.
+        const dataScript = '<script>window.__STATIC_TREE__ = ' + JSON.stringify(lastTreeResponse) +
+          ';<' + '/script>\n';
+        const staticHtml = sourceHtml.slice(0, idx) + dataScript + sourceHtml.slice(idx);
+
+        const blob = new Blob([staticHtml], { type: 'text/html;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const slug = (lastTreeResponse.doelenboom && lastTreeResponse.doelenboom.slug) || 'doelenboom';
+        const stamp = new Date().toISOString().slice(0, 10);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'doelenboom_' + slug + '_' + stamp + '.html';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+      })
+      .catch((err) => {
+        showToast('Exporteren als HTML-bestand mislukt: ' + (err && err.message ? err.message : 'onbekende fout'), 'error');
+      });
+  }
+  const exportHtmlBtn = document.getElementById('export-html-btn');
+  if (exportHtmlBtn) exportHtmlBtn.addEventListener('click', exportStaticHtml);
+
   const navPickerBtn = document.getElementById('nav-picker-btn');
   if (navPickerBtn) navPickerBtn.addEventListener('click', () => {
     window.parent.postMessage({ type: 'doelenboom-navigate', target: 'picker' }, PARENT_ORIGIN);
   });
+  // ---- Dropdown-knoppen in de topbar ("Bestand" en het account-menu delen
+  // dezelfde open/sluit-mechaniek: klik op de knop toggelt, klik op een item
+  // sluit 'm weer, en een klik ergens anders op de pagina sluit alle open
+  // dropdowns — dat laatste vooral relevant zodra er twee naast elkaar staan. ----
+  function wireDropdown(btnId, dropdownId) {
+    const btn = document.getElementById(btnId);
+    const dropdown = document.getElementById(dropdownId);
+    if (!btn || !dropdown) return;
+    btn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const willOpen = !dropdown.classList.contains('open');
+      document.querySelectorAll('.file-menu-dropdown.open').forEach((el) => el.classList.remove('open'));
+      if (willOpen) dropdown.classList.add('open');
+    });
+    dropdown.addEventListener('click', (ev) => {
+      if (ev.target.classList && ev.target.classList.contains('file-menu-item')) {
+        dropdown.classList.remove('open');
+      }
+    });
+  }
+  wireDropdown('file-menu-btn', 'file-menu-dropdown');
+  wireDropdown('user-menu-btn', 'user-menu-dropdown');
+  document.addEventListener('click', () => {
+    document.querySelectorAll('.file-menu-dropdown.open').forEach((el) => el.classList.remove('open'));
+  });
+
   const navImportBtn = document.getElementById('nav-import-btn');
   if (navImportBtn) navImportBtn.addEventListener('click', () => {
     window.parent.postMessage({ type: 'doelenboom-navigate', target: 'import' }, PARENT_ORIGIN);
@@ -2400,10 +2546,16 @@ let apiUrl = null, authToken = null, doelenboomId = null, userEmail = null;
 // bepaalt alleen welke CRUD-knoppen zichtbaar zijn. Standaard 'gebruiker'
 // (veiligste optie) totdat het echte init-bericht binnenkomt.
 let userRole = 'gebruiker';
+// Onbewerkte laatst-geladen boomdata (zelfde vorm als GET .../tree) — bewaard
+// zodat exportStaticHtml() 'm kan inbakken in een losstaand HTML-bestand
+// zonder opnieuw te hoeven fetchen.
+let lastTreeResponse = null;
 
 function renderTopbarUser() {
-  const el = document.getElementById('topbar-user-text');
-  if (el) el.textContent = userEmail ? ('Ingelogd als ' + userEmail) : '';
+  const avatarEl = document.getElementById('user-avatar');
+  if (avatarEl) avatarEl.textContent = userEmail ? userEmail.charAt(0).toUpperCase() : '';
+  const btnEl = document.getElementById('user-menu-btn');
+  if (btnEl) btnEl.title = userEmail ? ('Ingelogd als ' + userEmail) : '';
 }
 
 function applyRole(role) {
@@ -2599,6 +2751,8 @@ function renderError(message) {
 }
 
 function boot(tree) {
+  lastTreeResponse = tree;
+
   const COL_ORDER = ["project", "cap", "obe", "sub", "prog", "strat", "doel", "missie"];
   const COL_LABELS = {"project": "Project", "cap": "Capability", "obe": "Operationele benefit", "sub": "Sub-benefit FPBB", "prog": "Programmabaat FPBB", "strat": "Strategisch benefit B&B", "doel": "Strategisch doel", "missie": "Missie KMar"};
   const COL_COLORS = {"project": "#3E6FA6", "cap": "#6B4C8A", "obe": "#C05A2C", "sub": "#B8862E", "prog": "#2E7D5B", "strat": "#8FAADC", "doel": "#2F5597", "missie": "#203864"};
@@ -2615,8 +2769,10 @@ function boot(tree) {
   if (subtitleEl) subtitleEl.textContent = tree.doelenboom.tenant.name + ' — van missie tot capability';
   const footerEl = document.getElementById('app-footer');
   if (footerEl) {
-    footerEl.textContent = tree.doelenboom.tenant.name + ' · ' + tree.doelenboom.name +
-      ' · opgehaald op ' + new Date().toLocaleString('nl-NL');
+    footerEl.textContent = tree.doelenboom.tenant.name + ' · ' + tree.doelenboom.name + ' · ' +
+      (document.body.classList.contains('standalone')
+        ? 'geëxporteerd als los HTML-bestand op ' + new Date().toLocaleString('nl-NL')
+        : 'opgehaald op ' + new Date().toLocaleString('nl-NL'));
   }
 
   runApp(data);
@@ -2631,43 +2787,57 @@ function fetchAndBoot() {
   }).then(boot).catch((err) => renderError(err && err.message ? err.message : 'Onbekende fout bij laden van de boom.'));
 }
 
-window.addEventListener('message', (event) => {
-  if (!event.data || event.data.type !== 'doelenboom-init') return;
-  PARENT_ORIGIN = event.origin;
-  apiUrl = event.data.apiUrl;
-  authToken = event.data.token;
-  doelenboomId = event.data.doelenboomId;
-  userEmail = event.data.userEmail || null;
-  applyRole(event.data.role);
+// Losstaand geëxporteerd HTML-bestand (zie exportStaticHtml()): een klein
+// <script>-blokje vóór dit script zet window.__STATIC_TREE__ met de volledige
+// boomdata erin (dezelfde vorm als het antwoord van GET .../tree). Is dat
+// aanwezig, dan boot() daar direct mee — geen postMessage-handshake, geen
+// API-fetch, geen inloggegevens nodig. Dit is bewust de eerste check: zo blijft
+// er precies één plek die bepaalt "hoe laad ik de boom" voor alle scenario's
+// (live in de React-app, standalone/debuggen via querystring, of een export).
+if (window.__STATIC_TREE__) {
+  applyRole('gebruiker');
+  document.body.classList.add('standalone');
   renderTopbarUser();
-  fetchAndBoot();
-});
-
-// Fallback voor standalone gebruik/debuggen buiten de React-app: als api/token/
-// doelenboom als querystring-parameters zijn meegegeven, meteen laden i.p.v. te
-// wachten op een postMessage-handshake. De echte app gebruikt altijd postMessage
-// (geen token in de URL/adresbalk/geschiedenis).
-(function initFromQuery() {
-  const params = new URLSearchParams(window.location.search);
-  const qApi = params.get('api');
-  const qToken = params.get('token');
-  const qId = params.get('doelenboom');
-  if (qApi && qToken && qId) {
-    apiUrl = qApi; authToken = qToken; doelenboomId = qId;
-    userEmail = params.get('user') || null;
-    // Standalone/debug-modus buiten de React-app: standaard 'admin' (tenzij
-    // expliciet ?role=gebruiker meegegeven), zodat lokaal testen van CRUD niet
-    // wordt gehinderd — dit pad wordt in productie nooit gebruikt (de React-app
-    // gebruikt altijd de postMessage-handshake hierboven).
-    applyRole(params.get('role') || 'admin');
+  boot(window.__STATIC_TREE__);
+} else {
+  window.addEventListener('message', (event) => {
+    if (!event.data || event.data.type !== 'doelenboom-init') return;
+    PARENT_ORIGIN = event.origin;
+    apiUrl = event.data.apiUrl;
+    authToken = event.data.token;
+    doelenboomId = event.data.doelenboomId;
+    userEmail = event.data.userEmail || null;
+    applyRole(event.data.role);
     renderTopbarUser();
     fetchAndBoot();
-  }
-})();
+  });
 
-// Meldt aan de parent dat dit iframe klaar is om het init-bericht te ontvangen
-// (voorkomt een race condition als de parent eerder post dan onze listener actief is).
-window.parent.postMessage({ type: 'doelenboom-ready' }, '*');
+  // Fallback voor standalone gebruik/debuggen buiten de React-app: als api/token/
+  // doelenboom als querystring-parameters zijn meegegeven, meteen laden i.p.v. te
+  // wachten op een postMessage-handshake. De echte app gebruikt altijd postMessage
+  // (geen token in de URL/adresbalk/geschiedenis).
+  (function initFromQuery() {
+    const params = new URLSearchParams(window.location.search);
+    const qApi = params.get('api');
+    const qToken = params.get('token');
+    const qId = params.get('doelenboom');
+    if (qApi && qToken && qId) {
+      apiUrl = qApi; authToken = qToken; doelenboomId = qId;
+      userEmail = params.get('user') || null;
+      // Standalone/debug-modus buiten de React-app: standaard 'admin' (tenzij
+      // expliciet ?role=gebruiker meegegeven), zodat lokaal testen van CRUD niet
+      // wordt gehinderd — dit pad wordt in productie nooit gebruikt (de React-app
+      // gebruikt altijd de postMessage-handshake hierboven).
+      applyRole(params.get('role') || 'admin');
+      renderTopbarUser();
+      fetchAndBoot();
+    }
+  })();
+
+  // Meldt aan de parent dat dit iframe klaar is om het init-bericht te ontvangen
+  // (voorkomt een race condition als de parent eerder post dan onze listener actief is).
+  window.parent.postMessage({ type: 'doelenboom-ready' }, '*');
+}
 </script>
 </body>
 </html>

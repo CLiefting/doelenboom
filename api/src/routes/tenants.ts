@@ -106,7 +106,8 @@ tenantsRouter.post('/:tenantId/members', requireTenantRoleForTenantParam('admin'
       return res.status(400).json({ error: 'Nieuw account: wachtwoord (min. 8 tekens) is verplicht.' });
     }
     const created = await pool.query(
-      `insert into users (email, password_hash, is_sysadmin) values ($1, crypt($2, gen_salt('bf')), false) returning id`,
+      `insert into users (email, password_hash, is_sysadmin, must_change_password)
+       values ($1, crypt($2, gen_salt('bf')), false, true) returning id`,
       [email, password]
     );
     userId = created.rows[0].id;

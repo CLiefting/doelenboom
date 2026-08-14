@@ -12,6 +12,8 @@ import { elementsRouter } from './routes/elements.js';
 import { tagsRouter } from './routes/tags.js';
 import { orgUnitsRouter } from './routes/orgUnits.js';
 import { edgesRouter } from './routes/edges.js';
+import { dbstatRouter } from './routes/dbstat.js';
+import { sessionsRouter } from './routes/sessions.js';
 import { sweepIdleTenants } from './tenantWipe.js';
 
 const app = express();
@@ -46,6 +48,8 @@ app.use('/api', elementsRouter);
 app.use('/api', tagsRouter);
 app.use('/api', orgUnitsRouter);
 app.use('/api', edgesRouter);
+app.use('/api/dbstat', dbstatRouter);
+app.use('/api/sessions', sessionsRouter);
 
 app.listen(PORT, () => {
   console.log(`doelenboom-api listening on port ${PORT}`);

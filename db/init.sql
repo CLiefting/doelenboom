@@ -16,6 +16,11 @@ create table if not exists users (
   email text not null unique,
   password_hash text not null,
   is_sysadmin boolean not null default false,
+  -- Gezet op true wanneer een sysadmin een account aanmaakt of een wachtwoord
+  -- reset (dan kent de gebruiker zelf het wachtwoord niet als "van hemzelf").
+  -- De frontend dwingt dan bij de eerstvolgende login een wachtwoordwijziging af
+  -- (zie POST /api/auth/change-password) en zet 'm daarna terug op false.
+  must_change_password boolean not null default false,
   created_at timestamptz not null default now()
 );
 

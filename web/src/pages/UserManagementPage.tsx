@@ -72,6 +72,9 @@ export default function UserManagementPage({
         <h2 style={styles.h2}>Tenants</h2>
         {!tenants && <p>Laden…</p>}
         {tenants && manageableTenants.length === 0 && <p style={styles.muted}>Geen tenants om te beheren.</p>}
+        {tenants && manageableTenants.length > 0 && (
+          <p style={styles.muted}>Klik op een tenant om de leden (rol admin/gebruiker) te beheren.</p>
+        )}
         <div style={styles.tenantList}>
           {manageableTenants.map((t) => (
             <button
@@ -95,6 +98,30 @@ export default function UserManagementPage({
           />
         )}
       </section>
+
+      {selectedTenantId != null && (
+        <section style={styles.section}>
+          <h2 style={styles.h2}>
+            Instellingen van {manageableTenants.find((t) => t.id === selectedTenantId)?.name ?? ''}
+          </h2>
+          {(() => {
+            const t = manageableTenants.find((x) => x.id === selectedTenantId);
+            if (!t) return null;
+            return (
+              <TenantSettingsForm
+                token={token}
+                tenant={t}
+                busy={busy}
+                setBusy={setBusy}
+                setError={setError}
+                onSaved={() => {
+                  api.tenants(token).then(setTenants).catch((err) => setError(errMsg(err)));
+                }}
+              />
+            );
+          })()}
+        </section>
+      )}
 
       {selectedTenantId != null && (
         <section style={styles.section}>
@@ -302,6 +329,87 @@ function AddMemberForm({
   );
 }
 
+// Instelt of de data van deze tenant automatisch geleegd wordt zodra niemand
+// er meer actief toegang toe heeft, en na hoeveel minuten inactiviteit dat
+// telt — zie tenantWipe.ts / "Sessies & automatisch leegmaken" in de README.
+// Alleen de doelenboom-data verdwijnt dan (tenant/doelenboom-rijen blijven
+// bestaan); wijzigt hier niets aan de leden/rollen.
+function TenantSettingsForm({
+  token,
+  tenant,
+  busy,
+  setBusy,
+  setError,
+  onSaved,
+}: {
+  token: string;
+  tenant: TenantSummary;
+  busy: boolean;
+  setBusy: (b: boolean) => void;
+  setError: (e: string | null) => void;
+  onSaved: () => void;
+}) {
+  const [wipeOnEmpty, setWipeOnEmpty] = useState(tenant.wipe_on_empty);
+  const [timeoutMinutes, setTimeoutMinutes] = useState(String(tenant.session_timeout_minutes));
+  const [saved, setSaved] = useState(false);
+
+  // Als de gebruiker een andere tenant selecteert moet het formulier de
+  // waarden van díe tenant tonen, niet de vorige selectie blijven vasthouden.
+  useEffect(() => {
+    setWipeOnEmpty(tenant.wipe_on_empty);
+    setTimeoutMinutes(String(tenant.session_timeout_minutes));
+    setSaved(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tenant.id]);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const minutes = Number(timeoutMinutes);
+    if (!Number.isFinite(minutes) || minutes <= 0) {
+      setError('Aantal minuten moet een positief getal zijn.');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setSaved(false);
+    try {
+      await api.updateTenantSettings(token, tenant.id, { wipeOnEmpty, sessionTimeoutMinutes: minutes });
+      setSaved(true);
+      onSaved();
+    } catch (err) {
+      setError(errMsg(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5 }}>
+        <input type="checkbox" checked={wipeOnEmpty} onChange={(e) => setWipeOnEmpty(e.target.checked)} />
+        Database van deze tenant automatisch leegmaken zodra niemand meer actief toegang heeft
+      </label>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5 }}>
+        Na
+        <input
+          style={{ ...styles.input, width: 70 }}
+          type="number"
+          min={1}
+          value={timeoutMinutes}
+          onChange={(e) => setTimeoutMinutes(e.target.value)}
+        />
+        minuten inactiviteit
+      </label>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <button style={{ ...btnStyle('primary'), alignSelf: 'flex-start' }} type="submit" disabled={busy}>
+          Opslaan
+        </button>
+        {saved && <span style={{ color: '#2e7d32', fontSize: 12.5 }}>Opgeslagen.</span>}
+      </div>
+    </form>
+  );
+}
+
 function CreateTenantForm({ token, onCreated }: { token: string; onCreated: () => void }) {
   const [slug, setSlug] = useState('');
   const [name, setName] = useState('');
@@ -380,6 +488,8 @@ function AllUsersTable({
     }
   }
 
+  const [resettingId, setResettingId] = useState<number | null>(null);
+
   return (
     <table style={styles.table}>
       <thead>
@@ -393,7 +503,14 @@ function AllUsersTable({
       <tbody>
         {users.map((u) => (
           <tr key={u.id}>
-            <td style={styles.td}>{u.email}</td>
+            <td style={styles.td}>
+              {u.email}
+              {u.must_change_password && (
+                <span style={styles.mustChangeBadge} title="Moet wachtwoord wijzigen bij volgende login">
+                  moet wachtwoord wijzigen
+                </span>
+              )}
+            </td>
             <td style={styles.td}>
               <input
                 type="checkbox"
@@ -409,6 +526,13 @@ function AllUsersTable({
             </td>
             <td style={styles.td}>
               <button
+                disabled={busy}
+                onClick={() => setResettingId(resettingId === u.id ? null : u.id)}
+                style={btnStyle('ghost')}
+              >
+                Wachtwoord resetten
+              </button>
+              <button
                 disabled={busy || u.id === currentUserId}
                 onClick={() => remove(u)}
                 style={btnStyle('danger-text')}
@@ -416,11 +540,78 @@ function AllUsersTable({
               >
                 Verwijderen
               </button>
+              {resettingId === u.id && (
+                <ResetPasswordRow
+                  token={token}
+                  userId={u.id}
+                  busy={busy}
+                  setBusy={setBusy}
+                  setError={setError}
+                  onDone={() => {
+                    setResettingId(null);
+                    onChanged();
+                  }}
+                />
+              )}
             </td>
           </tr>
         ))}
       </tbody>
     </table>
+  );
+}
+
+function ResetPasswordRow({
+  token,
+  userId,
+  busy,
+  setBusy,
+  setError,
+  onDone,
+}: {
+  token: string;
+  userId: number;
+  busy: boolean;
+  setBusy: (b: boolean) => void;
+  setError: (e: string | null) => void;
+  onDone: () => void;
+}) {
+  const [password, setPassword] = useState('');
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      // mustChangePassword niet meegeven = standaard true (zie users.ts): de
+      // gebruiker moet dit tijdelijke wachtwoord bij de eerstvolgende login
+      // vervangen door een eigen wachtwoord.
+      await api.updateUser(token, userId, { password });
+      setPassword('');
+      onDone();
+    } catch (err) {
+      setError(errMsg(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} style={{ display: 'flex', gap: 6, marginTop: 6, alignItems: 'center' }}>
+      <input
+        style={styles.input}
+        type="password"
+        placeholder="nieuw tijdelijk wachtwoord (min. 8 tekens)"
+        required
+        minLength={8}
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+        autoFocus
+      />
+      <button style={btnStyle('primary')} type="submit" disabled={busy}>
+        Opslaan
+      </button>
+    </form>
   );
 }
 
@@ -440,16 +631,18 @@ function CreateUserForm({
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isSysadmin, setIsSysadmin] = useState(false);
+  const [mustChangePassword, setMustChangePassword] = useState(true);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      await api.createUser(token, { email, password, isSysadmin });
+      await api.createUser(token, { email, password, isSysadmin, mustChangePassword });
       setEmail('');
       setPassword('');
       setIsSysadmin(false);
+      setMustChangePassword(true);
       onCreated();
     } catch (err) {
       setError(errMsg(err));
@@ -479,6 +672,14 @@ function CreateUserForm({
       <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13 }}>
         <input type="checkbox" checked={isSysadmin} onChange={(e) => setIsSysadmin(e.target.checked)} />
         sysadmin
+      </label>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13 }}>
+        <input
+          type="checkbox"
+          checked={mustChangePassword}
+          onChange={(e) => setMustChangePassword(e.target.checked)}
+        />
+        moet wachtwoord wijzigen bij volgende login
       </label>
       <button style={btnStyle('primary')} type="submit" disabled={busy}>
         + Account aanmaken
@@ -512,4 +713,8 @@ const styles: Record<string, React.CSSProperties> = {
   td: { borderBottom: '1px solid #f0f1f3', padding: '6px 8px' },
   muted: { color: '#9aa0a8', fontSize: 13, margin: 0 },
   error: { color: '#DC3545', fontSize: 13 },
+  mustChangeBadge: {
+    marginLeft: 8, fontSize: 11, color: '#946200', background: '#FFF3CD',
+    border: '1px solid #FFE69C', borderRadius: 999, padding: '2px 8px',
+  },
 };

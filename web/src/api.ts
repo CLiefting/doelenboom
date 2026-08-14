@@ -64,6 +64,12 @@ export const api = {
 
   heartbeat: (token: string) => request<void>('/api/auth/heartbeat', { method: 'POST' }, token),
 
+  changePassword: (token: string, currentPassword: string, newPassword: string) =>
+    request<{ user: import('./types').User }>('/api/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ currentPassword, newPassword }),
+    }, token),
+
   logoutPreview: (token: string) =>
     request<{ wouldWipe: import('./types').WipeCandidate[] }>('/api/auth/logout-preview', {}, token),
 
@@ -107,12 +113,21 @@ export const api = {
   // --- Gebruikersaccounts (sysadmin-only) ---
   users: (token: string) => request<import('./types').UserSummary[]>('/api/users', {}, token),
 
-  createUser: (token: string, body: { email: string; password: string; isSysadmin?: boolean }) =>
+  createUser: (token: string, body: { email: string; password: string; isSysadmin?: boolean; mustChangePassword?: boolean }) =>
     request<import('./types').UserSummary>('/api/users', { method: 'POST', body: JSON.stringify(body) }, token),
 
-  updateUser: (token: string, userId: number, body: { email?: string; password?: string; isSysadmin?: boolean }) =>
-    request<import('./types').UserSummary>(`/api/users/${userId}`, { method: 'PUT', body: JSON.stringify(body) }, token),
+  updateUser: (
+    token: string,
+    userId: number,
+    body: { email?: string; password?: string; isSysadmin?: boolean; mustChangePassword?: boolean }
+  ) => request<import('./types').UserSummary>(`/api/users/${userId}`, { method: 'PUT', body: JSON.stringify(body) }, token),
 
   deleteUser: (token: string, userId: number) =>
     request<void>(`/api/users/${userId}`, { method: 'DELETE' }, token),
+
+  // --- Database-overzicht (sysadmin-only, /dbstat) ---
+  dbStat: (token: string) => request<import('./types').DbStatTenant[]>('/api/dbstat', {}, token),
+
+  // --- Login-overzicht (sysadmin-only, /sessions): wie is (recent) ingelogd, wanneer ---
+  sessions: (token: string) => request<import('./types').SessionInfo[]>('/api/sessions', {}, token),
 };

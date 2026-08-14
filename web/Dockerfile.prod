@@ -1,0 +1,22 @@
+# Productie-Dockerfile — los van het bestaande Dockerfile (dat blijft
+# ongewijzigd voor lokale ontwikkeling: vite dev-server met hot reload). Alleen
+# de productie-overlay (../docker-compose.prod.yml) gebruikt dit bestand.
+#
+# Stage 1: vite-build. VITE_API_URL leeg (default) = same-origin: de gebouwde
+# app doet gewoon fetch('/api/...') en nginx (stage 2) stuurt dat intern door
+# naar de api-container — zelfde aanpak als bij WWspeur, geen CORS nodig en
+# geen domeinnaam hardcoded in de build.
+FROM node:20-alpine AS build
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+ARG VITE_API_URL=""
+ENV VITE_API_URL=$VITE_API_URL
+RUN npm run build
+
+# Stage 2: statische bestanden serveren + /api/ doorsturen naar de api-container.
+FROM nginx:alpine
+COPY --from=build /app/dist /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+EXPOSE 80

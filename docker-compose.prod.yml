@@ -1,0 +1,69 @@
+# Productie-overlay bovenop docker-compose.yml (dat bestand blijft ongewijzigd
+# — dat is de lokaal geteste configuratie, zonder enige afhankelijkheid van
+# code072-infra). Deze overlay:
+#   - voegt Traefik-routing toe voor doelenboom.code072.nl (via het gedeelde
+#     externe netwerk code072-net, aangemaakt door code072-infra)
+#   - sluit de host-poorten die lokaal handig zijn (5432/4000/5173) af naar
+#     alleen-127.0.0.1 (db/api, voor incidenteel debuggen via een SSH-tunnel)
+#     of helemaal dicht (web) — vanaf internet is straks alleen Traefik
+#     (infra-stack) het ingangspunt.
+#   - bouwt web met de productie-Dockerfile (Dockerfile.prod: vite build +
+#     nginx, i.p.v. de dev-server) en VITE_API_URL='' (same-origin: de app
+#     doet relatieve fetch('/api/...'), nginx stuurt dat intern door — geen
+#     CORS, geen hardcoded domeinnaam in de build).
+#
+# Bewust ANDERS dan WWspeur op één punt: daar staat code072-net al in de
+# lokaal-geteste docker-compose.yml zelf (lokaal draaien vereist dus ook daar
+# de infra-stack). Hier laten we de basis docker-compose.yml bewust vrij van
+# die afhankelijkheid — code072-net wordt pas hier, in de productie-overlay,
+# toegevoegd (bovenop het bestaande project-netwerk, niet in plaats daarvan)
+# zodat db/api/web elkaar nog steeds gewoon vinden zoals lokaal, én web+api
+# via code072-net ontdekt kunnen worden door Traefik/elkaar op de VPS.
+#
+# Gebruik (op de VPS):
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# Vereist Docker Compose >= 2.24 voor de !override-tag (idem WWspeur).
+services:
+  db:
+    ports: !override
+      - "127.0.0.1:5432:5432"   # alleen via een SSH-tunnel, niet vanaf internet
+    networks:
+      - default
+
+  excel-service:
+    networks:
+      - default
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile.prod
+    ports: !override
+      - "127.0.0.1:4000:4000"   # alleen via een SSH-tunnel, niet vanaf internet
+    networks:
+      - default
+      - code072-net
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile.prod
+      args:
+        VITE_API_URL: ""
+    ports: !override []
+    networks:
+      - default
+      - code072-net
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.doelenboom.rule=Host(`doelenboom.code072.nl`)
+      - traefik.http.routers.doelenboom.entrypoints=websecure
+      - traefik.http.routers.doelenboom.tls.certresolver=le
+      - traefik.http.routers.doelenboom.middlewares=security-headers@file
+      - traefik.http.services.doelenboom.loadbalancer.server.port=80
+
+networks:
+  default: {}
+  code072-net:
+    external: true

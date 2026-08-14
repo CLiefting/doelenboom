@@ -7,17 +7,55 @@ export type UserTenantRole = {
   role: TenantRoleName;
 };
 
-export type User = { id: number; email: string; isSysadmin: boolean; tenantRoles: UserTenantRole[] };
+export type User = {
+  id: number;
+  email: string;
+  isSysadmin: boolean;
+  mustChangePassword: boolean;
+  tenantRoles: UserTenantRole[];
+};
 
 export type UserSummary = {
   id: number;
   email: string;
   is_sysadmin: boolean;
+  must_change_password: boolean;
   created_at: string;
   tenantRoles: UserTenantRole[];
 };
 
 export type TenantMember = { user_id: number; email: string; role: TenantRoleName };
+
+export type DbStatDoelenboom = {
+  id: number;
+  slug: string;
+  name: string;
+  elementCount: number;
+  edgeCount: number;
+  tagCount: number;
+  orgUnitCount: number;
+  importCount: number;
+};
+
+export type DbStatTenant = {
+  id: number;
+  slug: string;
+  name: string;
+  wipeOnEmpty: boolean;
+  sessionTimeoutMinutes: number;
+  doelenbomen: DbStatDoelenboom[];
+};
+
+export type SessionInfo = {
+  sessionId: string;
+  userId: number;
+  email: string;
+  isSysadmin: boolean;
+  createdAt: string;
+  lastSeenAt: string;
+  endedAt: string | null;
+  active: boolean;
+};
 
 export type WipeCandidate = {
   tenant: { id: number; slug: string; name: string };
