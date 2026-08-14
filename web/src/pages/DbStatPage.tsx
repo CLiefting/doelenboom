@@ -75,6 +75,7 @@ function DbStatContent({ token }: { token: string }) {
           {t.doelenbomen.length === 0 && <p style={{ color: '#9aa0a8', fontSize: 13 }}>Geen doelenbomen.</p>}
 
           {t.doelenbomen.length > 0 && (
+            <div style={styles.tableWrap}>
             <table style={styles.table}>
               <thead>
                 <tr>
@@ -105,6 +106,7 @@ function DbStatContent({ token }: { token: string }) {
                 })}
               </tbody>
             </table>
+            </div>
           )}
         </section>
       ))}
@@ -118,10 +120,10 @@ const styles: Record<string, React.CSSProperties> = {
     background: '#f4f5f7', fontFamily: 'system-ui, sans-serif',
   },
   card: {
-    background: 'white', padding: '2.5rem', borderRadius: 12, boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-    width: 380, display: 'flex', flexDirection: 'column', gap: '0.75rem',
+    background: 'white', padding: 'clamp(1.5rem, 6vw, 2.5rem)', borderRadius: 12, boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+    width: 'min(380px, 90vw)', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: '0.75rem',
   },
-  mainWide: { fontFamily: 'system-ui, sans-serif', padding: '2rem', maxWidth: 960, margin: '0 auto' },
+  mainWide: { fontFamily: 'system-ui, sans-serif', padding: 'clamp(1rem, 4vw, 2rem)', maxWidth: 960, margin: '0 auto' },
   title: { margin: 0, color: '#203864' },
   link: { color: '#2F5597', fontSize: 14 },
   section: { marginBottom: '1.5rem', background: 'white', borderRadius: 10, padding: '1.25rem 1.5rem', border: '1px solid #e4e6ea' },
@@ -134,6 +136,9 @@ const styles: Record<string, React.CSSProperties> = {
     marginLeft: 8, fontSize: 11, color: '#2e7d32', background: '#E8F5E9', border: '1px solid #C8E6C9',
     borderRadius: 999, padding: '2px 8px',
   },
+  // overflowX:auto zodat een brede tabel op een smal scherm (telefoon) kan
+  // scrollen i.p.v. de pagina-layout te breken.
+  tableWrap: { overflowX: 'auto' },
   table: { width: '100%', borderCollapse: 'collapse', fontSize: 13.5 },
   th: { textAlign: 'left', borderBottom: '1px solid #e4e6ea', padding: '6px 8px', color: '#6c6f76', fontWeight: 600 },
   td: { borderBottom: '1px solid #f0f1f3', padding: '6px 8px' },

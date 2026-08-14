@@ -114,10 +114,11 @@ const styles: Record<string, React.CSSProperties> = {
   },
   card: {
     background: 'white',
-    padding: '2.5rem',
+    padding: 'clamp(1.5rem, 6vw, 2.5rem)',
     borderRadius: 12,
     boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-    width: 340,
+    width: 'min(340px, 90vw)',
+    boxSizing: 'border-box',
     display: 'flex',
     flexDirection: 'column',
     gap: '0.75rem',
@@ -125,7 +126,9 @@ const styles: Record<string, React.CSSProperties> = {
   title: { margin: 0, color: '#203864' },
   subtitle: { margin: '0 0 0.5rem', color: '#6c6f76', fontSize: 13.5, lineHeight: 1.4 },
   label: { display: 'flex', flexDirection: 'column', gap: 4, fontSize: 14, color: '#333' },
-  input: { padding: '0.5rem', borderRadius: 6, border: '1px solid #d0d4da', fontSize: 14 },
+  // fontSize 16px i.p.v. 14px: voorkomt dat mobiel Safari automatisch inzoomt
+  // zodra je een invoerveld aantikt (zie LoginPage.tsx voor dezelfde toelichting).
+  input: { padding: '0.5rem', borderRadius: 6, border: '1px solid #d0d4da', fontSize: 16 },
   button: {
     flex: 1,
     marginTop: '0.5rem',

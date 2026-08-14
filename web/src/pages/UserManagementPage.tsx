@@ -230,6 +230,7 @@ function MemberTable({
   if (members.length === 0) return <p style={styles.muted}>Nog geen leden.</p>;
 
   return (
+    <div style={styles.tableWrap}>
     <table style={styles.table}>
       <thead>
         <tr>
@@ -262,6 +263,7 @@ function MemberTable({
         ))}
       </tbody>
     </table>
+    </div>
   );
 }
 
@@ -491,6 +493,7 @@ function AllUsersTable({
   const [resettingId, setResettingId] = useState<number | null>(null);
 
   return (
+    <div style={styles.tableWrap}>
     <table style={styles.table}>
       <thead>
         <tr>
@@ -558,6 +561,7 @@ function AllUsersTable({
         ))}
       </tbody>
     </table>
+    </div>
   );
 }
 
@@ -698,7 +702,7 @@ function btnStyle(kind: 'ghost' | 'primary' | 'danger-text'): React.CSSPropertie
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  main: { fontFamily: 'system-ui, sans-serif', padding: '2rem', maxWidth: 860, margin: '0 auto' },
+  main: { fontFamily: 'system-ui, sans-serif', padding: 'clamp(1rem, 4vw, 2rem)', maxWidth: 860, margin: '0 auto' },
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.5rem' },
   title: { margin: 0, color: '#203864' },
   subtitle: { margin: '4px 0 0', color: '#6c6f76', fontSize: 13.5 },
@@ -708,6 +712,9 @@ const styles: Record<string, React.CSSProperties> = {
   inlineForm: { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginTop: 12 },
   input: { padding: '7px 10px', borderRadius: 6, border: '1px solid #d0d4da', fontSize: 13 },
   select: { padding: '6px 8px', borderRadius: 6, border: '1px solid #d0d4da', fontSize: 13 },
+  // overflowX:auto zodat een brede tabel op een smal scherm (telefoon) kan
+  // scrollen i.p.v. de pagina-layout te breken.
+  tableWrap: { overflowX: 'auto' },
   table: { width: '100%', borderCollapse: 'collapse', fontSize: 13.5 },
   th: { textAlign: 'left', borderBottom: '1px solid #e4e6ea', padding: '6px 8px', color: '#6c6f76', fontWeight: 600 },
   td: { borderBottom: '1px solid #f0f1f3', padding: '6px 8px' },

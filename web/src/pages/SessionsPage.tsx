@@ -128,6 +128,7 @@ function SessionsContent({ token }: { token: string }) {
       {sessions && sessions.length === 0 && <p style={{ color: '#9aa0a8', fontSize: 13 }}>Nog geen sessies geregistreerd.</p>}
 
       {sessions && sessions.length > 0 && viewMode === 'sessions' && (
+        <div style={styles.tableWrap}>
         <table style={styles.table}>
           <thead>
             <tr>
@@ -159,9 +160,11 @@ function SessionsContent({ token }: { token: string }) {
             ))}
           </tbody>
         </table>
+        </div>
       )}
 
       {sessions && sessions.length > 0 && viewMode === 'users' && (
+        <div style={styles.tableWrap}>
         <table style={styles.table}>
           <thead>
             <tr>
@@ -193,6 +196,7 @@ function SessionsContent({ token }: { token: string }) {
             ))}
           </tbody>
         </table>
+        </div>
       )}
     </main>
   );
@@ -204,12 +208,15 @@ const styles: Record<string, React.CSSProperties> = {
     background: '#f4f5f7', fontFamily: 'system-ui, sans-serif',
   },
   card: {
-    background: 'white', padding: '2.5rem', borderRadius: 12, boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-    width: 380, display: 'flex', flexDirection: 'column', gap: '0.75rem',
+    background: 'white', padding: 'clamp(1.5rem, 6vw, 2.5rem)', borderRadius: 12, boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+    width: 'min(380px, 90vw)', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: '0.75rem',
   },
-  mainWide: { fontFamily: 'system-ui, sans-serif', padding: '2rem', maxWidth: 960, margin: '0 auto' },
+  mainWide: { fontFamily: 'system-ui, sans-serif', padding: 'clamp(1rem, 4vw, 2rem)', maxWidth: 960, margin: '0 auto' },
   title: { margin: 0, color: '#203864' },
   link: { color: '#2F5597', fontSize: 14 },
+  // overflowX:auto zodat een brede tabel op een smal scherm (telefoon) kan
+  // scrollen i.p.v. de pagina-layout te breken.
+  tableWrap: { overflowX: 'auto' },
   table: { width: '100%', borderCollapse: 'collapse', fontSize: 13.5, background: 'white', borderRadius: 10, overflow: 'hidden', border: '1px solid #e4e6ea' },
   th: { textAlign: 'left', borderBottom: '1px solid #e4e6ea', padding: '8px 12px', color: '#6c6f76', fontWeight: 600 },
   td: { borderBottom: '1px solid #f0f1f3', padding: '8px 12px' },

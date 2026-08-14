@@ -53,7 +53,7 @@ export default function ImportPage({
   const canPublish = detail && detail.status !== 'failed' && !published;
 
   return (
-    <main style={{ fontFamily: 'system-ui, sans-serif', padding: '2rem', maxWidth: 720, margin: '0 auto' }}>
+    <main style={{ fontFamily: 'system-ui, sans-serif', padding: 'clamp(1rem, 4vw, 2rem)', maxWidth: 720, margin: '0 auto' }}>
       <button onClick={onBack} style={{ border: 'none', background: 'none', color: '#2F5597', cursor: 'pointer', marginBottom: 12 }}>
         ← Terug naar {doelenboom.name}
       </button>

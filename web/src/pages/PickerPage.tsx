@@ -36,7 +36,7 @@ export default function PickerPage({
   }
 
   return (
-    <main style={{ fontFamily: 'system-ui, sans-serif', padding: '2rem', maxWidth: 780, margin: '0 auto' }}>
+    <main style={{ fontFamily: 'system-ui, sans-serif', padding: 'clamp(1rem, 4vw, 2rem)', maxWidth: 780, margin: '0 auto' }}>
       <header style={{ marginBottom: '2rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
           <h1 style={{ margin: 0, color: '#203864' }}>Doelenboom</h1>
