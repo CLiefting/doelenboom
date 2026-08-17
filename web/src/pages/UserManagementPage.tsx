@@ -144,10 +144,18 @@ export default function UserManagementPage({
               token={token}
               tenantId={selectedTenantId}
               doelenbomen={doelenbomen.filter((d) => d.tenant_id === selectedTenantId)}
+              isSysadmin={user.isSysadmin}
+              tenants={tenants ?? []}
               busy={busy}
               setBusy={setBusy}
               setError={setError}
               onChanged={refreshDoelenbomen}
+              onDuplicated={() => {
+                refreshDoelenbomen();
+                // Een duplicatie kan (bij "nieuwe tenant") een tenant hebben
+                // aangemaakt — die moet dan ook in de tenant-lijst verschijnen.
+                api.tenants(token).then(setTenants).catch((err) => setError(errMsg(err)));
+              }}
             />
           )}
         </section>
@@ -372,20 +380,27 @@ function DoelenbomenSection({
   token,
   tenantId,
   doelenbomen,
+  isSysadmin,
+  tenants,
   busy,
   setBusy,
   setError,
   onChanged,
+  onDuplicated,
 }: {
   token: string;
   tenantId: number;
   doelenbomen: DoelenboomSummary[];
+  isSysadmin: boolean;
+  tenants: TenantSummary[];
   busy: boolean;
   setBusy: (b: boolean) => void;
   setError: (e: string | null) => void;
   onChanged: () => void;
+  onDuplicated: () => void;
 }) {
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [duplicatingId, setDuplicatingId] = useState<number | null>(null);
 
   async function remove(d: DoelenboomSummary) {
     const ok = window.confirm(
@@ -409,22 +424,43 @@ function DoelenbomenSection({
     <div>
       {doelenbomen.length === 0 && <p style={styles.muted}>Nog geen doelenbomen in deze tenant.</p>}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
-        {doelenbomen.map((d) =>
-          editingId === d.id ? (
-            <DoelenboomEditRow
-              key={d.id}
-              token={token}
-              doelenboom={d}
-              busy={busy}
-              setBusy={setBusy}
-              setError={setError}
-              onSaved={() => {
-                setEditingId(null);
-                onChanged();
-              }}
-              onCancel={() => setEditingId(null)}
-            />
-          ) : (
+        {doelenbomen.map((d) => {
+          if (editingId === d.id) {
+            return (
+              <DoelenboomEditRow
+                key={d.id}
+                token={token}
+                doelenboom={d}
+                busy={busy}
+                setBusy={setBusy}
+                setError={setError}
+                onSaved={() => {
+                  setEditingId(null);
+                  onChanged();
+                }}
+                onCancel={() => setEditingId(null)}
+              />
+            );
+          }
+          if (duplicatingId === d.id) {
+            return (
+              <DuplicateDoelenboomForm
+                key={d.id}
+                token={token}
+                doelenboom={d}
+                tenants={tenants}
+                busy={busy}
+                setBusy={setBusy}
+                setError={setError}
+                onDuplicated={() => {
+                  setDuplicatingId(null);
+                  onDuplicated();
+                }}
+                onCancel={() => setDuplicatingId(null)}
+              />
+            );
+          }
+          return (
             <div key={d.id} style={styles.doelenboomRow}>
               <div>
                 <strong>{d.name}</strong> <span style={{ opacity: 0.6, fontSize: 12 }}>({d.slug})</span>
@@ -432,6 +468,11 @@ function DoelenbomenSection({
                 {d.wipe_on_empty && <span style={styles.mustChangeBadge}>auto-leegmaken</span>}
               </div>
               <div style={{ display: 'flex', gap: 6 }}>
+                {isSysadmin && (
+                  <button disabled={busy} onClick={() => setDuplicatingId(d.id)} style={btnStyle('ghost')}>
+                    Dupliceren
+                  </button>
+                )}
                 <button disabled={busy} onClick={() => setEditingId(d.id)} style={btnStyle('ghost')}>
                   Bewerken
                 </button>
@@ -440,8 +481,8 @@ function DoelenbomenSection({
                 </button>
               </div>
             </div>
-          )
-        )}
+          );
+        })}
       </div>
       <CreateDoelenboomForm
         token={token}
@@ -511,6 +552,149 @@ function DoelenboomEditRow({
         </button>
         <button type="submit" style={btnStyle('primary')} disabled={busy}>
           Opslaan
+        </button>
+      </div>
+    </form>
+  );
+}
+
+// Sysadmin-only: dupliceert een doelenboom incl. alle inhoud (elementen,
+// relaties, tags, org.-onderdelen, ...) — evt. naar een andere bestaande
+// tenant of een gloednieuwe tenant. Excel-importhistorie wordt bewust niet
+// meegekopieerd (zie api/src/routes/doelenbomen.ts). Route zelf is al
+// sysadmin-gated; deze knop is client-side ook al alleen zichtbaar voor
+// sysadmins, maar het formulier checkt niets extra — de server is de
+// echte grens.
+function DuplicateDoelenboomForm({
+  token,
+  doelenboom,
+  tenants,
+  busy,
+  setBusy,
+  setError,
+  onDuplicated,
+  onCancel,
+}: {
+  token: string;
+  doelenboom: DoelenboomSummary;
+  tenants: TenantSummary[];
+  busy: boolean;
+  setBusy: (b: boolean) => void;
+  setError: (e: string | null) => void;
+  onDuplicated: () => void;
+  onCancel: () => void;
+}) {
+  const [slug, setSlug] = useState(`${doelenboom.slug}-kopie`);
+  const [name, setName] = useState(`${doelenboom.name} (kopie)`);
+  const [target, setTarget] = useState<'same' | 'existing' | 'new'>('same');
+  const [existingTenantId, setExistingTenantId] = useState<number | ''>('');
+  const [newTenantSlug, setNewTenantSlug] = useState('');
+  const [newTenantName, setNewTenantName] = useState('');
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const body: Parameters<typeof api.duplicateDoelenboom>[2] = { slug, name };
+      if (target === 'existing') {
+        if (!existingTenantId) {
+          setError('Kies een doel-tenant.');
+          setBusy(false);
+          return;
+        }
+        body.targetTenantId = existingTenantId;
+      } else if (target === 'new') {
+        if (!newTenantSlug.trim() || !newTenantName.trim()) {
+          setError('Slug en naam van de nieuwe tenant zijn verplicht.');
+          setBusy(false);
+          return;
+        }
+        body.newTenant = { slug: newTenantSlug.trim(), name: newTenantName.trim() };
+      }
+      await api.duplicateDoelenboom(token, doelenboom.id, body);
+      onDuplicated();
+    } catch (err) {
+      setError(errMsg(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const otherTenants = tenants.filter((t) => t.id !== doelenboom.tenant_id);
+
+  return (
+    <form onSubmit={submit} style={styles.doelenboomEditRow}>
+      <p style={{ margin: 0, fontSize: 13.5, color: '#6c6f76' }}>
+        "{doelenboom.name}" dupliceren, inclusief alle elementen, relaties, tags en organisatieonderdelen
+        (importhistorie wordt niet meegekopieerd).
+      </p>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <input
+          style={styles.input}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="naam van de kopie"
+          required
+        />
+        <input
+          style={styles.input}
+          value={slug}
+          onChange={(e) => setSlug(e.target.value)}
+          placeholder="slug van de kopie"
+          required
+        />
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13.5 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <input type="radio" name="dup-target" checked={target === 'same'} onChange={() => setTarget('same')} />
+          Binnen dezelfde tenant ({doelenboom.tenant_name})
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <input type="radio" name="dup-target" checked={target === 'existing'} onChange={() => setTarget('existing')} />
+          Naar een andere bestaande tenant
+        </label>
+        {target === 'existing' && (
+          <select
+            style={{ ...styles.input, marginLeft: 26 }}
+            value={existingTenantId}
+            onChange={(e) => setExistingTenantId(e.target.value ? Number(e.target.value) : '')}
+          >
+            <option value="">— kies tenant —</option>
+            {otherTenants.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name} ({t.slug})
+              </option>
+            ))}
+          </select>
+        )}
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <input type="radio" name="dup-target" checked={target === 'new'} onChange={() => setTarget('new')} />
+          Naar een gloednieuwe tenant
+        </label>
+        {target === 'new' && (
+          <div style={{ display: 'flex', gap: 8, marginLeft: 26 }}>
+            <input
+              style={styles.input}
+              placeholder="naam nieuwe tenant"
+              value={newTenantName}
+              onChange={(e) => setNewTenantName(e.target.value)}
+            />
+            <input
+              style={styles.input}
+              placeholder="slug nieuwe tenant"
+              value={newTenantSlug}
+              onChange={(e) => setNewTenantSlug(e.target.value)}
+            />
+          </div>
+        )}
+      </div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button type="button" onClick={onCancel} style={btnStyle('ghost')} disabled={busy}>
+          Annuleren
+        </button>
+        <button type="submit" style={btnStyle('primary')} disabled={busy}>
+          Dupliceren
         </button>
       </div>
     </form>

@@ -1,7 +1,17 @@
 import { Router } from 'express';
 import { pool } from '../db.js';
 import { requireAuth, AuthedRequest } from '../auth.js';
-import { requireTenantRole, requireTenantRoleForDoelenboomParam, requireTenantRoleForTenantParam, tenantIdForDoelenboom } from '../rbac.js';
+import {
+  requireSysadmin,
+  requireTenantRole,
+  requireTenantRoleForDoelenboomParam,
+  requireTenantRoleForTenantParam,
+  tenantIdForDoelenboom,
+} from '../rbac.js';
+
+function isUniqueViolation(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { code?: string }).code === '23505';
+}
 
 // Let op: dit router wordt gemount op '/api' (niet '/api/doelenbomen'), zodat zowel
 // '/api/doelenbomen' als '/api/tenants/:tenantId/doelenbomen' vanuit één bestand
@@ -142,3 +152,197 @@ doelenbomenRouter.delete(
     res.status(204).send();
   }
 );
+
+// POST /api/doelenbomen/:id/duplicate — { slug, name, targetTenantId?, newTenant?: { slug, name } }
+// Sysadmin-only: dupliceert een doelenboom inclusief alle inhoud (elementen,
+// relaties, projectstatus, producten, tags + koppelingen, organisatieonderdelen
+// + koppelingen) naar een nieuwe doelenboom — desgewenst in dezelfde tenant, een
+// andere bestaande tenant (targetTenantId), of een gloednieuwe tenant (newTenant,
+// in dezelfde transactie aangemaakt zodat er bij een mislukte kopie geen lege
+// tenant achterblijft). Imports (excel_imports) worden bewust NIET meegekopieerd
+// — dat is upload-historie/audit-trail, geen boom-inhoud. De duplicaat start
+// altijd met read_only=false en wipe_on_empty=false, ongeacht de bron — dat zijn
+// per-boom operationele vlaggen die je na het dupliceren zelf weer instelt.
+doelenbomenRouter.post('/doelenbomen/:id/duplicate', requireSysadmin, async (req, res) => {
+  const b = (req.body ?? {}) as Record<string, unknown>;
+  const slug = typeof b.slug === 'string' ? b.slug.trim() : '';
+  const name = typeof b.name === 'string' ? b.name.trim() : '';
+  const targetTenantId = typeof b.targetTenantId === 'number' ? b.targetTenantId : undefined;
+  const newTenantInput = (b.newTenant ?? null) as { slug?: unknown; name?: unknown } | null;
+  const newTenantSlug = typeof newTenantInput?.slug === 'string' ? newTenantInput.slug.trim() : '';
+  const newTenantName = typeof newTenantInput?.name === 'string' ? newTenantInput.name.trim() : '';
+
+  if (!slug || !name) return res.status(400).json({ error: 'slug en name zijn verplicht.' });
+  if (newTenantInput && (!newTenantSlug || !newTenantName)) {
+    return res.status(400).json({ error: 'newTenant.slug en newTenant.name zijn verplicht.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('begin');
+
+    const source = await client.query('select tenant_id from doelenbomen where id = $1', [req.params.id]);
+    if (source.rows.length === 0) {
+      await client.query('rollback');
+      return res.status(404).json({ error: 'Bron-doelenboom niet gevonden.' });
+    }
+
+    let resolvedTenantId: number = targetTenantId ?? source.rows[0].tenant_id;
+    if (newTenantInput) {
+      const tenantResult = await client.query(
+        'insert into tenants (slug, name) values ($1, $2) returning id',
+        [newTenantSlug, newTenantName]
+      );
+      resolvedTenantId = tenantResult.rows[0].id;
+    }
+
+    const newDoelenboom = await client.query(
+      `insert into doelenbomen (tenant_id, slug, name)
+       values ($1, $2, $3) returning id, slug, name, read_only, wipe_on_empty, created_at`,
+      [resolvedTenantId, slug, name]
+    );
+    const newDoelenboomId = newDoelenboom.rows[0].id;
+
+    const elementsResult = await client.query(
+      `select id, code, type, name, description, parent_text, kpi, taakveld, subtaakveld, sort_order
+       from elements where doelenboom_id = $1`,
+      [req.params.id]
+    );
+    const sourceElementIds = elementsResult.rows.map((r) => r.id);
+    const elementIdMap = new Map<number, number>();
+    for (const el of elementsResult.rows) {
+      const r = await client.query(
+        `insert into elements
+           (doelenboom_id, code, type, name, description, parent_text, kpi, taakveld, subtaakveld, sort_order)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning id`,
+        [
+          newDoelenboomId, el.code, el.type, el.name, el.description,
+          el.parent_text, el.kpi, el.taakveld, el.subtaakveld, el.sort_order,
+        ]
+      );
+      elementIdMap.set(el.id, r.rows[0].id);
+    }
+
+    const edgesResult = await client.query(
+      'select source_element_id, target_element_id, weight, toelichting from edges where doelenboom_id = $1',
+      [req.params.id]
+    );
+    for (const e of edgesResult.rows) {
+      const newSource = elementIdMap.get(e.source_element_id);
+      const newTarget = elementIdMap.get(e.target_element_id);
+      if (!newSource || !newTarget) continue;
+      await client.query(
+        `insert into edges (doelenboom_id, source_element_id, target_element_id, weight, toelichting)
+         values ($1,$2,$3,$4,$5)`,
+        [newDoelenboomId, newSource, newTarget, e.weight, e.toelichting]
+      );
+    }
+
+    const psResult = await client.query(
+      `select element_id, projectstatus, rag, toelichting, gerapporteerd_op, cluster_ppt
+       from project_status where element_id = any($1::bigint[])`,
+      [sourceElementIds]
+    );
+    for (const ps of psResult.rows) {
+      const newElementId = elementIdMap.get(ps.element_id);
+      if (!newElementId) continue;
+      await client.query(
+        `insert into project_status (element_id, projectstatus, rag, toelichting, gerapporteerd_op, cluster_ppt)
+         values ($1,$2,$3,$4,$5,$6)`,
+        [newElementId, ps.projectstatus, ps.rag, ps.toelichting, ps.gerapporteerd_op, ps.cluster_ppt]
+      );
+    }
+
+    const productsResult = await client.query(
+      `select element_id, code, name, omschrijving, pct_gereed, verwachte_datum, werkelijke_datum, opmerking
+       from products where element_id = any($1::bigint[])`,
+      [sourceElementIds]
+    );
+    for (const p of productsResult.rows) {
+      const newElementId = elementIdMap.get(p.element_id);
+      if (!newElementId) continue;
+      await client.query(
+        `insert into products
+           (element_id, code, name, omschrijving, pct_gereed, verwachte_datum, werkelijke_datum, opmerking)
+         values ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [newElementId, p.code, p.name, p.omschrijving, p.pct_gereed, p.verwachte_datum, p.werkelijke_datum, p.opmerking]
+      );
+    }
+
+    const tagsResult = await client.query(
+      'select id, code, name, categorie, omschrijving from tags where doelenboom_id = $1',
+      [req.params.id]
+    );
+    const tagIdMap = new Map<number, number>();
+    for (const t of tagsResult.rows) {
+      const r = await client.query(
+        'insert into tags (doelenboom_id, code, name, categorie, omschrijving) values ($1,$2,$3,$4,$5) returning id',
+        [newDoelenboomId, t.code, t.name, t.categorie, t.omschrijving]
+      );
+      tagIdMap.set(t.id, r.rows[0].id);
+    }
+
+    const elementTagsResult = await client.query(
+      'select element_id, tag_id, toelichting from element_tags where element_id = any($1::bigint[])',
+      [sourceElementIds]
+    );
+    for (const et of elementTagsResult.rows) {
+      const newElementId = elementIdMap.get(et.element_id);
+      const newTagId = tagIdMap.get(et.tag_id);
+      if (!newElementId || !newTagId) continue;
+      await client.query(
+        'insert into element_tags (element_id, tag_id, toelichting) values ($1,$2,$3)',
+        [newElementId, newTagId, et.toelichting]
+      );
+    }
+
+    const orgUnitsResult = await client.query(
+      'select id, code, name, omschrijving from org_units where doelenboom_id = $1',
+      [req.params.id]
+    );
+    const orgUnitIdMap = new Map<number, number>();
+    for (const o of orgUnitsResult.rows) {
+      const r = await client.query(
+        'insert into org_units (doelenboom_id, code, name, omschrijving) values ($1,$2,$3,$4) returning id',
+        [newDoelenboomId, o.code, o.name, o.omschrijving]
+      );
+      orgUnitIdMap.set(o.id, r.rows[0].id);
+    }
+
+    const obOrgResult = await client.query(
+      `select element_id, org_unit_id, relatietype, toelichting, status
+       from ob_org_relations where element_id = any($1::bigint[])`,
+      [sourceElementIds]
+    );
+    for (const rel of obOrgResult.rows) {
+      const newElementId = elementIdMap.get(rel.element_id);
+      const newOrgUnitId = orgUnitIdMap.get(rel.org_unit_id);
+      if (!newElementId || !newOrgUnitId) continue;
+      await client.query(
+        `insert into ob_org_relations (element_id, org_unit_id, relatietype, toelichting, status)
+         values ($1,$2,$3,$4,$5)`,
+        [newElementId, newOrgUnitId, rel.relatietype, rel.toelichting, rel.status]
+      );
+    }
+
+    await client.query('commit');
+
+    const tenantInfo = await pool.query('select id, slug, name from tenants where id = $1', [resolvedTenantId]);
+    res.status(201).json({
+      ...newDoelenboom.rows[0],
+      tenant_id: tenantInfo.rows[0].id,
+      tenant_slug: tenantInfo.rows[0].slug,
+      tenant_name: tenantInfo.rows[0].name,
+    });
+  } catch (err) {
+    await client.query('rollback');
+    if (isUniqueViolation(err)) {
+      return res
+        .status(409)
+        .json({ error: 'Doelenboom- of tenant-slug bestaat al.', detail: (err as Error).message });
+    }
+    res.status(500).json({ error: 'Dupliceren mislukt', detail: (err as Error).message });
+  } finally {
+    client.release();
+  }
+});

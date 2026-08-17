@@ -73,6 +73,18 @@ export const api = {
   deleteDoelenboom: (token: string, doelenboomId: number) =>
     request<void>(`/api/doelenbomen/${doelenboomId}`, { method: 'DELETE' }, token),
 
+  // Sysadmin-only — zie api/src/routes/doelenbomen.ts. targetTenantId en newTenant
+  // zijn elkaar uitsluitend: geen van beide meegeven dupliceert binnen dezelfde tenant.
+  duplicateDoelenboom: (
+    token: string,
+    doelenboomId: number,
+    body: { slug: string; name: string; targetTenantId?: number; newTenant?: { slug: string; name: string } }
+  ) =>
+    request<import('./types').DoelenboomSummary>(`/api/doelenbomen/${doelenboomId}/duplicate`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }, token),
+
   tree: (token: string, id: number | string) =>
     request<import('./types').TreeResponse>(`/api/doelenbomen/${id}/tree`, {}, token),
 
