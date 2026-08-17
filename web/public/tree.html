@@ -207,6 +207,18 @@
     border: none; background: none; font: inherit; font-size: 12.5px; color: #333; cursor: pointer;
   }
   .value-picker-item:hover { background: #eef0f3; }
+  .checkbox-list {
+    max-height: 150px; overflow-y: auto; border: 1.5px solid #ccc; border-radius: 6px;
+    padding: 8px 10px; margin-top: 4px; display: flex; flex-direction: column; gap: 6px;
+    background: #fafbfc;
+  }
+  .checkbox-list-item {
+    display: flex !important; align-items: center; gap: 7px; font-size: 13px !important;
+    font-weight: 400 !important; text-transform: none; letter-spacing: normal; color: #333;
+    margin-bottom: 0 !important; cursor: pointer;
+  }
+  .checkbox-list-item input { width: auto !important; margin: 0 !important; }
+  .checkbox-list-empty { font-size: 12px; color: #999; font-style: italic; margin: 0; }
   .value-picker-empty { padding: 8px; font-size: 12px; color: #999; font-style: italic; }
 
   .dp-crud-actions { display: flex; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 1px solid #eee; }
@@ -715,6 +727,13 @@
             <input type="text" id="element-field-subtaakveld" autocomplete="off">
             <button type="button" class="value-picker-btn" id="element-subtaakveld-picker-btn" title="Kies uit bestaande waarden">&hellip;</button>
           </div>
+        </label>
+        <label>Tags
+          <div class="checkbox-list" id="element-field-tags"></div>
+        </label>
+        <label>Organisatieonderdelen
+          <div class="checkbox-list" id="element-field-orgunits"></div>
+          <span class="field-note">Voor relatietype/status/toelichting per koppeling: klik na het opslaan op het chipje in het detailpaneel.</span>
         </label>
         <p class="element-modal-status" id="element-modal-status"></p>
         <div class="element-modal-actions">
@@ -2093,6 +2112,8 @@ function runApp(data) {
   const elementFieldKpi = document.getElementById('element-field-kpi');
   const elementFieldTaakveld = document.getElementById('element-field-taakveld');
   const elementFieldSubtaakveld = document.getElementById('element-field-subtaakveld');
+  const elementFieldTagsList = document.getElementById('element-field-tags');
+  const elementFieldOrgUnitsList = document.getElementById('element-field-orgunits');
   let elementModalMode = 'create';
   let elementModalOriginalCode = null;
   let elementCodeAutoFilled = false;
@@ -2170,6 +2191,30 @@ function runApp(data) {
     }
   });
 
+  // Checkbox-lijsten in het element-formulier tonen alleen lid-/niet-lid-schap
+  // (aan/uit); relatietype/status/toelichting per koppeling met een organisatie-
+  // onderdeel blijft de taak van het dedicated koppel-paneel (openOrgLinkModal,
+  // opengeklikt via een chipje in het detailpaneel) — hier zou dat de vorm
+  // onnodig zwaar maken.
+  function checkboxListHtml(items, checkedSet) {
+    if (!items.length) return '<p class="checkbox-list-empty">Nog geen items — voeg ze eerst toe via "Tags &amp; organisatieonderdelen beheren".</p>';
+    return items.map((it) =>
+      '<label class="checkbox-list-item"><input type="checkbox" value="' + escapeHtml(it.code) + '"' +
+      (checkedSet.has(it.code) ? ' checked' : '') + '> ' + escapeHtml(it.name) + '</label>'
+    ).join('');
+  }
+
+  function populateElementTagOrgCheckboxes(code) {
+    const tagItems = Object.keys(TAGS).map((t) => ({ code: t, name: TAGS[t].name }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'nl'));
+    const orgItems = Object.keys(ORGS).map((o) => ({ code: o, name: ORGS[o].name }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'nl'));
+    const checkedTags = new Set(code ? (ELEMENT_TAGS[code] || []) : []);
+    const checkedOrgs = new Set(code ? (OB_ORG[code] || []).map((r) => r.org) : []);
+    elementFieldTagsList.innerHTML = checkboxListHtml(tagItems, checkedTags);
+    elementFieldOrgUnitsList.innerHTML = checkboxListHtml(orgItems, checkedOrgs);
+  }
+
   function openElementModal(mode, code) {
     elementModalMode = mode;
     elementModalOriginalCode = code || null;
@@ -2185,12 +2230,14 @@ function runApp(data) {
       elementFieldKpi.value = d.kpi || '';
       elementFieldTaakveld.value = d.taakveld || '';
       elementFieldSubtaakveld.value = d.subtaakveld || '';
+      populateElementTagOrgCheckboxes(code);
     } else {
       elementModalTitle.textContent = 'Nieuw element';
       elementForm.reset();
       elementFieldType.value = 'Project';
       elementFieldCode.value = suggestElementCode(elementFieldType.value);
       elementCodeAutoFilled = true;
+      populateElementTagOrgCheckboxes(null);
     }
     elementModalBackdrop.classList.add('visible');
     elementFieldName.focus();
@@ -2236,6 +2283,61 @@ function runApp(data) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || ('Opslaan mislukt (HTTP ' + res.status + ')'));
       }
+      const saved = await res.json().catch(() => ({}));
+      const savedCode = saved.code || payload.code;
+
+      // Tags/organisatieonderdelen bijwerken op basis van de checkbox-lijsten
+      // hierboven: alleen het verschil met de situatie vóór het openen van dit
+      // formulier (leeg bij "Nieuw element") wordt via losse koppel-requests
+      // verstuurd — zelfde endpoints als de +Tag/+Organisatieonderdeel-knoppen
+      // in het detailpaneel.
+      const selectedTags = new Set(
+        Array.from(elementFieldTagsList.querySelectorAll('input:checked')).map((el) => el.value)
+      );
+      const selectedOrgs = new Set(
+        Array.from(elementFieldOrgUnitsList.querySelectorAll('input:checked')).map((el) => el.value)
+      );
+      const priorTags = new Set(isEdit ? (ELEMENT_TAGS[elementModalOriginalCode] || []) : []);
+      const priorOrgs = new Set(isEdit ? (OB_ORG[elementModalOriginalCode] || []).map((r) => r.org) : []);
+
+      const tagsToAdd = Array.from(selectedTags).filter((t) => !priorTags.has(t));
+      const tagsToRemove = Array.from(priorTags).filter((t) => !selectedTags.has(t));
+      const orgsToAdd = Array.from(selectedOrgs).filter((o) => !priorOrgs.has(o));
+      const orgsToRemove = Array.from(priorOrgs).filter((o) => !selectedOrgs.has(o));
+
+      const jsonHeaders = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + authToken };
+      const authOnlyHeaders = { Authorization: 'Bearer ' + authToken };
+      const elementsBase = apiUrl + '/api/doelenbomen/' + doelenboomId + '/elements/' + encodeURIComponent(savedCode);
+      const linkCalls = [
+        ...tagsToAdd.map((t) => () => fetch(elementsBase + '/tags', {
+          method: 'POST', headers: jsonHeaders, body: JSON.stringify({ tagCode: t, toelichting: '' }),
+        })),
+        ...tagsToRemove.map((t) => () => fetch(elementsBase + '/tags/' + encodeURIComponent(t), {
+          method: 'DELETE', headers: authOnlyHeaders,
+        })),
+        ...orgsToAdd.map((o) => () => fetch(elementsBase + '/org-units', {
+          method: 'POST', headers: jsonHeaders,
+          body: JSON.stringify({ orgCode: o, relatietype: 'Betrokken', status: 'Concept', toelichting: '' }),
+        })),
+        ...orgsToRemove.map((o) => () => fetch(elementsBase + '/org-units/' + encodeURIComponent(o), {
+          method: 'DELETE', headers: authOnlyHeaders,
+        })),
+      ];
+
+      if (linkCalls.length) {
+        const results = await Promise.all(linkCalls.map((call) => call().then(async (r) => {
+          if (r.ok || r.status === 204) return null;
+          const b = await r.json().catch(() => ({}));
+          return b.error || ('HTTP ' + r.status);
+        })));
+        const linkErrors = results.filter(Boolean);
+        if (linkErrors.length) {
+          setElementModalStatus('Element opgeslagen, maar niet alle tag-/organisatiekoppelingen zijn gelukt: ' + linkErrors.join('; '));
+          setTimeout(() => window.location.reload(), 1800);
+          return;
+        }
+      }
+
       setElementModalStatus('Opgeslagen, boom wordt herladen…', 'ok');
       setTimeout(() => window.location.reload(), 400);
     } catch (err) {
