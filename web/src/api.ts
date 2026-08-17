@@ -54,6 +54,25 @@ export const api = {
 
   doelenbomen: (token: string) => request<import('./types').DoelenboomSummary[]>('/api/doelenbomen', {}, token),
 
+  createDoelenboom: (token: string, tenantId: number, body: { slug: string; name: string }) =>
+    request<import('./types').DoelenboomBase>(`/api/tenants/${tenantId}/doelenbomen`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }, token),
+
+  updateDoelenboom: (
+    token: string,
+    doelenboomId: number,
+    body: { name: string; slug?: string; readOnly?: boolean }
+  ) =>
+    request<import('./types').DoelenboomBase>(`/api/doelenbomen/${doelenboomId}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }, token),
+
+  deleteDoelenboom: (token: string, doelenboomId: number) =>
+    request<void>(`/api/doelenbomen/${doelenboomId}`, { method: 'DELETE' }, token),
+
   tree: (token: string, id: number | string) =>
     request<import('./types').TreeResponse>(`/api/doelenbomen/${id}/tree`, {}, token),
 

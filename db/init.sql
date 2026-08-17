@@ -72,6 +72,14 @@ create table if not exists doelenbomen (
   tenant_id bigint not null references tenants(id) on delete cascade,
   slug text not null,
   name text not null,
+  -- Als true: alleen sysadmins mogen nog wijzigen (elementen/relaties/tags/
+  -- organisatieonderdelen/imports) — tenant-admins en gebruikers krijgen dan
+  -- overal read-only te zien, ook al zouden ze normaal wel schrijfrechten
+  -- hebben (zie requireWritableDoelenboom in api/src/rbac.ts). Hernoemen/
+  -- verwijderen van de doelenboom zelf, en deze vlag omzetten, blijft wél
+  -- gewoon voor tenant-admins mogelijk — dat is geen "boom-inhoud" maar
+  -- tenant-beheer.
+  read_only boolean not null default false,
   created_at timestamptz not null default now(),
   unique (tenant_id, slug)
 );

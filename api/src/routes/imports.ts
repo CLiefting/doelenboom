@@ -2,13 +2,22 @@ import { Router } from 'express';
 import multer from 'multer';
 import { pool } from '../db.js';
 import { requireAuth, AuthedRequest } from '../auth.js';
-import { requireTenantRole, requireTenantRoleForDoelenboomParam, tenantIdForDoelenboom } from '../rbac.js';
+import {
+  requireTenantRole,
+  requireTenantRoleForDoelenboomParam,
+  requireWritableDoelenboom,
+  tenantIdForDoelenboom,
+} from '../rbac.js';
 
 // Voor routes met :id = import-id (niet doelenboom-id): eerst de doelenboom van
 // deze import opzoeken, dan pas de tenant daarvan.
-async function tenantIdForImport(importId: string): Promise<number | null> {
+async function doelenboomIdForImport(importId: string): Promise<number | null> {
   const result = await pool.query('select doelenboom_id from excel_imports where id = $1', [importId]);
-  const doelenboomId = result.rows[0]?.doelenboom_id;
+  return result.rows[0]?.doelenboom_id ?? null;
+}
+
+async function tenantIdForImport(importId: string): Promise<number | null> {
+  const doelenboomId = await doelenboomIdForImport(importId);
   return doelenboomId == null ? null : tenantIdForDoelenboom(doelenboomId);
 }
 
@@ -24,7 +33,7 @@ importsRouter.use(requireAuth);
 // bevestiging tussen "geïmporteerd" en "live in de boom" zit (zie architectuurdoc §4).
 importsRouter.post(
   '/doelenbomen/:doelenboomId/imports',
-  requireTenantRoleForDoelenboomParam('admin', 'doelenboomId'),
+  requireWritableDoelenboom('doelenboomId'),
   upload.single('file'),
   async (req: AuthedRequest, res) => {
     if (!req.file) {
@@ -97,7 +106,7 @@ importsRouter.get(
 // tijdens dit project handmatig is gehanteerd bij elke nieuwe Excel-versie.
 importsRouter.post(
   '/imports/:id/publish',
-  requireTenantRole('admin', (req) => tenantIdForImport(req.params.id)),
+  requireWritableDoelenboom((req) => doelenboomIdForImport(req.params.id)),
   async (req, res) => {
   const importRow = await pool.query(
     'select id, doelenboom_id, status, parsed_json, published_at from excel_imports where id = $1',

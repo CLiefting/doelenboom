@@ -72,11 +72,19 @@ export type TenantSummary = {
   my_role?: TenantRoleName; // alleen aanwezig als niet-sysadmin dit ophaalt
 };
 
-export type DoelenboomSummary = {
+// Basisvorm zoals POST/PUT /api/doelenbomen die teruggeven (geen tenant-join
+// nodig daar, de tenant is al bekend uit de URL/context). DoelenboomSummary
+// (hieronder) is de rijkere vorm van GET /api/doelenbomen — mét tenant-info,
+// nodig voor de picker die per tenant groepeert.
+export type DoelenboomBase = {
   id: number;
   slug: string;
   name: string;
+  read_only: boolean;
   created_at: string;
+};
+
+export type DoelenboomSummary = DoelenboomBase & {
   tenant_id: number;
   tenant_slug: string;
   tenant_name: string;
@@ -119,7 +127,13 @@ export type OrgUnit = { code: string; name: string; omschrijving: string };
 export type ObOrgRelation = { org: string; relatietype: string; toelichting: string; status: string };
 
 export type TreeResponse = {
-  doelenboom: { id: number; slug: string; name: string; tenant: { id: number; slug: string; name: string } };
+  doelenboom: {
+    id: number;
+    slug: string;
+    name: string;
+    readOnly: boolean;
+    tenant: { id: number; slug: string; name: string };
+  };
   elements: Element[];
   edges: Edge[];
   projectStatus: Record<string, ProjectStatus>;

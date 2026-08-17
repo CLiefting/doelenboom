@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { pool } from '../db.js';
 import { requireAuth } from '../auth.js';
-import { requireTenantRoleForDoelenboomParam } from '../rbac.js';
+import { requireWritableDoelenboom } from '../rbac.js';
 
 // CRUD voor losse elementen (fase 1 van de CRUD-uitbreiding — zie ook de latere
 // fases voor tags/organisatieonderdelen en relaties). Dit bestaat naast, en is
@@ -13,10 +13,11 @@ export const elementsRouter = Router();
 elementsRouter.use(requireAuth);
 
 // Alle schrijfacties hieronder (create/update/delete) vereisen tenant-admin (of
-// sysadmin) — lezen gebeurt via routes/tree.ts, dat zijn eigen (lichtere) check
-// heeft. Let op: dit moet per route meegegeven worden (niet via router.use()),
-// omdat :id op het moment van een path-loze .use() nog niet gevuld is.
-const requireAdmin = requireTenantRoleForDoelenboomParam('admin', 'id');
+// sysadmin), én mag de doelenboom niet op read-only staan (zie rbac.ts) — lezen
+// gebeurt via routes/tree.ts, dat zijn eigen (lichtere) check heeft. Let op: dit
+// moet per route meegegeven worden (niet via router.use()), omdat :id op het
+// moment van een path-loze .use() nog niet gevuld is.
+const requireAdmin = requireWritableDoelenboom('id');
 
 // Canonieke set — dezelfde als de check-constraint op elements.type in db/init.sql.
 const ELEMENT_TYPES = [

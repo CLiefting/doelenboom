@@ -90,6 +90,16 @@ export default function PickerPage({
                 }}
               >
                 <strong>{d.name}</strong>
+                {d.read_only && (
+                  <span
+                    style={{
+                      marginLeft: 8, fontSize: 11, color: '#946200', background: '#FFF3CD',
+                      border: '1px solid #FFE69C', borderRadius: 999, padding: '2px 8px',
+                    }}
+                  >
+                    alleen-lezen
+                  </span>
+                )}
                 <div style={{ fontSize: 12, color: '#6c6f76' }}>{d.slug}</div>
               </button>
             ))}

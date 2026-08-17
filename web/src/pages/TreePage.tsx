@@ -28,12 +28,18 @@ export default function TreePage({
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   // Sysadmin mag overal wijzigen (UI-technisch behandeld als 'admin'); anders de
-  // rol die deze gebruiker heeft in de tenant van déze doelenboom. 'gebruiker' is
-  // de veilige fallback (alleen lezen) mocht er onverwacht geen rol gevonden
-  // worden — de API dekt de daadwerkelijke autorisatie sowieso al af (rbac.ts),
-  // dit hier bepaalt alleen welke knoppen tree.html toont.
+  // rol die deze gebruiker heeft in de tenant van déze doelenboom, tenzij de
+  // doelenboom zelf op read_only staat — dan geldt voor iedereen behalve
+  // sysadmin altijd 'gebruiker' (alleen lezen), ook voor een tenant-admin (zie
+  // db/init.sql bij doelenbomen.read_only en requireWritableDoelenboom in
+  // api/src/rbac.ts, die dit ook server-side afdwingt). 'gebruiker' is verder de
+  // veilige fallback mocht er onverwacht geen rol gevonden worden — de API dekt
+  // de daadwerkelijke autorisatie sowieso al af, dit hier bepaalt alleen welke
+  // knoppen tree.html toont.
   const role: 'admin' | 'gebruiker' = user.isSysadmin
     ? 'admin'
+    : doelenboom.read_only
+    ? 'gebruiker'
     : user.tenantRoles.find((r) => r.tenantId === doelenboom.tenant_id)?.role ?? 'gebruiker';
 
   useEffect(() => {

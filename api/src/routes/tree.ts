@@ -13,7 +13,7 @@ treeRouter.use(requireAuth);
 // zodat beide altijd exact dezelfde data tonen/exporteren.
 export async function fetchTree(doelenboomId: string) {
   const doelenboomResult = await pool.query(
-    `select d.id, d.slug, d.name, t.id as tenant_id, t.slug as tenant_slug, t.name as tenant_name
+    `select d.id, d.slug, d.name, d.read_only, t.id as tenant_id, t.slug as tenant_slug, t.name as tenant_name
      from doelenbomen d join tenants t on t.id = d.tenant_id
      where d.id = $1`,
     [doelenboomId]
@@ -125,6 +125,7 @@ export async function fetchTree(doelenboomId: string) {
       id: doelenboomResult.rows[0].id,
       slug: doelenboomResult.rows[0].slug,
       name: doelenboomResult.rows[0].name,
+      readOnly: doelenboomResult.rows[0].read_only,
       tenant: {
         id: doelenboomResult.rows[0].tenant_id,
         slug: doelenboomResult.rows[0].tenant_slug,

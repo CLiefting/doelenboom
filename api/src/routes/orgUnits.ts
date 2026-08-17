@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { pool } from '../db.js';
 import { requireAuth } from '../auth.js';
-import { requireTenantRoleForDoelenboomParam } from '../rbac.js';
+import { requireWritableDoelenboom } from '../rbac.js';
 
 // CRUD voor organisatieonderdelen (fase 2, samen met tags.ts), plus (fase 4) het
 // koppelen/bewerken/ontkoppelen van een organisatieonderdeel aan een specifiek
@@ -10,7 +10,9 @@ import { requireTenantRoleForDoelenboomParam } from '../rbac.js';
 export const orgUnitsRouter = Router();
 orgUnitsRouter.use(requireAuth);
 // Per route meegeven (niet via router.use()) — zie toelichting in elements.ts.
-const requireAdmin = requireTenantRoleForDoelenboomParam('admin', 'id');
+// requireWritableDoelenboom i.p.v. requireTenantRoleForDoelenboomParam: blokkeert
+// ook tenant-admins zodra de doelenboom op read-only staat (zie rbac.ts).
+const requireAdmin = requireWritableDoelenboom('id');
 
 function isUniqueViolation(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { code?: string }).code === '23505';

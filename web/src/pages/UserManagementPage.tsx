@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '../api';
-import type { TenantMember, TenantRoleName, TenantSummary, User, UserSummary } from '../types';
+import type { DoelenboomSummary, TenantMember, TenantRoleName, TenantSummary, User, UserSummary } from '../types';
 
 // Gebruikersbeheer — twee gedaantes in één scherm, afhankelijk van de rol van de
 // ingelogde gebruiker:
@@ -24,6 +24,7 @@ export default function UserManagementPage({
   const [selectedTenantId, setSelectedTenantId] = useState<number | null>(null);
   const [members, setMembers] = useState<TenantMember[] | null>(null);
   const [allUsers, setAllUsers] = useState<UserSummary[] | null>(null);
+  const [doelenbomen, setDoelenbomen] = useState<DoelenboomSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -31,10 +32,19 @@ export default function UserManagementPage({
 
   useEffect(() => {
     api.tenants(token).then(setTenants).catch((err) => setError(errMsg(err)));
+    // GET /api/doelenbomen is voor iedere ingelogde gebruiker toegankelijk en
+    // geeft (voor een tenant-admin) al alleen de doelenbomen van diens eigen
+    // tenant(s) terug — geen aparte per-tenant call nodig, gewoon hieronder
+    // client-side filteren op de geselecteerde tenant.
+    api.doelenbomen(token).then(setDoelenbomen).catch((err) => setError(errMsg(err)));
     if (user.isSysadmin) {
       api.users(token).then(setAllUsers).catch((err) => setError(errMsg(err)));
     }
   }, [token, user.isSysadmin]);
+
+  function refreshDoelenbomen() {
+    api.doelenbomen(token).then(setDoelenbomen).catch((err) => setError(errMsg(err)));
+  }
 
   useEffect(() => {
     if (selectedTenantId == null) {
@@ -120,6 +130,26 @@ export default function UserManagementPage({
               />
             );
           })()}
+        </section>
+      )}
+
+      {selectedTenantId != null && (
+        <section style={styles.section}>
+          <h2 style={styles.h2}>
+            Doelenbomen van {manageableTenants.find((t) => t.id === selectedTenantId)?.name ?? ''}
+          </h2>
+          {!doelenbomen && <p>Laden…</p>}
+          {doelenbomen && (
+            <DoelenbomenSection
+              token={token}
+              tenantId={selectedTenantId}
+              doelenbomen={doelenbomen.filter((d) => d.tenant_id === selectedTenantId)}
+              busy={busy}
+              setBusy={setBusy}
+              setError={setError}
+              onChanged={refreshDoelenbomen}
+            />
+          )}
         </section>
       )}
 
@@ -326,6 +356,201 @@ function AddMemberForm({
       </select>
       <button style={btnStyle('primary')} type="submit" disabled={busy}>
         + Lid toevoegen
+      </button>
+    </form>
+  );
+}
+
+// Doelenbomen van een tenant beheren: aanmaken, hernoemen/slug wijzigen,
+// alleen-lezen aan/uit zetten, verwijderen. Zelfde rechten als "Instellingen"
+// hierboven (sysadmin of tenant-admin van déze tenant) — de API (rbac.ts)
+// handhaaft dit sowieso, dit scherm toont het gewoon aan iedereen die de
+// tenant al mag beheren. Verwijderen is destructief (cascade: alle
+// elementen/relaties/tags/organisatieonderdelen/imports van die doelenboom
+// gaan mee weg) — vandaar de expliciete window.confirm met die waarschuwing.
+function DoelenbomenSection({
+  token,
+  tenantId,
+  doelenbomen,
+  busy,
+  setBusy,
+  setError,
+  onChanged,
+}: {
+  token: string;
+  tenantId: number;
+  doelenbomen: DoelenboomSummary[];
+  busy: boolean;
+  setBusy: (b: boolean) => void;
+  setError: (e: string | null) => void;
+  onChanged: () => void;
+}) {
+  const [editingId, setEditingId] = useState<number | null>(null);
+
+  async function remove(d: DoelenboomSummary) {
+    const ok = window.confirm(
+      `Doelenboom "${d.name}" volledig verwijderen? Alle elementen, relaties, tags, organisatieonderdelen en ` +
+      `imports hierin gaan dan ook verloren. Dit kan niet ongedaan worden gemaakt.`
+    );
+    if (!ok) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.deleteDoelenboom(token, d.id);
+      onChanged();
+    } catch (err) {
+      setError(errMsg(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div>
+      {doelenbomen.length === 0 && <p style={styles.muted}>Nog geen doelenbomen in deze tenant.</p>}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+        {doelenbomen.map((d) =>
+          editingId === d.id ? (
+            <DoelenboomEditRow
+              key={d.id}
+              token={token}
+              doelenboom={d}
+              busy={busy}
+              setBusy={setBusy}
+              setError={setError}
+              onSaved={() => {
+                setEditingId(null);
+                onChanged();
+              }}
+              onCancel={() => setEditingId(null)}
+            />
+          ) : (
+            <div key={d.id} style={styles.doelenboomRow}>
+              <div>
+                <strong>{d.name}</strong> <span style={{ opacity: 0.6, fontSize: 12 }}>({d.slug})</span>
+                {d.read_only && <span style={styles.mustChangeBadge}>alleen-lezen</span>}
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button disabled={busy} onClick={() => setEditingId(d.id)} style={btnStyle('ghost')}>
+                  Bewerken
+                </button>
+                <button disabled={busy} onClick={() => remove(d)} style={btnStyle('danger-text')}>
+                  Verwijderen
+                </button>
+              </div>
+            </div>
+          )
+        )}
+      </div>
+      <CreateDoelenboomForm
+        token={token}
+        tenantId={tenantId}
+        busy={busy}
+        setBusy={setBusy}
+        setError={setError}
+        onCreated={onChanged}
+      />
+    </div>
+  );
+}
+
+function DoelenboomEditRow({
+  token,
+  doelenboom,
+  busy,
+  setBusy,
+  setError,
+  onSaved,
+  onCancel,
+}: {
+  token: string;
+  doelenboom: DoelenboomSummary;
+  busy: boolean;
+  setBusy: (b: boolean) => void;
+  setError: (e: string | null) => void;
+  onSaved: () => void;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState(doelenboom.name);
+  const [slug, setSlug] = useState(doelenboom.slug);
+  const [readOnly, setReadOnly] = useState(doelenboom.read_only);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await api.updateDoelenboom(token, doelenboom.id, { name, slug, readOnly });
+      onSaved();
+    } catch (err) {
+      setError(errMsg(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} style={styles.doelenboomEditRow}>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <input style={styles.input} value={name} onChange={(e) => setName(e.target.value)} placeholder="naam" required />
+        <input style={styles.input} value={slug} onChange={(e) => setSlug(e.target.value)} placeholder="slug" required />
+      </div>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5 }}>
+        <input type="checkbox" checked={readOnly} onChange={(e) => setReadOnly(e.target.checked)} />
+        Alleen-lezen — niemand behalve een sysadmin kan dan nog iets wijzigen
+      </label>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button type="button" onClick={onCancel} style={btnStyle('ghost')} disabled={busy}>
+          Annuleren
+        </button>
+        <button type="submit" style={btnStyle('primary')} disabled={busy}>
+          Opslaan
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function CreateDoelenboomForm({
+  token,
+  tenantId,
+  busy,
+  setBusy,
+  setError,
+  onCreated,
+}: {
+  token: string;
+  tenantId: number;
+  busy: boolean;
+  setBusy: (b: boolean) => void;
+  setError: (e: string | null) => void;
+  onCreated: () => void;
+}) {
+  const [slug, setSlug] = useState('');
+  const [name, setName] = useState('');
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await api.createDoelenboom(token, tenantId, { slug, name });
+      setSlug('');
+      setName('');
+      onCreated();
+    } catch (err) {
+      setError(errMsg(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} style={styles.inlineForm}>
+      <input style={styles.input} placeholder="slug" required value={slug} onChange={(e) => setSlug(e.target.value)} />
+      <input style={styles.input} placeholder="naam" required value={name} onChange={(e) => setName(e.target.value)} />
+      <button style={btnStyle('primary')} type="submit" disabled={busy}>
+        + Doelenboom aanmaken
       </button>
     </form>
   );
@@ -723,5 +948,13 @@ const styles: Record<string, React.CSSProperties> = {
   mustChangeBadge: {
     marginLeft: 8, fontSize: 11, color: '#946200', background: '#FFF3CD',
     border: '1px solid #FFE69C', borderRadius: 999, padding: '2px 8px',
+  },
+  doelenboomRow: {
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8,
+    padding: '8px 10px', borderRadius: 8, background: '#f7f8fa', border: '1px solid #e4e6ea',
+  },
+  doelenboomEditRow: {
+    display: 'flex', flexDirection: 'column', gap: 10,
+    padding: '10px 12px', borderRadius: 8, background: '#f7f8fa', border: '1px solid #e4e6ea',
   },
 };

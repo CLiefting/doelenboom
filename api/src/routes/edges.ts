@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { pool } from '../db.js';
 import { requireAuth } from '../auth.js';
-import { requireTenantRoleForDoelenboomParam } from '../rbac.js';
+import { requireWritableDoelenboom } from '../rbac.js';
 
 // CRUD voor relaties (edges) tussen elementen — fase 3 van de CRUD-uitbreiding.
 // Edges worden geïdentificeerd door hun (source-code, target-code)-paar i.p.v. een
@@ -12,7 +12,9 @@ import { requireTenantRoleForDoelenboomParam } from '../rbac.js';
 export const edgesRouter = Router();
 edgesRouter.use(requireAuth);
 // Per route meegeven (niet via router.use()) — zie toelichting in elements.ts.
-const requireAdmin = requireTenantRoleForDoelenboomParam('admin', 'id');
+// requireWritableDoelenboom i.p.v. requireTenantRoleForDoelenboomParam: blokkeert
+// ook tenant-admins zodra de doelenboom op read-only staat (zie rbac.ts).
+const requireAdmin = requireWritableDoelenboom('id');
 
 const WEIGHTS = ['primair', 'ondersteunend'];
 

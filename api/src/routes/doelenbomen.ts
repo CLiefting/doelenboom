@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { pool } from '../db.js';
 import { requireAuth, AuthedRequest } from '../auth.js';
-import { requireTenantRole, requireTenantRoleForTenantParam, tenantIdForDoelenboom } from '../rbac.js';
+import { requireTenantRole, requireTenantRoleForDoelenboomParam, requireTenantRoleForTenantParam, tenantIdForDoelenboom } from '../rbac.js';
 
 // Let op: dit router wordt gemount op '/api' (niet '/api/doelenbomen'), zodat zowel
 // '/api/doelenbomen' als '/api/tenants/:tenantId/doelenbomen' vanuit één bestand
@@ -16,7 +16,7 @@ doelenbomenRouter.use(requireAuth);
 doelenbomenRouter.get('/doelenbomen', async (req: AuthedRequest, res) => {
   if (req.user!.isSysadmin) {
     const result = await pool.query(
-      `select d.id, d.slug, d.name, d.created_at, t.id as tenant_id, t.slug as tenant_slug, t.name as tenant_name
+      `select d.id, d.slug, d.name, d.read_only, d.created_at, t.id as tenant_id, t.slug as tenant_slug, t.name as tenant_name
        from doelenbomen d
        join tenants t on t.id = d.tenant_id
        order by t.name, d.name`
@@ -24,7 +24,7 @@ doelenbomenRouter.get('/doelenbomen', async (req: AuthedRequest, res) => {
     return res.json(result.rows);
   }
   const result = await pool.query(
-    `select d.id, d.slug, d.name, d.created_at, t.id as tenant_id, t.slug as tenant_slug, t.name as tenant_name
+    `select d.id, d.slug, d.name, d.read_only, d.created_at, t.id as tenant_id, t.slug as tenant_slug, t.name as tenant_name
      from doelenbomen d
      join tenants t on t.id = d.tenant_id
      join tenant_users tu on tu.tenant_id = t.id
@@ -40,7 +40,7 @@ doelenbomenRouter.get(
   requireTenantRole('gebruiker', (req) => tenantIdForDoelenboom(req.params.id)),
   async (req, res) => {
     const result = await pool.query(
-      `select d.id, d.slug, d.name, d.created_at, t.id as tenant_id, t.slug as tenant_slug, t.name as tenant_name
+      `select d.id, d.slug, d.name, d.read_only, d.created_at, t.id as tenant_id, t.slug as tenant_slug, t.name as tenant_name
        from doelenbomen d join tenants t on t.id = d.tenant_id
        where d.id = $1`,
       [req.params.id]
@@ -55,7 +55,7 @@ doelenbomenRouter.get(
   requireTenantRoleForTenantParam('gebruiker', 'tenantId'),
   async (req, res) => {
     const result = await pool.query(
-      'select id, slug, name, created_at from doelenbomen where tenant_id = $1 order by name',
+      'select id, slug, name, read_only, created_at from doelenbomen where tenant_id = $1 order by name',
       [req.params.tenantId]
     );
     res.json(result.rows);
@@ -75,12 +75,60 @@ doelenbomenRouter.post(
     }
     try {
       const result = await pool.query(
-        'insert into doelenbomen (tenant_id, slug, name) values ($1, $2, $3) returning id, slug, name, created_at',
+        'insert into doelenbomen (tenant_id, slug, name) values ($1, $2, $3) returning id, slug, name, read_only, created_at',
         [req.params.tenantId, slug, name]
       );
       res.status(201).json(result.rows[0]);
     } catch (err) {
       res.status(409).json({ error: 'Doelenboom met deze slug bestaat al binnen deze tenant', detail: (err as Error).message });
     }
+  }
+);
+
+// PUT /api/doelenbomen/:id — { name?, slug?, readOnly? }. Dit zijn instellingen
+// van de doelenboom zelf (naam/slug/alleen-lezen-vlag), geen "boom-inhoud" —
+// daarom hier bewust requireTenantRoleForDoelenboomParam i.p.v.
+// requireWritableDoelenboom: een tenant-admin mag de read-only-vlag altijd zelf
+// weer uitzetten, ook als de doelenboom op dit moment read-only staat (anders
+// zou een tenant-admin zichzelf kunnen buitensluiten zonder sysadmin erbij te
+// hoeven halen).
+doelenbomenRouter.put(
+  '/doelenbomen/:id',
+  requireTenantRoleForDoelenboomParam('admin', 'id'),
+  async (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const name = typeof b.name === 'string' ? b.name.trim() : '';
+    const slug = typeof b.slug === 'string' ? b.slug.trim() : '';
+    const readOnly = typeof b.readOnly === 'boolean' ? b.readOnly : undefined;
+    if (!name) return res.status(400).json({ error: 'Naam is verplicht.' });
+
+    const current = await pool.query('select slug, read_only from doelenbomen where id = $1', [req.params.id]);
+    if (current.rows.length === 0) return res.status(404).json({ error: 'Doelenboom niet gevonden.' });
+    const newSlug = slug || current.rows[0].slug;
+    const newReadOnly = readOnly === undefined ? current.rows[0].read_only : readOnly;
+
+    try {
+      const result = await pool.query(
+        `update doelenbomen set name = $1, slug = $2, read_only = $3
+         where id = $4 returning id, slug, name, read_only, created_at`,
+        [name, newSlug, newReadOnly, req.params.id]
+      );
+      res.json(result.rows[0]);
+    } catch (err) {
+      res.status(409).json({ error: 'Doelenboom met deze slug bestaat al binnen deze tenant', detail: (err as Error).message });
+    }
+  }
+);
+
+// DELETE /api/doelenbomen/:id — cascade (db/init.sql) ruimt elementen/relaties/
+// tags/organisatieonderdelen/imports van deze doelenboom automatisch mee op.
+// Zelfde toegang als hernoemen/read-only (tenant-beheer, niet "boom-inhoud").
+doelenbomenRouter.delete(
+  '/doelenbomen/:id',
+  requireTenantRoleForDoelenboomParam('admin', 'id'),
+  async (req, res) => {
+    const result = await pool.query('delete from doelenbomen where id = $1 returning id', [req.params.id]);
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Doelenboom niet gevonden.' });
+    res.status(204).send();
   }
 );
