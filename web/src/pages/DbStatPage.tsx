@@ -67,8 +67,10 @@ function DbStatContent({ token }: { token: string }) {
         <section key={t.id} style={styles.section}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
             <h2 style={styles.h2}>{t.name} <span style={{ opacity: 0.5, fontWeight: 400 }}>({t.slug})</span></h2>
-            {t.wipeOnEmpty && (
-              <span style={styles.badge}>auto-leegmaken na {t.sessionTimeoutMinutes} min. inactiviteit</span>
+            {t.defaultWipeOnEmpty && (
+              <span style={styles.badge} title="Standaardinstelling voor nieuwe doelenbomen in deze tenant">
+                default: auto-leegmaken na {t.sessionTimeoutMinutes} min. inactiviteit
+              </span>
             )}
           </div>
 
@@ -95,6 +97,15 @@ function DbStatContent({ token }: { token: string }) {
                       <td style={styles.td}>
                         {d.name} <span style={{ opacity: 0.5, fontSize: 12 }}>({d.slug})</span>
                         {empty && <span style={styles.emptyBadge}>leeg</span>}
+                        {d.readOnly && <span style={{ ...styles.badge, marginLeft: 6 }}>alleen-lezen</span>}
+                        {d.wipeOnEmpty && (
+                          <span
+                            style={{ ...styles.badge, marginLeft: 6 }}
+                            title={`Na ${t.sessionTimeoutMinutes} min. inactiviteit`}
+                          >
+                            auto-leegmaken
+                          </span>
+                        )}
                       </td>
                       <td style={styles.td}>{d.elementCount}</td>
                       <td style={styles.td}>{d.edgeCount}</td>

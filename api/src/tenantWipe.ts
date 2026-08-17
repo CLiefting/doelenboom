@@ -55,9 +55,16 @@ async function wipeDoelenboomData(doelenboomId: number): Promise<void> {
   await pool.query('delete from excel_imports where doelenboom_id = $1', [doelenboomId]);
 }
 
-// Bepaalt welke tenants (met hun doelenbomen) op dit moment "verlaten" zijn —
-// wipe_on_empty staat aan én er is geen actieve sessie meer met toegang. Als
-// commit=true wordt de data ook daadwerkelijk geleegd (en, indien sessionId
+// Bepaalt welke doelenbomen (gegroepeerd per tenant) op dit moment "verlaten"
+// zijn — de doelenboom heeft wipe_on_empty aan staan (per-doelenboom instelbaar
+// sinds een tenant meerdere doelenbomen kan hebben, zie db/init.sql) én er is
+// geen actieve sessie meer met toegang tot de tenant van die doelenboom (de
+// timing zelf, session_timeout_minutes, blijft wél tenant-breed — een sessie
+// heeft nu eenmaal toegang tot een hele tenant, niet tot één specifieke boom).
+// Andere doelenbomen in dezelfde tenant zonder wipe_on_empty blijven met rust,
+// ook als de tenant verder helemaal verlaten is.
+//
+// Als commit=true wordt de data ook daadwerkelijk geleegd (en, indien sessionId
 // gegeven, die sessie eerst als beëindigd gemarkeerd). Met commit=false is dit
 // een pure preview (voor de "wil je exporteren?"-vraag bij uitloggen), zonder
 // bijeffecten.
@@ -69,7 +76,7 @@ async function wipeDoelenboomData(doelenboomId: number): Promise<void> {
 // omdat toevallig niemand anders op dat moment nog een actieve KMar-sessie
 // had. Bij de periodieke idle-sweep (sweepIdleTenants) is er geen specifieke
 // gebruiker die uitlogt, dus blijft dit param leeg en gelden alle
-// wipe_on_empty-tenants zoals voorheen.
+// wipe_on_empty-doelenbomen zoals voorheen.
 export async function previewOrCommitWipe(
   sessionId: string | null,
   commit: boolean,
@@ -79,17 +86,23 @@ export async function previewOrCommitWipe(
     await pool.query('update sessions set ended_at = now() where id = $1 and ended_at is null', [sessionId]);
   }
 
+  // distinct: een tenant met meerdere wipe_on_empty-doelenbomen mag hier maar
+  // één keer in staan — welke doelenbomen precies gewipet worden, bepaalt de
+  // query verderop (opnieuw gefilterd op wipe_on_empty).
   const tenantsResult =
     requestingUser && !requestingUser.isSysadmin
       ? await pool.query(
-          `select t.id, t.slug, t.name, t.session_timeout_minutes
+          `select distinct t.id, t.slug, t.name, t.session_timeout_minutes
            from tenants t
+           join doelenbomen d on d.tenant_id = t.id and d.wipe_on_empty = true
            join tenant_users tu on tu.tenant_id = t.id
-           where t.wipe_on_empty = true and tu.user_id = $1`,
+           where tu.user_id = $1`,
           [requestingUser.id]
         )
       : await pool.query(
-          'select id, slug, name, session_timeout_minutes from tenants where wipe_on_empty = true'
+          `select distinct t.id, t.slug, t.name, t.session_timeout_minutes
+           from tenants t
+           join doelenbomen d on d.tenant_id = t.id and d.wipe_on_empty = true`
         );
 
   const candidates: WipeCandidate[] = [];
@@ -108,7 +121,7 @@ export async function previewOrCommitWipe(
       `select d.id, d.slug, d.name, count(e.id)::int as "elementCount"
        from doelenbomen d
        left join elements e on e.doelenboom_id = d.id
-       where d.tenant_id = $1
+       where d.tenant_id = $1 and d.wipe_on_empty = true
        group by d.id, d.slug, d.name
        order by d.name`,
       [t.id]

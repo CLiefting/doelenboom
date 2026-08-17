@@ -30,6 +30,8 @@ export type DbStatDoelenboom = {
   id: number;
   slug: string;
   name: string;
+  readOnly: boolean;
+  wipeOnEmpty: boolean;
   elementCount: number;
   edgeCount: number;
   tagCount: number;
@@ -41,7 +43,10 @@ export type DbStatTenant = {
   id: number;
   slug: string;
   name: string;
-  wipeOnEmpty: boolean;
+  // Alleen nog de standaardwaarde voor nieuwe doelenbomen in deze tenant — de
+  // daadwerkelijke auto-leegmaken-status staat per doelenboom (wipeOnEmpty
+  // hierboven), zie db/init.sql bij doelenbomen.wipe_on_empty.
+  defaultWipeOnEmpty: boolean;
   sessionTimeoutMinutes: number;
   doelenbomen: DbStatDoelenboom[];
 };
@@ -81,6 +86,7 @@ export type DoelenboomBase = {
   slug: string;
   name: string;
   read_only: boolean;
+  wipe_on_empty: boolean;
   created_at: string;
 };
 

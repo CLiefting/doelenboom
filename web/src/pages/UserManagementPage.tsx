@@ -429,6 +429,7 @@ function DoelenbomenSection({
               <div>
                 <strong>{d.name}</strong> <span style={{ opacity: 0.6, fontSize: 12 }}>({d.slug})</span>
                 {d.read_only && <span style={styles.mustChangeBadge}>alleen-lezen</span>}
+                {d.wipe_on_empty && <span style={styles.mustChangeBadge}>auto-leegmaken</span>}
               </div>
               <div style={{ display: 'flex', gap: 6 }}>
                 <button disabled={busy} onClick={() => setEditingId(d.id)} style={btnStyle('ghost')}>
@@ -474,13 +475,14 @@ function DoelenboomEditRow({
   const [name, setName] = useState(doelenboom.name);
   const [slug, setSlug] = useState(doelenboom.slug);
   const [readOnly, setReadOnly] = useState(doelenboom.read_only);
+  const [wipeOnEmpty, setWipeOnEmpty] = useState(doelenboom.wipe_on_empty);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      await api.updateDoelenboom(token, doelenboom.id, { name, slug, readOnly });
+      await api.updateDoelenboom(token, doelenboom.id, { name, slug, readOnly, wipeOnEmpty });
       onSaved();
     } catch (err) {
       setError(errMsg(err));
@@ -498,6 +500,10 @@ function DoelenboomEditRow({
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5 }}>
         <input type="checkbox" checked={readOnly} onChange={(e) => setReadOnly(e.target.checked)} />
         Alleen-lezen — niemand behalve een sysadmin kan dan nog iets wijzigen
+      </label>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5 }}>
+        <input type="checkbox" checked={wipeOnEmpty} onChange={(e) => setWipeOnEmpty(e.target.checked)} />
+        Automatisch leegmaken zodra niemand meer actief toegang heeft tot de tenant
       </label>
       <div style={{ display: 'flex', gap: 8 }}>
         <button type="button" onClick={onCancel} style={btnStyle('ghost')} disabled={busy}>
@@ -614,8 +620,13 @@ function TenantSettingsForm({
     <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5 }}>
         <input type="checkbox" checked={wipeOnEmpty} onChange={(e) => setWipeOnEmpty(e.target.checked)} />
-        Database van deze tenant automatisch leegmaken zodra niemand meer actief toegang heeft
+        Standaardinstelling voor nieuwe doelenbomen in deze tenant: automatisch leegmaken zodra niemand meer
+        actief toegang heeft
       </label>
+      <p style={{ margin: '-4px 0 0 26px', fontSize: 12, color: '#9aa0a8' }}>
+        Geldt alleen bij het aanmaken van een nieuwe doelenboom — per bestaande doelenboom is dit apart
+        instelbaar bij "Doelenbomen" hieronder.
+      </p>
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5 }}>
         Na
         <input
@@ -625,7 +636,7 @@ function TenantSettingsForm({
           value={timeoutMinutes}
           onChange={(e) => setTimeoutMinutes(e.target.value)}
         />
-        minuten inactiviteit
+        minuten inactiviteit (geldt voor de hele tenant)
       </label>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <button style={{ ...btnStyle('primary'), alignSelf: 'flex-start' }} type="submit" disabled={busy}>

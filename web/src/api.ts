@@ -63,7 +63,7 @@ export const api = {
   updateDoelenboom: (
     token: string,
     doelenboomId: number,
-    body: { name: string; slug?: string; readOnly?: boolean }
+    body: { name: string; slug?: string; readOnly?: boolean; wipeOnEmpty?: boolean }
   ) =>
     request<import('./types').DoelenboomBase>(`/api/doelenbomen/${doelenboomId}`, {
       method: 'PUT',

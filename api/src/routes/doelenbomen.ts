@@ -13,10 +13,12 @@ doelenbomenRouter.use(requireAuth);
 // alleen doelenbomen van tenants waar hij/zij lid van is (rol maakt niet uit,
 // gebruiker mag ook lezen). Zonder deze filter zag elke ingelogde gebruiker
 // vroeger alle tenants door elkaar in de picker.
+const DOELENBOOM_FIELDS = 'd.id, d.slug, d.name, d.read_only, d.wipe_on_empty, d.created_at';
+
 doelenbomenRouter.get('/doelenbomen', async (req: AuthedRequest, res) => {
   if (req.user!.isSysadmin) {
     const result = await pool.query(
-      `select d.id, d.slug, d.name, d.read_only, d.created_at, t.id as tenant_id, t.slug as tenant_slug, t.name as tenant_name
+      `select ${DOELENBOOM_FIELDS}, t.id as tenant_id, t.slug as tenant_slug, t.name as tenant_name
        from doelenbomen d
        join tenants t on t.id = d.tenant_id
        order by t.name, d.name`
@@ -24,7 +26,7 @@ doelenbomenRouter.get('/doelenbomen', async (req: AuthedRequest, res) => {
     return res.json(result.rows);
   }
   const result = await pool.query(
-    `select d.id, d.slug, d.name, d.read_only, d.created_at, t.id as tenant_id, t.slug as tenant_slug, t.name as tenant_name
+    `select ${DOELENBOOM_FIELDS}, t.id as tenant_id, t.slug as tenant_slug, t.name as tenant_name
      from doelenbomen d
      join tenants t on t.id = d.tenant_id
      join tenant_users tu on tu.tenant_id = t.id
@@ -40,7 +42,7 @@ doelenbomenRouter.get(
   requireTenantRole('gebruiker', (req) => tenantIdForDoelenboom(req.params.id)),
   async (req, res) => {
     const result = await pool.query(
-      `select d.id, d.slug, d.name, d.read_only, d.created_at, t.id as tenant_id, t.slug as tenant_slug, t.name as tenant_name
+      `select ${DOELENBOOM_FIELDS}, t.id as tenant_id, t.slug as tenant_slug, t.name as tenant_name
        from doelenbomen d join tenants t on t.id = d.tenant_id
        where d.id = $1`,
       [req.params.id]
@@ -55,7 +57,7 @@ doelenbomenRouter.get(
   requireTenantRoleForTenantParam('gebruiker', 'tenantId'),
   async (req, res) => {
     const result = await pool.query(
-      'select id, slug, name, read_only, created_at from doelenbomen where tenant_id = $1 order by name',
+      'select id, slug, name, read_only, wipe_on_empty, created_at from doelenbomen where tenant_id = $1 order by name',
       [req.params.tenantId]
     );
     res.json(result.rows);
@@ -64,7 +66,10 @@ doelenbomenRouter.get(
 
 // Een nieuwe doelenboom binnen een tenant aanmaken is een tenant-wijziging —
 // toegestaan voor sysadmins en tenant-admins van die tenant, niet voor gewone
-// gebruikers.
+// gebruikers. wipe_on_empty wordt geseed vanuit tenants.wipe_on_empty (de
+// "standaardinstelling" van de tenant, zie db/init.sql) zodat je 'm niet elke
+// keer opnieuw hoeft te zetten — na aanmaken is 't gewoon een eigen,
+// onafhankelijk instelbare vlag op déze doelenboom.
 doelenbomenRouter.post(
   '/tenants/:tenantId/doelenbomen',
   requireTenantRoleForTenantParam('admin', 'tenantId'),
@@ -74,9 +79,12 @@ doelenbomenRouter.post(
       return res.status(400).json({ error: 'slug en name zijn verplicht' });
     }
     try {
+      const tenantDefault = await pool.query('select wipe_on_empty from tenants where id = $1', [req.params.tenantId]);
+      const defaultWipeOnEmpty = tenantDefault.rows[0]?.wipe_on_empty ?? false;
       const result = await pool.query(
-        'insert into doelenbomen (tenant_id, slug, name) values ($1, $2, $3) returning id, slug, name, read_only, created_at',
-        [req.params.tenantId, slug, name]
+        `insert into doelenbomen (tenant_id, slug, name, wipe_on_empty)
+         values ($1, $2, $3, $4) returning id, slug, name, read_only, wipe_on_empty, created_at`,
+        [req.params.tenantId, slug, name, defaultWipeOnEmpty]
       );
       res.status(201).json(result.rows[0]);
     } catch (err) {
@@ -85,13 +93,13 @@ doelenbomenRouter.post(
   }
 );
 
-// PUT /api/doelenbomen/:id — { name?, slug?, readOnly? }. Dit zijn instellingen
-// van de doelenboom zelf (naam/slug/alleen-lezen-vlag), geen "boom-inhoud" —
-// daarom hier bewust requireTenantRoleForDoelenboomParam i.p.v.
-// requireWritableDoelenboom: een tenant-admin mag de read-only-vlag altijd zelf
-// weer uitzetten, ook als de doelenboom op dit moment read-only staat (anders
-// zou een tenant-admin zichzelf kunnen buitensluiten zonder sysadmin erbij te
-// hoeven halen).
+// PUT /api/doelenbomen/:id — { name?, slug?, readOnly?, wipeOnEmpty? }. Dit zijn
+// instellingen van de doelenboom zelf (naam/slug/alleen-lezen/auto-leegmaken),
+// geen "boom-inhoud" — daarom hier bewust requireTenantRoleForDoelenboomParam
+// i.p.v. requireWritableDoelenboom: een tenant-admin mag de read-only-vlag
+// altijd zelf weer uitzetten, ook als de doelenboom op dit moment read-only
+// staat (anders zou een tenant-admin zichzelf kunnen buitensluiten zonder
+// sysadmin erbij te hoeven halen).
 doelenbomenRouter.put(
   '/doelenbomen/:id',
   requireTenantRoleForDoelenboomParam('admin', 'id'),
@@ -100,18 +108,20 @@ doelenbomenRouter.put(
     const name = typeof b.name === 'string' ? b.name.trim() : '';
     const slug = typeof b.slug === 'string' ? b.slug.trim() : '';
     const readOnly = typeof b.readOnly === 'boolean' ? b.readOnly : undefined;
+    const wipeOnEmpty = typeof b.wipeOnEmpty === 'boolean' ? b.wipeOnEmpty : undefined;
     if (!name) return res.status(400).json({ error: 'Naam is verplicht.' });
 
-    const current = await pool.query('select slug, read_only from doelenbomen where id = $1', [req.params.id]);
+    const current = await pool.query('select slug, read_only, wipe_on_empty from doelenbomen where id = $1', [req.params.id]);
     if (current.rows.length === 0) return res.status(404).json({ error: 'Doelenboom niet gevonden.' });
     const newSlug = slug || current.rows[0].slug;
     const newReadOnly = readOnly === undefined ? current.rows[0].read_only : readOnly;
+    const newWipeOnEmpty = wipeOnEmpty === undefined ? current.rows[0].wipe_on_empty : wipeOnEmpty;
 
     try {
       const result = await pool.query(
-        `update doelenbomen set name = $1, slug = $2, read_only = $3
-         where id = $4 returning id, slug, name, read_only, created_at`,
-        [name, newSlug, newReadOnly, req.params.id]
+        `update doelenbomen set name = $1, slug = $2, read_only = $3, wipe_on_empty = $4
+         where id = $5 returning id, slug, name, read_only, wipe_on_empty, created_at`,
+        [name, newSlug, newReadOnly, newWipeOnEmpty, req.params.id]
       );
       res.json(result.rows[0]);
     } catch (err) {

@@ -15,8 +15,9 @@ dbstatRouter.get('/', async (_req, res) => {
   const result = await pool.query(`
     select
       t.id as tenant_id, t.slug as tenant_slug, t.name as tenant_name,
-      t.wipe_on_empty, t.session_timeout_minutes,
+      t.wipe_on_empty as tenant_default_wipe_on_empty, t.session_timeout_minutes,
       d.id as doelenboom_id, d.slug as doelenboom_slug, d.name as doelenboom_name,
+      d.read_only as doelenboom_read_only, d.wipe_on_empty as doelenboom_wipe_on_empty,
       (select count(*) from elements e where e.doelenboom_id = d.id) as element_count,
       (select count(*) from edges e2 where e2.doelenboom_id = d.id) as edge_count,
       (select count(*) from tags tg where tg.doelenboom_id = d.id) as tag_count,
@@ -29,9 +30,12 @@ dbstatRouter.get('/', async (_req, res) => {
 
   const byTenant = new Map<number, {
     id: number; slug: string; name: string;
-    wipeOnEmpty: boolean; sessionTimeoutMinutes: number;
+    // Sinds wipe_on_empty per doelenboom instelbaar is (zie db/init.sql), is dit
+    // tenant-veld alleen nog de standaardwaarde voor nieuw aan te maken
+    // doelenbomen — de daadwerkelijke wipe-status staat per doelenboom hieronder.
+    defaultWipeOnEmpty: boolean; sessionTimeoutMinutes: number;
     doelenbomen: Array<{
-      id: number; slug: string; name: string;
+      id: number; slug: string; name: string; readOnly: boolean; wipeOnEmpty: boolean;
       elementCount: number; edgeCount: number; tagCount: number; orgUnitCount: number; importCount: number;
     }>;
   }>();
@@ -42,7 +46,7 @@ dbstatRouter.get('/', async (_req, res) => {
         id: row.tenant_id,
         slug: row.tenant_slug,
         name: row.tenant_name,
-        wipeOnEmpty: row.wipe_on_empty,
+        defaultWipeOnEmpty: row.tenant_default_wipe_on_empty,
         sessionTimeoutMinutes: row.session_timeout_minutes,
         doelenbomen: [],
       });
@@ -52,6 +56,8 @@ dbstatRouter.get('/', async (_req, res) => {
         id: row.doelenboom_id,
         slug: row.doelenboom_slug,
         name: row.doelenboom_name,
+        readOnly: row.doelenboom_read_only,
+        wipeOnEmpty: row.doelenboom_wipe_on_empty,
         elementCount: Number(row.element_count),
         edgeCount: Number(row.edge_count),
         tagCount: Number(row.tag_count),

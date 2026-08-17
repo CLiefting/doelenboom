@@ -43,13 +43,17 @@ create table if not exists tenants (
   id bigserial primary key,
   slug text not null unique,
   name text not null,
-  -- Als true: zodra geen enkele actieve gebruiker meer toegang heeft tot deze
-  -- tenant (zie tenantWipe.ts), wordt de inhoud van al zijn doelenbomen
-  -- automatisch geleegd (elementen/relaties/tags/org-eenheden/imports) — de
-  -- tenant en doelenboom-rijen zelf blijven bestaan. Standaard uit; per tenant
-  -- expliciet aan te zetten (nu alleen via de database, geen UI in v1).
+  -- Sinds meerdere doelenbomen per tenant mogelijk zijn (zie doelenbomen.
+  -- wipe_on_empty hieronder) is dít hier niet meer de daadwerkelijke
+  -- aan/uit-schakelaar voor het automatisch leegmaken — dat staat nu per
+  -- doelenboom. Dit tenant-veld is alleen nog de standaardwaarde waarmee een
+  -- nieuwe doelenboom in deze tenant wordt aangemaakt (zie POST
+  -- /api/tenants/:tenantId/doelenbomen), zodat je 'm niet elke keer opnieuw
+  -- hoeft te zetten.
   wipe_on_empty boolean not null default false,
-  -- Na hoeveel minuten zonder actieve sessie deze tenant als "verlaten" geldt.
+  -- Na hoeveel minuten zonder actieve sessie deze tenant als "verlaten" geldt
+  -- — dit blijft wél tenant-breed (een sessie heeft toegang tot de hele
+  -- tenant, niet tot één specifieke doelenboom), zie tenantWipe.ts.
   session_timeout_minutes integer not null default 30 check (session_timeout_minutes > 0),
   created_at timestamptz not null default now()
 );
@@ -80,6 +84,14 @@ create table if not exists doelenbomen (
   -- gewoon voor tenant-admins mogelijk — dat is geen "boom-inhoud" maar
   -- tenant-beheer.
   read_only boolean not null default false,
+  -- Als true: zodra geen enkele actieve sessie meer toegang heeft tot de
+  -- tenant van deze doelenboom (session_timeout_minutes, zie tenants
+  -- hierboven en tenantWipe.ts), wordt de inhoud van déze doelenboom
+  -- automatisch geleegd — andere doelenbomen in dezelfde tenant zonder deze
+  -- vlag blijven met rust. Per doelenboom instelbaar (i.p.v. tenant-breed)
+  -- sinds een tenant meerdere doelenbomen kan hebben; bij het aanmaken wordt
+  -- 'm standaard gevuld met tenants.wipe_on_empty.
+  wipe_on_empty boolean not null default false,
   created_at timestamptz not null default now(),
   unique (tenant_id, slug)
 );
