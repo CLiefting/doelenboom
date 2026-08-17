@@ -1354,7 +1354,7 @@ function runApp(data) {
     }).join('');
     return '<div class="dp-field">' +
       '<div class="dp-field-header"><label>Organisatieonderdelen</label>' +
-        '<button type="button" class="btn ghost btn-xs dp-add-org-btn crud-only" data-code="' + escapeHtml(id) + '">+ Organisatieonderdeel</button>' +
+        '<button type="button" class="btn ghost btn-xs dp-add-org-btn crud-only" data-code="' + escapeHtml(id) + '" title="Organisatieonderdeel koppelen">+ OE</button>' +
       '</div>' +
       (chips ? '<div class="dp-chip-row">' + chips + '</div>' : '<span class="dp-empty-note-inline">Geen organisatieonderdelen gekoppeld.</span>') +
       '</div>';
