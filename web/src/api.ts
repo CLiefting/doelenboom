@@ -137,6 +137,11 @@ export const api = {
       body: JSON.stringify(patch),
     }, token),
 
+  // Sysadmin-only — verwijdert de tenant zelf plus (cascade) al zijn leden,
+  // doelenbomen en boom-inhoud. Zie api/src/routes/tenants.ts.
+  deleteTenant: (token: string, tenantId: number) =>
+    request<void>(`/api/tenants/${tenantId}`, { method: 'DELETE' }, token),
+
   // --- Tenant-leden (rol admin/gebruiker binnen één tenant) ---
   tenantMembers: (token: string, tenantId: number) =>
     request<import('./types').TenantMember[]>(`/api/tenants/${tenantId}/members`, {}, token),

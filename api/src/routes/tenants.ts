@@ -67,6 +67,17 @@ tenantsRouter.put('/:id', requireTenantRoleForTenantParam('admin', 'id'), async 
   res.json(result.rows[0]);
 });
 
+// DELETE /api/tenants/:id — sysadmin-only. Cascade (db/init.sql) ruimt
+// tenant_users, doelenbomen en al hun inhoud (elementen/relaties/tags/
+// organisatieonderdelen/imports) van deze tenant automatisch mee op. Bewust
+// géén requireTenantRoleForTenantParam hier: een tenant-admin mag zijn eigen
+// tenant niet kunnen wegvagen, alleen een sysadmin.
+tenantsRouter.delete('/:id', requireSysadmin, async (req, res) => {
+  const result = await pool.query('delete from tenants where id = $1 returning id', [req.params.id]);
+  if (result.rowCount === 0) return res.status(404).json({ error: 'Tenant niet gevonden.' });
+  res.status(204).send();
+});
+
 // --- Leden van een tenant (user management binnen de tenant) ---
 // Toegestaan voor sysadmins en tenant-admins van déze tenant. Los van
 // api/src/routes/users.ts (dat is accountbeheer zelf, sysadmin-only) — dit hier

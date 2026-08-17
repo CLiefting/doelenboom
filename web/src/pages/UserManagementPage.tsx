@@ -118,16 +118,48 @@ export default function UserManagementPage({
             const t = manageableTenants.find((x) => x.id === selectedTenantId);
             if (!t) return null;
             return (
-              <TenantSettingsForm
-                token={token}
-                tenant={t}
-                busy={busy}
-                setBusy={setBusy}
-                setError={setError}
-                onSaved={() => {
-                  api.tenants(token).then(setTenants).catch((err) => setError(errMsg(err)));
-                }}
-              />
+              <>
+                <TenantSettingsForm
+                  token={token}
+                  tenant={t}
+                  busy={busy}
+                  setBusy={setBusy}
+                  setError={setError}
+                  onSaved={() => {
+                    api.tenants(token).then(setTenants).catch((err) => setError(errMsg(err)));
+                  }}
+                />
+                {user.isSysadmin && (
+                  <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid #f0f1f3' }}>
+                    <button
+                      disabled={busy}
+                      style={btnStyle('danger-text')}
+                      onClick={async () => {
+                        const ok = window.confirm(
+                          `Tenant "${t.name}" volledig verwijderen? Alle doelenbomen, elementen, relaties, ` +
+                          `tags, organisatieonderdelen, imports en leden hiervan gaan dan ook verloren. ` +
+                          `Dit kan niet ongedaan worden gemaakt.`
+                        );
+                        if (!ok) return;
+                        setBusy(true);
+                        setError(null);
+                        try {
+                          await api.deleteTenant(token, t.id);
+                          setSelectedTenantId(null);
+                          api.tenants(token).then(setTenants).catch((err) => setError(errMsg(err)));
+                          refreshDoelenbomen();
+                        } catch (err) {
+                          setError(errMsg(err));
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                    >
+                      Tenant verwijderen
+                    </button>
+                  </div>
+                )}
+              </>
             );
           })()}
         </section>
