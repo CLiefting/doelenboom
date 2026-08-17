@@ -8,6 +8,10 @@ export class ApiError extends Error {
   }
 }
 
+// Zelfde localStorage-sleutel als useSession.ts — hier niet als import omdat
+// dat een React-hook is en dit een gewone module-level functie, geen component.
+const SESSION_STORAGE_KEY = 'doelenboom.session';
+
 async function request<T>(path: string, options: RequestInit = {}, token?: string | null): Promise<T> {
   const headers: Record<string, string> = { ...(options.headers as Record<string, string> | undefined) };
   if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -23,6 +27,17 @@ async function request<T>(path: string, options: RequestInit = {}, token?: strin
       message = body.error ?? body.detail ?? message;
     } catch {
       // response had geen JSON-body
+    }
+    // Alleen bij een 401 op een call die zelf al een token meestuurde (dus niet
+    // /auth/login zelf, waar 401 gewoon "onjuist wachtwoord" betekent): de JWT
+    // is verlopen of ongeldig geworden. Zonder dit bleef de gebruiker vast
+    // hangen op een scherm met alleen deze foutmelding in rode tekst, zonder
+    // duidelijk herstelpad terug naar het inlogscherm (zelfs "Uitloggen" werkt
+    // dan niet, want dat vereist zelf ook weer een geldige sessie). Lokale
+    // sessie wissen + herladen brengt de gebruiker direct terug bij LoginPage.
+    if (res.status === 401 && token) {
+      localStorage.removeItem(SESSION_STORAGE_KEY);
+      window.location.reload();
     }
     throw new ApiError(res.status, message);
   }
