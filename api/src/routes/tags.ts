@@ -3,9 +3,10 @@ import { pool } from '../db.js';
 import { requireAuth } from '../auth.js';
 import { requireTenantRoleForDoelenboomParam } from '../rbac.js';
 
-// CRUD voor tags (fase 2 van de CRUD-uitbreiding, samen met org-units.ts). Koppelen
-// van een tag aan een element (element_tags) hoort bij de relaties-fase en zit hier
-// nog niet in — dit is puur de stamlijst.
+// CRUD voor tags (fase 2 van de CRUD-uitbreiding, samen met org-units.ts), plus
+// (fase 4) het koppelen/ontkoppelen van een bestaande tag aan een specifiek
+// element (element_tags) — de stamlijst hierboven blijft gescheiden van deze
+// koppel-routes onderaan het bestand.
 export const tagsRouter = Router();
 tagsRouter.use(requireAuth);
 // Per route meegeven (niet via router.use()) — zie toelichting in elements.ts.
@@ -92,5 +93,58 @@ tagsRouter.delete('/doelenbomen/:id/tags/:code', requireAdmin, async (req, res) 
     [req.params.id, req.params.code]
   );
   if (result.rowCount === 0) return res.status(404).json({ error: 'Tag niet gevonden.' });
+  res.status(204).send();
+});
+
+async function findElementId(doelenboomId: string, code: string): Promise<number | null> {
+  const r = await pool.query('select id from elements where doelenboom_id = $1 and code = $2', [doelenboomId, code]);
+  return r.rows[0]?.id ?? null;
+}
+
+async function findTagId(doelenboomId: string, code: string): Promise<number | null> {
+  const r = await pool.query('select id from tags where doelenboom_id = $1 and code = $2', [doelenboomId, code]);
+  return r.rows[0]?.id ?? null;
+}
+
+// POST /api/doelenbomen/:id/elements/:code/tags — { tagCode, toelichting } koppelt een
+// bestaande tag aan een element. Voor het aanmaken van de tag zelf, zie
+// POST /doelenbomen/:id/tags hierboven.
+tagsRouter.post('/doelenbomen/:id/elements/:code/tags', requireAdmin, async (req, res) => {
+  const b = (req.body ?? {}) as Record<string, unknown>;
+  const tagCode = typeof b.tagCode === 'string' ? b.tagCode.trim() : '';
+  const toelichting = typeof b.toelichting === 'string' ? b.toelichting.trim() : '';
+  if (!tagCode) return res.status(400).json({ error: 'Tag is verplicht.' });
+
+  const doelenboomId = req.params.id;
+  const elementId = await findElementId(doelenboomId, req.params.code);
+  if (!elementId) return res.status(404).json({ error: `Element "${req.params.code}" niet gevonden.` });
+  const tagId = await findTagId(doelenboomId, tagCode);
+  if (!tagId) return res.status(404).json({ error: `Tag "${tagCode}" niet gevonden.` });
+
+  try {
+    await pool.query(
+      'insert into element_tags (element_id, tag_id, toelichting) values ($1,$2,$3)',
+      [elementId, tagId, toelichting]
+    );
+    res.status(201).json({ elementCode: req.params.code, tagCode, toelichting });
+  } catch (err) {
+    if (isUniqueViolation(err)) {
+      return res.status(409).json({ error: `Tag "${tagCode}" is al gekoppeld aan dit element.` });
+    }
+    res.status(500).json({ error: 'Koppelen van tag mislukt', detail: (err as Error).message });
+  }
+});
+
+// DELETE /api/doelenbomen/:id/elements/:code/tags/:tagCode — ontkoppelt alleen; de tag
+// zelf (in de stamlijst) blijft bestaan.
+tagsRouter.delete('/doelenbomen/:id/elements/:code/tags/:tagCode', requireAdmin, async (req, res) => {
+  const result = await pool.query(
+    `delete from element_tags
+     where element_id = (select id from elements where doelenboom_id = $1 and code = $2)
+       and tag_id = (select id from tags where doelenboom_id = $1 and code = $3)
+     returning element_id`,
+    [req.params.id, req.params.code, req.params.tagCode]
+  );
+  if (result.rowCount === 0) return res.status(404).json({ error: 'Koppeling niet gevonden.' });
   res.status(204).send();
 });

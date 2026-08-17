@@ -340,14 +340,26 @@
   }
   .dp-field span { font-size: 13px; color: #222; white-space: normal; word-break: break-word; line-height: 1.4; }
   .dp-field.empty span { color: #bbb; font-style: italic; }
+  .dp-field-header {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  }
+  .dp-field-header label { margin: 0; }
   .dp-chip-row { display: flex; flex-wrap: wrap; gap: 5px; }
   .dp-chip {
-    display: inline-block; font-size: 11.5px; padding: 3px 10px; border-radius: 999px;
-    background: #eef0f3; color: #333; border: 1px solid #dde1e7;
+    display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; padding: 3px 8px 3px 10px;
+    border-radius: 999px; background: #eef0f3; color: #333; border: 1px solid #dde1e7;
   }
   .dp-chip.org-primair { background: #dcE8ff; border-color: #9fc0ee; color: #0d3a6b; }
   .dp-chip.org-ondersteunend { background: #f0f1f3; border-color: #d5d9e0; color: #444; }
   .dp-chip.org-betrokken { background: #fdf1e0; border-color: #edcd94; color: #6b4c0d; }
+  .dp-chip-remove {
+    border: none; background: none; cursor: pointer; padding: 0; line-height: 1;
+    font-size: 13px; color: inherit; opacity: 0.55;
+  }
+  .dp-chip-remove:hover { opacity: 1; }
+  .dp-empty-note-inline { font-size: 12.5px; color: #bbb; font-style: italic; }
+  body:not(.read-only) .dp-org-chip { cursor: pointer; }
+  body:not(.read-only) .dp-org-chip:hover { filter: brightness(0.96); }
 
   /* Project status + products panel, shown below the tree */
   .project-panel {
@@ -793,6 +805,58 @@
         <div class="element-modal-actions">
           <button type="button" class="btn ghost" id="edge-modal-cancel">Annuleren</button>
           <button type="submit" class="btn" id="edge-modal-save">Opslaan</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="element-modal-backdrop" id="tag-link-modal-backdrop">
+    <div class="element-modal">
+      <h3 id="tag-link-modal-title">Tag koppelen</h3>
+      <form id="tag-link-form">
+        <label>Tag <span class="req-mark">*</span>
+          <select id="tag-link-field-tag"></select>
+        </label>
+        <label>Toelichting
+          <textarea id="tag-link-field-toelichting" rows="2"></textarea>
+        </label>
+        <p class="element-modal-status" id="tag-link-modal-status"></p>
+        <div class="element-modal-actions">
+          <button type="button" class="btn ghost" id="tag-link-modal-cancel">Annuleren</button>
+          <button type="submit" class="btn" id="tag-link-modal-save">Opslaan</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="element-modal-backdrop" id="orgunit-link-modal-backdrop">
+    <div class="element-modal">
+      <h3 id="orgunit-link-modal-title">Organisatieonderdeel koppelen</h3>
+      <form id="orgunit-link-form">
+        <label>Organisatieonderdeel <span class="req-mark">*</span>
+          <select id="orgunit-link-field-org"></select>
+        </label>
+        <label>Relatietype
+          <select id="orgunit-link-field-relatietype">
+            <option value="Primair">Primair</option>
+            <option value="Ondersteunend">Ondersteunend</option>
+            <option value="Betrokken">Betrokken</option>
+          </select>
+        </label>
+        <label>Status
+          <select id="orgunit-link-field-status">
+            <option value="Concept">Concept</option>
+            <option value="Gevalideerd">Gevalideerd</option>
+            <option value="Vervallen">Vervallen</option>
+          </select>
+        </label>
+        <label>Toelichting
+          <textarea id="orgunit-link-field-toelichting" rows="2"></textarea>
+        </label>
+        <p class="element-modal-status" id="orgunit-link-modal-status"></p>
+        <div class="element-modal-actions">
+          <button type="button" class="btn ghost" id="orgunit-link-modal-cancel">Annuleren</button>
+          <button type="submit" class="btn" id="orgunit-link-modal-save">Opslaan</button>
         </div>
       </form>
     </div>
@@ -1247,21 +1311,34 @@ function runApp(data) {
 
   function tagsChipsHtml(id) {
     const tagIds = ELEMENT_TAGS[id] || [];
-    if (!tagIds.length) return '';
-    const chips = tagIds.map(t => '<span class="dp-chip">' + (TAGS[t] ? TAGS[t].name : t) + '</span>').join('');
-    return '<div class="dp-field"><label>Tags</label><div class="dp-chip-row">' + chips + '</div></div>';
+    const chips = tagIds.map(t => {
+      const name = TAGS[t] ? TAGS[t].name : t;
+      return '<span class="dp-chip">' + escapeHtml(name) +
+        '<button type="button" class="dp-chip-remove crud-only dp-tag-remove-btn" data-code="' + escapeHtml(id) + '" data-tag="' + escapeHtml(t) + '" title="Tag ontkoppelen">&times;</button></span>';
+    }).join('');
+    return '<div class="dp-field">' +
+      '<div class="dp-field-header"><label>Tags</label>' +
+        '<button type="button" class="btn ghost btn-xs dp-add-tag-btn crud-only" data-code="' + escapeHtml(id) + '">+ Tag</button>' +
+      '</div>' +
+      (chips ? '<div class="dp-chip-row">' + chips + '</div>' : '<span class="dp-empty-note-inline">Geen tags gekoppeld.</span>') +
+      '</div>';
   }
 
   function orgChipsHtml(id) {
     const rels = OB_ORG[id] || [];
-    if (!rels.length) return '';
     const chips = rels.map(r => {
       const name = ORGS[r.org] ? ORGS[r.org].name : r.org;
       const relCls = 'org-' + (r.relatietype || '').toLowerCase();
       const title = [r.relatietype, r.toelichting, r.status].filter(Boolean).join(' — ');
-      return '<span class="dp-chip ' + relCls + '" title="' + title.replace(/"/g, '&quot;') + '">' + name + '</span>';
+      return '<span class="dp-chip ' + relCls + ' dp-org-chip" title="' + title.replace(/"/g, '&quot;') + '" data-code="' + escapeHtml(id) + '" data-org="' + escapeHtml(r.org) + '">' + escapeHtml(name) +
+        '<button type="button" class="dp-chip-remove crud-only dp-org-remove-btn" data-code="' + escapeHtml(id) + '" data-org="' + escapeHtml(r.org) + '" title="Koppeling verwijderen">&times;</button></span>';
     }).join('');
-    return '<div class="dp-field"><label>Organisatieonderdelen</label><div class="dp-chip-row">' + chips + '</div></div>';
+    return '<div class="dp-field">' +
+      '<div class="dp-field-header"><label>Organisatieonderdelen</label>' +
+        '<button type="button" class="btn ghost btn-xs dp-add-org-btn crud-only" data-code="' + escapeHtml(id) + '">+ Organisatieonderdeel</button>' +
+      '</div>' +
+      (chips ? '<div class="dp-chip-row">' + chips + '</div>' : '<span class="dp-empty-note-inline">Geen organisatieonderdelen gekoppeld.</span>') +
+      '</div>';
   }
 
   function taakveldLine(d) {
@@ -2188,7 +2265,11 @@ function runApp(data) {
     }
   }
 
-  detailPanel.addEventListener('click', (ev) => {
+  // Eén gedeelde handler voor zowel het detail-paneel (alle elementtypen) als het
+  // project-paneel eronder (dat voor Project-elementen dezelfde tags/org-chips
+  // toont, zie projectSectionHtml) — anders werken de +Tag/+Organisatieonderdeel-
+  // knoppen daar niet, want die staan in een los DOM-element (project-panel).
+  function onDetailAreaClick(ev) {
     const editBtn = ev.target.closest('.dp-edit-btn');
     if (editBtn) { openElementModal('edit', editBtn.dataset.code); return; }
     const delBtn = ev.target.closest('.dp-delete-btn');
@@ -2198,8 +2279,22 @@ function runApp(data) {
     const connEditBtn = ev.target.closest('.conn-edit-btn');
     if (connEditBtn) { openEditEdgeModal(connEditBtn.dataset.source, connEditBtn.dataset.target); return; }
     const connDelBtn = ev.target.closest('.conn-delete-btn');
-    if (connDelBtn) { deleteEdge(connDelBtn.dataset.source, connDelBtn.dataset.target); }
-  });
+    if (connDelBtn) { deleteEdge(connDelBtn.dataset.source, connDelBtn.dataset.target); return; }
+    const addTagBtn = ev.target.closest('.dp-add-tag-btn');
+    if (addTagBtn) { openTagLinkModal(addTagBtn.dataset.code); return; }
+    const tagRemoveBtn = ev.target.closest('.dp-tag-remove-btn');
+    if (tagRemoveBtn) { deleteTagLink(tagRemoveBtn.dataset.code, tagRemoveBtn.dataset.tag); return; }
+    const addOrgBtn = ev.target.closest('.dp-add-org-btn');
+    if (addOrgBtn) { openOrgLinkModal(addOrgBtn.dataset.code); return; }
+    const orgRemoveBtn = ev.target.closest('.dp-org-remove-btn');
+    if (orgRemoveBtn) { deleteOrgLink(orgRemoveBtn.dataset.code, orgRemoveBtn.dataset.org); return; }
+    const orgChip = ev.target.closest('.dp-org-chip');
+    if (orgChip && !document.body.classList.contains('read-only')) {
+      openOrgLinkModal(orgChip.dataset.code, orgChip.dataset.org);
+    }
+  }
+  detailPanel.addEventListener('click', onDetailAreaClick);
+  projectPanelEl.addEventListener('click', onDetailAreaClick);
 
   // ---- Fase 2: CRUD voor tags en organisatieonderdelen (de stamlijsten; koppelen
   // aan een element is een relatie en hoort bij fase 3). Eén herbruikbare factory
@@ -2515,6 +2610,206 @@ function runApp(data) {
     try {
       const res = await fetch(
         apiUrl + '/api/doelenbomen/' + doelenboomId + '/edges/' + encodeURIComponent(source) + '/' + encodeURIComponent(target),
+        { method: 'DELETE', headers: { Authorization: 'Bearer ' + authToken } }
+      );
+      if (!res.ok && res.status !== 204) {
+        const b = await res.json().catch(() => ({}));
+        throw new Error(b.error || ('Verwijderen mislukt (HTTP ' + res.status + ')'));
+      }
+      window.location.reload();
+    } catch (err) {
+      showToast(err && err.message ? err.message : 'Onbekende fout bij verwijderen.', 'error');
+    }
+  }
+
+  // ---- Fase 4: tag/organisatieonderdeel koppelen aan een element. Net als bij
+  // edges (relaties) is dit een koppeling tussen bestaande stamgegevens, niet het
+  // aanmaken van een tag/organisatieonderdeel zelf (dat blijft het "Tags &
+  // organisatieonderdelen beheren"-scherm, setupRefCrud hierboven). Zelfde
+  // reload-na-opslaan-aanpak als de rest van deze CRUD-uitbreiding.
+  const tagLinkModalBackdrop = document.getElementById('tag-link-modal-backdrop');
+  const tagLinkForm = document.getElementById('tag-link-form');
+  const tagLinkFieldTag = document.getElementById('tag-link-field-tag');
+  const tagLinkFieldToelichting = document.getElementById('tag-link-field-toelichting');
+  const tagLinkModalStatus = document.getElementById('tag-link-modal-status');
+  const tagLinkModalCancelBtn = document.getElementById('tag-link-modal-cancel');
+  let tagLinkAnchorCode = null;
+
+  function setTagLinkModalStatus(text, kind) {
+    tagLinkModalStatus.textContent = text || '';
+    tagLinkModalStatus.style.color = kind === 'ok' ? '#2E7D5B' : kind === 'busy' ? '#777' : '#DC3545';
+  }
+
+  function openTagLinkModal(elementCode) {
+    tagLinkAnchorCode = elementCode;
+    const linked = new Set(ELEMENT_TAGS[elementCode] || []);
+    const available = Object.keys(TAGS).filter((t) => !linked.has(t)).sort((a, b) => TAGS[a].name.localeCompare(TAGS[b].name, 'nl'));
+    if (!available.length) {
+      tagLinkFieldTag.innerHTML = '<option value="">(alle tags zijn al gekoppeld)</option>';
+    } else {
+      tagLinkFieldTag.innerHTML = available.map((t) => '<option value="' + escapeHtml(t) + '">' + escapeHtml(TAGS[t].name) + '</option>').join('');
+    }
+    tagLinkFieldToelichting.value = '';
+    setTagLinkModalStatus('');
+    tagLinkModalBackdrop.classList.add('visible');
+  }
+
+  function closeTagLinkModal() {
+    tagLinkModalBackdrop.classList.remove('visible');
+  }
+
+  if (tagLinkModalCancelBtn) tagLinkModalCancelBtn.addEventListener('click', closeTagLinkModal);
+  if (tagLinkModalBackdrop) tagLinkModalBackdrop.addEventListener('click', (ev) => {
+    if (ev.target === tagLinkModalBackdrop) closeTagLinkModal();
+  });
+
+  if (tagLinkForm) tagLinkForm.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const tagCode = tagLinkFieldTag.value;
+    if (!tagCode) { setTagLinkModalStatus('Kies een tag.'); return; }
+    setTagLinkModalStatus('Bezig met opslaan…', 'busy');
+    try {
+      const res = await fetch(
+        apiUrl + '/api/doelenbomen/' + doelenboomId + '/elements/' + encodeURIComponent(tagLinkAnchorCode) + '/tags',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + authToken },
+          body: JSON.stringify({ tagCode, toelichting: tagLinkFieldToelichting.value.trim() }),
+        }
+      );
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}));
+        throw new Error(b.error || ('Opslaan mislukt (HTTP ' + res.status + ')'));
+      }
+      setTagLinkModalStatus('Opgeslagen, boom wordt herladen…', 'ok');
+      setTimeout(() => window.location.reload(), 400);
+    } catch (err) {
+      setTagLinkModalStatus(err && err.message ? err.message : 'Onbekende fout bij opslaan.');
+    }
+  });
+
+  async function deleteTagLink(elementCode, tagCode) {
+    const tagName = TAGS[tagCode] ? TAGS[tagCode].name : tagCode;
+    const ok = await showConfirm('Tag "' + tagName + '" ontkoppelen van dit element?');
+    if (!ok) return;
+    try {
+      const res = await fetch(
+        apiUrl + '/api/doelenbomen/' + doelenboomId + '/elements/' + encodeURIComponent(elementCode) + '/tags/' + encodeURIComponent(tagCode),
+        { method: 'DELETE', headers: { Authorization: 'Bearer ' + authToken } }
+      );
+      if (!res.ok && res.status !== 204) {
+        const b = await res.json().catch(() => ({}));
+        throw new Error(b.error || ('Verwijderen mislukt (HTTP ' + res.status + ')'));
+      }
+      window.location.reload();
+    } catch (err) {
+      showToast(err && err.message ? err.message : 'Onbekende fout bij verwijderen.', 'error');
+    }
+  }
+
+  const orgLinkModalBackdrop = document.getElementById('orgunit-link-modal-backdrop');
+  const orgLinkModalTitle = document.getElementById('orgunit-link-modal-title');
+  const orgLinkForm = document.getElementById('orgunit-link-form');
+  const orgLinkFieldOrg = document.getElementById('orgunit-link-field-org');
+  const orgLinkFieldOrgLabel = orgLinkFieldOrg.closest('label');
+  const orgLinkFieldRelatietype = document.getElementById('orgunit-link-field-relatietype');
+  const orgLinkFieldStatus = document.getElementById('orgunit-link-field-status');
+  const orgLinkFieldToelichting = document.getElementById('orgunit-link-field-toelichting');
+  const orgLinkModalStatus = document.getElementById('orgunit-link-modal-status');
+  const orgLinkModalCancelBtn = document.getElementById('orgunit-link-modal-cancel');
+  let orgLinkMode = 'create';
+  let orgLinkAnchorCode = null;
+  let orgLinkEditOrgCode = null;
+
+  function setOrgLinkModalStatus(text, kind) {
+    orgLinkModalStatus.textContent = text || '';
+    orgLinkModalStatus.style.color = kind === 'ok' ? '#2E7D5B' : kind === 'busy' ? '#777' : '#DC3545';
+  }
+
+  // orgCode meegeven = bewerken van een bestaande koppeling (organisatieonderdeel
+  // zelf staat dan vast, alleen relatietype/status/toelichting zijn te wijzigen —
+  // zelfde aanpak als edges.ts/de edge-modal hierboven).
+  function openOrgLinkModal(elementCode, orgCode) {
+    orgLinkAnchorCode = elementCode;
+    if (orgCode) {
+      orgLinkMode = 'edit';
+      orgLinkEditOrgCode = orgCode;
+      orgLinkModalTitle.textContent = 'Koppeling bewerken';
+      orgLinkFieldOrgLabel.style.display = 'none';
+      const rel = (OB_ORG[elementCode] || []).find((r) => r.org === orgCode);
+      orgLinkFieldRelatietype.value = (rel && rel.relatietype) || 'Betrokken';
+      orgLinkFieldStatus.value = (rel && rel.status) || 'Concept';
+      orgLinkFieldToelichting.value = (rel && rel.toelichting) || '';
+    } else {
+      orgLinkMode = 'create';
+      orgLinkEditOrgCode = null;
+      orgLinkModalTitle.textContent = 'Organisatieonderdeel koppelen';
+      orgLinkFieldOrgLabel.style.display = '';
+      const linked = new Set((OB_ORG[elementCode] || []).map((r) => r.org));
+      const available = Object.keys(ORGS).filter((o) => !linked.has(o)).sort((a, b) => ORGS[a].name.localeCompare(ORGS[b].name, 'nl'));
+      orgLinkFieldOrg.innerHTML = available.length
+        ? available.map((o) => '<option value="' + escapeHtml(o) + '">' + escapeHtml(ORGS[o].name) + '</option>').join('')
+        : '<option value="">(alle organisatieonderdelen zijn al gekoppeld)</option>';
+      orgLinkFieldRelatietype.value = 'Betrokken';
+      orgLinkFieldStatus.value = 'Concept';
+      orgLinkFieldToelichting.value = '';
+    }
+    setOrgLinkModalStatus('');
+    orgLinkModalBackdrop.classList.add('visible');
+  }
+
+  function closeOrgLinkModal() {
+    orgLinkModalBackdrop.classList.remove('visible');
+  }
+
+  if (orgLinkModalCancelBtn) orgLinkModalCancelBtn.addEventListener('click', closeOrgLinkModal);
+  if (orgLinkModalBackdrop) orgLinkModalBackdrop.addEventListener('click', (ev) => {
+    if (ev.target === orgLinkModalBackdrop) closeOrgLinkModal();
+  });
+
+  if (orgLinkForm) orgLinkForm.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const relatietype = orgLinkFieldRelatietype.value;
+    const status = orgLinkFieldStatus.value;
+    const toelichting = orgLinkFieldToelichting.value.trim();
+    setOrgLinkModalStatus('Bezig met opslaan…', 'busy');
+    try {
+      let url, method, body;
+      if (orgLinkMode === 'create') {
+        const orgCode = orgLinkFieldOrg.value;
+        if (!orgCode) { setOrgLinkModalStatus('Kies een organisatieonderdeel.'); return; }
+        url = apiUrl + '/api/doelenbomen/' + doelenboomId + '/elements/' + encodeURIComponent(orgLinkAnchorCode) + '/org-units';
+        method = 'POST';
+        body = JSON.stringify({ orgCode, relatietype, status, toelichting });
+      } else {
+        url = apiUrl + '/api/doelenbomen/' + doelenboomId + '/elements/' + encodeURIComponent(orgLinkAnchorCode) +
+          '/org-units/' + encodeURIComponent(orgLinkEditOrgCode);
+        method = 'PUT';
+        body = JSON.stringify({ relatietype, status, toelichting });
+      }
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + authToken },
+        body,
+      });
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}));
+        throw new Error(b.error || ('Opslaan mislukt (HTTP ' + res.status + ')'));
+      }
+      setOrgLinkModalStatus('Opgeslagen, boom wordt herladen…', 'ok');
+      setTimeout(() => window.location.reload(), 400);
+    } catch (err) {
+      setOrgLinkModalStatus(err && err.message ? err.message : 'Onbekende fout bij opslaan.');
+    }
+  });
+
+  async function deleteOrgLink(elementCode, orgCode) {
+    const orgName = ORGS[orgCode] ? ORGS[orgCode].name : orgCode;
+    const ok = await showConfirm('Koppeling met "' + orgName + '" verwijderen?');
+    if (!ok) return;
+    try {
+      const res = await fetch(
+        apiUrl + '/api/doelenbomen/' + doelenboomId + '/elements/' + encodeURIComponent(elementCode) + '/org-units/' + encodeURIComponent(orgCode),
         { method: 'DELETE', headers: { Authorization: 'Bearer ' + authToken } }
       );
       if (!res.ok && res.status !== 204) {
