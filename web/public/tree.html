@@ -1768,10 +1768,34 @@ function runApp(data) {
     return lines;
   }
 
+  // getComputedStyle() geeft stroke-width/stroke-dasharray terug als CSS-lengtes
+  // met een eenheid (bv. "1.8px", "3px, 3px"). Dat is geldig genoeg voor browsers,
+  // maar niet voor de strikte SVG-attribuutsyntax (numbers, geen units) die o.a.
+  // PowerPoint/Word's SVG-import verwacht — daar kan zo'n non-conform attribuut
+  // de hele import laten mislukken (tekst incluis). Strippen naar kale getallen.
+  function stripPx(v) {
+    return (v || '').replace(/px/g, '');
+  }
+
   function exportSVG() {
     const boardRect = boardEl.getBoundingClientRect();
     const W = Math.ceil(boardRect.width);
-    const H = Math.ceil(boardRect.height);
+    const boardH = Math.ceil(boardRect.height);
+
+    // De "ontwikkelt/ondersteunt/..."-labels boven de kolommen renderen (door
+    // margin-collapsing tussen .board en zijn eerste kind .columns) een stukje
+    // BOVEN boardRect.top, dus met een negatieve y t.o.v. boardRect. In de app
+    // is dat geen probleem (canvas-wrap heeft daar ruimte voor via z'n padding),
+    // maar in de geëxporteerde SVG viel dat buiten de viewBox en werd het dus
+    // stilzwijgend afgeknipt. Hier vooraf de werkelijk benodigde extra ruimte
+    // boven y=0 bepalen, en straks alles met evenveel naar beneden schuiven.
+    let topOverflow = 0;
+    document.querySelectorAll('.col-arrow-label').forEach(label => {
+      const top = label.getBoundingClientRect().top - boardRect.top;
+      if (top < topOverflow) topOverflow = top;
+    });
+    const yOffset = topOverflow < 0 ? Math.ceil(-topOverflow) + 4 : 0;
+    const H = boardH + yOffset;
 
     const out = document.createElementNS(SVG_NS, 'svg');
     out.setAttribute('xmlns', SVG_NS);
@@ -1786,6 +1810,14 @@ function runApp(data) {
     bg.setAttribute('fill', '#ffffff');
     out.appendChild(bg);
 
+    // Alle inhoud (edges, labels, headers, nodes) wordt zoals voorheen berekend
+    // t.o.v. boardRect, en dan als groep yOffset naar beneden geschoven — zo
+    // blijft de rest van de code ongewijzigd en is er geen kans meer op
+    // negatieve coördinaten die door de viewBox worden afgeknipt.
+    const content = document.createElementNS(SVG_NS, 'g');
+    if (yOffset) content.setAttribute('transform', 'translate(0, ' + yOffset + ')');
+    out.appendChild(content);
+
     // Edges + column-relation arrows: clone the live connector SVG, resolving computed
     // style into explicit presentation attributes so the file is self-contained.
     Array.from(svg.children).forEach(el => {
@@ -1795,18 +1827,18 @@ function runApp(data) {
       clone.removeAttribute('class');
       if (tag === 'path') {
         clone.setAttribute('stroke', cs.stroke);
-        clone.setAttribute('stroke-width', cs.strokeWidth);
+        clone.setAttribute('stroke-width', stripPx(cs.strokeWidth));
         clone.setAttribute('fill', 'none');
         clone.setAttribute('opacity', cs.opacity);
         const dash = cs.strokeDasharray;
-        if (dash && dash !== 'none') clone.setAttribute('stroke-dasharray', dash);
+        if (dash && dash !== 'none') clone.setAttribute('stroke-dasharray', stripPx(dash));
       } else if (tag === 'line') {
         clone.setAttribute('stroke', cs.stroke);
-        clone.setAttribute('stroke-width', cs.strokeWidth);
+        clone.setAttribute('stroke-width', stripPx(cs.strokeWidth));
       } else if (tag === 'polygon') {
         clone.setAttribute('fill', cs.fill);
       }
-      out.appendChild(clone);
+      content.appendChild(clone);
     });
 
     // Column-relation arrow labels (HTML divs) -> SVG text with a white backing rect.
@@ -1823,7 +1855,7 @@ function runApp(data) {
       rect.setAttribute('width', tw + 12);
       rect.setAttribute('height', 18);
       rect.setAttribute('fill', '#ffffff');
-      out.appendChild(rect);
+      content.appendChild(rect);
       const t = document.createElementNS(SVG_NS, 'text');
       t.setAttribute('x', cx);
       t.setAttribute('y', cy + 4);
@@ -1833,7 +1865,7 @@ function runApp(data) {
       t.setAttribute('font-style', 'italic');
       t.setAttribute('fill', '#002855');
       t.textContent = label.textContent;
-      out.appendChild(t);
+      content.appendChild(t);
     });
 
     // Column headers.
@@ -1849,7 +1881,7 @@ function runApp(data) {
       t.setAttribute('font-weight', '700');
       t.setAttribute('fill', '#002855');
       t.textContent = header.childNodes[0] ? header.childNodes[0].textContent.trim() : '';
-      out.appendChild(t);
+      content.appendChild(t);
     });
 
     // Nodes: rect + wrapped, vertically centered text + RAG/tag corner markers.
@@ -1915,7 +1947,7 @@ function runApp(data) {
         g.appendChild(c);
       }
 
-      out.appendChild(g);
+      content.appendChild(g);
     });
 
     const serializer = new XMLSerializer();
