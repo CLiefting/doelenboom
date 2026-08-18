@@ -1868,14 +1868,22 @@ function runApp(data) {
       content.appendChild(t);
     });
 
-    // Column headers.
+    // Column headers. Let op: .col-header is "position: sticky; top: 0" (blijft
+    // zichtbaar tijdens scrollen) — getBoundingClientRect() geeft dan de
+    // "vastgeplakte" positie in het scrollvenster terug, niet de werkelijke
+    // documentpositie, waardoor de kopteksten bij een gescrolde export ergens
+    // middenin de figuur belandden i.p.v. bovenaan. Zelfde fix als eerder al
+    // toegepast in drawColumnArrows(): de vertical offset bepalen via de
+    // niet-sticky .columns-rij, die wél altijd de echte documentpositie geeft.
+    const columnsRect = columnsEl.getBoundingClientRect();
+    const headerY = columnsRect.top - boardRect.top + 16;
     document.querySelectorAll('.col-header').forEach(header => {
       const col = header.closest('.column');
       if (col.classList.contains('hidden')) return;
       const r = header.getBoundingClientRect();
       const t = document.createElementNS(SVG_NS, 'text');
       t.setAttribute('x', r.left + r.width / 2 - boardRect.left);
-      t.setAttribute('y', r.top - boardRect.top + 16);
+      t.setAttribute('y', headerY);
       t.setAttribute('text-anchor', 'middle');
       t.setAttribute('font-size', '12');
       t.setAttribute('font-weight', '700');
