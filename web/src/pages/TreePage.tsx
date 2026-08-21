@@ -27,20 +27,17 @@ export default function TreePage({
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
-  // Sysadmin mag overal wijzigen (UI-technisch behandeld als 'admin'); anders de
-  // rol die deze gebruiker heeft in de tenant van déze doelenboom, tenzij de
-  // doelenboom zelf op read_only staat — dan geldt voor iedereen behalve
-  // sysadmin altijd 'gebruiker' (alleen lezen), ook voor een tenant-admin (zie
-  // db/init.sql bij doelenbomen.read_only en requireWritableDoelenboom in
-  // api/src/rbac.ts, die dit ook server-side afdwingt). 'gebruiker' is verder de
-  // veilige fallback mocht er onverwacht geen rol gevonden worden — de API dekt
-  // de daadwerkelijke autorisatie sowieso al af, dit hier bepaalt alleen welke
-  // knoppen tree.html toont.
-  const role: 'admin' | 'gebruiker' = user.isSysadmin
-    ? 'admin'
-    : doelenboom.read_only
-    ? 'gebruiker'
-    : user.tenantRoles.find((r) => r.tenantId === doelenboom.tenant_id)?.role ?? 'gebruiker';
+  // Alleen een voorlopige gok vóórdat tree.html de echte boomdata heeft
+  // opgehaald: de rol hangt niet meer alleen af van de tenant-brede rol en
+  // doelenboom.read_only, maar kan ook per doelenboom overruled zijn (zie
+  // doelenboom_user_roles / getEffectiveRoleForDoelenboom in api/src/rbac.ts)
+  // — dat weet dit component niet, dus laten we tree.html zelf de knop-
+  // zichtbaarheid corrigeren zodra GET .../tree binnen is (boot() roept daar
+  // applyRole(tree.doelenboom.canWrite ? 'admin' : 'gebruiker') aan). Deze
+  // voorlopige waarde voorkomt alleen een korte flits van de verkeerde UI
+  // vlak na het laden — de daadwerkelijke autorisatie wordt sowieso altijd
+  // server-side afgedwongen, ongeacht wat hier staat.
+  const role: 'admin' | 'gebruiker' = user.isSysadmin ? 'admin' : 'gebruiker';
 
   useEffect(() => {
     function sendInit() {
@@ -65,7 +62,7 @@ export default function TreePage({
 
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, [token, user.email, doelenboom.id, doelenboom.tenant_id, role, onBack, onImport, onLogoutRequest]);
+  }, [token, user.email, doelenboom.id, role, onBack, onImport, onLogoutRequest]);
 
   return (
     <iframe

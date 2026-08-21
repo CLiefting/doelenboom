@@ -55,7 +55,7 @@ OUD_SHEET_HEADERS: dict[str, list[str]] = {
         'Statustoelichting', 'Status gerapporteerd op', 'Uitgebreide beschrijving',
     ],
     'Producten': [
-        'Product-ID', 'Project-ID', 'Project', 'Product / deliverable', 'Omschrijving',
+        'Product-ID', 'Project-ID', 'Project', 'Product / deliverable', 'Type', 'Omschrijving',
         '% gereed', 'Verwachte opleverdatum', 'Werkelijke opleverdatum', 'Opmerking',
     ],
     'Tags': ['Tag-ID', 'Tag', 'Categorie', 'Omschrijving'],
@@ -79,7 +79,7 @@ NIEUW_SHEET_HEADERS: dict[str, list[str]] = {
         'Statustoelichting', 'Status gerapporteerd op', 'Uitgebreide beschrijving',
     ],
     'Producten': [
-        'Product-ID', 'Project-ID', 'Project', 'Product / deliverable', 'Omschrijving',
+        'Product-ID', 'Project-ID', 'Project', 'Product / deliverable', 'Type', 'Omschrijving',
         'Voortgang (0-100)', 'Verwachte opleverdatum', 'Werkelijke opleverdatum', 'Opmerking',
     ],
     'Tags': ['Tag-ID', 'Tag', 'Categorie', 'Omschrijving'],
@@ -97,6 +97,7 @@ VALIDATIELIJSTEN: dict[str, list[str]] = {
     'RAG-status': ['Rood', 'Oranje', 'Groen'],
     'Org-relatie status': ['Concept', 'Gevalideerd', 'Vervallen'],
     'Actief': ['Ja', 'Nee'],
+    'Product-type': ['deliverable', 'mijlpaal'],
 }
 
 
@@ -181,6 +182,9 @@ def _apply_data_validation(sheets: dict[str, Worksheet], ranges: dict[str, str])
     _add_dropdown(proj_ws, ranges['Projectstatus'], 'D2:D10000')
     _add_dropdown(proj_ws, ranges['RAG-status'], 'E2:E10000')
 
+    prod_ws = sheets['Producten']
+    _add_dropdown(prod_ws, ranges['Product-type'], 'E2:E10000')
+
     obo_ws = sheets['OB-Organisatie relaties']
     _add_dropdown(obo_ws, ranges['Relatietype'], 'E2:E10000')
     _add_dropdown(obo_ws, ranges['Org-relatie status'], 'G2:G10000')
@@ -254,7 +258,7 @@ def _fill_oud(sheets: dict[str, Worksheet], tree: dict[str, Any]) -> None:
         for p in products:
             prod_ws.append([
                 p.get('code', ''), project_code, project_name, p.get('name', ''),
-                p.get('omschrijving', ''), p.get('pctGereed', 0),
+                p.get('type', 'deliverable'), p.get('omschrijving', ''), p.get('pctGereed', 0),
                 p.get('verwachteDatum') or '', p.get('werkelijkeDatum') or '', p.get('opmerking', ''),
             ])
 
@@ -328,7 +332,7 @@ def _fill_nieuw(sheets: dict[str, Worksheet], tree: dict[str, Any]) -> None:
         for p in products:
             prod_ws.append([
                 p.get('code', ''), project_code, project_name, p.get('name', ''),
-                p.get('omschrijving', ''), p.get('pctGereed', 0),
+                p.get('type', 'deliverable'), p.get('omschrijving', ''), p.get('pctGereed', 0),
                 p.get('verwachteDatum') or '', p.get('werkelijkeDatum') or '', p.get('opmerking', ''),
             ])
 

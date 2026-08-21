@@ -96,6 +96,21 @@ create table if not exists doelenbomen (
   unique (tenant_id, slug)
 );
 
+-- Overrulet, per doelenboom, de rol uit tenant_users voor die ene gebruiker —
+-- bv. een tenant-admin die op één specifieke doelenboom als gebruiker (alleen
+-- lezen) behandeld moet worden, of andersom. Geen rij hier = "gewoon de
+-- tenant-rol" (het overgrote-meerderheid-geval). Een gebruiker moet nog altijd
+-- lid van de tenant zijn (tenant_users) om hier überhaupt toegang te krijgen —
+-- deze tabel kán geen toegang geven aan iemand die geen tenant-lid is, alleen
+-- de rol bínnen een toegankelijke doelenboom bijstellen. Zie
+-- getEffectiveRoleForDoelenboom in api/src/rbac.ts.
+create table if not exists doelenboom_user_roles (
+  doelenboom_id bigint not null references doelenbomen(id) on delete cascade,
+  user_id bigint not null references users(id) on delete cascade,
+  role text not null check (role in ('admin', 'gebruiker')),
+  primary key (doelenboom_id, user_id)
+);
+
 create table if not exists elements (
   id bigserial primary key,
   doelenboom_id bigint not null references doelenbomen(id) on delete cascade,
@@ -147,6 +162,10 @@ create table if not exists products (
   element_id bigint not null references elements(id) on delete cascade,
   code text not null default '',
   name text not null,
+  -- "Planning item"-type: 'deliverable' voor een regulier (initieel) product,
+  -- 'mijlpaal' voor een mijlpaal — bepaalt o.a. het symbool op de tijdbalk
+  -- boven de producten/deliverables-lijst in het projectpaneel (tree.html).
+  type text not null default 'deliverable' check (type in ('deliverable', 'mijlpaal')),
   omschrijving text not null default '',
   pct_gereed int not null default 0 check (pct_gereed between 0 and 100),
   verwachte_datum date,

@@ -1,6 +1,14 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '../api';
-import type { DoelenboomSummary, TenantMember, TenantRoleName, TenantSummary, User, UserSummary } from '../types';
+import type {
+  DoelenboomMemberRole,
+  DoelenboomSummary,
+  TenantMember,
+  TenantRoleName,
+  TenantSummary,
+  User,
+  UserSummary,
+} from '../types';
 
 // Gebruikersbeheer — twee gedaantes in één scherm, afhankelijk van de rol van de
 // ingelogde gebruiker:
@@ -433,6 +441,7 @@ function DoelenbomenSection({
 }) {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [duplicatingId, setDuplicatingId] = useState<number | null>(null);
+  const [rolesEditingId, setRolesEditingId] = useState<number | null>(null);
 
   async function remove(d: DoelenboomSummary) {
     const ok = window.confirm(
@@ -492,6 +501,19 @@ function DoelenbomenSection({
               />
             );
           }
+          if (rolesEditingId === d.id) {
+            return (
+              <DoelenboomMemberRolesSection
+                key={d.id}
+                token={token}
+                doelenboom={d}
+                busy={busy}
+                setBusy={setBusy}
+                setError={setError}
+                onCancel={() => setRolesEditingId(null)}
+              />
+            );
+          }
           return (
             <div key={d.id} style={styles.doelenboomRow}>
               <div>
@@ -505,6 +527,9 @@ function DoelenbomenSection({
                     Dupliceren
                   </button>
                 )}
+                <button disabled={busy} onClick={() => setRolesEditingId(d.id)} style={btnStyle('ghost')}>
+                  Rollen per lid
+                </button>
                 <button disabled={busy} onClick={() => setEditingId(d.id)} style={btnStyle('ghost')}>
                   Bewerken
                 </button>
@@ -730,6 +755,85 @@ function DuplicateDoelenboomForm({
         </button>
       </div>
     </form>
+  );
+}
+
+// Toont alle leden van de tenant van deze doelenboom, met hun tenant-rol en
+// een dropdown om die specifiek voor déze doelenboom te overrulen (leeg =
+// "gewoon de tenant-rol"). Zie api/src/routes/doelenbomen.ts (member-roles)
+// en getEffectiveRoleForDoelenboom in api/src/rbac.ts voor hoe dit server-side
+// wordt toegepast — dit scherm is puur de UI eromheen.
+function DoelenboomMemberRolesSection({
+  token,
+  doelenboom,
+  busy,
+  setBusy,
+  setError,
+  onCancel,
+}: {
+  token: string;
+  doelenboom: DoelenboomSummary;
+  busy: boolean;
+  setBusy: (b: boolean) => void;
+  setError: (e: string | null) => void;
+  onCancel: () => void;
+}) {
+  const [rows, setRows] = useState<DoelenboomMemberRole[] | null>(null);
+
+  function load() {
+    api.doelenboomMemberRoles(token, doelenboom.id).then(setRows).catch((err) => setError(errMsg(err)));
+  }
+
+  useEffect(load, [token, doelenboom.id]);
+
+  async function setRole(userId: number, role: 'admin' | 'gebruiker' | null) {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.setDoelenboomMemberRole(token, doelenboom.id, userId, role);
+      load();
+    } catch (err) {
+      setError(errMsg(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={styles.doelenboomEditRow}>
+      <p style={{ margin: 0, fontSize: 13.5, color: '#6c6f76' }}>
+        Rol per lid voor "{doelenboom.name}" — standaard de tenant-rol, hier per lid te overrulen (in beide
+        richtingen: kan zowel meer als minder rechten geven dan de tenant-rol).
+      </p>
+      {!rows && <p style={styles.muted}>Laden…</p>}
+      {rows && rows.length === 0 && <p style={styles.muted}>Geen leden in deze tenant.</p>}
+      {rows && rows.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {rows.map((r) => (
+            <div key={r.userId} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5 }}>
+              <span style={{ flex: 1 }}>
+                {r.email} <span style={{ opacity: 0.6, fontSize: 12 }}>(tenant-rol: {r.tenantRole})</span>
+              </span>
+              <select
+                style={styles.select}
+                value={r.overrideRole ?? ''}
+                disabled={busy}
+                onChange={(e) => setRole(r.userId, e.target.value ? (e.target.value as 'admin' | 'gebruiker') : null)}
+              >
+                <option value="">(zelfde als tenant: {r.tenantRole})</option>
+                <option value="admin">Admin (op deze doelenboom)</option>
+                <option value="gebruiker">Gebruiker (op deze doelenboom)</option>
+              </select>
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button type="button" onClick={onCancel} style={btnStyle('ghost')} disabled={busy}>
+          Sluiten
+        </button>
+      </div>
+    </div>
   );
 }
 

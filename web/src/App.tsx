@@ -6,6 +6,7 @@ import ImportPage from './pages/ImportPage';
 import UserManagementPage from './pages/UserManagementPage';
 import ChangePasswordPage from './pages/ChangePasswordPage';
 import LogoutFlow from './components/LogoutFlow';
+import VersionFooter from './components/VersionFooter';
 import { api } from './api';
 import { useSession } from './useSession';
 import type { DoelenboomSummary } from './types';
@@ -38,7 +39,12 @@ export default function App() {
   }, [session]);
 
   if (!session) {
-    return <LoginPage onLoggedIn={(token, user) => setSession({ token, user })} />;
+    return (
+      <>
+        <LoginPage onLoggedIn={(token, user) => setSession({ token, user })} />
+        <VersionFooter />
+      </>
+    );
   }
 
   // Afgedwongen wachtwoordwijziging: staat vóór alle andere views, blokkeert de
@@ -126,6 +132,7 @@ export default function App() {
       {loggingOut && (
         <LogoutFlow token={session.token} onDone={finishLogout} onCancel={() => setLoggingOut(false)} />
       )}
+      <VersionFooter />
     </>
   );
 }

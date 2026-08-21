@@ -153,6 +153,76 @@ doelenbomenRouter.delete(
   }
 );
 
+// GET /api/doelenbomen/:id/member-roles — alle leden van de tenant van deze
+// doelenboom, met hun tenant-rol, een eventuele override specifiek voor déze
+// doelenboom, en de daaruit volgende effectieve rol. Zelfde toegang als
+// hernoemen/read-only (tenant-/doelenboom-admin, geen sysadmin-only) — een
+// tenant-admin moet dit voor zijn eigen tenant kunnen beheren.
+doelenbomenRouter.get(
+  '/doelenbomen/:id/member-roles',
+  requireTenantRoleForDoelenboomParam('admin', 'id'),
+  async (req, res) => {
+    const result = await pool.query(
+      `select u.id as user_id, u.email, tu.role as tenant_role, dur.role as override_role
+       from tenant_users tu
+       join users u on u.id = tu.user_id
+       left join doelenboom_user_roles dur on dur.doelenboom_id = $1 and dur.user_id = u.id
+       where tu.tenant_id = (select tenant_id from doelenbomen where id = $1)
+       order by u.email`,
+      [req.params.id]
+    );
+    res.json(
+      result.rows.map((r) => ({
+        userId: r.user_id,
+        email: r.email,
+        tenantRole: r.tenant_role,
+        overrideRole: r.override_role,
+        effectiveRole: r.override_role ?? r.tenant_role,
+      }))
+    );
+  }
+);
+
+// PUT /api/doelenbomen/:id/member-roles/:userId — { role: 'admin' | 'gebruiker' | null }.
+// null verwijdert de override (terug naar de tenant-rol). De gebruiker moet
+// wél lid zijn van de tenant van deze doelenboom — een override kan geen
+// toegang geven aan iemand die geen tenant-lid is, alleen de rol bijstellen
+// binnen een doelenboom die diegene al mag zien.
+doelenbomenRouter.put(
+  '/doelenbomen/:id/member-roles/:userId',
+  requireTenantRoleForDoelenboomParam('admin', 'id'),
+  async (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const role = b.role === 'admin' || b.role === 'gebruiker' ? b.role : b.role === null ? null : undefined;
+    if (role === undefined) {
+      return res.status(400).json({ error: 'role moet "admin", "gebruiker" of null zijn.' });
+    }
+
+    const member = await pool.query(
+      `select 1 from tenant_users tu
+       where tu.user_id = $1 and tu.tenant_id = (select tenant_id from doelenbomen where id = $2)`,
+      [req.params.userId, req.params.id]
+    );
+    if (member.rows.length === 0) {
+      return res.status(404).json({ error: 'Deze gebruiker is geen lid van de tenant van deze doelenboom.' });
+    }
+
+    if (role === null) {
+      await pool.query(
+        'delete from doelenboom_user_roles where doelenboom_id = $1 and user_id = $2',
+        [req.params.id, req.params.userId]
+      );
+    } else {
+      await pool.query(
+        `insert into doelenboom_user_roles (doelenboom_id, user_id, role) values ($1, $2, $3)
+         on conflict (doelenboom_id, user_id) do update set role = excluded.role`,
+        [req.params.id, req.params.userId, role]
+      );
+    }
+    res.status(204).send();
+  }
+);
+
 // POST /api/doelenbomen/:id/duplicate — { slug, name, targetTenantId?, newTenant?: { slug, name } }
 // Sysadmin-only: dupliceert een doelenboom inclusief alle inhoud (elementen,
 // relaties, projectstatus, producten, tags + koppelingen, organisatieonderdelen
@@ -254,7 +324,7 @@ doelenbomenRouter.post('/doelenbomen/:id/duplicate', requireSysadmin, async (req
     }
 
     const productsResult = await client.query(
-      `select element_id, code, name, omschrijving, pct_gereed, verwachte_datum, werkelijke_datum, opmerking
+      `select element_id, code, name, type, omschrijving, pct_gereed, verwachte_datum, werkelijke_datum, opmerking
        from products where element_id = any($1::bigint[])`,
       [sourceElementIds]
     );
@@ -263,9 +333,9 @@ doelenbomenRouter.post('/doelenbomen/:id/duplicate', requireSysadmin, async (req
       if (!newElementId) continue;
       await client.query(
         `insert into products
-           (element_id, code, name, omschrijving, pct_gereed, verwachte_datum, werkelijke_datum, opmerking)
-         values ($1,$2,$3,$4,$5,$6,$7,$8)`,
-        [newElementId, p.code, p.name, p.omschrijving, p.pct_gereed, p.verwachte_datum, p.werkelijke_datum, p.opmerking]
+           (element_id, code, name, type, omschrijving, pct_gereed, verwachte_datum, werkelijke_datum, opmerking)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [newElementId, p.code, p.name, p.type, p.omschrijving, p.pct_gereed, p.verwachte_datum, p.werkelijke_datum, p.opmerking]
       );
     }
 

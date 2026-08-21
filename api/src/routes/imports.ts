@@ -126,7 +126,7 @@ importsRouter.post(
     }>;
     edges: Array<{ source: string; target: string; weight: string | null; toelichting: string }>;
     projectStatus: Record<string, { projectstatus: string; rag: string; toelichting: string; gerapporteerdOp: string | null; clusterPpt?: string }>;
-    products: Record<string, Array<{ code: string; name: string; omschrijving: string; pctGereed: number; verwachteDatum: string | null; werkelijkeDatum: string | null; opmerking: string }>>;
+    products: Record<string, Array<{ code: string; name: string; type?: string; omschrijving: string; pctGereed: number; verwachteDatum: string | null; werkelijkeDatum: string | null; opmerking: string }>>;
     tags: Array<{ code: string; name: string; categorie: string; omschrijving: string }>;
     elementTags: Record<string, string[]>;
     orgUnits: Array<{ code: string; name: string; omschrijving: string }>;
@@ -179,9 +179,9 @@ importsRouter.post(
       if (!elementId) continue;
       for (const p of prods) {
         await client.query(
-          `insert into products (element_id, code, name, omschrijving, pct_gereed, verwachte_datum, werkelijke_datum, opmerking)
-           values ($1,$2,$3,$4,$5,$6,$7,$8)`,
-          [elementId, p.code ?? '', p.name, p.omschrijving ?? '', p.pctGereed ?? 0, p.verwachteDatum || null, p.werkelijkeDatum || null, p.opmerking ?? '']
+          `insert into products (element_id, code, name, type, omschrijving, pct_gereed, verwachte_datum, werkelijke_datum, opmerking)
+           values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+          [elementId, p.code ?? '', p.name, p.type ?? 'deliverable', p.omschrijving ?? '', p.pctGereed ?? 0, p.verwachteDatum || null, p.werkelijkeDatum || null, p.opmerking ?? '']
         );
       }
     }

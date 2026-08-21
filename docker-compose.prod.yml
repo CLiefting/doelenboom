@@ -23,6 +23,7 @@
 # Gebruik: images worden LOKAAL gebouwd (niet op de VPS zelf — die deelt
 # resources met WWspeur's zware Puppeteer/Chromium-scans en heeft geen swap,
 # een --build daar bleek de server minutenlang vast te zetten). Op je Mac:
+#   export BUILD_VERSION="$(./scripts/build-version.sh)"
 #   DOCKER_DEFAULT_PLATFORM=linux/amd64 docker compose -f docker-compose.yml -f docker-compose.prod.yml build api web excel-service
 #   docker save doelenboom-api:latest doelenboom-web:latest doelenboom-excel-service:latest | gzip > doelenboom-images.tar.gz
 #   scp doelenboom-images.tar.gz charles@185.107.90.64:~/
@@ -50,6 +51,11 @@ services:
     build:
       context: ./api
       dockerfile: Dockerfile.prod
+      # Compose merget de 'args'-map uit docker-compose.yml normaliter al door
+      # naar hier (alleen 'dockerfile' wordt overridden), maar expliciet
+      # herhalen voorkomt verrassingen als dat basisbestand ooit verandert.
+      args:
+        BUILD_VERSION: ${BUILD_VERSION:-dev}
     ports: !override
       - "127.0.0.1:4000:4000"   # alleen via een SSH-tunnel, niet vanaf internet
     networks:

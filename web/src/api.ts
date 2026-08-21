@@ -73,6 +73,17 @@ export const api = {
   deleteDoelenboom: (token: string, doelenboomId: number) =>
     request<void>(`/api/doelenbomen/${doelenboomId}`, { method: 'DELETE' }, token),
 
+  // Per-doelenboom rol-overrides (overrult tenant_users.role voor één gebruiker
+  // op één doelenboom) — zie api/src/routes/doelenbomen.ts.
+  doelenboomMemberRoles: (token: string, doelenboomId: number) =>
+    request<import('./types').DoelenboomMemberRole[]>(`/api/doelenbomen/${doelenboomId}/member-roles`, {}, token),
+
+  setDoelenboomMemberRole: (token: string, doelenboomId: number, userId: number, role: 'admin' | 'gebruiker' | null) =>
+    request<void>(`/api/doelenbomen/${doelenboomId}/member-roles/${userId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ role }),
+    }, token),
+
   // Sysadmin-only — zie api/src/routes/doelenbomen.ts. targetTenantId en newTenant
   // zijn elkaar uitsluitend: geen van beide meegeven dupliceert binnen dezelfde tenant.
   duplicateDoelenboom: (
@@ -181,4 +192,9 @@ export const api = {
 
   // --- Login-overzicht (sysadmin-only, /sessions): wie is (recent) ingelogd, wanneer ---
   sessions: (token: string) => request<import('./types').SessionInfo[]>('/api/sessions', {}, token),
+
+  // Bouwversie (git-hash + datum, via Docker build-arg — zie api/Dockerfile en
+  // docker-compose.yml) voor de versie-footer (App.tsx). Geen token nodig:
+  // dit staat ook zichtbaar voordat iemand is ingelogd.
+  version: () => request<{ version: string }>('/api/version', {}),
 };

@@ -82,6 +82,8 @@ RELATIETYPE_MAP = {
 
 PROJECTSTATUS_VALUES = {'backlog', 'actief', 'on-hold', 'gereed', 'vervallen'}
 RAG_MAP = {'rood': 'Rood', 'oranje': 'Oranje', 'groen': 'Groen'}
+# "Planning item"-type van een product/deliverable — zie db/init.sql (products.type).
+PRODUCT_TYPE_MAP = {'deliverable': 'deliverable', 'mijlpaal': 'mijlpaal', 'milestone': 'mijlpaal'}
 
 
 def find_col(headers: list[Any], *aliases: str) -> int | None:
@@ -462,8 +464,15 @@ def parse_workbook(content: bytes, filename: str = '') -> tuple[str, dict, dict 
         'id': ('product-id', 'id'),
         'project_id': ('project-id',),
         'naam': ('product / deliverable', 'product/deliverable', 'product', 'deliverable', 'naam'),
+        'type': ('type',),
         'omschrijving': ('omschrijving',),
-        'pct': ('% gereed', 'pct gereed', 'gereed'),
+        # 'voortgang (0-100)' erbij: de kolomkop van het "nieuw" Excel-formaat
+        # (zie exporter.py NIEUW_SHEET_HEADERS) — zonder deze alias kwam
+        # pctGereed bij elke import van dat formaat altijd als 0 terug, omdat
+        # geen van de andere aliassen ('% gereed' e.d., alleen gebruikt in het
+        # "oud" formaat) matchte. Gevonden via de geautomatiseerde round-trip-
+        # regressietest (tests/test_roundtrip.py).
+        'pct': ('% gereed', 'pct gereed', 'gereed', 'voortgang (0-100)', 'voortgang'),
         'verwacht': ('verwachte opleverdatum', 'verwachte datum'),
         'werkelijk': ('werkelijke opleverdatum', 'werkelijke datum'),
         'opmerking': ('opmerking',),
@@ -479,9 +488,18 @@ def parse_workbook(content: bytes, filename: str = '') -> tuple[str, dict, dict 
         if project_code not in code_set:
             warnings.append(f'Producten: product "{naam}" verwijst naar onbekend Project-ID "{project_code}" — overgeslagen.')
             continue
+        type_raw = clean_text(row.get('type'))
+        type_key = norm(type_raw)
+        if type_key and type_key in PRODUCT_TYPE_MAP:
+            product_type = PRODUCT_TYPE_MAP[type_key]
+        else:
+            if type_key:
+                warnings.append(f'Producten: onbekend Type "{type_raw}" bij "{naam}" — gebruikt "deliverable".')
+            product_type = 'deliverable'
         products[project_code].append({
             'code': clean_text(row.get('id')),
             'name': naam,
+            'type': product_type,
             'omschrijving': clean_text(row.get('omschrijving')),
             'pctGereed': clean_pct(row.get('pct')),
             'verwachteDatum': clean_date(row.get('verwacht')),

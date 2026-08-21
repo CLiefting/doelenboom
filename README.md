@@ -24,7 +24,12 @@ architectuurdiscussie.
 
 1. Kopieer `.env.example` naar `.env` en pas **in elk geval `JWT_SECRET`** aan zodra dit
    niet meer puur lokaal draait.
-2. `docker compose up --build`
+2. `export BUILD_VERSION="$(./scripts/build-version.sh)" && docker compose up --build`
+   — zonder deze stap valt de versie-footer (rechtsonder in de app) altijd terug op de
+   vaste tekst "dev", ongeacht welke commit je net gebouwd hebt. Met deze stap zie je
+   daar bv. `3fd3132-dirty (21-08-2026 16:58)` (git-hash, `-dirty` als er niet-gecommite
+   wijzigingen zijn, en datum/tijdstip van bouwen) — zo weet je altijd zeker welke
+   versie je precies test, ook na meerdere rebuilds achter elkaar.
 3. Open http://localhost:5173
 
 Bij de allereerste start voert Postgres automatisch `db/init.sql` (schema) en

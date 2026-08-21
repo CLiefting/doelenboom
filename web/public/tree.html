@@ -104,6 +104,12 @@
   }
   .file-menu-item:hover { background: #f0f1f3; }
   .file-menu-separator { height: 1px; background: #e4e6ea; margin: 4px 6px; }
+  /* Bredere variant van .file-menu-dropdown voor de tags/organisatieonderdelen-
+     filter (kan flink wat chips bevatten) — zelfde open/dicht-mechaniek, alleen
+     breder en links uitgelijnd i.p.v. de pagina-brede center-uitlijning die
+     .tag-org-filter had toen 'm nog los onder de hele pagina stond. */
+  .filters-dropdown { min-width: 320px; max-width: min(90vw, 560px); max-height: 70vh; overflow-y: auto; padding: 10px; }
+  .filters-dropdown .tag-org-filter { justify-content: flex-start; margin: 0; }
   @media (max-width: 860px) {
     /* Op smalle schermen is er geen ruimte meer voor drie nette kolommen —
        terug naar een simpele, wrappende, gecentreerde rij (zoals vóór de
@@ -278,7 +284,6 @@
   .app-toast.error { background: #DC3545; }
   .app-toast.ok { background: #2E7D5B; }
 
-  .ref-manage-bar { display: flex; justify-content: center; margin: -10px 0 18px; }
   .btn.btn-xs { padding: 3px 9px; font-size: 11.5px; }
 
   .ref-modal-backdrop {
@@ -381,13 +386,20 @@
     box-shadow: 0 4px 16px rgba(0,0,0,0.12); padding: 20px 26px;
   }
   .project-panel.visible { display: block; }
-  .pp-header { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+  .pp-header { display: flex; align-items: center; gap: 14px; margin-bottom: 4px; flex-wrap: wrap; row-gap: 10px; }
   .pp-header .dp-code {
     color: #fff; font-weight: 700; font-size: 12px; padding: 3px 10px;
     border-radius: 999px; letter-spacing: 0.02em;
   }
   .pp-name { font-size: 16px; font-weight: 700; color: var(--navy); }
+  .pp-header-group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .pp-header-label {
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; color: #999;
+  }
+  .pp-header-divider { width: 1px; align-self: stretch; background: #e5e7eb; min-height: 22px; }
+  .pp-header-note { font-size: 12.5px; color: #555; line-height: 1.45; margin: 0 0 16px; }
   .dp-project-title {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
     font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;
     color: #999; margin-bottom: 8px;
   }
@@ -400,13 +412,33 @@
   .dp-status-date { font-size: 11px; color: #999; }
   .dp-empty-note { font-size: 12.5px; color: #bbb; font-style: italic; }
   .dp-products-title {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
     font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;
     color: #999; margin: 18px 0 10px;
   }
   .products-grid {
     display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px;
   }
-  .product-item { background: #f7f8fa; border-radius: 8px; padding: 10px 12px; }
+  .product-item { background: #f7f8fa; border-radius: 8px; padding: 10px 12px; border: 1px solid transparent; }
+  .product-item-overdue { border-color: #DC3545; background: #fdf2f3; }
+  .product-overdue-badge {
+    display: inline-block; font-size: 10px; font-weight: 700; color: #DC3545;
+    margin-left: 6px; vertical-align: middle;
+  }
+  .products-separator {
+    grid-column: 1 / -1; display: flex; align-items: center; gap: 10px;
+    font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;
+    color: #aab0b8; margin: 4px 0 -2px;
+  }
+  .products-separator::before, .products-separator::after {
+    content: ''; flex: 1; height: 1px; background: #e5e7eb;
+  }
+  .product-type-badge {
+    display: inline-block; font-size: 10px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.02em; padding: 2px 7px; border-radius: 999px; margin-bottom: 5px;
+  }
+  .product-type-deliverable { background: #e7ecf5; color: #2F5597; }
+  .product-type-mijlpaal { background: #fdeee0; color: #c9660a; }
   .product-name { font-size: 13px; font-weight: 700; color: #222; margin-bottom: 2px; }
   .product-desc { font-size: 12px; color: #555; margin-bottom: 6px; line-height: 1.4; }
   .product-progress-wrap { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
@@ -415,6 +447,109 @@
   .product-pct { font-size: 11.5px; font-weight: 700; color: #444; min-width: 34px; text-align: right; }
   .product-dates { font-size: 11px; color: #777; }
   .product-remark { font-size: 11.5px; color: #666; font-style: italic; margin-top: 4px; }
+  .product-item-actions { display: flex; gap: 6px; margin-top: 8px; }
+
+  /* Lichte, HTML/CSS-gebaseerde tijdlijn i.p.v. een groot geschaald SVG-canvas —
+     dat laatste bleek op brede schermen (viewBox altijd 1-op-1 uitgerekt naar de
+     volledige paneelbreedte) veel te dominant en grof oog: te dikke lijnen, te
+     grote symbolen, te grote tekst. Met gewone HTML-elementen (procentuele
+     left-posities) blijven lettergrootte/lijndikte/icoontjes altijd even klein,
+     ongeacht de breedte van het paneel — net als de rest van de app. */
+  .product-timeline-wrap { margin: 0 0 16px; }
+  .timeline-chart { position: relative; height: 40px; margin: 2px 0 0; }
+  .timeline-band-tick {
+    position: absolute; top: 0; height: 22px; border-left: 1px solid #eef0f3;
+  }
+  .timeline-band-label {
+    position: absolute; top: 24px; width: 100%; text-align: center;
+    font-size: 9.5px; color: #9aa1ab; white-space: nowrap; overflow: hidden;
+  }
+  .timeline-axis-line { position: absolute; left: 0; right: 0; top: 11px; height: 1px; background: #d8dbe0; }
+  .timeline-today-tick { position: absolute; top: 0; height: 22px; border-left: 1px dashed #c0392b; }
+  .timeline-today-label {
+    position: absolute; top: 1px; left: 3px; font-size: 8.5px; font-weight: 700;
+    color: #c0392b; white-space: nowrap;
+  }
+  .timeline-marker {
+    position: absolute; top: 11px; transform: translate(-50%, -50%);
+    line-height: 0; cursor: default;
+  }
+  .product-timeline-legend {
+    display: flex; flex-wrap: wrap; gap: 12px; font-size: 10px; color: #9aa1ab; margin-top: 4px;
+  }
+  .product-timeline-legend svg { width: 10px; height: 10px; }
+  .product-timeline-legend svg { vertical-align: -2px; margin-right: 3px; }
+
+  /* Overzicht "alle project-tijdlijnen" (#timelines-view) — een losse lijst
+     van kaarten, één per project, elk met dezelfde tijdbalk als in de
+     projectkaart (productTimelineHtml). Verborgen/getoond via de
+     "timelines-active"-klasse op <body>, die tegelijk de gewone boomweergave
+     verbergt (canvas/detailpaneel/projectpaneel/legenda/controls) en de twee
+     topbar-knoppen (#timelines-view-btn/#back-to-tree-btn) omwisselt. */
+  .timelines-view { display: none; }
+  body.timelines-active .timelines-view { display: block; }
+  body.timelines-active .page-header,
+  body.timelines-active .legend,
+  body.timelines-active .controls,
+  body.timelines-active .workspace,
+  body.timelines-active .project-panel { display: none !important; }
+  #back-to-tree-btn { display: none; }
+  body.timelines-active #timelines-view-btn { display: none; }
+  body.timelines-active #back-to-tree-btn { display: inline-flex; }
+
+  .timelines-view-empty { font-size: 13px; color: #999; font-style: italic; padding: 20px 0; }
+  .timelines-filter-note {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; color: #555;
+    background: #eef2f9; border: 1px solid #d7e0ee; border-radius: 8px;
+    padding: 8px 14px; margin-top: 8px;
+  }
+  .timelines-filter-note .dp-code {
+    color: #fff; font-weight: 700; font-size: 11px; padding: 2px 8px; border-radius: 999px;
+  }
+
+  /* Eén gedeelde tijdas voor alle projecten samen (renderTimelinesView) i.p.v.
+     een losse kaart per project — dat laatste oogde met veel projecten (vooral
+     de vele zonder geplande data) veel te druk. Hergebruikt dezelfde
+     .timeline-band-tick/.timeline-axis-line/.timeline-band-label/.timeline-
+     marker/.timeline-today-tick-klassen als de projectkaart-tijdlijn
+     (productTimelineHtml), nu binnen een .timelines-gantt-lane i.p.v.
+     .timeline-chart. */
+  .timelines-gantt {
+    background: #ffffff; border-radius: 12px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.12); padding: 6px 22px 4px; margin-top: 8px;
+  }
+  .timelines-gantt-header, .timelines-gantt-row {
+    display: flex; align-items: center; gap: 16px;
+  }
+  .timelines-gantt-header { padding-top: 10px; padding-bottom: 30px; border-bottom: 1px solid #eef0f3; }
+  .timelines-gantt-row {
+    padding: 9px 0; border-bottom: 1px solid #f2f3f5; cursor: pointer;
+  }
+  .timelines-gantt-row:last-child { border-bottom: none; }
+  .timelines-gantt-row:hover { background: #f7f8fa; }
+  .timelines-gantt-label {
+    flex: 0 0 260px; width: 260px; display: flex; flex-direction: column;
+    align-items: flex-start; gap: 3px; font-size: 12.5px;
+  }
+  .timelines-gantt-label-main { display: flex; align-items: center; gap: 7px; min-width: 0; }
+  .timelines-gantt-label .pp-name {
+    font-size: 12.5px; font-weight: 700; color: var(--navy); flex: 1 1 auto; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .timelines-gantt-status {
+    font-size: 10px; font-weight: 600; letter-spacing: 0.01em;
+    padding-left: 2px;
+  }
+  .timelines-gantt-lane { position: relative; flex: 1 1 auto; min-width: 0; height: 22px; }
+  .timelines-gantt-lane.timelines-gantt-axis { height: 40px; }
+  .timelines-view-empty-list {
+    font-size: 11.5px; color: #999; line-height: 1.6; margin-top: 12px; padding: 0 2px;
+  }
+  .timelines-view-empty-list-label { font-weight: 700; color: #888; }
+
+  @media (max-width: 1024px) {
+    .timelines-gantt-label { flex-basis: 180px; width: 180px; font-size: 11.5px; }
+  }
 
   @media (max-width: 1024px) {
     .project-panel { padding: 16px 18px; }
@@ -612,6 +747,31 @@
         <button class="btn ghost btn-icon" id="export-svg-btn" type="button" title="Exporteer als SVG" aria-label="Exporteer als SVG">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
         </button>
+        <!-- Alle project-tijdlijnen: los overzicht (zie #timelines-view), niet
+             de gewone boomweergave — vandaar een eigen icoon i.p.v. ergens
+             binnen een dropdown, symmetrisch met de "terug naar boom"-knop
+             hieronder die alleen zichtbaar wordt zodra dat overzicht open
+             staat (zie de "body.timelines-active"-CSS-regels). -->
+        <button class="btn ghost btn-icon" id="timelines-view-btn" type="button" title="Alle project-tijdlijnen" aria-label="Alle project-tijdlijnen">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="14" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="10" y2="18"/></svg>
+        </button>
+        <button class="btn ghost btn-icon" id="back-to-tree-btn" type="button" title="Terug naar doelenboom" aria-label="Terug naar doelenboom">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="4" r="2"/><circle cx="5" cy="18" r="2"/><circle cx="19" cy="18" r="2"/><path d="M12 6v4"/><path d="M12 10 5 16"/><path d="M12 10 19 16"/></svg>
+        </button>
+        <!-- De legenda blijft gewoon zichtbaar (zie verderop, onder de hint-tekst)
+             — die geeft in één oogopslag de kleurbetekenis, dus die mag ruimte
+             kosten. De tags/organisatieonderdelen-filter (kan veel chips worden)
+             zit wél achter een dropdown, zelfde open/sluit-mechaniek als het
+             Bestand-menu hieronder (wireDropdown). "Beheren" is een losse knop
+             i.p.v. in die dropdown — is één actie, geen filter, en opent toch al
+             een eigen modal (ref-modal). -->
+        <div class="file-menu" id="filters-menu">
+          <button class="btn ghost btn-sm" id="filters-btn" type="button">Filters &#9662;</button>
+          <div class="file-menu-dropdown filters-dropdown" id="filters-dropdown">
+            <div class="tag-org-filter" id="tag-org-filter"></div>
+          </div>
+        </div>
+        <button class="btn ghost btn-sm crud-only" id="manage-tags-orgs-btn" type="button" title="Tags &amp; organisatieonderdelen beheren">Beheer</button>
         <!-- Bestand-menu bevat alleen nog acties die een levende parent-app +
              API nodig hebben (Excel-import/export) of die in een al-geëxporteerd
              losstaand bestand geen zin hebben (nogmaals exporteren als HTML) — dus
@@ -650,10 +810,6 @@
   </div>
 
   <div class="legend"></div>
-  <div class="tag-org-filter" id="tag-org-filter"></div>
-  <div class="ref-manage-bar crud-only">
-    <button type="button" class="btn ghost btn-sm" id="manage-tags-orgs-btn">Tags &amp; organisatieonderdelen beheren</button>
-  </div>
 
   <div class="controls">
     <button class="btn ghost" id="expand-left-btn" type="button">&#9664; Kolom links tonen</button>
@@ -662,6 +818,11 @@
     <button class="btn ghost crud-only" id="new-element-btn" type="button">+ Nieuw element</button>
     <button class="btn back-btn" id="back-btn" style="display:none;">&#8592; Terug naar vorig scherm</button>
   </div>
+
+  <!-- Overzicht van alle project-tijdlijnen in één lijst (zie #timelines-view-btn
+       hierboven) — losstaand van de gewone boomweergave, wordt pas gevuld
+       (renderTimelinesView()) op het moment dat de gebruiker 'm opent. -->
+  <div class="timelines-view" id="timelines-view"></div>
 
   <div class="export-modal-backdrop" id="export-modal-backdrop">
     <div class="export-modal">
@@ -739,6 +900,84 @@
         <div class="element-modal-actions">
           <button type="button" class="btn ghost" id="element-modal-cancel">Annuleren</button>
           <button type="submit" class="btn" id="element-modal-save">Opslaan</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="element-modal-backdrop" id="product-modal-backdrop">
+    <div class="element-modal">
+      <h3 id="product-modal-title">Nieuw product</h3>
+      <p class="element-modal-hint">Velden met <span class="req-mark">*</span> zijn verplicht.</p>
+      <form id="product-form">
+        <label>Naam <span class="req-mark">*</span>
+          <input type="text" id="product-field-name" autocomplete="off" required>
+        </label>
+        <label>Type <span class="req-mark">*</span>
+          <select id="product-field-type">
+            <option value="deliverable">Deliverable</option>
+            <option value="mijlpaal">Mijlpaal</option>
+          </select>
+        </label>
+        <label>Omschrijving
+          <textarea id="product-field-omschrijving" rows="2"></textarea>
+        </label>
+        <label>% gereed
+          <input type="number" id="product-field-pct" min="0" max="100" step="1" value="0">
+        </label>
+        <label>Verwachte opleverdatum
+          <input type="date" id="product-field-verwacht">
+        </label>
+        <label>Werkelijke opleverdatum
+          <input type="date" id="product-field-werkelijk">
+        </label>
+        <label>Opmerking
+          <input type="text" id="product-field-opmerking" autocomplete="off">
+        </label>
+        <p class="element-modal-status" id="product-modal-status"></p>
+        <div class="element-modal-actions">
+          <button type="button" class="btn ghost" id="product-modal-cancel">Annuleren</button>
+          <button type="submit" class="btn" id="product-modal-save">Opslaan</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="element-modal-backdrop" id="project-status-modal-backdrop">
+    <div class="element-modal">
+      <h3>Projectstatus bewerken</h3>
+      <form id="project-status-form">
+        <label>Projectstatus
+          <select id="project-status-field-status">
+            <option value="">(geen)</option>
+            <option value="Backlog">Backlog</option>
+            <option value="Actief">Actief</option>
+            <option value="On-hold">On-hold</option>
+            <option value="Gereed">Gereed</option>
+            <option value="Vervallen">Vervallen</option>
+          </select>
+        </label>
+        <label>RAG-status
+          <select id="project-status-field-rag">
+            <option value="">(geen)</option>
+            <option value="Rood">Rood</option>
+            <option value="Oranje">Oranje</option>
+            <option value="Groen">Groen</option>
+          </select>
+        </label>
+        <label>Toelichting
+          <textarea id="project-status-field-toelichting" rows="3"></textarea>
+        </label>
+        <label>Gerapporteerd op
+          <input type="date" id="project-status-field-datum">
+        </label>
+        <label>Cluster PPT
+          <input type="text" id="project-status-field-cluster" autocomplete="off">
+        </label>
+        <p class="element-modal-status" id="project-status-modal-status"></p>
+        <div class="element-modal-actions">
+          <button type="button" class="btn ghost" id="project-status-modal-cancel">Annuleren</button>
+          <button type="submit" class="btn" id="project-status-modal-save">Opslaan</button>
         </div>
       </form>
     </div>
@@ -929,6 +1168,7 @@ function runApp(data) {
   const backBtn = document.getElementById('back-btn');
   const detailPanel = document.getElementById('detail-panel');
   const projectPanelEl = document.getElementById('project-panel');
+  const timelinesViewEl = document.getElementById('timelines-view');
   const tooltipEl = document.getElementById('hover-tooltip');
   const searchInput = document.getElementById('search-input');
   const searchClearBtn = document.getElementById('search-clear-btn');
@@ -1378,64 +1618,517 @@ function runApp(data) {
     return s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : s;
   }
 
-  function projectSectionHtml(id) {
-    const ps = PROJECT_STATUS[id];
-    if (!ps) return '';
+  // date-kolommen (verwachte_datum/werkelijke_datum) komen via de API soms als
+  // kaal "YYYY-MM-DD" binnen en soms als volledige ISO-datetime met tijdzone
+  // ("2026-09-15T00:00:00.000Z" — zo serialiseert node-pg/JSON.stringify een
+  // JS Date-object) — new Date(iso + 'T00:00:00') plakt er dan een tweede "T"
+  // achteraan en levert een Invalid Date op. Dit accepteert allebei.
+  function parseDateFlexible(value) {
+    if (!value) return NaN;
+    const d = new Date(String(value).includes('T') ? value : value + 'T00:00:00');
+    return d.getTime();
+  }
 
-    let html = '<div class="dp-project-title">Projectstatus</div>';
+  function formatDateNL(iso) {
+    if (!iso) return '';
+    const t = parseDateFlexible(iso);
+    if (isNaN(t)) return iso;
+    return new Date(t).toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  }
 
-    const hasStatus = ps.projectstatus || ps.rag;
-    if (hasStatus) {
-      html += '<div class="dp-badges">';
+  // <input type="date"> accepteert als .value ALLEEN het kale "YYYY-MM-DD"
+  // formaat (exact 10 tekens) — bij een volledige ISO-datetime ("2027-04-
+  // 01T00:00:00.000Z", zie parseDateFlexible hierboven) negeert de browser de
+  // toewijzing stilzwijgend en blijft het veld leeg (geen foutmelding), wat
+  // eerder de "verwachte/werkelijke datum verdwijnt bij bewerken"-klacht
+  // veroorzaakte. Simpelweg de eerste 10 tekens pakken werkt voor beide vormen,
+  // want een ISO-datetime begint altijd met exact dat kale datumdeel.
+  function toDateInputValue(value) {
+    if (!value) return '';
+    const s = String(value);
+    return s.length >= 10 ? s.slice(0, 10) : s;
+  }
+
+  // Een product/mijlpaal is "te laat": er is een verwachte datum, die ligt
+  // vóór vandaag, en er is nog geen werkelijke (realisatie)datum ingevuld.
+  // Vergeleken met de start van vandaag (lokale tijd) i.p.v. het exacte
+  // huidige tijdstip, zodat iets pas ná de vervaldag als te laat geldt, niet
+  // al op de vervaldag zelf.
+  function isProductOverdue(p) {
+    if (p.werkelijk || !p.verwacht) return false;
+    const t = parseDateFlexible(p.verwacht);
+    if (isNaN(t)) return false;
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    return t < startOfToday.getTime();
+  }
+
+  // Klein inline SVG-icoontje voor de legenda onder de tijdbalk (cirkel = deliverable,
+  // ruit = mijlpaal; open = verwacht, gevuld = daadwerkelijk opgeleverd/gehaald).
+  function timelineLegendIcon(shape, filled) {
+    const stroke = '#2F5597';
+    const fill = filled ? stroke : '#fff';
+    if (shape === 'mijlpaal') {
+      return '<svg width="12" height="12" viewBox="0 0 14 14"><polygon points="7,1 13,7 7,13 1,7" fill="' + fill + '" stroke="' + stroke + '" stroke-width="1.6"></polygon></svg>';
+    }
+    return '<svg width="12" height="12" viewBox="0 0 14 14"><circle cx="7" cy="7" r="5.5" fill="' + fill + '" stroke="' + stroke + '" stroke-width="1.6"></circle></svg>';
+  }
+
+  // Grenzen van de maand-/kwartaalvlakken onder de tijdbalk: bij een spanne van
+  // meer dan ~15 maanden gebruiken we kwartalen (anders wordt het te druk),
+  // anders maanden. bounds[0]/bounds[laatste] liggen op een ronde maand-/
+  // kwartaalgrens, dus altijd <= minT resp. >= maxT — dat wordt de nieuwe as-
+  // range (ruimer en netter dan precies op de eerste/laatste datum knippen).
+  function timelineBandBoundaries(minT, maxT) {
+    const spanDays = (maxT - minT) / 86400000;
+    const quarterly = spanDays > 460;
+    const start = new Date(minT);
+    const first = quarterly
+      ? new Date(start.getFullYear(), Math.floor(start.getMonth() / 3) * 3, 1)
+      : new Date(start.getFullYear(), start.getMonth(), 1);
+    const bounds = [first.getTime()];
+    const cur = new Date(first);
+    while (bounds[bounds.length - 1] < maxT) {
+      cur.setMonth(cur.getMonth() + (quarterly ? 3 : 1));
+      bounds.push(cur.getTime());
+    }
+    return { bounds, quarterly };
+  }
+
+  function timelineBandLabel(t, quarterly) {
+    const d = new Date(t);
+    if (quarterly) return 'K' + (Math.floor(d.getMonth() / 3) + 1) + ' ' + d.getFullYear();
+    return titleCase(d.toLocaleDateString('nl-NL', { month: 'short', year: 'numeric' }));
+  }
+
+  // Bouwt de tijdlijn-markers (verwachte + werkelijke datum per planning item)
+  // voor één project — losgetrokken uit productTimelineHtml hieronder zodat
+  // hetzelfde ook gebruikt kan worden voor de gedeelde as van het "alle
+  // project-tijdlijnen"-overzicht (renderTimelinesView), waar meerdere
+  // projecten se markers op één gezamenlijke tijdas moeten landen i.p.v. elk
+  // hun eigen as.
+  function buildTimelineMarkers(products) {
+    const markers = [];
+    products.forEach((p) => {
+      const type = p.type === 'mijlpaal' ? 'mijlpaal' : 'deliverable';
+      const label = p.name || p.code || '';
+      if (p.verwacht) {
+        const t = parseDateFlexible(p.verwacht);
+        if (!isNaN(t)) markers.push({ t, type, filled: false, label, dateLabel: formatDateNL(p.verwacht), kind: 'Verwacht' });
+      }
+      if (p.werkelijk) {
+        const t = parseDateFlexible(p.werkelijk);
+        if (!isNaN(t)) markers.push({ t, type, filled: true, label, dateLabel: formatDateNL(p.werkelijk), kind: 'Opgeleverd' });
+      }
+    });
+    markers.sort((a, b) => a.t - b.t);
+    return markers;
+  }
+
+  // Tijdbalk boven de producten/deliverables-lijst van een project: plot zowel de
+  // verwachte als de werkelijke opleverdatum van elk planning item op één horizontale
+  // as, onderverdeeld in maand- of kwartaalvlakken, met een symbool dat verschilt
+  // per type (cirkel/ruit) en per soort datum (open/gevuld). De naam van het item
+  // verschijnt als hint (native SVG <title>) bij hoveren. Geeft '' terug als geen
+  // enkel item een datum heeft — dan is er simpelweg niets te plotten.
+  function productTimelineHtml(products) {
+    const markers = buildTimelineMarkers(products);
+    if (!markers.length) return '';
+
+    const rawMinT = markers[0].t;
+    const rawMaxT = markers[markers.length - 1].t;
+    const { bounds, quarterly } = timelineBandBoundaries(
+      rawMinT === rawMaxT ? rawMinT - 86400000 : rawMinT,
+      rawMinT === rawMaxT ? rawMaxT + 86400000 : rawMaxT
+    );
+    const minT = bounds[0];
+    const maxT = bounds[bounds.length - 1];
+    // Gewone HTML/CSS met procentuele posities i.p.v. een geschaald SVG-canvas —
+    // zie de toelichting bij .product-timeline-wrap: zo blijven lijndikte,
+    // tekst en icoontjes altijd even klein, ongeacht de breedte van het paneel.
+    const pctFor = (t) => ((t - minT) / (maxT - minT)) * 100;
+
+    let ticksHtml = '';
+    let labelsHtml = '';
+    for (let i = 0; i < bounds.length - 1; i++) {
+      const left = pctFor(bounds[i]);
+      const width = pctFor(bounds[i + 1]) - left;
+      ticksHtml += '<div class="timeline-band-tick" style="left:' + left + '%"></div>';
+      if (width >= 6) {
+        labelsHtml += '<div class="timeline-band-label" style="left:' + left + '%;width:' + width + '%">' +
+          timelineBandLabel(bounds[i], quarterly) + '</div>';
+      }
+    }
+
+    // "Vandaag"-lijn — alleen als de huidige datum binnen de getoonde spanne valt.
+    let todayHtml = '';
+    const now = Date.now();
+    if (now >= minT && now <= maxT) {
+      todayHtml = '<div class="timeline-today-tick" style="left:' + pctFor(now) + '%">' +
+        '<span class="timeline-today-label">vandaag</span></div>';
+    }
+
+    // Eenvoudige verticale stapeling om symbolen die (bijna) op dezelfde datum
+    // vallen niet exact over elkaar te laten landen — geen echte collision-
+    // detectie, maar volstaat voor de doorgaans kleine aantallen items per project.
+    const bucketCounts = {};
+    const markersHtml = markers.map((m) => {
+      const left = pctFor(m.t);
+      const bucket = Math.round(left * 2);
+      const stack = bucketCounts[bucket] || 0;
+      bucketCounts[bucket] = stack + 1;
+      const topOffset = 11 - (stack % 3) * 9;
+      const title = escapeHtml(m.label) + ' — ' + m.kind + ': ' + m.dateLabel;
+      return '<span class="timeline-marker" style="left:' + left + '%;top:' + topOffset + 'px" title="' + title + '">' +
+        timelineLegendIcon(m.type, m.filled) + '</span>';
+    }).join('');
+
+    return '<div class="product-timeline-wrap">' +
+      '<div class="timeline-chart">' +
+        ticksHtml +
+        '<div class="timeline-axis-line"></div>' +
+        labelsHtml + todayHtml + markersHtml +
+      '</div>' +
+      '<div class="product-timeline-legend">' +
+        '<span>' + timelineLegendIcon('deliverable', false) + 'Deliverable · verwacht</span>' +
+        '<span>' + timelineLegendIcon('deliverable', true) + 'Deliverable · opgeleverd</span>' +
+        '<span>' + timelineLegendIcon('mijlpaal', false) + 'Mijlpaal · verwacht</span>' +
+        '<span>' + timelineLegendIcon('mijlpaal', true) + 'Mijlpaal · gehaald</span>' +
+      '</div>' +
+    '</div>';
+  }
+
+  // ---- Overzicht "alle project-tijdlijnen" (#timelines-view) ----
+  // Eén gedeelde tijdas (i.p.v. een losse kaart met eigen as per project, wat
+  // met veel projecten al snel erg druk/rommelig oogt — vooral omdat de
+  // meeste projecten geen enkele geplande datum hebben) — één compacte rij
+  // per project, uitgelijnd onder dezelfde maand-/kwartaalverdeling, zoals een
+  // eenvoudige Gantt-weergave. Projecten zonder een enkele geplande datum
+  // krijgen geen eigen rij (die zouden toch alleen een lege as tonen) maar
+  // staan compact opgesomd onderaan, zodat niets stilzwijgend verdwijnt.
+  // Klikken op een rij springt terug naar de boom, gefocust op dat project
+  // (enterFocus), net als dubbelklikken op de node zelf.
+  function renderTimelinesView() {
+    const allProjectIds = Object.keys(DETAILS).filter((id) => DETAILS[id].type === 'Project');
+    if (!allProjectIds.length) {
+      timelinesViewEl.innerHTML = '<div class="timelines-view-empty">Geen projecten gevonden in deze doelenboom.</div>';
+      return;
+    }
+
+    // Is er in de boom een pad gemarkeerd (klik-op-een-vak, zie
+    // computeActiveSets/selectNode) én zit daar minstens één project in? Dan
+    // toont dit overzicht alléén de gemarkeerde projecten — anders (niets
+    // gemarkeerd, of het gemarkeerde pad bevat toevallig geen enkel project)
+    // gewoon de planning van alle projecten, zoals voorheen.
+    const markedProjectIds = allProjectIds.filter((id) => activeNodeIds.has(id));
+    const isFiltered = markedProjectIds.length > 0;
+    const projectIds = isFiltered ? markedProjectIds : allProjectIds;
+    projectIds.sort((a, b) =>
+      (DETAILS[a].code || '').localeCompare(DETAILS[b].code || '', 'nl', { numeric: true })
+    );
+
+    const rows = [];
+    const emptyIds = [];
+    projectIds.forEach((id) => {
+      const markers = buildTimelineMarkers(PRODUCTS[id] || []);
+      if (markers.length) rows.push({ id, markers });
+      else emptyIds.push(id);
+    });
+
+    if (!rows.length) {
+      timelinesViewEl.innerHTML = '<div class="timelines-view-empty">' +
+        (isFiltered ? 'Geen van de gemarkeerde projecten heeft' : 'Geen enkel project heeft') +
+        ' producten met een verwachte of werkelijke datum.' +
+      '</div>';
+      return;
+    }
+
+    const allT = rows.flatMap((r) => r.markers.map((m) => m.t));
+    const rawMinT = Math.min.apply(null, allT);
+    const rawMaxT = Math.max.apply(null, allT);
+    const { bounds, quarterly } = timelineBandBoundaries(
+      rawMinT === rawMaxT ? rawMinT - 86400000 : rawMinT,
+      rawMinT === rawMaxT ? rawMaxT + 86400000 : rawMaxT
+    );
+    const minT = bounds[0];
+    const maxT = bounds[bounds.length - 1];
+    const pctFor = (t) => ((t - minT) / (maxT - minT)) * 100;
+
+    let ticksHtml = '';
+    let bandLabelsHtml = '';
+    for (let i = 0; i < bounds.length - 1; i++) {
+      const left = pctFor(bounds[i]);
+      const width = pctFor(bounds[i + 1]) - left;
+      ticksHtml += '<div class="timeline-band-tick" style="left:' + left + '%"></div>';
+      if (width >= 4) {
+        bandLabelsHtml += '<div class="timeline-band-label" style="left:' + left + '%;width:' + width + '%">' +
+          timelineBandLabel(bounds[i], quarterly) + '</div>';
+      }
+    }
+    // Het "vandaag"-label zelf verschijnt alleen boven in de as (headerHtml)
+    // — bij elke rij nogmaals dezelfde tekst tonen zou juist de drukte
+    // terugbrengen die de gedeelde as moest voorkomen; de losse streep
+    // (zonder label) bij elke rij is genoeg om 'm te kunnen aflezen.
+    let todayTickHtml = '';
+    let todayTickWithLabelHtml = '';
+    const now = Date.now();
+    if (now >= minT && now <= maxT) {
+      const todayLeft = pctFor(now);
+      todayTickHtml = '<div class="timeline-today-tick" style="left:' + todayLeft + '%"></div>';
+      todayTickWithLabelHtml = '<div class="timeline-today-tick" style="left:' + todayLeft + '%">' +
+        '<span class="timeline-today-label">vandaag</span></div>';
+    }
+
+    function laneMarkersHtml(markers) {
+      const bucketCounts = {};
+      return markers.map((m) => {
+        const left = pctFor(m.t);
+        const bucket = Math.round(left * 2);
+        const stack = bucketCounts[bucket] || 0;
+        bucketCounts[bucket] = stack + 1;
+        const topOffset = 11 - (stack % 3) * 9;
+        const title = escapeHtml(m.label) + ' — ' + m.kind + ': ' + m.dateLabel;
+        return '<span class="timeline-marker" style="left:' + left + '%;top:' + topOffset + 'px" title="' + title + '">' +
+          timelineLegendIcon(m.type, m.filled) + '</span>';
+      }).join('');
+    }
+
+    function projectLabelHtml(id) {
+      const d = DETAILS[id];
+      const ps = PROJECT_STATUS[id] || { projectstatus: '' };
+      let statusHtml = '';
       if (ps.projectstatus) {
         const key = ps.projectstatus.toLowerCase();
         const col = STATUS_COLORS[key] || '#B5BAC2';
-        html += '<span class="status-badge" style="background:' + col + '">' + titleCase(ps.projectstatus) + '</span>';
+        // Klein, subtiel tekstlabel onder de naam i.p.v. een volle badge
+        // ernaast — die laatste wrapte bij een lange projectnaam al snel naar
+        // een eigen regel en oogde te zwaar voor deze compacte rij-weergave.
+        statusHtml = '<div class="timelines-gantt-status" style="color:' + col + '">&#9679; ' + titleCase(ps.projectstatus) + '</div>';
       }
-      if (ps.rag) {
-        const key = ps.rag.toLowerCase();
-        const col = RAG_COLORS[key] || '#B5BAC2';
-        html += '<span class="rag-badge" style="background:' + col + '">&#9679; ' + titleCase(ps.rag) + '</span>';
-      }
-      html += '</div>';
-      if (ps.toelichting) {
-        html += '<div class="dp-status-note">' + ps.toelichting + '</div>';
-      }
-      if (ps.datum) {
-        html += '<div class="dp-status-date">Gerapporteerd op ' + ps.datum + '</div>';
-      }
-    } else {
-      html += '<div class="dp-empty-note">Nog geen status gerapporteerd.</div>';
+      return '<div class="timelines-gantt-label-main">' +
+        '<span class="dp-code" style="background:' + COL_COLORS['project'] + '">' + escapeHtml(d.code) + '</span>' +
+        '<span class="pp-name">' + escapeHtml(d.name) + '</span>' +
+      '</div>' + statusHtml;
     }
 
-    const tagsHtml = tagsChipsHtml(id);
-    const orgHtml = orgChipsHtml(id);
-    if (tagsHtml || orgHtml) {
-      html += '<div class="dp-grid" style="border-top:none;padding-top:0;margin-top:12px;">' + tagsHtml + orgHtml + '</div>';
+    const headerHtml = '<div class="timelines-gantt-header">' +
+      '<div class="timelines-gantt-label"></div>' +
+      '<div class="timelines-gantt-lane timelines-gantt-axis">' + ticksHtml + bandLabelsHtml + todayTickWithLabelHtml + '</div>' +
+    '</div>';
+
+    const rowsHtml = rows.map((r) =>
+      '<div class="timelines-gantt-row" data-code="' + escapeHtml(r.id) + '">' +
+        '<div class="timelines-gantt-label">' + projectLabelHtml(r.id) + '</div>' +
+        '<div class="timelines-gantt-lane">' +
+          ticksHtml + '<div class="timeline-axis-line"></div>' + todayTickHtml + laneMarkersHtml(r.markers) +
+        '</div>' +
+      '</div>'
+    ).join('');
+
+    let emptyHtml = '';
+    if (emptyIds.length) {
+      emptyHtml = '<div class="timelines-view-empty-list">' +
+        '<span class="timelines-view-empty-list-label">Zonder geplande data (' + emptyIds.length + '):</span> ' +
+        emptyIds.map((id) => escapeHtml(DETAILS[id].code + ' ' + DETAILS[id].name)).join(', ') +
+      '</div>';
     }
 
+    // Duidelijk maken dát er gefilterd is (anders lijkt het alsof de rest van
+    // de projecten stilzwijgend ontbreekt), mét het element waarop in de boom
+    // is geklikt (selectedId — hetzelfde element als waar activeNodeIds/
+    // markedProjectIds vandaan komen, zie computeActiveSets), + een snelle
+    // manier om de markering weer te wissen zonder terug te hoeven naar de boom.
+    let selectedChipHtml = '';
+    const selectedDetail = selectedId !== null ? DETAILS[selectedId] : null;
+    if (selectedDetail) {
+      const selColKey = TYPE_TO_COLKEY[selectedDetail.type];
+      const selColor = COL_COLORS[selColKey] || '#666';
+      selectedChipHtml = ', verbonden met <span class="dp-code" style="background:' + selColor + '">' +
+        escapeHtml(selectedDetail.code) + '</span> <strong>' + escapeHtml(selectedDetail.name) + '</strong>';
+    }
+    const filterNoteHtml = isFiltered
+      ? '<div class="timelines-filter-note">Gefilterd op ' + markedProjectIds.length +
+        ' gemarkeerd' + (markedProjectIds.length === 1 ? ' project' : 'e projecten') +
+        ' (van ' + allProjectIds.length + ' in totaal)' + selectedChipHtml + '.' +
+        ' <button type="button" class="btn ghost btn-xs" id="timelines-clear-filter-btn">Wis markering</button></div>'
+      : '';
+
+    timelinesViewEl.innerHTML =
+      filterNoteHtml +
+      '<div class="timelines-gantt">' + headerHtml + rowsHtml + '</div>' +
+      '<div class="product-timeline-legend">' +
+        '<span>' + timelineLegendIcon('deliverable', false) + 'Deliverable · verwacht</span>' +
+        '<span>' + timelineLegendIcon('deliverable', true) + 'Deliverable · opgeleverd</span>' +
+        '<span>' + timelineLegendIcon('mijlpaal', false) + 'Mijlpaal · verwacht</span>' +
+        '<span>' + timelineLegendIcon('mijlpaal', true) + 'Mijlpaal · gehaald</span>' +
+      '</div>' +
+      emptyHtml;
+
+    const clearFilterBtn = document.getElementById('timelines-clear-filter-btn');
+    if (clearFilterBtn) {
+      clearFilterBtn.addEventListener('click', () => {
+        deselect();
+        renderTimelinesView();
+      });
+    }
+  }
+
+  function showTimelinesView() {
+    if (focusId !== null) exitFocus();
+    document.body.classList.add('timelines-active');
+    renderTimelinesView();
+  }
+
+  function hideTimelinesView() {
+    document.body.classList.remove('timelines-active');
+  }
+
+  timelinesViewEl.addEventListener('click', (ev) => {
+    const row = ev.target.closest('.timelines-gantt-row');
+    if (!row) return;
+    const id = row.dataset.code;
+    hideTimelinesView();
+    const node = columnsEl.querySelector('.node[data-id="' + CSS.escape(id) + '"]');
+    if (node) enterFocus(node);
+  });
+
+  // Compacte, klikbare variant van een tag-/organisatiechip voor in de
+  // projectkaart-header (projectHeaderHtml) — zelfde opzet/klassen als
+  // tagsChipsHtml/orgChipsHtml (die het .dp-field-blok met eigen "TAGS"/
+  // "ORGANISATIEONDERDELEN"-kop gebruiken, geschikt voor het detailpaneel maar
+  // te breed voor één horizontale kopregel), zodat dezelfde click-handlers in
+  // onDetailAreaClick (dp-tag-remove-btn/dp-org-remove-btn/dp-org-chip)
+  // hergebruikt kunnen worden zonder JS-wijzigingen.
+  function tagsChipsInlineHtml(id) {
+    const tagIds = ELEMENT_TAGS[id] || [];
+    return tagIds.map(t => {
+      const name = TAGS[t] ? TAGS[t].name : t;
+      return '<span class="dp-chip">' + escapeHtml(name) +
+        '<button type="button" class="dp-chip-remove crud-only dp-tag-remove-btn" data-code="' + escapeHtml(id) + '" data-tag="' + escapeHtml(t) + '" title="Tag ontkoppelen">&times;</button></span>';
+    }).join('');
+  }
+
+  function orgChipsInlineHtml(id) {
+    const rels = OB_ORG[id] || [];
+    return rels.map(r => {
+      const name = ORGS[r.org] ? ORGS[r.org].name : r.org;
+      const relCls = 'org-' + (r.relatietype || '').toLowerCase();
+      const title = [r.relatietype, r.toelichting, r.status].filter(Boolean).join(' — ');
+      return '<span class="dp-chip ' + relCls + ' dp-org-chip" title="' + title.replace(/"/g, '&quot;') + '" data-code="' + escapeHtml(id) + '" data-org="' + escapeHtml(r.org) + '">' + escapeHtml(name) +
+        '<button type="button" class="dp-chip-remove crud-only dp-org-remove-btn" data-code="' + escapeHtml(id) + '" data-org="' + escapeHtml(r.org) + '" title="Koppeling verwijderen">&times;</button></span>';
+    }).join('');
+  }
+
+  // Header van de projectkaart: code + naam, projectstatus, tags en
+  // organisatieonderdelen allemaal op één regel (van links naar rechts),
+  // met de toelichting/rapportagedatum (indien aanwezig) op een aparte regel
+  // eronder — dat is vrije tekst en past niet netjes in de kopregel.
+  function projectHeaderHtml(id, color) {
+    const d = DETAILS[id];
+    const ps = PROJECT_STATUS[id] || { projectstatus: '', rag: '', toelichting: '', datum: '', clusterPpt: '' };
+
+    let statusHtml = '';
+    if (ps.projectstatus) {
+      const key = ps.projectstatus.toLowerCase();
+      const col = STATUS_COLORS[key] || '#B5BAC2';
+      statusHtml += '<span class="status-badge" style="background:' + col + '">' + titleCase(ps.projectstatus) + '</span>';
+    }
+    if (ps.rag) {
+      const key = ps.rag.toLowerCase();
+      const col = RAG_COLORS[key] || '#B5BAC2';
+      statusHtml += '<span class="rag-badge" style="background:' + col + '">&#9679; ' + titleCase(ps.rag) + '</span>';
+    }
+    if (!statusHtml) statusHtml = '<span class="dp-empty-note-inline">geen status</span>';
+
+    const tagsHtml = tagsChipsInlineHtml(id);
+    const orgHtml = orgChipsInlineHtml(id);
+
+    let html = '<div class="pp-header">' +
+      '<span class="dp-code" style="background:' + color + '">' + escapeHtml(d.code) + '</span>' +
+      '<span class="pp-name">' + escapeHtml(d.name) + '</span>' +
+      '<span class="pp-header-divider"></span>' +
+      '<div class="pp-header-group">' + statusHtml +
+        '<button type="button" class="btn ghost btn-xs project-status-edit-btn crud-only" data-code="' + escapeHtml(id) + '">Bewerken</button>' +
+      '</div>' +
+      '<span class="pp-header-divider"></span>' +
+      '<div class="pp-header-group"><span class="pp-header-label">Tags</span>' +
+        (tagsHtml || '<span class="dp-empty-note-inline">geen</span>') +
+        '<button type="button" class="btn ghost btn-xs dp-add-tag-btn crud-only" data-code="' + escapeHtml(id) + '">+ Tag</button>' +
+      '</div>' +
+      '<span class="pp-header-divider"></span>' +
+      '<div class="pp-header-group"><span class="pp-header-label">Org.</span>' +
+        (orgHtml || '<span class="dp-empty-note-inline">geen</span>') +
+        '<button type="button" class="btn ghost btn-xs dp-add-org-btn crud-only" data-code="' + escapeHtml(id) + '" title="Organisatieonderdeel koppelen">+ OE</button>' +
+      '</div>' +
+    '</div>';
+
+    if (ps.toelichting || ps.datum) {
+      html += '<div class="pp-header-note">' +
+        (ps.toelichting ? escapeHtml(ps.toelichting) : '') +
+        (ps.datum ? ' <span class="dp-status-date">(gerapporteerd op ' + formatDateNL(ps.datum) + ')</span>' : '') +
+      '</div>';
+    }
+
+    return html;
+  }
+
+  function projectSectionHtml(id) {
     const products = PRODUCTS[id] || [];
-    html += '<div class="dp-products-title">Producten / deliverables' + (products.length ? ' (' + products.length + ')' : '') + '</div>';
+
+    // Tijdlijn bovenaan het paneel (onder de header, vóór producten) — geeft in
+    // één oogopslag het verloop van het hele project. Leeg als geen enkel
+    // product/mijlpaal een datum heeft.
+    let html = '';
+    const timelineHtml = productTimelineHtml(products);
+    if (timelineHtml) {
+      html += '<div class="dp-project-title"><span>Tijdlijn</span></div>' + timelineHtml;
+    }
+
+    html += '<div class="dp-products-title"><span>Producten / deliverables' + (products.length ? ' (' + products.length + ')' : '') + '</span>' +
+      '<button type="button" class="btn ghost btn-xs product-add-btn crud-only" data-code="' + escapeHtml(id) + '">+ Product</button>' +
+      '</div>';
     if (products.length === 0) {
       html += '<div class="dp-empty-note">Nog geen producten gekoppeld aan dit project.</div>';
     } else {
-      html += '<div class="products-grid">';
-      products.forEach(p => {
+      function productCardHtml(p) {
         const pct = Math.max(0, Math.min(100, Number(p.pct) || 0));
-        html += '<div class="product-item">' +
-          '<div class="product-name">' + (p.name || p.id) + '</div>' +
-          (p.omschrijving ? '<div class="product-desc">' + p.omschrijving + '</div>' : '') +
+        const isMijlpaal = p.type === 'mijlpaal';
+        const overdue = isProductOverdue(p);
+        return '<div class="product-item' + (overdue ? ' product-item-overdue' : '') + '">' +
+          '<span class="product-type-badge ' + (isMijlpaal ? 'product-type-mijlpaal' : 'product-type-deliverable') + '">' +
+            (isMijlpaal ? 'Mijlpaal' : 'Deliverable') +
+          '</span>' +
+          (overdue ? '<span class="product-overdue-badge">Te laat</span>' : '') +
+          '<div class="product-name">' + escapeHtml(p.name || p.code || '') + '</div>' +
+          (p.omschrijving ? '<div class="product-desc">' + escapeHtml(p.omschrijving) + '</div>' : '') +
           '<div class="product-progress-wrap">' +
             '<div class="product-progress-bar"><div class="product-progress-fill" style="width:' + pct + '%"></div></div>' +
             '<span class="product-pct">' + pct + '%</span>' +
           '</div>' +
           '<div class="product-dates">' +
-            (p.verwacht ? 'Verwacht: ' + p.verwacht : 'Verwachte opleverdatum onbekend') +
-            (p.werkelijk ? ' &middot; Opgeleverd: ' + p.werkelijk : '') +
+            (p.verwacht ? 'Verwacht: ' + formatDateNL(p.verwacht) : 'Verwachte opleverdatum onbekend') +
+            (p.werkelijk ? ' &middot; Opgeleverd: ' + formatDateNL(p.werkelijk) : '') +
           '</div>' +
-          (p.opmerking ? '<div class="product-remark">' + p.opmerking + '</div>' : '') +
+          (p.opmerking ? '<div class="product-remark">' + escapeHtml(p.opmerking) + '</div>' : '') +
+          '<div class="product-item-actions crud-only">' +
+            '<button type="button" class="btn ghost btn-xs product-edit-btn" data-code="' + escapeHtml(id) + '" data-id="' + escapeHtml(String(p.dbId)) + '">Bewerken</button>' +
+            '<button type="button" class="btn ghost btn-xs product-delete-btn" data-code="' + escapeHtml(id) + '" data-id="' + escapeHtml(String(p.dbId)) + '">Verwijderen</button>' +
+          '</div>' +
           '</div>';
-      });
+      }
+
+      // Al gehaalde/opgeleverde items (werkelijke datum ingevuld) onderaan, met
+      // een separator ertussen — houdt de nog-lopende items bovenaan, waar de
+      // aandacht van de gebruiker het eerst naartoe moet.
+      const openProducts = products.filter((p) => !p.werkelijk);
+      const doneProducts = products.filter((p) => p.werkelijk);
+
+      html += '<div class="products-grid">';
+      html += openProducts.map(productCardHtml).join('');
+      if (doneProducts.length) {
+        html += '<div class="products-separator"><span>Opgeleverd / gehaald (' + doneProducts.length + ')</span></div>';
+        html += doneProducts.map(productCardHtml).join('');
+      }
       html += '</div>';
     }
 
@@ -1443,17 +2136,13 @@ function runApp(data) {
   }
 
   function renderProjectPanel(id, color) {
-    const ps = PROJECT_STATUS[id];
-    if (!ps) {
+    const d = DETAILS[id];
+    if (!d || d.type !== 'Project') {
       projectPanelEl.classList.remove('visible');
       projectPanelEl.innerHTML = '';
       return;
     }
-    const d = DETAILS[id];
-    projectPanelEl.innerHTML =
-      '<div class="pp-header"><span class="dp-code" style="background:' + color + '">' + d.code + '</span>' +
-      '<span class="pp-name">' + d.name + '</span></div>' +
-      projectSectionHtml(id);
+    projectPanelEl.innerHTML = projectHeaderHtml(id, color) + projectSectionHtml(id);
     projectPanelEl.classList.add('visible');
   }
 
@@ -1496,6 +2185,12 @@ function runApp(data) {
     const d = DETAILS[id];
     if (!d) { detailPanel.classList.remove('visible'); detailPanel.innerHTML = ''; return; }
     detailPanel.style.borderTopColor = color;
+    // Voor Project-elementen staan Tags/Organisatieonderdelen al (beheerbaar)
+    // in de projectkaart-header eronder (projectHeaderHtml) — nogmaals tonen
+    // in dit algemene detailpaneel is dan overbodige duplicatie. Voor alle
+    // andere elementtypen (die geen projectkaart hebben) blijft dit de enige
+    // plek om ze te beheren.
+    const isProject = d.type === 'Project';
     detailPanel.innerHTML =
       '<div class="dp-meta"><span class="dp-code" style="background:' + color + '">' + d.code + '</span>' +
       '<span class="dp-type">' + d.type + '</span>' + ragBadgeHtml(id) + '</div>' +
@@ -1505,8 +2200,7 @@ function runApp(data) {
         fieldHtml('Bovenliggend element', d.parent) +
         fieldHtml('Mogelijke KPI / indicator', d.kpi) +
         fieldHtml('Taakveld / Sub-taakveld', taakveldLine(d)) +
-        tagsChipsHtml(id) +
-        orgChipsHtml(id) +
+        (isProject ? '' : tagsChipsHtml(id) + orgChipsHtml(id)) +
       '</div>' +
       connectionsHtml(id) +
       '<div class="dp-crud-actions crud-only">' +
@@ -1582,6 +2276,70 @@ function runApp(data) {
     resetBtn.disabled = false;
     backBtn.style.display = 'none';
     applyVisibility(); // also refreshes expandLeftBtn state
+  }
+
+  // Na een save/verwijder-actie (product, projectstatus, element, tag- of
+  // organisatiekoppeling, relatie, ...) herladen we de hele pagina om zeker te
+  // zijn dat alle afgeleide state (DETAILS/PRODUCTS/PROJECT_STATUS/...) weer
+  // exact overeenkomt met de database — een lokale patch van al die structuren
+  // zou foutgevoelig zijn. Nadeel: zonder iets te onthouden viel je daarbij
+  // altijd terug op de volledig uitgezoomde boom, ook als je net op een project
+  // aan het bewerken was. Dit onthoudt welk element in focus-modus openstond
+  // (sessionStorage — hoort bij dít tabblad, niet blijvend) en herstelt dat
+  // na de reload; zie restoreFocusAfterReload(), aangeroepen aan het eind van
+  // runApp(). Eén sleutel per doelenboom zodat wisselen van boom nooit een
+  // oude focus van een andere boom terughaalt.
+  function focusStorageKey() {
+    return 'doelenboom-focus-' + (doelenboomId || '');
+  }
+
+  function reloadTreeKeepingFocus(delayMs) {
+    try {
+      // Naast een eventuele focus-zoom (focusId) onthouden we ook de
+      // kolomzichtbaarheid (hiddenCols) los daarvan — dat is een onafhankelijke
+      // stuk state (zie "Kolom links tonen"/"Toon alle kolommen"/reset-knop)
+      // die net zo goed actief kan zijn zonder dat er iets in focus-modus
+      // staat. Zonder dit viel elke save/verwijder-actie buiten focus-modus
+      // terug op de standaard kolomweergave (alleen de Missie-kolom), ook als
+      // je net een aantal kolommen naar links had opengeklapt.
+      sessionStorage.setItem(focusStorageKey(), JSON.stringify({
+        focusId: focusId,
+        hiddenCols: Array.from(hiddenCols),
+      }));
+    } catch (err) {
+      // sessionStorage kan geblokkeerd zijn (bv. strikte privacy-instellingen)
+      // — dan herladen we gewoon zonder de weergave te kunnen herstellen.
+    }
+    if (delayMs) {
+      setTimeout(() => window.location.reload(), delayMs);
+    } else {
+      window.location.reload();
+    }
+  }
+
+  function restoreFocusAfterReload() {
+    let raw;
+    try {
+      raw = sessionStorage.getItem(focusStorageKey());
+      sessionStorage.removeItem(focusStorageKey());
+    } catch (err) {
+      return;
+    }
+    if (!raw) return;
+    let saved;
+    try {
+      saved = JSON.parse(raw);
+    } catch (err) {
+      return; // oudere, kale focusId-string uit een vorige versie — negeren
+    }
+    if (saved && Array.isArray(saved.hiddenCols)) {
+      hiddenCols = new Set(saved.hiddenCols);
+      applyVisibility();
+    }
+    if (saved && saved.focusId) {
+      const node = columnsEl.querySelector('.node[data-id="' + CSS.escape(saved.focusId) + '"]');
+      if (node) enterFocus(node);
+    }
   }
 
   columnsEl.addEventListener('dblclick', (ev) => {
@@ -1974,6 +2732,11 @@ function runApp(data) {
   const exportSvgBtn = document.getElementById('export-svg-btn');
   if (exportSvgBtn) exportSvgBtn.addEventListener('click', exportSVG);
 
+  const timelinesViewBtn = document.getElementById('timelines-view-btn');
+  const backToTreeBtn = document.getElementById('back-to-tree-btn');
+  if (timelinesViewBtn) timelinesViewBtn.addEventListener('click', showTimelinesView);
+  if (backToTreeBtn) backToTreeBtn.addEventListener('click', hideTimelinesView);
+
   // Exporteert de huidige boom als één losstaand, offline werkend HTML-bestand
   // (vergelijkbaar met het oorspronkelijke doelenboom.html, zie
   // doelenboom_update_instructie.md) — puur client-side, geen API-endpoint
@@ -2045,6 +2808,7 @@ function runApp(data) {
   }
   wireDropdown('file-menu-btn', 'file-menu-dropdown');
   wireDropdown('user-menu-btn', 'user-menu-dropdown');
+  wireDropdown('filters-btn', 'filters-dropdown');
   document.addEventListener('click', () => {
     document.querySelectorAll('.file-menu-dropdown.open').forEach((el) => el.classList.remove('open'));
   });
@@ -2373,13 +3137,13 @@ function runApp(data) {
         const linkErrors = results.filter(Boolean);
         if (linkErrors.length) {
           setElementModalStatus('Element opgeslagen, maar niet alle tag-/organisatiekoppelingen zijn gelukt: ' + linkErrors.join('; '));
-          setTimeout(() => window.location.reload(), 1800);
+          reloadTreeKeepingFocus(1800);
           return;
         }
       }
 
       setElementModalStatus('Opgeslagen, boom wordt herladen…', 'ok');
-      setTimeout(() => window.location.reload(), 400);
+      reloadTreeKeepingFocus(400);
     } catch (err) {
       setElementModalStatus(err && err.message ? err.message : 'Onbekende fout bij opslaan.');
     }
@@ -2401,17 +3165,209 @@ function runApp(data) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || ('Verwijderen mislukt (HTTP ' + res.status + ')'));
       }
-      window.location.reload();
+      reloadTreeKeepingFocus();
     } catch (err) {
       showToast(err && err.message ? err.message : 'Onbekende fout bij verwijderen.', 'error');
     }
   }
+
+  // ---- Producten/deliverables ("planning items") CRUD binnen een project ----
+  const productModalBackdrop = document.getElementById('product-modal-backdrop');
+  const productModalTitle = document.getElementById('product-modal-title');
+  const productModalStatus = document.getElementById('product-modal-status');
+  const productForm = document.getElementById('product-form');
+  const productFieldName = document.getElementById('product-field-name');
+  const productFieldType = document.getElementById('product-field-type');
+  const productFieldOmschrijving = document.getElementById('product-field-omschrijving');
+  const productFieldPct = document.getElementById('product-field-pct');
+  const productFieldVerwacht = document.getElementById('product-field-verwacht');
+  const productFieldWerkelijk = document.getElementById('product-field-werkelijk');
+  const productFieldOpmerking = document.getElementById('product-field-opmerking');
+  const productModalCancelBtn = document.getElementById('product-modal-cancel');
+
+  let productModalMode = 'create';
+  let productModalProjectCode = null;
+  let productModalProductId = null;
+
+  function setProductModalStatus(text, kind) {
+    productModalStatus.textContent = text || '';
+    productModalStatus.style.color = kind === 'ok' ? '#2E7D5B' : kind === 'busy' ? '#777' : '#DC3545';
+  }
+
+  function openProductModal(mode, projectCode, productId) {
+    productModalMode = mode;
+    productModalProjectCode = projectCode;
+    productModalProductId = productId || null;
+    setProductModalStatus('');
+    const existing = mode === 'edit' && productId
+      ? (PRODUCTS[projectCode] || []).find((x) => String(x.dbId) === String(productId))
+      : null;
+    if (mode === 'edit' && existing) {
+      productModalTitle.textContent = 'Product bewerken';
+      productFieldName.value = existing.name || '';
+      productFieldType.value = existing.type === 'mijlpaal' ? 'mijlpaal' : 'deliverable';
+      productFieldOmschrijving.value = existing.omschrijving || '';
+      productFieldPct.value = existing.pct || 0;
+      productFieldVerwacht.value = toDateInputValue(existing.verwacht);
+      productFieldWerkelijk.value = toDateInputValue(existing.werkelijk);
+      productFieldOpmerking.value = existing.opmerking || '';
+    } else {
+      productModalTitle.textContent = 'Nieuw product';
+      productForm.reset();
+      productFieldType.value = 'deliverable';
+      productFieldPct.value = 0;
+    }
+    productModalBackdrop.classList.add('visible');
+    productFieldName.focus();
+  }
+
+  function closeProductModal() {
+    productModalBackdrop.classList.remove('visible');
+  }
+
+  if (productModalCancelBtn) productModalCancelBtn.addEventListener('click', closeProductModal);
+  if (productModalBackdrop) productModalBackdrop.addEventListener('click', (ev) => {
+    if (ev.target === productModalBackdrop) closeProductModal();
+  });
+
+  if (productForm) productForm.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const payload = {
+      name: productFieldName.value.trim(),
+      type: productFieldType.value === 'mijlpaal' ? 'mijlpaal' : 'deliverable',
+      omschrijving: productFieldOmschrijving.value.trim(),
+      pctGereed: Number(productFieldPct.value) || 0,
+      verwachteDatum: productFieldVerwacht.value || null,
+      werkelijkeDatum: productFieldWerkelijk.value || null,
+      opmerking: productFieldOpmerking.value.trim(),
+    };
+    if (!payload.name) {
+      setProductModalStatus('Naam is verplicht.');
+      return;
+    }
+    setProductModalStatus('Bezig met opslaan…', 'busy');
+    try {
+      const isEdit = productModalMode === 'edit';
+      const base = apiUrl + '/api/doelenbomen/' + doelenboomId + '/elements/' +
+        encodeURIComponent(productModalProjectCode) + '/products';
+      const url = isEdit ? base + '/' + encodeURIComponent(productModalProductId) : base;
+      const res = await fetch(url, {
+        method: isEdit ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + authToken },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || ('Opslaan mislukt (HTTP ' + res.status + ')'));
+      }
+      setProductModalStatus('Opgeslagen, boom wordt herladen…', 'ok');
+      reloadTreeKeepingFocus(400);
+    } catch (err) {
+      setProductModalStatus(err && err.message ? err.message : 'Onbekende fout bij opslaan.');
+    }
+  });
+
+  async function deleteProduct(projectCode, productId) {
+    if (!productId) return;
+    const ok = await showConfirm('Dit product/planning item verwijderen?');
+    if (!ok) return;
+    try {
+      const res = await fetch(
+        apiUrl + '/api/doelenbomen/' + doelenboomId + '/elements/' + encodeURIComponent(projectCode) +
+          '/products/' + encodeURIComponent(productId),
+        { method: 'DELETE', headers: { Authorization: 'Bearer ' + authToken } }
+      );
+      if (!res.ok && res.status !== 204) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || ('Verwijderen mislukt (HTTP ' + res.status + ')'));
+      }
+      reloadTreeKeepingFocus();
+    } catch (err) {
+      showToast(err && err.message ? err.message : 'Onbekende fout bij verwijderen.', 'error');
+    }
+  }
+
+  // ---- Projectstatus bewerken (upsert, zie api/src/routes/projectStatus.ts) ----
+  const projectStatusModalBackdrop = document.getElementById('project-status-modal-backdrop');
+  const projectStatusModalStatus = document.getElementById('project-status-modal-status');
+  const projectStatusForm = document.getElementById('project-status-form');
+  const projectStatusFieldStatus = document.getElementById('project-status-field-status');
+  const projectStatusFieldRag = document.getElementById('project-status-field-rag');
+  const projectStatusFieldToelichting = document.getElementById('project-status-field-toelichting');
+  const projectStatusFieldDatum = document.getElementById('project-status-field-datum');
+  const projectStatusFieldCluster = document.getElementById('project-status-field-cluster');
+  const projectStatusModalCancelBtn = document.getElementById('project-status-modal-cancel');
+
+  let projectStatusModalProjectCode = null;
+
+  function setProjectStatusModalStatus(text, kind) {
+    projectStatusModalStatus.textContent = text || '';
+    projectStatusModalStatus.style.color = kind === 'ok' ? '#2E7D5B' : kind === 'busy' ? '#777' : '#DC3545';
+  }
+
+  function openProjectStatusModal(projectCode) {
+    projectStatusModalProjectCode = projectCode;
+    setProjectStatusModalStatus('');
+    const ps = PROJECT_STATUS[projectCode] || { projectstatus: '', rag: '', toelichting: '', datum: '', clusterPpt: '' };
+    projectStatusFieldStatus.value = ps.projectstatus || '';
+    projectStatusFieldRag.value = ps.rag || '';
+    projectStatusFieldToelichting.value = ps.toelichting || '';
+    projectStatusFieldDatum.value = toDateInputValue(ps.datum);
+    projectStatusFieldCluster.value = ps.clusterPpt || '';
+    projectStatusModalBackdrop.classList.add('visible');
+  }
+
+  function closeProjectStatusModal() {
+    projectStatusModalBackdrop.classList.remove('visible');
+  }
+
+  if (projectStatusModalCancelBtn) projectStatusModalCancelBtn.addEventListener('click', closeProjectStatusModal);
+  if (projectStatusModalBackdrop) projectStatusModalBackdrop.addEventListener('click', (ev) => {
+    if (ev.target === projectStatusModalBackdrop) closeProjectStatusModal();
+  });
+
+  if (projectStatusForm) projectStatusForm.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const payload = {
+      projectstatus: projectStatusFieldStatus.value,
+      rag: projectStatusFieldRag.value,
+      toelichting: projectStatusFieldToelichting.value.trim(),
+      gerapporteerdOp: projectStatusFieldDatum.value || null,
+      clusterPpt: projectStatusFieldCluster.value.trim(),
+    };
+    setProjectStatusModalStatus('Bezig met opslaan…', 'busy');
+    try {
+      const url = apiUrl + '/api/doelenbomen/' + doelenboomId + '/elements/' +
+        encodeURIComponent(projectStatusModalProjectCode) + '/project-status';
+      const res = await fetch(url, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + authToken },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || ('Opslaan mislukt (HTTP ' + res.status + ')'));
+      }
+      setProjectStatusModalStatus('Opgeslagen, boom wordt herladen…', 'ok');
+      reloadTreeKeepingFocus(400);
+    } catch (err) {
+      setProjectStatusModalStatus(err && err.message ? err.message : 'Onbekende fout bij opslaan.');
+    }
+  });
 
   // Eén gedeelde handler voor zowel het detail-paneel (alle elementtypen) als het
   // project-paneel eronder (dat voor Project-elementen dezelfde tags/org-chips
   // toont, zie projectSectionHtml) — anders werken de +Tag/+Organisatieonderdeel-
   // knoppen daar niet, want die staan in een los DOM-element (project-panel).
   function onDetailAreaClick(ev) {
+    const projectStatusEditBtn = ev.target.closest('.project-status-edit-btn');
+    if (projectStatusEditBtn) { openProjectStatusModal(projectStatusEditBtn.dataset.code); return; }
+    const productAddBtn = ev.target.closest('.product-add-btn');
+    if (productAddBtn) { openProductModal('create', productAddBtn.dataset.code); return; }
+    const productEditBtn = ev.target.closest('.product-edit-btn');
+    if (productEditBtn) { openProductModal('edit', productEditBtn.dataset.code, productEditBtn.dataset.id); return; }
+    const productDeleteBtn = ev.target.closest('.product-delete-btn');
+    if (productDeleteBtn) { deleteProduct(productDeleteBtn.dataset.code, productDeleteBtn.dataset.id); return; }
     const editBtn = ev.target.closest('.dp-edit-btn');
     if (editBtn) { openElementModal('edit', editBtn.dataset.code); return; }
     const delBtn = ev.target.closest('.dp-delete-btn');
@@ -2524,7 +3480,7 @@ function runApp(data) {
           const body = await res.json().catch(() => ({}));
           throw new Error(body.error || ('Verwijderen mislukt (HTTP ' + res.status + ')'));
         }
-        window.location.reload();
+        reloadTreeKeepingFocus();
       } catch (err) {
         showToast(err && err.message ? err.message : 'Onbekende fout bij verwijderen.', 'error');
       }
@@ -2562,7 +3518,7 @@ function runApp(data) {
           throw new Error(body.error || ('Opslaan mislukt (HTTP ' + res.status + ')'));
         }
         setRefModalStatus('Opgeslagen, boom wordt herladen…', 'ok');
-        setTimeout(() => window.location.reload(), 400);
+        reloadTreeKeepingFocus(400);
       } catch (err) {
         setRefModalStatus(err && err.message ? err.message : 'Onbekende fout bij opslaan.');
       }
@@ -2738,7 +3694,7 @@ function runApp(data) {
         throw new Error(b.error || ('Opslaan mislukt (HTTP ' + res.status + ')'));
       }
       setEdgeModalStatus('Opgeslagen, boom wordt herladen…', 'ok');
-      setTimeout(() => window.location.reload(), 400);
+      reloadTreeKeepingFocus(400);
     } catch (err) {
       setEdgeModalStatus(err && err.message ? err.message : 'Onbekende fout bij opslaan.');
     }
@@ -2758,7 +3714,7 @@ function runApp(data) {
         const b = await res.json().catch(() => ({}));
         throw new Error(b.error || ('Verwijderen mislukt (HTTP ' + res.status + ')'));
       }
-      window.location.reload();
+      reloadTreeKeepingFocus();
     } catch (err) {
       showToast(err && err.message ? err.message : 'Onbekende fout bij verwijderen.', 'error');
     }
@@ -2824,7 +3780,7 @@ function runApp(data) {
         throw new Error(b.error || ('Opslaan mislukt (HTTP ' + res.status + ')'));
       }
       setTagLinkModalStatus('Opgeslagen, boom wordt herladen…', 'ok');
-      setTimeout(() => window.location.reload(), 400);
+      reloadTreeKeepingFocus(400);
     } catch (err) {
       setTagLinkModalStatus(err && err.message ? err.message : 'Onbekende fout bij opslaan.');
     }
@@ -2843,7 +3799,7 @@ function runApp(data) {
         const b = await res.json().catch(() => ({}));
         throw new Error(b.error || ('Verwijderen mislukt (HTTP ' + res.status + ')'));
       }
-      window.location.reload();
+      reloadTreeKeepingFocus();
     } catch (err) {
       showToast(err && err.message ? err.message : 'Onbekende fout bij verwijderen.', 'error');
     }
@@ -2939,7 +3895,7 @@ function runApp(data) {
         throw new Error(b.error || ('Opslaan mislukt (HTTP ' + res.status + ')'));
       }
       setOrgLinkModalStatus('Opgeslagen, boom wordt herladen…', 'ok');
-      setTimeout(() => window.location.reload(), 400);
+      reloadTreeKeepingFocus(400);
     } catch (err) {
       setOrgLinkModalStatus(err && err.message ? err.message : 'Onbekende fout bij opslaan.');
     }
@@ -2958,13 +3914,19 @@ function runApp(data) {
         const b = await res.json().catch(() => ({}));
         throw new Error(b.error || ('Verwijderen mislukt (HTTP ' + res.status + ')'));
       }
-      window.location.reload();
+      reloadTreeKeepingFocus();
     } catch (err) {
       showToast(err && err.message ? err.message : 'Onbekende fout bij verwijderen.', 'error');
     }
   }
 
   applyVisibility();
+
+  // Ná de initiële (uitgezoomde) render alsnog inzoomen op het element dat
+  // openstond vóór een save-actie deze reload veroorzaakte — zie
+  // reloadTreeKeepingFocus()/restoreFocusAfterReload() hierboven. Geen effect
+  // bij een "gewone" eerste load, want dan staat er niets in sessionStorage.
+  restoreFocusAfterReload();
 }
 
 // ============================================================================
@@ -3164,13 +4126,15 @@ function adaptTreeResponse(tree) {
     PROJECT_STATUS[id] = {
       projectstatus: ps.projectstatus || '', rag: ps.rag || '',
       toelichting: ps.toelichting || '', datum: ps.gerapporteerdOp || '',
+      clusterPpt: ps.clusterPpt || '',
     };
   });
 
   const PRODUCTS = {};
   Object.keys(tree.products || {}).forEach((id) => {
     PRODUCTS[id] = (tree.products[id] || []).map((p) => ({
-      id: p.code, name: p.name, omschrijving: p.omschrijving,
+      dbId: p.id, code: p.code, name: p.name, type: p.type === 'mijlpaal' ? 'mijlpaal' : 'deliverable',
+      omschrijving: p.omschrijving,
       pct: p.pctGereed, verwacht: p.verwachteDatum, werkelijk: p.werkelijkeDatum, opmerking: p.opmerking,
     }));
   });
@@ -3197,6 +4161,17 @@ function renderError(message) {
 
 function boot(tree) {
   lastTreeResponse = tree;
+  // De rol die de parent-app (React) via postMessage meegaf vóórdat de echte
+  // boomdata er was, is maar een gok (kent geen per-doelenboom rol-overrides,
+  // zie doelenboom_user_roles). GET .../tree berekent de echte, effectieve
+  // schrijfbaarheid server-side (tree.doelenboom.canWrite) — die is hier
+  // leidend en overschrijft die eerdere gok. Een losstaand geëxporteerd
+  // HTML-bestand (standalone) moet echter altijd 'gebruiker' blijven, ongeacht
+  // wat canWrite op het moment van exporteren was — anders zou een export
+  // gemaakt door een admin daarna zelf ook weer schrijfbaar lijken.
+  if (typeof tree.doelenboom.canWrite === 'boolean' && !document.body.classList.contains('standalone')) {
+    applyRole(tree.doelenboom.canWrite ? 'admin' : 'gebruiker');
+  }
   CURRENT_TENANT_NAME = tree.doelenboom.tenant.name;
   // COLUMN_HINTS.prog/strat bevatten de tenantnaam; dat object is al bij het
   // parsen van het script aangemaakt (toen CURRENT_TENANT_NAME nog leeg was),

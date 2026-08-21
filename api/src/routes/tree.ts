@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { pool } from '../db.js';
-import { requireAuth } from '../auth.js';
-import { requireTenantRoleForDoelenboomParam } from '../rbac.js';
+import { requireAuth, AuthedRequest } from '../auth.js';
+import { requireTenantRoleForDoelenboomParam, getEffectiveRoleForDoelenboom } from '../rbac.js';
 
 export const treeRouter = Router();
 treeRouter.use(requireAuth);
@@ -45,7 +45,7 @@ export async function fetchTree(doelenboomId: string) {
   );
 
   const productsResult = await pool.query(
-    `select el.code as element_code, p.code, p.name, p.omschrijving, p.pct_gereed,
+    `select el.code as element_code, p.id, p.code, p.name, p.type, p.omschrijving, p.pct_gereed,
             p.verwachte_datum, p.werkelijke_datum, p.opmerking
      from products p join elements el on el.id = p.element_id
      where el.doelenboom_id = $1
@@ -95,8 +95,10 @@ export async function fetchTree(doelenboomId: string) {
   const products: Record<string, unknown[]> = {};
   for (const row of productsResult.rows) {
     (products[row.element_code] ??= []).push({
+      id: row.id,
       code: row.code,
       name: row.name,
+      type: row.type,
       omschrijving: row.omschrijving,
       pctGereed: row.pct_gereed,
       verwachteDatum: row.verwachte_datum,
@@ -148,9 +150,18 @@ export async function fetchTree(doelenboomId: string) {
   };
 }
 
-// GET /api/doelenbomen/:id/tree
-treeRouter.get('/:id/tree', requireTenantRoleForDoelenboomParam('gebruiker', 'id'), async (req, res) => {
+// GET /api/doelenbomen/:id/tree — geeft naast de boom ook de effectieve rol en
+// schrijfbaarheid van de ingelogde gebruiker mee, zodat de frontend niet zelf
+// (met kans op afwijkende logica) hoeft te herleiden uit tenantRoles + read_only
+// + een eventuele per-doelenboom rol-override (zie getEffectiveRoleForDoelenboom).
+treeRouter.get('/:id/tree', requireTenantRoleForDoelenboomParam('gebruiker', 'id'), async (req: AuthedRequest, res) => {
   const tree = await fetchTree(req.params.id);
   if (!tree) return res.status(404).json({ error: 'Doelenboom niet gevonden' });
-  res.json(tree);
+
+  const effectiveRole = req.user!.isSysadmin
+    ? 'admin'
+    : (await getEffectiveRoleForDoelenboom(req.user!.id, req.params.id)) ?? 'gebruiker';
+  const canWrite = req.user!.isSysadmin || (effectiveRole === 'admin' && !tree.doelenboom.readOnly);
+
+  res.json({ ...tree, doelenboom: { ...tree.doelenboom, effectiveRole, canWrite } });
 });

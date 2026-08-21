@@ -96,6 +96,18 @@ export type DoelenboomSummary = DoelenboomBase & {
   tenant_name: string;
 };
 
+// Eén rij in GET /api/doelenbomen/:id/member-roles — een tenant-lid met zijn
+// tenant-brede rol, een eventuele override specifiek voor déze doelenboom
+// (null = geen override, "gewoon de tenant-rol"), en de effectieve rol die
+// daaruit volgt (overrideRole ?? tenantRole).
+export type DoelenboomMemberRole = {
+  userId: number;
+  email: string;
+  tenantRole: TenantRoleName;
+  overrideRole: TenantRoleName | null;
+  effectiveRole: TenantRoleName;
+};
+
 export type Element = {
   code: string;
   type: string;
@@ -118,9 +130,13 @@ export type ProjectStatus = {
   clusterPpt?: string;
 };
 
+export type ProductType = 'deliverable' | 'mijlpaal';
+
 export type Product = {
+  id: number;
   code: string;
   name: string;
+  type: ProductType;
   omschrijving: string;
   pctGereed: number;
   verwachteDatum: string | null;
@@ -132,12 +148,19 @@ export type Tag = { code: string; name: string; categorie: string; omschrijving:
 export type OrgUnit = { code: string; name: string; omschrijving: string };
 export type ObOrgRelation = { org: string; relatietype: string; toelichting: string; status: string };
 
+// Rol van de ingelogde gebruiker op déze specifieke doelenboom, en of diegene
+// er (op dit moment) daadwerkelijk in mag schrijven — al server-side bepaald
+// (tenant-rol, tenzij overruled via doelenboom_user_roles, plus read_only),
+// zodat de frontend dit niet zelf hoeft te herleiden. Zie
+// getEffectiveRoleForDoelenboom in api/src/rbac.ts.
 export type TreeResponse = {
   doelenboom: {
     id: number;
     slug: string;
     name: string;
     readOnly: boolean;
+    effectiveRole: TenantRoleName;
+    canWrite: boolean;
     tenant: { id: number; slug: string; name: string };
   };
   elements: Element[];

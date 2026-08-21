@@ -39,7 +39,16 @@ services:
     # conflicten met poort 8000 op de host (bv. AirPlay Receiver op macOS).
 
   api:
-    build: ./api
+    build:
+      context: ./api
+      # BUILD_VERSION exporteren vóór `docker compose build`/`up --build` om 'm
+      # mee te geven, bv.: export BUILD_VERSION="$(./scripts/build-version.sh)"
+      # (zie dat script) — zonder die env var valt dit terug op "dev" (zie
+      # api/Dockerfile ARG-default), dus een lokale `docker compose up --build`
+      # blijft ook zonder die stap gewoon werken, alleen toont de footer dan
+      # geen onderscheidende versie.
+      args:
+        BUILD_VERSION: ${BUILD_VERSION:-dev}
     image: doelenboom-api:latest
     restart: unless-stopped
     environment:

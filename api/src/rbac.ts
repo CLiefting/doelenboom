@@ -25,6 +25,28 @@ export async function tenantIdForDoelenboom(doelenboomId: number | string): Prom
   return result.rows[0]?.tenant_id ?? null;
 }
 
+// Effectieve rol van een gebruiker op één specifieke doelenboom: de rol uit
+// doelenboom_user_roles (indien aanwezig) overrult de tenant-brede rol uit
+// tenant_users — in beide richtingen (kan zowel op- als afschalen). Geen
+// tenant-lidmaatschap betekent geen toegang, ook niet met een override-rij
+// (die kan niet bestaan zonder een geldige user_id, maar checkt hier expliciet
+// nog de tenant-membership zodat een verwijderd tenant-lidmaatschap ook
+// meteen de toegang intrekt, ongeacht een eventuele oude override-rij).
+export async function getEffectiveRoleForDoelenboom(
+  userId: number,
+  doelenboomId: number | string
+): Promise<TenantRole | null> {
+  const tenantId = await tenantIdForDoelenboom(doelenboomId);
+  if (tenantId == null) return null;
+  const tenantRole = await getTenantRole(userId, tenantId);
+  if (!tenantRole) return null;
+  const override = await pool.query(
+    'select role from doelenboom_user_roles where doelenboom_id = $1 and user_id = $2',
+    [doelenboomId, userId]
+  );
+  return (override.rows[0]?.role as TenantRole | undefined) ?? tenantRole;
+}
+
 export function requireSysadmin(req: AuthedRequest, res: Response, next: NextFunction) {
   if (!req.user?.isSysadmin) {
     return res.status(403).json({ error: 'Deze actie is alleen voor sysadmins.' });
@@ -55,9 +77,26 @@ export function requireTenantRole(
   };
 }
 
-// Voor routes met :id = doelenboom-id (elements/tags/orgUnits/edges/imports/exports/tree).
+// Voor routes met :id = doelenboom-id (elements/tags/orgUnits/edges/imports/exports/
+// tree, en de doelenboom-instellingen zelf). Gebruikt de EFFECTIEVE rol (tenant-rol,
+// tenzij overruled voor déze doelenboom via doelenboom_user_roles) — dus een
+// tenant-admin die op deze ene doelenboom is teruggezet naar 'gebruiker' verliest
+// hier ook de rechten om 'm te hernoemen/verwijderen/op read-only te zetten.
 export function requireTenantRoleForDoelenboomParam(minRole: TenantRole, paramName = 'id') {
-  return requireTenantRole(minRole, async (req) => tenantIdForDoelenboom(req.params[paramName]));
+  return async (req: AuthedRequest, res: Response, next: NextFunction) => {
+    if (req.user?.isSysadmin) return next();
+
+    const doelenboomId = req.params[paramName];
+    const tenantId = await tenantIdForDoelenboom(doelenboomId);
+    if (tenantId == null) return res.status(404).json({ error: 'Niet gevonden.' });
+
+    const role = await getEffectiveRoleForDoelenboom(req.user!.id, doelenboomId);
+    if (!role) return res.status(403).json({ error: 'Geen toegang tot deze tenant.' });
+    if (minRole === 'admin' && role !== 'admin') {
+      return res.status(403).json({ error: 'Alleen een admin (tenant- of doelenboom-specifiek) mag dit wijzigen.' });
+    }
+    next();
+  };
 }
 
 // Voor routes met :tenantId direct in de URL (tenants/:id, tenants/:tenantId/...).
@@ -67,10 +106,11 @@ export function requireTenantRoleForTenantParam(minRole: TenantRole, paramName =
 
 // Voor content-schrijfroutes binnen een doelenboom (elementen/relaties/tags/
 // organisatieonderdelen/imports — niet de doelenboom-instellingen zelf, zie
-// db/init.sql bij doelenbomen.read_only). Sysadmin mag altijd door. Een
-// tenant-admin moet zowel tenant-admin zijn ALS de doelenboom mag niet op
-// read-only staan — zo blokkeert read-only iedereen behalve sysadmin, ook een
-// tenant-admin die normaal wél zou mogen schrijven.
+// db/init.sql bij doelenbomen.read_only). Sysadmin mag altijd door. Voor
+// iedereen anders geldt de EFFECTIEVE rol (tenant-rol, tenzij overruled voor
+// déze doelenboom, zie doelenboom_user_roles) — die moet 'admin' zijn EN de
+// doelenboom mag niet op read-only staan — zo blokkeert read-only iedereen
+// behalve sysadmin, ook een admin die normaal wél zou mogen schrijven.
 //
 // resolveDoelenboomId: net als bij requireTenantRole hierboven, óf de naam van
 // de route-param die direct het doelenboom-id bevat, óf een functie die 'm
@@ -87,9 +127,11 @@ export function requireWritableDoelenboom(
 
     const tenantId = await tenantIdForDoelenboom(doelenboomId);
     if (tenantId == null) return res.status(404).json({ error: 'Niet gevonden.' });
-    const role = await getTenantRole(req.user!.id, tenantId);
+    const role = await getEffectiveRoleForDoelenboom(req.user!.id, doelenboomId);
     if (!role) return res.status(403).json({ error: 'Geen toegang tot deze tenant.' });
-    if (role !== 'admin') return res.status(403).json({ error: 'Alleen een tenant-admin mag dit wijzigen.' });
+    if (role !== 'admin') {
+      return res.status(403).json({ error: 'Alleen een admin (tenant- of doelenboom-specifiek) mag dit wijzigen.' });
+    }
 
     const result = await pool.query('select read_only from doelenbomen where id = $1', [doelenboomId]);
     if (result.rows[0]?.read_only) {

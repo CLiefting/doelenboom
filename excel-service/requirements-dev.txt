@@ -1,0 +1,4 @@
+# Extra dependencies voor de regressietest-suite (tests/), los van
+# requirements.txt (dat blijft de productie-runtime-set voor de Docker-image —
+# pytest hoort daar niet in thuis). Installeren: zie TESTING.md in de projectroot.
+pytest==8.3.3
