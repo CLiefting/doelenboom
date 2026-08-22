@@ -79,6 +79,24 @@ rol-afhankelijk gedrag te kunnen zien.
       controleren).
 - [ ] Legenda is altijd zichtbaar boven in de pagina en klopt met de
       kleuren/symbolen in de boom.
+- [ ] Bouwrichting omdraaien (topbar-icoon, dubbele pijl): Missie komt links
+      te staan en Project rechts (en andersom weer terug); verbindingslijnen
+      en kolomrelatie-pijlen lopen na het omdraaien nog steeds netjes tussen
+      de juiste vakken (geen rare terugbuigende lijnen).
+- [ ] Na het omdraaien blijft "Kolom (links/rechts) tonen" werken en het
+      label/pijltje van die knop past zich aan de richting aan; alleen Missie
+      is standaard zichtbaar, ongeacht de gekozen richting.
+- [ ] De gekozen bouwrichting blijft staan na een reload van dezelfde
+      doelenboom (per-doelenboom onthouden), en is onafhankelijk per
+      doelenboom (omdraaien in boom A wijzigt boom B niet).
+- [ ] Kijkrichting/anker wisselen (topbar-icoon, cirkel met stralen): standaard
+      start alleen Missie zichtbaar en onthult "Kolom (links) tonen" richting
+      Project; na het wisselen start alleen Project zichtbaar en onthult die
+      knop richting Missie. De fysieke links/rechts-positie van de kolommen
+      verandert hierbij **niet** (in tegenstelling tot de bouwrichting-knop
+      hierboven) — beide instellingen zijn onafhankelijk te combineren.
+      "↺ Alleen Missie"/"↺ Alleen Project"-knop past zijn label/gedrag ook aan.
+      Ook deze voorkeur blijft staan na een reload, per doelenboom.
 
 ## 5. Filters & beheer (topbar, `tree.html`)
 
@@ -132,7 +150,34 @@ rol-afhankelijk gedrag te kunnen zien.
       ingevuld verdwijnt die markering.
 - [ ] Product bewerken/verwijderen werkt en de tijdlijn/lijst werken meteen bij.
 
-## 8. Excel-export (topbar, `tree.html`)
+## 8. Project-tijdlijnenoverzicht (topbar-icoon, `tree.html`)
+
+- [ ] Topbar-icoon (Gantt-balkjes) opent het overzicht; topbar/legenda/
+      filters/boom verdwijnen, alleen het overzicht + "Terug naar boom"-icoon
+      (boompictogram) blijven zichtbaar.
+- [ ] Alle projecten met minstens één product met een verwachte/werkelijke
+      datum staan op één gedeelde tijdas (geen los tegeltje per project);
+      projecten zonder geplande data staan als aparte lijst onderaan.
+- [ ] Projectstatus staat als klein, subtiel gekleurd label onder de
+      projectnaam (niet als opvallende badge die naast/onder de naam wrapt).
+- [ ] Het label "vandaag" staat één keer, in de gedeelde koprij boven de
+      lijst — niet los herhaald per project-rij.
+- [ ] Zonder een gemarkeerd pad in de boom (zie de klik-om-te-markeren-hint)
+      toont het overzicht alle projecten. Markeer je een element (bv. een
+      capability), dan toont het overzicht **alleen** de daarmee verbonden
+      projecten, met een banner die vermeldt waarop gefilterd is + hoeveel
+      van het totaal; "Wis markering" in die banner herstelt de volledige
+      lijst.
+- [ ] Op een project-rij klikken springt naar de boom, ingezoomd op dat
+      project (net als dubbelklikken in de gewone boomweergave).
+- [ ] **"Terug naar vorig scherm" vanuit die focus gaat terug naar het
+      tijdlijnenoverzicht** (niet naar de volledige boom) als je er via een
+      klik op een rij in het overzicht kwam — ook nog na een tussentijdse
+      opslaan-actie (die de pagina herlaadt).
+- [ ] Boompictogram (topbar) sluit het overzicht en toont weer de gewone
+      boomweergave.
+
+## 9. Excel-export & SVG-export (topbar, `tree.html`)
 
 - [ ] Export "oud" formaat, sjabloon (leeg) — download lukt, tabbladen/headers
       kloppen als je het bestand opent.
@@ -141,12 +186,38 @@ rol-afhankelijk gedrag te kunnen zien.
 - [ ] Export "nieuw" formaat (sjabloon + met data) — idem, incl. dropdown-
       validatie op de kolommen die dat moeten hebben (Type, Actief,
       Projectstatus, RAG, Product-type, Relatietype, Org-relatie-status).
-- [ ] SVG-export van de boom (indien aanwezig in deze weergave) toont de volle
+- [ ] SVG-export zonder gemarkeerd pad: toont de volle (huidig zichtbare)
       boom zonder clipping, met de kolomkop-header op de juiste positie.
+- [ ] SVG-export mét een gemarkeerd pad (klik op een vak): bevat **alleen**
+      de gemarkeerde vakken en hun onderlinge verbindingen (geen volledige
+      boom); kolomkoppen en kolomrelatie-pijlen blijven wel staan voor
+      context. Bestandsnaam bevat de code van het gemarkeerde element
+      (`doelenboom-pad-<code>.svg`).
 
-## 9. Rollen & rechten — expliciete matrix
+## 10. Rollen & rechten — expliciete matrix
 
-Doorloop minstens deze combinaties (met echte, verschillende accounts):
+### 10.1 Testopstelling (eenmalig per testronde, als sysadmin)
+
+- [ ] Nieuwe tenant aanmaken, specifiek voor deze testronde (bv. slug
+      `regressietest`) — niet hergebruiken/vervuilen van een bestaande
+      tenant.
+- [ ] Binnen die tenant een nieuwe doelenboom aanmaken (leeg is prima, of
+      importeer een klein testbestand — zie §3).
+- [ ] Drie test-accounts aanmaken, **één per basisrol**, alle drie lid van
+      deze tenant:
+      - `regressietest-sysadmin@...` — rol **sysadmin** (systeembreed, niet
+        tenant-gebonden, maar wel als lid toevoegen aan de tenant zodat er
+        ook een "gewoon tenant-lidmaatschap"-pad getest wordt)
+      - `regressietest-admin@...` — rol **tenant-admin** binnen
+        `regressietest`
+      - `regressietest-gebruiker@...` — rol **tenant-gebruiker** binnen
+        `regressietest`
+- [ ] Voor de laatste twee rijen van de matrix hieronder: op de nieuwe
+      doelenboom een per-doelenboom rol-override instellen (Gebruikersbeheer,
+      zie §2) — `regressietest-admin` → override "gebruiker",
+      `regressietest-gebruiker` → override "admin".
+
+### 10.2 Matrix — per account inloggen en verifiëren
 
 | Rol                                   | Mag lezen | Mag schrijven | Opmerking |
 |----------------------------------------|:---:|:---:|---|
@@ -156,12 +227,22 @@ Doorloop minstens deze combinaties (met echte, verschillende accounts):
 | Tenant-admin met doelenboom-override "gebruiker" | ✅ | ❌ | Alleen in díe ene doelenboom |
 | Tenant-gebruiker met doelenboom-override "admin" | ✅ | ✅ | Alleen in díe ene doelenboom |
 
-- [ ] Voor elke rij: schrijfacties (element/tag/OE/edge/product/projectstatus
-      aanmaken/wijzigen/verwijderen) zijn precies aan/uit zoals in de tabel.
+- [ ] Voor elke rij: log in met het bijbehorende account uit §10.1 en
+      controleer dat schrijfacties (element/tag/OE/edge/product/
+      projectstatus aanmaken/wijzigen/verwijderen) precies aan/uit staan
+      zoals in de tabel — én dat lezen (boom bekijken, exporteren) altijd
+      lukt.
+- [ ] Tenant-gebruiker/tenant-admin-met-override "gebruiker": bewerk-/
+      aanmaak-/verwijderknoppen zijn **afwezig** (niet zichtbaar-maar-
+      uitgeschakeld) in zowel de React-schermen als `tree.html`.
+- [ ] Sysadmin ziet en kan schrijven op de nieuwe `regressietest`-doelenboom
+      zonder er lid van te hoeven zijn (systeembrede toegang).
 - [ ] Een tenant-admin kan een read-only doelenboom altijd zelf weer op
       schrijfbaar zetten (mag niet zichzelf buitensluiten).
+- [ ] Opruimen: de `regressietest`-tenant (en daarmee alle drie accounts en
+      de doelenboom, cascade) weer verwijderen na afloop van de testronde.
 
-## 10. Algemeen / cross-cutting
+## 11. Algemeen / cross-cutting
 
 - [ ] Geen JavaScript-fouten in de browserconsole tijdens een normale sessie
       (inloggen -> boom bekijken -> bewerken -> exporteren -> uitloggen).

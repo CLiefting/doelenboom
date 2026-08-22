@@ -81,6 +81,10 @@
     display: inline-flex; align-items: center; justify-content: center;
     width: 32px; height: 32px; padding: 0; border-radius: 999px;
   }
+  /* Actieve staat van de bouwrichting-knop (#flip-columns-btn) — zelfde idee
+     als de "actief" focus-kleur elders, zodat in één oogopslag te zien is dat
+     de omgedraaide (Missie links) volgorde aanstaat, niet de standaard. */
+  .btn.btn-icon.active { background: var(--focus); border-color: var(--focus); color: #fff; }
   .user-avatar {
     display: inline-flex; align-items: center; justify-content: center;
     width: 22px; height: 22px; border-radius: 50%;
@@ -652,6 +656,15 @@
     position: absolute; transform: translate(-50%, -50%);
     background: #ffffff; padding: 0 8px; font-size: 11px; font-weight: 700;
     font-style: italic; color: var(--navy); white-space: nowrap;
+    text-align: center;
+  }
+  /* Richtingspijltje ónder de labeltekst (bv. "geeft invulling aan" / "←") —
+     wijst altijd naar de kolom die conceptueel "to" is (zie fromIsLeft in
+     drawColumnArrows), en spiegelt dus automatisch mee met de omgedraaide
+     bouwrichting (zie columnsReversed/#flip-columns-btn). */
+  .col-arrow-glyph {
+    display: block; font-style: normal; font-size: 13px; line-height: 1;
+    margin-top: 2px;
   }
 
   /* Hover tooltip */
@@ -746,6 +759,25 @@
       <div class="topbar-actions">
         <button class="btn ghost btn-icon" id="export-svg-btn" type="button" title="Exporteer als SVG" aria-label="Exporteer als SVG">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+        </button>
+        <!-- Bouwrichting omdraaien: standaard staat Project links en Missie
+             rechts (COL_ORDER, zie boot()); deze knop wisselt naar Missie
+             links/Project rechts (per doelenboom onthouden in localStorage,
+             zie flipColumnDirection()). Ververst de pagina om alles opnieuw
+             en consistent op te bouwen — zelfde aanpak als reloadTreeKeepingFocus. -->
+        <button class="btn ghost btn-icon" id="flip-columns-btn" type="button" title="Bouwrichting omdraaien" aria-label="Bouwrichting omdraaien">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h13"/><path d="m13 3 4 4-4 4"/><path d="M21 17H8"/><path d="m11 21-4-4 4-4"/></svg>
+        </button>
+        <!-- Kijkrichting/anker wisselen: standaard start alleen Missie
+             zichtbaar en onthult "Kolom tonen" stap voor stap richting
+             Project (expandAnchor 'missie'); deze knop wisselt naar het
+             omgekeerde: alleen Project start zichtbaar, onthullen gaat
+             richting Missie (expandAnchor 'project') — zie
+             flipExpandAnchor(). Los van #flip-columns-btn hierboven: de
+             fysieke links/rechts-volgorde van de kolommen verandert hier
+             niet mee. -->
+        <button class="btn ghost btn-icon" id="flip-anchor-btn" type="button" title="Kijkrichting wisselen" aria-label="Kijkrichting wisselen">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v4"/><path d="M12 18v4"/><path d="M4.93 4.93l2.83 2.83"/><path d="M16.24 16.24l2.83 2.83"/><path d="M2 12h4"/><path d="M18 12h4"/><path d="M4.93 19.07l2.83-2.83"/><path d="M16.24 7.76l2.83-2.83"/></svg>
         </button>
         <!-- Alle project-tijdlijnen: los overzicht (zie #timelines-view), niet
              de gewone boomweergave — vandaar een eigen icoon i.p.v. ergens
@@ -1149,9 +1181,51 @@
   <div id="hover-tooltip"></div>
 
 <script>
+// Vaste, richtingsonafhankelijke referentievolgorde (Project = index 0,
+// Missie = laatste index) — gebruikt voor alles wat "hoeveel kolommen zijn
+// er vanaf Missie onthuld" betekent (defaultHiddenCols/expandOneColumnLeft
+// in runApp) en voor het omdraaien van de fysieke weergavevolgorde in boot().
+// De fysieke weergavevolgorde (welke kolom links/rechts op het scherm staat)
+// is COL_ORDER, lokaal in boot() berekend uit deze constante + columnsReversed.
+const CANONICAL_COL_ORDER = ["project", "cap", "obe", "sub", "prog", "strat", "doel", "missie"];
+// Bouwrichting: false = standaard (Project links, Missie rechts), true =
+// omgedraaid (Missie links, Project rechts) — per doelenboom onthouden in
+// localStorage (colDirectionStorageKey()), gelezen aan het begin van boot().
+let columnsReversed = false;
+function colDirectionStorageKey() {
+  return 'doelenboom-cols-reversed-' + (doelenboomId || '');
+}
+function flipColumnDirection() {
+  try {
+    localStorage.setItem(colDirectionStorageKey(), columnsReversed ? '0' : '1');
+  } catch (err) {
+    // localStorage kan geblokkeerd zijn (bv. strikte privacy-instellingen) —
+    // dan verandert er simpelweg niets bij een reload.
+  }
+  window.location.reload();
+}
+
+// Kijkrichting/anker: 'missie' (standaard) = alleen Missie start zichtbaar,
+// "Kolom (links) tonen" onthult stap voor stap richting Project. 'project' =
+// precies andersom: alleen Project start zichtbaar, onthullen gaat richting
+// Missie. Dit is bewust LOS van columnsReversed hierboven — de fysieke
+// links/rechts-positie van de kolommen verandert hier niet mee, alleen welk
+// uiteinde het standaard-zichtbare anker is (zie ANCHOR_ORDER in runApp()).
+let expandAnchor = 'missie';
+function expandAnchorStorageKey() {
+  return 'doelenboom-expand-anchor-' + (doelenboomId || '');
+}
+function flipExpandAnchor() {
+  try {
+    localStorage.setItem(expandAnchorStorageKey(), expandAnchor === 'missie' ? 'project' : 'missie');
+  } catch (err) {
+    // zie flipColumnDirection() hierboven
+  }
+  window.location.reload();
+}
+
 function runApp(data) {
   const { DETAILS, EDGES, TOELICHTING, PROJECT_STATUS, PRODUCTS, TAGS, ELEMENT_TAGS, ORGS, OB_ORG } = data;
-  const COL_ORDER = ["project", "cap", "obe", "sub", "prog", "strat", "doel", "missie"];
   const COL_LABELS = {"project": "Project", "cap": "Capability", "obe": "Operationele benefit", "sub": "Sub-benefit " + CURRENT_TENANT_NAME, "prog": "Programmabaat " + CURRENT_TENANT_NAME, "strat": "Strategisch benefit " + CURRENT_TENANT_NAME, "doel": "Strategisch doel", "missie": "Missie " + CURRENT_TENANT_NAME};
   const COL_COLORS = {"project": "#3E6FA6", "cap": "#6B4C8A", "obe": "#C05A2C", "sub": "#B8862E", "prog": "#2E7D5B", "strat": "#8FAADC", "doel": "#2F5597", "missie": "#203864"};
   const COL_ARROWS = [{"from": "project", "to": "cap", "label": "ontwikkelt"}, {"from": "cap", "to": "obe", "label": "ondersteunt"}, {"from": "obe", "to": "sub", "label": "realiseert"}, {"from": "sub", "to": "prog", "label": "versterkt"}, {"from": "prog", "to": "strat", "label": "draagt bij aan"}, {"from": "strat", "to": "doel", "label": "ondersteunt"}, {"from": "doel", "to": "missie", "label": "geeft invulling aan"}];
@@ -1188,8 +1262,18 @@ function runApp(data) {
     SEARCH_INDEX[id] = normalizeSearch([d.code, d.name, d.desc, d.taakveld, d.subtaakveld, d.kpi, d.parent, ...extra, ...tagNames, ...orgNames].filter(Boolean).join(' | '));
   });
 
+  // Volgorde waarin kolommen ontvouwen worden vanaf het anker (zie
+  // expandAnchor hierboven) — het LAATSTE element is steeds het anker zelf
+  // (standaard zichtbaar, de rest start verborgen). Bewust los van de fysieke
+  // links/rechts-volgorde (COL_ORDER/columnsReversed, alleen gebruikt in
+  // boot() voor de layout): dit bepaalt alleen "vanaf welk uiteinde onthullen
+  // we, en in welke volgorde", niet waar dat fysiek op het scherm staat.
+  const ANCHOR_ORDER = expandAnchor === 'project'
+    ? CANONICAL_COL_ORDER.slice().reverse()
+    : CANONICAL_COL_ORDER.slice();
+
   function defaultHiddenCols() {
-    return new Set(COL_ORDER.slice(0, -1)); // everything except the last (Missie) starts hidden
+    return new Set(ANCHOR_ORDER.slice(0, -1));
   }
 
   let hiddenCols = defaultHiddenCols();
@@ -1200,6 +1284,11 @@ function runApp(data) {
   let activeEdgeKeys = new Set();
   let focusId = null;
   let prevHiddenCols = null;
+  // Welk scherm de "Terug naar vorig scherm"-knop moet tonen na exitFocus():
+  // null = de doelenboom zelf (standaardgedrag), 'timelines' = het
+  // project-tijdlijnenoverzicht (zie showTimelinesView) — gezet door
+  // enterFocus(node, returnTarget), gelezen/gereset door goBackFromFocus().
+  let focusReturnTarget = null;
 
   function applyVisibility() {
     if (focusId !== null) return;
@@ -1219,17 +1308,18 @@ function runApp(data) {
     requestAnimationFrame(() => setTimeout(() => { drawEdges(); drawColumnArrows(); }, 280));
   }
 
-  // Leftmost currently-visible column index in COL_ORDER, or COL_ORDER.length if none visible.
-  function leftmostVisibleIndex() {
-    for (let i = 0; i < COL_ORDER.length; i++) {
-      if (!hiddenCols.has(COL_ORDER[i])) return i;
+  // Index (in ANCHOR_ORDER) van de zichtbare kolom die het verst van het
+  // anker af staat — d.w.z. hoever "Kolom (links) tonen" al onthuld heeft.
+  function furthestFromAnchorVisibleIndex() {
+    for (let i = 0; i < ANCHOR_ORDER.length; i++) {
+      if (!hiddenCols.has(ANCHOR_ORDER[i])) return i;
     }
-    return COL_ORDER.length;
+    return ANCHOR_ORDER.length;
   }
 
   function updateExpandLeftBtnState() {
     if (!expandLeftBtn) return;
-    const idx = leftmostVisibleIndex();
+    const idx = furthestFromAnchorVisibleIndex();
     const canExpand = idx > 0;
     expandLeftBtn.disabled = !canExpand;
     expandLeftBtn.classList.toggle('disabled', !canExpand);
@@ -1237,13 +1327,13 @@ function runApp(data) {
 
   function expandOneColumnLeft() {
     if (focusId !== null) return;
-    const idx = leftmostVisibleIndex();
+    const idx = furthestFromAnchorVisibleIndex();
     if (idx <= 0) return; // already fully expanded (or nothing to anchor from)
-    if (idx >= COL_ORDER.length) {
-      // nothing visible at all: reveal the rightmost column first
-      hiddenCols.delete(COL_ORDER[COL_ORDER.length - 1]);
+    if (idx >= ANCHOR_ORDER.length) {
+      // nothing visible at all: reveal het anker eerst
+      hiddenCols.delete(ANCHOR_ORDER[ANCHOR_ORDER.length - 1]);
     } else {
-      hiddenCols.delete(COL_ORDER[idx - 1]);
+      hiddenCols.delete(ANCHOR_ORDER[idx - 1]);
     }
     applyVisibility();
   }
@@ -1346,7 +1436,7 @@ function runApp(data) {
     hiddenCols = defaultHiddenCols();
     applyVisibility();
   });
-  backBtn.addEventListener('click', exitFocus);
+  backBtn.addEventListener('click', goBackFromFocus);
   updateExpandLeftBtnState();
 
   // ---- Geometry: (re)draw connector lines + column-relation arrows from live DOM positions ----
@@ -1413,7 +1503,15 @@ function runApp(data) {
       const s = nodeRects[e.source];
       const t = nodeRects[e.target];
       if (!s || !t) return;
-      const sx = s.right, sy = s.midY, tx = t.left, ty = t.midY;
+      // Altijd verbinden van de fysiek meest linkse kant naar de meest
+      // rechtse (i.p.v. altijd source->target) — bij een omgedraaide
+      // bouwrichting (zie columnsReversed) kan het conceptuele "target"
+      // fysiek links van "source" staan, en zonder deze correctie zou de
+      // curve dan lelijk terugbuigen i.p.v. netjes tussen de twee vakken
+      // te lopen.
+      const left = s.left <= t.left ? s : t;
+      const right = s.left <= t.left ? t : s;
+      const sx = left.right, sy = left.midY, tx = right.left, ty = right.midY;
       const midx = (sx + tx) / 2;
       const path = document.createElementNS(SVG_NS, 'path');
       path.setAttribute('d', `M ${sx} ${sy} C ${midx} ${sy}, ${midx} ${ty}, ${tx} ${ty}`);
@@ -1455,23 +1553,36 @@ function runApp(data) {
       // the row's actual document position and would misplace the arrows.
       const columnsRect = columnsEl.getBoundingClientRect();
 
-      const x1 = fr.right - boardRect.left + 4;
-      const x2 = tr.left - boardRect.left - 4;
+      // Fysiek van links naar rechts tekenen i.p.v. aannemen dat "from" altijd
+      // links van "to" staat — bij een omgedraaide bouwrichting (zie
+      // columnsReversed) kan dat andersom zijn; de pijlpunt moet dan links
+      // staan i.p.v. rechts, wijzend naar de kolom die conceptueel "to" is.
+      const fromIsLeft = fr.left <= tr.left;
+      const leftRect = fromIsLeft ? fr : tr;
+      const rightRect = fromIsLeft ? tr : fr;
+      const x1 = leftRect.right - boardRect.left + 4;
+      const x2 = rightRect.left - boardRect.left - 4;
       if (x2 - x1 < 20) return;
       const y = columnsRect.top - boardRect.top - 16;
 
       const headLen = 9;
       const line = document.createElementNS(SVG_NS, 'line');
-      line.setAttribute('x1', x1);
       line.setAttribute('y1', y);
-      line.setAttribute('x2', x2 - headLen);
       line.setAttribute('y2', y);
+      if (fromIsLeft) {
+        line.setAttribute('x1', x1);
+        line.setAttribute('x2', x2 - headLen);
+      } else {
+        line.setAttribute('x1', x2);
+        line.setAttribute('x2', x1 + headLen);
+      }
       line.setAttribute('class', 'col-arrow-line');
       svg.appendChild(line);
 
       const head = document.createElementNS(SVG_NS, 'polygon');
-      head.setAttribute('points',
-        `${x2},${y} ${x2 - headLen},${y - 5} ${x2 - headLen},${y + 5}`);
+      head.setAttribute('points', fromIsLeft
+        ? `${x2},${y} ${x2 - headLen},${y - 5} ${x2 - headLen},${y + 5}`
+        : `${x1},${y} ${x1 + headLen},${y - 5} ${x1 + headLen},${y + 5}`);
       head.setAttribute('class', 'col-arrow-head');
       svg.appendChild(head);
 
@@ -1479,7 +1590,13 @@ function runApp(data) {
       label.className = 'col-arrow-label';
       label.style.left = ((x1 + x2) / 2) + 'px';
       label.style.top = y + 'px';
-      label.textContent = rel.label;
+      const textEl = document.createElement('span');
+      textEl.textContent = rel.label;
+      const glyphEl = document.createElement('span');
+      glyphEl.className = 'col-arrow-glyph';
+      glyphEl.textContent = fromIsLeft ? '→' : '←'; // → of ←
+      label.appendChild(textEl);
+      label.appendChild(glyphEl);
       colArrowsEl.appendChild(label);
     });
   }
@@ -1989,7 +2106,7 @@ function runApp(data) {
     const id = row.dataset.code;
     hideTimelinesView();
     const node = columnsEl.querySelector('.node[data-id="' + CSS.escape(id) + '"]');
-    if (node) enterFocus(node);
+    if (node) enterFocus(node, 'timelines');
   });
 
   // Compacte, klikbare variant van een tag-/organisatiechip voor in de
@@ -2228,12 +2345,13 @@ function runApp(data) {
     return keep;
   }
 
-  function enterFocus(node) {
+  function enterFocus(node, returnTarget) {
     const id = node.dataset.id;
     if (focusId === null) {
       prevHiddenCols = new Set(hiddenCols);
     }
     focusId = id;
+    focusReturnTarget = returnTarget || null;
     deselect();
     hideTooltip();
 
@@ -2264,6 +2382,7 @@ function runApp(data) {
 
   function exitFocus() {
     focusId = null;
+    focusReturnTarget = null;
     document.querySelectorAll('.node').forEach(n => n.classList.remove('node-hidden', 'focus-target'));
     detailPanel.classList.remove('visible');
     detailPanel.innerHTML = '';
@@ -2276,6 +2395,15 @@ function runApp(data) {
     resetBtn.disabled = false;
     backBtn.style.display = 'none';
     applyVisibility(); // also refreshes expandLeftBtn state
+  }
+
+  // Wat de "Terug naar vorig scherm"-knop precies doet: als de focus vanuit
+  // het tijdlijnenoverzicht geopend is (enterFocus(node, 'timelines')), ga
+  // dan terug naar dát overzicht i.p.v. altijd naar de volledige boom.
+  function goBackFromFocus() {
+    const returnTarget = focusReturnTarget;
+    exitFocus();
+    if (returnTarget === 'timelines') showTimelinesView();
   }
 
   // Na een save/verwijder-actie (product, projectstatus, element, tag- of
@@ -2304,6 +2432,7 @@ function runApp(data) {
       // je net een aantal kolommen naar links had opengeklapt.
       sessionStorage.setItem(focusStorageKey(), JSON.stringify({
         focusId: focusId,
+        focusReturnTarget: focusReturnTarget,
         hiddenCols: Array.from(hiddenCols),
       }));
     } catch (err) {
@@ -2338,7 +2467,7 @@ function runApp(data) {
     }
     if (saved && saved.focusId) {
       const node = columnsEl.querySelector('.node[data-id="' + CSS.escape(saved.focusId) + '"]');
-      if (node) enterFocus(node);
+      if (node) enterFocus(node, saved.focusReturnTarget || null);
     }
   }
 
@@ -2578,8 +2707,16 @@ function runApp(data) {
 
     // Edges + column-relation arrows: clone the live connector SVG, resolving computed
     // style into explicit presentation attributes so the file is self-contained.
+    // Is er een pad gemarkeerd (klik op een vak, zie selectNode/activeEdgeKeys)?
+    // Dan exporteren we alleen dát pad — niet de volledige (grotendeels
+    // gedimde) boom. Kolomrelatie-pijlen (line/polygon, geen dataset.source)
+    // zijn niet element-specifiek en blijven altijd staan voor context.
     Array.from(svg.children).forEach(el => {
       const tag = el.tagName.toLowerCase();
+      if (tag === 'path' && el.dataset.source && selectedId !== null) {
+        const key = el.dataset.source + '|' + el.dataset.target;
+        if (!activeEdgeKeys.has(key)) return;
+      }
       const cs = getComputedStyle(el);
       const clone = el.cloneNode(false);
       clone.removeAttribute('class');
@@ -2599,31 +2736,49 @@ function runApp(data) {
       content.appendChild(clone);
     });
 
-    // Column-relation arrow labels (HTML divs) -> SVG text with a white backing rect.
+    // Column-relation arrow labels (HTML divs) -> SVG text with a white backing
+    // rect. Twee regels: de labeltekst (bv. "geeft invulling aan") en het
+    // richtingspijltje eronder (.col-arrow-glyph, zie drawColumnArrows) — apart
+    // uitgelezen i.p.v. label.textContent in zijn geheel, anders plakken beide
+    // aan elkaar zonder spatie/regeleinde.
     const canvasMeasure = document.createElement('canvas').getContext('2d');
     document.querySelectorAll('.col-arrow-label').forEach(label => {
+      const glyphSpan = label.querySelector('.col-arrow-glyph');
+      const text = glyphSpan ? label.firstChild.textContent : label.textContent;
+      const glyph = glyphSpan ? glyphSpan.textContent : '';
       const r = label.getBoundingClientRect();
       const cx = r.left + r.width / 2 - boardRect.left;
       const cy = r.top + r.height / 2 - boardRect.top;
       canvasMeasure.font = '700 11px Calibri, Arial, sans-serif';
-      const tw = canvasMeasure.measureText(label.textContent).width;
+      const tw = canvasMeasure.measureText(text).width;
       const rect = document.createElementNS(SVG_NS, 'rect');
       rect.setAttribute('x', cx - tw / 2 - 6);
-      rect.setAttribute('y', cy - 9);
+      rect.setAttribute('y', cy - (glyph ? 17 : 9));
       rect.setAttribute('width', tw + 12);
-      rect.setAttribute('height', 18);
+      rect.setAttribute('height', glyph ? 34 : 18);
       rect.setAttribute('fill', '#ffffff');
       content.appendChild(rect);
       const t = document.createElementNS(SVG_NS, 'text');
       t.setAttribute('x', cx);
-      t.setAttribute('y', cy + 4);
+      t.setAttribute('y', glyph ? cy - 3 : cy + 4);
       t.setAttribute('text-anchor', 'middle');
       t.setAttribute('font-size', '11');
       t.setAttribute('font-weight', '700');
       t.setAttribute('font-style', 'italic');
       t.setAttribute('fill', '#002855');
-      t.textContent = label.textContent;
+      t.textContent = text;
       content.appendChild(t);
+      if (glyph) {
+        const g = document.createElementNS(SVG_NS, 'text');
+        g.setAttribute('x', cx);
+        g.setAttribute('y', cy + 13);
+        g.setAttribute('text-anchor', 'middle');
+        g.setAttribute('font-size', '13');
+        g.setAttribute('font-weight', '700');
+        g.setAttribute('fill', '#002855');
+        g.textContent = glyph;
+        content.appendChild(g);
+      }
     });
 
     // Column headers. Let op: .col-header is "position: sticky; top: 0" (blijft
@@ -2654,6 +2809,7 @@ function runApp(data) {
     document.querySelectorAll('.node').forEach(node => {
       const col = node.closest('.column');
       if (col.classList.contains('hidden') || node.classList.contains('node-hidden')) return;
+      if (selectedId !== null && !activeNodeIds.has(node.dataset.id)) return;
       const r = node.getBoundingClientRect();
       const x = r.left - boardRect.left, y = r.top - boardRect.top;
       const w = r.width, h = r.height;
@@ -2722,7 +2878,10 @@ function runApp(data) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'doelenboom.svg';
+    const selectedCode = selectedId !== null && DETAILS[selectedId] ? DETAILS[selectedId].code : null;
+    a.download = selectedCode
+      ? 'doelenboom-pad-' + selectedCode.replace(/[^a-zA-Z0-9_-]/g, '') + '.svg'
+      : 'doelenboom.svg';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -3920,6 +4079,36 @@ function runApp(data) {
     }
   }
 
+  // "Kolom (links) tonen" onthult altijd de volgende kolom richting het
+  // uiteinde tegenover het anker (zie expandOneColumnLeft/ANCHOR_ORDER) —
+  // welke fysieke kant dat is, hangt af van ZOWEL het anker (expandAnchor)
+  // als de bouwrichting (columnsReversed): bij anker 'missie' onthult je
+  // richting Project (fysiek links, tenzij omgedraaid); bij anker 'project'
+  // precies andersom, richting Missie (fysiek rechts, tenzij omgedraaid).
+  const revealTowardLeft = expandAnchor === 'missie' ? !columnsReversed : columnsReversed;
+  if (expandLeftBtn) {
+    expandLeftBtn.textContent = revealTowardLeft ? '◀ Kolom links tonen' : 'Kolom rechts tonen ▶';
+  }
+  if (resetBtn) {
+    resetBtn.textContent = expandAnchor === 'project' ? '↺ Alleen Project' : '↺ Alleen Missie';
+  }
+  const flipColumnsBtn = document.getElementById('flip-columns-btn');
+  if (flipColumnsBtn) {
+    flipColumnsBtn.classList.toggle('active', columnsReversed);
+    flipColumnsBtn.title = columnsReversed
+      ? 'Bouwrichting omdraaien (nu: Missie links, Project rechts)'
+      : 'Bouwrichting omdraaien (nu: Project links, Missie rechts)';
+    flipColumnsBtn.addEventListener('click', flipColumnDirection);
+  }
+  const flipAnchorBtn = document.getElementById('flip-anchor-btn');
+  if (flipAnchorBtn) {
+    flipAnchorBtn.classList.toggle('active', expandAnchor === 'project');
+    flipAnchorBtn.title = expandAnchor === 'project'
+      ? 'Kijkrichting wisselen (nu: vanuit Project, uitbreiden richting Missie)'
+      : 'Kijkrichting wisselen (nu: vanuit Missie, uitbreiden richting Project)';
+    flipAnchorBtn.addEventListener('click', flipExpandAnchor);
+  }
+
   applyVisibility();
 
   // Ná de initiële (uitgezoomde) render alsnog inzoomen op het element dat
@@ -4179,7 +4368,25 @@ function boot(tree) {
   COLUMN_HINTS.prog = 'Welke waarde levert dit aan ' + CURRENT_TENANT_NAME + '?';
   COLUMN_HINTS.strat = 'Wat betekent dit voor ' + CURRENT_TENANT_NAME + '?';
 
-  const COL_ORDER = ["project", "cap", "obe", "sub", "prog", "strat", "doel", "missie"];
+  // Bouwrichting-voorkeur voor déze doelenboom lezen vóórdat de kolommen
+  // gebouwd worden (zie flipColumnDirection()/CANONICAL_COL_ORDER hierboven).
+  try {
+    columnsReversed = localStorage.getItem(colDirectionStorageKey()) === '1';
+  } catch (err) {
+    columnsReversed = false;
+  }
+  // Kijkrichting/anker-voorkeur (zie expandAnchor/flipExpandAnchor hierboven)
+  // — bewust los van columnsReversed: bepaalt alleen welke kolom standaard
+  // zichtbaar is en welke kant "Kolom tonen" op ontvouwt, niet de fysieke
+  // links/rechts-volgorde van COL_ORDER hieronder.
+  try {
+    expandAnchor = localStorage.getItem(expandAnchorStorageKey()) === 'project' ? 'project' : 'missie';
+  } catch (err) {
+    expandAnchor = 'missie';
+  }
+  const COL_ORDER = columnsReversed
+    ? CANONICAL_COL_ORDER.slice().reverse()
+    : CANONICAL_COL_ORDER.slice();
   const COL_LABELS = {"project": "Project", "cap": "Capability", "obe": "Operationele benefit", "sub": "Sub-benefit " + CURRENT_TENANT_NAME, "prog": "Programmabaat " + CURRENT_TENANT_NAME, "strat": "Strategisch benefit " + CURRENT_TENANT_NAME, "doel": "Strategisch doel", "missie": "Missie " + CURRENT_TENANT_NAME};
   const COL_COLORS = {"project": "#3E6FA6", "cap": "#6B4C8A", "obe": "#C05A2C", "sub": "#B8862E", "prog": "#2E7D5B", "strat": "#8FAADC", "doel": "#2F5597", "missie": "#203864"};
 
