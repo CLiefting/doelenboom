@@ -57,7 +57,8 @@ export default function LoginPage({ onLoggedIn }: { onLoggedIn: (token: string, 
     <div style={styles.page}>
       {/* Media query kan niet via inline styles — dit stukje CSS verbergt het
           features-paneel op smalle schermen (telefoon/smalle tablet), zodat
-          daar alleen het inlogformulier overblijft. */}
+          daar alleen het inlogformulier overblijft. De hero-tile blijft altijd
+          zichtbaar, ook op mobiel. */}
       <style>{`
         @media (max-width: 860px) {
           .login-features-panel { display: none !important; }
@@ -65,15 +66,33 @@ export default function LoginPage({ onLoggedIn }: { onLoggedIn: (token: string, 
         }
       `}</style>
 
+      {/* Eye-catcher, los van de twee kolommen hieronder — zodat de kernboodschap
+          meteen opvalt, boven de vouw, ongeacht schermbreedte. */}
+      <div style={styles.heroBand}>
+        <div style={styles.heroTile}>
+          <div style={styles.brandRow}>
+            <span style={styles.brandMark}>D</span>
+            <span style={styles.brandName}>Doelenboom</span>
+          </div>
+          <h1 style={styles.heroHeadline}>Van ambitie naar aantoonbare waarde</h1>
+          <p style={styles.heroSubline}>Inzicht in samenhang. Sturen op waarde. Aantoonbaar resultaat.</p>
+        </div>
+      </div>
+
+      <div style={styles.split}>
       <div className="login-features-panel" style={styles.featuresPanel}>
         <div style={styles.featuresPanelInner}>
           <div>
-            <div style={styles.brandRow}>
-              <span style={styles.brandMark}>D</span>
-              <span style={styles.brandName}>Doelenboom</span>
-            </div>
             <p style={styles.tagline}>
-              Eén platform om de doelenboom van jouw organisatie te beheren, te delen en actueel te houden.
+              Doelenboom maakt zichtbaar hoe alles wat een organisatie doet, bijdraagt aan wat zij wil bereiken.
+            </p>
+            <p style={styles.tagline}>
+              Door strategie, baten, capabilities, projecten en resultaten met elkaar te verbinden ontstaat één
+              heldere lijn van investering naar impact.
+            </p>
+            <p style={styles.tagline}>
+              Zo zie je niet alleen wat de organisatie doet, maar vooral waarom, waaraan het bijdraagt en of het
+              daadwerkelijk waarde oplevert.
             </p>
           </div>
 
@@ -121,6 +140,7 @@ export default function LoginPage({ onLoggedIn }: { onLoggedIn: (token: string, 
             {busy ? 'Bezig…' : 'Inloggen'}
           </button>
         </form>
+      </div>
       </div>
     </div>
   );
@@ -173,10 +193,43 @@ function UsersIcon() {
 }
 
 const styles: Record<string, React.CSSProperties> = {
+  // Lichte achtergrondkleur op paginaniveau (i.p.v. alleen op de heroBand) —
+  // zo blijft er overal een randje van deze kleur zichtbaar rond de losse,
+  // afgeronde vlakken hieronder (hero-tile, features-paneel, formulier),
+  // i.p.v. dat het features-paneel randloos tegen de vensterrand aan plakt.
   page: {
     display: 'flex',
+    flexDirection: 'column',
     minHeight: '100vh',
     fontFamily: 'system-ui, sans-serif',
+    background: '#eef1f8',
+  },
+  heroBand: {
+    display: 'flex', justifyContent: 'center',
+    // Kleinere minimumwaarde dan voorheen (was 1.5rem vast): op een smalle
+    // telefoon (<400px) telt anders elke geneste padding-laag hieronder op
+    // tot te weinig overblijft voor de inhoud.
+    padding: 'clamp(1rem, 4vw, 2.5rem) clamp(1rem, 4vw, 2.5rem) 0',
+  },
+  heroTile: {
+    width: '100%', maxWidth: 780, textAlign: 'center',
+    background: 'linear-gradient(135deg, #203864 0%, #2F5597 100%)',
+    borderRadius: 16, padding: 'clamp(1.25rem, 4vw, 2.25rem) clamp(1rem, 5vw, 3rem)',
+    boxShadow: '0 12px 32px rgba(32, 56, 100, 0.25)',
+    boxSizing: 'border-box',
+  },
+  heroHeadline: {
+    color: 'white', fontWeight: 800, fontSize: 'clamp(1.5rem, 3.6vw, 2.2rem)',
+    lineHeight: 1.2, letterSpacing: -0.5, margin: '4px 0 10px',
+  },
+  heroSubline: {
+    color: 'rgba(255,255,255,0.88)', fontWeight: 600, fontSize: 14.5,
+    letterSpacing: 0.2, margin: 0,
+  },
+  split: {
+    display: 'flex', flex: 1,
+    gap: 'clamp(1rem, 3vw, 1.5rem)',
+    padding: 'clamp(1rem, 3vw, 1.5rem) clamp(1rem, 4vw, 2.5rem) clamp(1rem, 4vw, 2.5rem)',
   },
   featuresPanel: {
     flex: '1 1 50%',
@@ -185,6 +238,12 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     padding: 'clamp(2rem, 5vw, 4rem)',
     boxSizing: 'border-box',
+    borderRadius: 16,
+    boxShadow: '0 8px 24px rgba(32, 56, 100, 0.18)',
+    // Deze kolom heeft nu genoeg tekst om op een laag scherm hoger te worden
+    // dan de beschikbare hoogte — dan liever intern scrollen dan clippen of
+    // de layout breken.
+    overflowY: 'auto',
   },
   featuresPanelInner: {
     maxWidth: 460,
@@ -192,16 +251,16 @@ const styles: Record<string, React.CSSProperties> = {
     marginRight: 'auto',
     display: 'flex',
     flexDirection: 'column',
-    gap: '2.5rem',
+    gap: '2rem',
   },
-  brandRow: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 },
+  brandRow: { display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center', marginBottom: 4 },
   brandMark: {
     display: 'flex', alignItems: 'center', justifyContent: 'center',
-    width: 34, height: 34, borderRadius: 9, background: 'rgba(255,255,255,0.16)',
-    color: 'white', fontWeight: 700, fontSize: 17,
+    width: 30, height: 30, borderRadius: 8, background: 'rgba(255,255,255,0.16)',
+    color: 'white', fontWeight: 700, fontSize: 15,
   },
-  brandName: { color: 'white', fontWeight: 700, fontSize: 19, letterSpacing: -0.3 },
-  tagline: { color: 'rgba(255,255,255,0.82)', fontSize: 15.5, lineHeight: 1.55, margin: 0 },
+  brandName: { color: 'white', fontWeight: 700, fontSize: 16, letterSpacing: -0.3 },
+  tagline: { color: 'rgba(255,255,255,0.82)', fontSize: 15, lineHeight: 1.55, margin: '0 0 10px' },
   featureList: { listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: '1.3rem' },
   featureItem: { display: 'flex', gap: 14, alignItems: 'flex-start' },
   featureIcon: {
@@ -217,15 +276,24 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     justifyContent: 'center',
     background: '#f4f5f7',
-    padding: '2rem',
+    // clamp i.p.v. een vaste 2rem: op een smalle telefoon telt dit op bij de
+    // padding van .split hierboven, en at een vaste 2rem (32px) aan beide
+    // kanten bleef er te weinig breedte over voor de kaart eronder.
+    padding: 'clamp(1rem, 5vw, 2rem)',
     boxSizing: 'border-box',
+    borderRadius: 16,
   },
   card: {
     background: 'white',
-    padding: 'clamp(1.5rem, 6vw, 2.5rem)',
+    padding: 'clamp(1.25rem, 6vw, 2.5rem)',
     borderRadius: 12,
     boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-    width: 'min(320px, 90vw)',
+    // 100% (i.p.v. de eerdere 'min(320px, 90vw)') schaalt mee met de écht
+    // beschikbare breedte van het ouder-element — vw-eenheden kijken naar de
+    // volledige viewport en negeren de padding van .split/.formPanel
+    // hierboven, wat op smalle telefoons tot horizontale overflow leidde.
+    width: '100%',
+    maxWidth: 320,
     boxSizing: 'border-box',
     display: 'flex',
     flexDirection: 'column',
