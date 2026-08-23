@@ -2,3 +2,6 @@
 # requirements.txt (dat blijft de productie-runtime-set voor de Docker-image —
 # pytest hoort daar niet in thuis). Installeren: zie TESTING.md in de projectroot.
 pytest==8.3.3
+# Vereist door starlette.testclient (gebruikt in tests/test_main.py) sinds
+# Starlette TestClient niet meer zelf een HTTP-client meelevert.
+httpx==0.28.1
