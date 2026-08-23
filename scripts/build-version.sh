@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Print een BUILD_VERSION-string (git-hash + datum, evt. -dirty als er niet-
-# gecommite wijzigingen zijn) op stdout — bedoeld om te gebruiken als:
+# Print een BUILD_VERSION-string op stdout — bedoeld om te gebruiken als:
 #
 #   export BUILD_VERSION="$(./scripts/build-version.sh)"
 #
@@ -11,12 +10,25 @@
 # /api/version) niet meer te zien welke commit je precies test/draait, alleen
 # dat het "een dev-build" is. Geen git-repo gevonden (bv. een kale checkout
 # zonder .git)? Dan blijft "dev" gewoon de uitkomst, geen foutmelding.
+#
+# Staat HEAD exact op een release-tag (bv. "v1.0.0") én is de working tree
+# schoon, dan wordt die tag getoond (zonder de "v", want de footer zet er zelf
+# al een "v" voor — zie VersionFooter.tsx) — leesbaarder dan een kale hash op
+# een releasepunt. In alle andere gevallen (tussen releases in, of met
+# niet-gecommite wijzigingen): hash + bouwdatum, zoals voorheen.
 set -euo pipefail
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if ! git rev-parse --short HEAD >/dev/null 2>&1; then
   echo "dev"
   exit 0
+fi
+
+if [ -z "$(git status --porcelain)" ]; then
+  if TAG="$(git describe --tags --exact-match 2>/dev/null)"; then
+    echo "${TAG#v}"
+    exit 0
+  fi
 fi
 
 HASH="$(git rev-parse --short HEAD)"
