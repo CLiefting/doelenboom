@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { pool } from '../db.js';
 import { requireAuth, AuthedRequest } from '../auth.js';
 import { requireTenantRoleForDoelenboomParam, getEffectiveRoleForDoelenboom } from '../rbac.js';
+import { getColumnsForDoelenboom } from '../columnConfig.js';
 
 export const treeRouter = Router();
 treeRouter.use(requireAuth);
@@ -122,7 +123,10 @@ export async function fetchTree(doelenboomId: string) {
     });
   }
 
+  const columns = await getColumnsForDoelenboom(doelenboomId);
+
   return {
+    columns,
     doelenboom: {
       id: doelenboomResult.rows[0].id,
       slug: doelenboomResult.rows[0].slug,

@@ -186,6 +186,14 @@ rol-afhankelijk gedrag te kunnen zien.
 - [ ] Export "nieuw" formaat (sjabloon + met data) — idem, incl. dropdown-
       validatie op de kolommen die dat moeten hebben (Type, Actief,
       Projectstatus, RAG, Product-type, Relatietype, Org-relatie-status).
+- [ ] Elke export (beide formaten, beide modi) bevat een **"Kolommen"**-tab
+      met één rij per geconfigureerde kolom (volgorde, type, titel,
+      ondertitel, kleur, smal, projectrol, label naar volgende kolom,
+      lettergrootte) — bij een doelenboom met een aangepaste kolomconfiguratie
+      staan hier de eigen typen in, niet de 8 standaardtypes.
+- [ ] Gedownloade bestandsnaam volgt het patroon
+      `Doelenboom_<Tenant>_<Doelenboomnaam>_<JJMMDD>.xlsx` — met de
+      leesbare **naam** van tenant/doelenboom (niet de slug).
 - [ ] SVG-export zonder gemarkeerd pad: toont de volle (huidig zichtbare)
       boom zonder clipping, met de kolomkop-header op de juiste positie.
 - [ ] SVG-export mét een gemarkeerd pad (klik op een vak): bevat **alleen**
@@ -242,7 +250,60 @@ rol-afhankelijk gedrag te kunnen zien.
 - [ ] Opruimen: de `regressietest`-tenant (en daarmee alle drie accounts en
       de doelenboom, cascade) weer verwijderen na afloop van de testronde.
 
-## 11. Algemeen / cross-cutting
+## 11. Kolomconfiguratie (React-app + `tree.html`)
+
+Zie `docs/kolommen-configuratie-ontwerp.md` voor het volledige ontwerp. De
+kern-CRUD (validatie, "kolom nog in gebruik"-blokkade, tenant-default vs.
+doelenboom-config-onafhankelijkheid, dynamische Excel-Type-lijst) is al gedekt
+door `api/test/columnConfig.test.ts` en `excel-service/tests/`; dit hier is
+puur de UI-doorloop.
+
+- [ ] Een **nieuwe** tenant aanmaken (sysadmin) en een nieuwe doelenboom
+      daarbinnen: de boom toont meteen de 8 standaardkolommen (Project t/m
+      Missie), precies zoals vóór de configureerbare kolommen.
+- [ ] Gebruikersbeheer → tenant selecteren → "Standaardkolommen"
+      (sysadmin-only, niet zichtbaar voor een tenant-admin): kolom
+      toevoegen/verwijderen/herordenen (pijltjes)/hernoemen/kleur wijzigen/
+      projectrol verplaatsen, opslaan lukt en toont de bijgewerkte lijst.
+- [ ] Kolom toevoegen zonder titel, zonder geldige kleur, met een dubbele
+      type-naam, of zonder (of met twee) een "Projectrol" aangevinkt: elk
+      geeft een duidelijke foutmelding vóór het opslaan lukt.
+- [ ] Een standaardkolommen-wijziging van de tenant-default heeft **geen**
+      zichtbaar effect op een al bestaande doelenboom in diezelfde tenant
+      (eigen, onafhankelijke kopie) — wél op een doelenboom die je daarna pas
+      aanmaakt.
+- [ ] Gebruikersbeheer → doelenboom → "Kolommen" (zichtbaar voor tenant-admin
+      én sysadmin, niet voor een tenant-gebruiker/read-only account): toont de
+      eigen kolommen van díe doelenboom, los van de tenant-default.
+- [ ] Een kolom verwijderen/hernoemen waarvan nog elementen van dat type
+      bestaan geeft een foutmelding met het aantal betrokken elementen; na
+      die elementen te verwijderen/verplaatsen lukt het opslaan alsnog.
+- [ ] Na het toevoegen van een nieuwe kolom (eigen type-naam): dat type
+      verschijnt meteen als keuze in "Type" bij "+ Nieuw element" en bij
+      "+ Relatie" in `tree.html` — een element van dat type aanmaken en zien
+      verschijnen in de juiste kolom.
+- [ ] `tree.html` van een doelenboom met een **aangepaste** kolomconfiguratie
+      (andere titels/kleuren/volgorde/aantal kolommen dan de standaard 8):
+      legenda, kolomkoppen, kolomrelatie-pijlen/labels, node-kleuren en de
+      "Alleen `<laatste kolom>`"/bouwrichting-omdraaien/kijkrichting-knoppen
+      tonen overal de juiste, eigen namen — geen restanten van "Project"/
+      "Missie" als de kolommen zijn hernoemd.
+- [ ] Bij zo'n aangepaste configuratie: de knop "Oud formaat" in het
+      Excel-exportmenu is **uitgeschakeld** (met een tooltip die uitlegt
+      waarom); "Nieuw formaat" werkt gewoon en de dropdown/validatielijst
+      voor "Type" in het geëxporteerde bestand bevat exact de eigen
+      kolommen, in de juiste volgorde.
+- [ ] Een doelenboom met de ongewijzigde standaard 8 kolommen kan nog gewoon
+      als "oud" formaat geëxporteerd worden (knop niet uitgeschakeld).
+- [ ] Zo'n "nieuw"-formaat-export met eigen kolommen re-importeren in
+      dezelfde doelenboom (upload → rapport → publiceren) geeft een schoon
+      rapport, geen "Onbekend Type-label"-waarschuwingen voor de eigen
+      types.
+- [ ] Doelenboom dupliceren (sysadmin, zie §2): de kopie krijgt de **eigen**
+      kolomconfiguratie van de bron mee (niet de huidige tenant-default, ook
+      als die inmiddels afwijkt).
+
+## 12. Algemeen / cross-cutting
 
 - [ ] Geen JavaScript-fouten in de browserconsole tijdens een normale sessie
       (inloggen -> boom bekijken -> bewerken -> exporteren -> uitloggen).

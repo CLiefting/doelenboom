@@ -154,6 +154,7 @@ export type ObOrgRelation = { org: string; relatietype: string; toelichting: str
 // zodat de frontend dit niet zelf hoeft te herleiden. Zie
 // getEffectiveRoleForDoelenboom in api/src/rbac.ts.
 export type TreeResponse = {
+  columns: ColumnDef[];
   doelenboom: {
     id: number;
     slug: string;
@@ -194,4 +195,21 @@ export type ImportReport = {
 export type ImportDetail = ImportSummary & {
   doelenboom_id: number;
   report_json: ImportReport;
+};
+
+// Eén kolom in een kolomconfiguratie (tenant-default óf één specifieke
+// doelenboom, zie docs/kolommen-configuratie-ontwerp.md) — zelfde vorm als
+// ColumnDef in api/src/columnConfig.ts. `id` ontbreekt bij een nog niet
+// opgeslagen, lokaal toegevoegde rij in de editor (zie ColumnConfigEditor).
+export type ColumnDef = {
+  id?: number;
+  position: number;
+  typeName: string;
+  title: string;
+  subtitle: string;
+  color: string;
+  isNarrow: boolean;
+  nodeFontSize: number | null;
+  isProjectRole: boolean;
+  relationLabelToNext: string | null;
 };

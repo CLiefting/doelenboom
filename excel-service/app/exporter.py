@@ -19,7 +19,9 @@ Twee formaten:
 
 Beide formaten krijgen een Configuratie-tab (doelenboom, tenant, formaat, modus,
 geëxporteerd op/door) — nuttig om te kunnen zien waar een bestand vandaan komt,
-ook als het los rondgestuurd wordt.
+ook als het los rondgestuurd wordt — en een Kolommen-tab met de volledige
+kolomconfiguratie (volgorde, type, titel, ondertitel, kleur, smal, projectrol,
+relatielabel, lettergrootte) van déze doelenboom op het moment van exporteren.
 
 Twee modi (onafhankelijk van het formaat):
 - "template": alleen tabbladen + headers, geen datarijen.
@@ -38,6 +40,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 CONFIG_SHEET_NAME = 'Configuratie'
 VALIDATIELIJSTEN_SHEET_NAME = '_Validatielijsten'
+KOLOMMEN_SHEET_NAME = 'Kolommen'
 
 # ---------------------------------------------------------------------------
 # Oud formaat — huidige productiestructuur
@@ -89,9 +92,47 @@ NIEUW_SHEET_HEADERS: dict[str, list[str]] = {
 }
 NIEUW_SHEET_ORDER = list(NIEUW_SHEET_HEADERS.keys())
 
-# Dropdown-brondata voor het nieuwe formaat (§4 en §7 van het voorstel).
+# De 8 standaardtypes, in hun oorspronkelijke volgorde — zie ook
+# standardColumns() in api/src/columnConfig.ts (bewust twee keer uitgeschreven,
+# zelfde reden als daar: TS-runtime-code en deze Python-service raken elkaar
+# niet, geen gedeeld pad zonder dat een van beide de ander als afhankelijkheid
+# zou moeten inladen). Gebruikt om (a) het "oud" formaat te beperken tot
+# doelenbomen die nog exact deze standaardconfig hebben (zie is_standard_columns
+# hieronder, en docs/kolommen-configuratie-ontwerp.md) en (b) als fallback-
+# Type-lijst wanneer geen columns zijn meegegeven (bv. een oudere aanroep).
+STANDARD_TYPE_NAMES: list[str] = [
+    'Project', 'Capability', 'Operationele benefit', 'Sub-benefit',
+    'Programmabaat', 'Strategische benefit', 'Strategisch doel', 'Missie',
+]
+
+
+def is_standard_columns(columns: list[dict[str, Any]]) -> bool:
+    """True als de meegegeven kolommen (op position gesorteerd) qua type-namen
+    en volgorde exact overeenkomen met de 8 standaardkolommen — titel/ondertitel/
+    kleur mogen wél afwijken (bv. een tenantnaam in de titel), dat verandert
+    niets aan de structuur waar het "oud" Excel-formaat van uitgaat."""
+    ordered = sorted(columns, key=lambda c: c.get('position', 0))
+    return [c.get('typeName') for c in ordered] == STANDARD_TYPE_NAMES
+
+
+def _type_names_from_columns(columns: list[dict[str, Any]]) -> list[str]:
+    """Type-namen van de meegegeven kolommen, op position gesorteerd — de
+    dynamische vervanger van de vroeger hardgecodeerde VALIDATIELIJSTEN['Type'].
+    Valt terug op STANDARD_TYPE_NAMES als er geen columns zijn meegegeven
+    (defensief; de aanroeper (main.py) geeft deze normaliter altijd mee)."""
+    if not columns:
+        return list(STANDARD_TYPE_NAMES)
+    ordered = sorted(columns, key=lambda c: c.get('position', 0))
+    names = [c.get('typeName') for c in ordered if c.get('typeName')]
+    return names or list(STANDARD_TYPE_NAMES)
+
+
+# Dropdown-brondata voor het nieuwe formaat (§4 en §7 van het voorstel). 'Type'
+# staat hier bewust NIET meer vast in — die wordt per export dynamisch bepaald
+# uit de kolomconfiguratie van de doelenboom (zie _type_names_from_columns en
+# _write_validatielijsten hieronder), want dat is nu per tenant/doelenboom
+# configureerbaar (zie docs/kolommen-configuratie-ontwerp.md).
 VALIDATIELIJSTEN: dict[str, list[str]] = {
-    'Type': ['Project', 'Capability', 'Operationele benefit', 'Sub-benefit', 'Programmabaat', 'Strategische benefit', 'Strategisch doel', 'Missie'],
     'Relatietype': ['Primair', 'Ondersteunend'],
     'Projectstatus': ['Backlog', 'Actief', 'On-hold', 'Gereed', 'Vervallen'],
     'RAG-status': ['Rood', 'Oranje', 'Groen'],
@@ -141,23 +182,64 @@ def _write_configuratie(wb: Workbook, meta: dict[str, Any], format_label: str, m
     ws.column_dimensions['B'].width = 44
 
 
-def _write_validatielijsten(wb: Workbook) -> dict[str, str]:
-    """Schrijft de _Validatielijsten-tab en geeft per lijst de celrange terug
-    (bv. 'Type' -> '_Validatielijsten!$A$2:$A$9') voor gebruik in Data Validation."""
-    ws = wb.create_sheet(VALIDATIELIJSTEN_SHEET_NAME)
-    headers = list(VALIDATIELIJSTEN.keys())
+def _write_kolommen(wb: Workbook, columns: list[dict[str, Any]]) -> None:
+    """Schrijft een leesbare 'Kolommen'-tab met de volledige kolomconfiguratie
+    van deze doelenboom (zie docs/kolommen-configuratie-ontwerp.md) — puur
+    documentair, net als de Configuratie-tab: hiermee is uit het losse
+    Excel-bestand zelf af te lezen welke typen/kolommen deze doelenboom op het
+    moment van exporteren had, zonder dat je in de app hoeft te kijken. Wordt
+    voor beide formaten (oud/nieuw) en beide modi (template/data) geschreven,
+    ook al is de kolomconfiguratie bij het "oud" formaat altijd de 8
+    standaardkolommen (zie is_standard_columns) — ook dan is het nuttig om
+    bevestigd te zien."""
+    ws = wb.create_sheet(KOLOMMEN_SHEET_NAME)
+    headers = [
+        'Volgorde', 'Type', 'Titel', 'Ondertitel', 'Kleur', 'Smal',
+        'Projectrol', 'Label naar volgende kolom', 'Lettergrootte knoop',
+    ]
     ws.append(headers)
     for cell in ws[1]:
         cell.font = Font(bold=True)
-    max_len = max(len(v) for v in VALIDATIELIJSTEN.values())
+    ws.freeze_panes = 'A2'
+    ordered = sorted(columns, key=lambda c: c.get('position', 0))
+    for c in ordered:
+        node_font_size = c.get('nodeFontSize')
+        ws.append([
+            c.get('position', ''),
+            c.get('typeName', ''),
+            c.get('title', ''),
+            c.get('subtitle', ''),
+            c.get('color', ''),
+            'Ja' if c.get('isNarrow') else 'Nee',
+            'Ja' if c.get('isProjectRole') else 'Nee',
+            c.get('relationLabelToNext') or '',
+            node_font_size if node_font_size is not None else '',
+        ])
+    widths = [10, 22, 22, 22, 10, 8, 11, 26, 16]
+    for idx, width in enumerate(widths, start=1):
+        ws.column_dimensions[get_column_letter(idx)].width = width
+
+
+def _write_validatielijsten(wb: Workbook, columns: list[dict[str, Any]]) -> dict[str, str]:
+    """Schrijft de _Validatielijsten-tab en geeft per lijst de celrange terug
+    (bv. 'Type' -> '_Validatielijsten!$A$2:$A$9') voor gebruik in Data Validation.
+    'Type' komt (i.t.t. de andere lijsten) niet uit de vaste VALIDATIELIJSTEN-
+    constante maar dynamisch uit de kolomconfiguratie van deze doelenboom."""
+    lijsten: dict[str, list[str]] = {'Type': _type_names_from_columns(columns), **VALIDATIELIJSTEN}
+    ws = wb.create_sheet(VALIDATIELIJSTEN_SHEET_NAME)
+    headers = list(lijsten.keys())
+    ws.append(headers)
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+    max_len = max(len(v) for v in lijsten.values())
     for i in range(max_len):
-        row = [VALIDATIELIJSTEN[key][i] if i < len(VALIDATIELIJSTEN[key]) else None for key in headers]
+        row = [lijsten[key][i] if i < len(lijsten[key]) else None for key in headers]
         ws.append(row)
 
     ranges: dict[str, str] = {}
     for idx, key in enumerate(headers, start=1):
         col = get_column_letter(idx)
-        n = len(VALIDATIELIJSTEN[key])
+        n = len(lijsten[key])
         ranges[key] = f'{VALIDATIELIJSTEN_SHEET_NAME}!${col}$2:${col}${n + 1}'
     return ranges
 
@@ -198,12 +280,16 @@ def _relatietype_label(weight: str | None) -> str:
     return ''
 
 
-def build_template_workbook(format_: str, meta: dict[str, Any] | None = None) -> bytes:
+def build_template_workbook(
+    format_: str, meta: dict[str, Any] | None = None, columns: list[dict[str, Any]] | None = None
+) -> bytes:
     meta = meta or {}
+    columns = columns or []
     wb, sheets = _new_workbook(format_)
     if format_ == 'nieuw':
-        ranges = _write_validatielijsten(wb)
+        ranges = _write_validatielijsten(wb, columns)
         _apply_data_validation(sheets, ranges)
+    _write_kolommen(wb, columns)
     _write_configuratie(wb, meta, 'Nieuw' if format_ == 'nieuw' else 'Oud', 'Lege template')
     buf = io.BytesIO()
     wb.save(buf)
@@ -368,15 +454,19 @@ def _fill_nieuw(sheets: dict[str, Worksheet], tree: dict[str, Any]) -> None:
             ])
 
 
-def build_data_workbook(format_: str, tree: dict[str, Any], meta: dict[str, Any] | None = None) -> bytes:
+def build_data_workbook(
+    format_: str, tree: dict[str, Any], meta: dict[str, Any] | None = None, columns: list[dict[str, Any]] | None = None
+) -> bytes:
     meta = meta or {}
+    columns = columns if columns is not None else (tree.get('columns') or [])
     wb, sheets = _new_workbook(format_)
     if format_ == 'oud':
         _fill_oud(sheets, tree)
     else:
         _fill_nieuw(sheets, tree)
-        ranges = _write_validatielijsten(wb)
+        ranges = _write_validatielijsten(wb, columns)
         _apply_data_validation(sheets, ranges)
+    _write_kolommen(wb, columns)
     _write_configuratie(wb, meta, 'Nieuw' if format_ == 'nieuw' else 'Oud', 'Met huidige data')
     buf = io.BytesIO()
     wb.save(buf)

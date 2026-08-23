@@ -8,6 +8,7 @@ import {
   requireWritableDoelenboom,
   tenantIdForDoelenboom,
 } from '../rbac.js';
+import { getColumnsForDoelenboom } from '../columnConfig.js';
 
 // Voor routes met :id = import-id (niet doelenboom-id): eerst de doelenboom van
 // deze import opzoeken, dan pas de tenant daarvan.
@@ -45,9 +46,16 @@ importsRouter.post(
     new Uint8Array(arrayBuffer).set(req.file.buffer);
     form.append('file', new Blob([arrayBuffer]), req.file.originalname);
 
+    // De geldige Type-waarden voor déze doelenboom (zie
+    // docs/kolommen-configuratie-ontwerp.md) — zonder dit zou excel-service
+    // terugvallen op de vaste 8 standaardtypes en elementen met een eigen,
+    // niet-standaard type altijd als "onbekend Type-label" overslaan.
+    const validTypes = (await getColumnsForDoelenboom(req.params.doelenboomId)).map((c) => c.typeName);
+    const parseQuery = validTypes.map((t) => `valid_types=${encodeURIComponent(t)}`).join('&');
+
     let parseResult: { status: string; report: unknown; parsed: unknown };
     try {
-      const upstream = await fetch(`${EXCEL_SERVICE_URL}/parse`, { method: 'POST', body: form });
+      const upstream = await fetch(`${EXCEL_SERVICE_URL}/parse?${parseQuery}`, { method: 'POST', body: form });
       if (!upstream.ok) {
         const text = await upstream.text();
         return res.status(502).json({ error: 'Excel-service gaf een fout terug', detail: text });

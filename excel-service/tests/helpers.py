@@ -83,3 +83,29 @@ def make_tree(**overrides: Any) -> dict[str, Any]:
     }
     tree.update(overrides)
     return tree
+
+
+# Kolomconfiguratie-helpers (zie docs/kolommen-configuratie-ontwerp.md en
+# app/exporter.py::STANDARD_TYPE_NAMES/is_standard_columns) — voor tests die de
+# dynamische Type-lijst ('nieuw' formaat) of de 'oud'-formaat-beperking dekken.
+def make_columns(type_names: list[str]) -> list[dict[str, Any]]:
+    """Minimale ColumnDef-achtige rijen (alleen de velden die de exporter/
+    parser gebruiken) voor de gegeven type-namen, op volgorde."""
+    return [
+        {
+            'position': i, 'typeName': t, 'title': t, 'subtitle': '', 'color': '#000000',
+            'isNarrow': False, 'nodeFontSize': None, 'isProjectRole': t == type_names[0],
+            'relationLabelToNext': None if i == len(type_names) - 1 else 'ondersteunt',
+        }
+        for i, t in enumerate(type_names)
+    ]
+
+
+STANDARD_TYPE_NAMES = [
+    'Project', 'Capability', 'Operationele benefit', 'Sub-benefit',
+    'Programmabaat', 'Strategische benefit', 'Strategisch doel', 'Missie',
+]
+
+
+def standard_columns() -> list[dict[str, Any]]:
+    return make_columns(STANDARD_TYPE_NAMES)

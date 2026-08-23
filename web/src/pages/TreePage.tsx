@@ -17,6 +17,7 @@ export default function TreePage({
   onBack,
   onImport,
   onLogoutRequest,
+  onHelpRequest,
 }: {
   token: string;
   user: User;
@@ -24,6 +25,7 @@ export default function TreePage({
   onBack: () => void;
   onImport: () => void;
   onLogoutRequest: () => void;
+  onHelpRequest: () => void;
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
@@ -57,12 +59,13 @@ export default function TreePage({
         if (event.data.target === 'picker') onBack();
         else if (event.data.target === 'import') onImport();
         else if (event.data.target === 'logout') onLogoutRequest();
+        else if (event.data.target === 'help') onHelpRequest();
       }
     }
 
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, [token, user.email, doelenboom.id, role, onBack, onImport, onLogoutRequest]);
+  }, [token, user.email, doelenboom.id, role, onBack, onImport, onLogoutRequest, onHelpRequest]);
 
   return (
     <iframe

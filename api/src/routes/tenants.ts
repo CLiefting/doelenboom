@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { pool } from '../db.js';
 import { requireAuth, AuthedRequest } from '../auth.js';
 import { requireSysadmin, requireTenantRoleForTenantParam } from '../rbac.js';
+import { createTenantDefaultConfig } from '../columnConfig.js';
 
 export const tenantsRouter = Router();
 tenantsRouter.use(requireAuth);
@@ -26,21 +27,31 @@ tenantsRouter.get('/', async (req: AuthedRequest, res) => {
   res.json(result.rows);
 });
 
-// Alleen sysadmins mogen nieuwe tenants aanmaken.
+// Alleen sysadmins mogen nieuwe tenants aanmaken. Krijgt meteen een eigen
+// tenant-default kolomconfiguratie (de standaardkolommen, zie
+// columnConfig.ts) — het sjabloon waarmee elke nieuwe doelenboom binnen deze
+// tenant straks start.
 tenantsRouter.post('/', requireSysadmin, async (req, res) => {
   const { slug, name, wipeOnEmpty, sessionTimeoutMinutes } = req.body ?? {};
   if (!slug || !name) {
     return res.status(400).json({ error: 'slug en name zijn verplicht' });
   }
+  const client = await pool.connect();
   try {
-    const result = await pool.query(
+    await client.query('begin');
+    const result = await client.query(
       `insert into tenants (slug, name, wipe_on_empty, session_timeout_minutes)
        values ($1, $2, $3, $4) returning ${TENANT_SELECT_FIELDS}`,
       [slug, name, !!wipeOnEmpty, Number.isFinite(sessionTimeoutMinutes) ? sessionTimeoutMinutes : 30]
     );
+    await createTenantDefaultConfig(client, result.rows[0].id, result.rows[0].name);
+    await client.query('commit');
     res.status(201).json(result.rows[0]);
   } catch (err) {
+    await client.query('rollback');
     res.status(409).json({ error: 'Tenant met deze slug bestaat al', detail: (err as Error).message });
+  } finally {
+    client.release();
   }
 });
 

@@ -111,14 +111,69 @@ create table if not exists doelenboom_user_roles (
   primary key (doelenboom_id, user_id)
 );
 
+-- Configureerbare kolommen (zie docs/kolommen-configuratie-ontwerp.md).
+-- Eén rij per "kolomset": ofwel de tenant-default (scope='tenant_default',
+-- één per tenant — het sjabloon waarmee een nieuwe doelenboom start), ofwel
+-- de eigen, onafhankelijke config van één specifieke doelenboom
+-- (scope='doelenboom'). Een doelenboom-config is een KOPIE van de op dat
+-- moment geldende tenant-default op het moment van aanmaken, geen levende
+-- verwijzing — wijzig je de tenant-default later, dan verandert een
+-- al-bestaande doelenboom dus niet automatisch mee.
+create table if not exists column_configs (
+  id bigserial primary key,
+  scope text not null check (scope in ('tenant_default', 'doelenboom')),
+  tenant_id bigint not null references tenants(id) on delete cascade,
+  doelenboom_id bigint references doelenbomen(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  check ((scope = 'doelenboom') = (doelenboom_id is not null))
+);
+create unique index if not exists idx_column_configs_tenant_default
+  on column_configs(tenant_id) where (scope = 'tenant_default');
+create unique index if not exists idx_column_configs_doelenboom
+  on column_configs(doelenboom_id) where (scope = 'doelenboom');
+
+-- Eén rij per kolom binnen een column_configs-set, links-naar-rechts via
+-- position (0-based). type_name is de vrije, door de tenant/doelenboom
+-- gekozen naam van het elementtype dat in deze kolom getoond wordt (1-op-1:
+-- elke kolom toont precies één type) — elements.type verwijst hiernaar via
+-- de tekstwaarde, niet via een foreign key (zie toelichting bij elements
+-- hieronder: dat blijft nodig voor de Excel-rondgang, die al op tekst draait).
+-- is_project_role: precies één kolom per config moet dit zijn — daaraan
+-- hangt de speciale functionaliteit (projectkaart, planning-items,
+-- projectstatus, project-tijdlijnenoverzicht) vast, ongeacht hoe die kolom
+-- genoemd is. relation_label_to_next is de tekst op de pijl naar de
+-- eerstvolgende kolom (bv. "ontwikkelt") — null bij de laatste kolom, die
+-- heeft geen volgende.
+create table if not exists columns (
+  id bigserial primary key,
+  column_config_id bigint not null references column_configs(id) on delete cascade,
+  position int not null,
+  type_name text not null,
+  title text not null,
+  subtitle text not null default '',
+  color text not null,
+  is_narrow boolean not null default false,
+  node_font_size int,
+  is_project_role boolean not null default false,
+  relation_label_to_next text,
+  unique (column_config_id, position),
+  unique (column_config_id, type_name)
+);
+create index if not exists idx_columns_config on columns(column_config_id);
+
 create table if not exists elements (
   id bigserial primary key,
   doelenboom_id bigint not null references doelenbomen(id) on delete cascade,
   code text not null,
-  type text not null check (type in (
-    'Project', 'Capability', 'Operationele benefit', 'Sub-benefit',
-    'Programmabaat', 'Strategische benefit', 'Strategisch doel', 'Missie'
-  )),
+  -- Geen check-constraint meer op een vaste lijst (was: 'Project',
+  -- 'Capability', ... — zie kolommen-configuratie-ontwerp.md): welke typen
+  -- geldig zijn, hangt nu af van de columns-configuratie van de doelenboom
+  -- (columns.type_name) en wordt op API-niveau gevalideerd, niet meer in de
+  -- database — dat kan per doelenboom verschillen, een vaste check-constraint
+  -- kan dat niet uitdrukken. Blijft een gewoon tekstveld (geen foreign key)
+  -- omdat de Excel-import/export al op tekstwaarden draait.
+  type text not null,
   name text not null,
   description text not null default '',
   parent_text text not null default '',

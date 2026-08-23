@@ -125,6 +125,72 @@ class TestReferentietabelRijvalidatie:
         assert by_code == {'P1': 5, 'P2': 1}
 
 
+class TestDynamischeTypeValidatie:
+    """valid_types (zie docs/kolommen-configuratie-ontwerp.md) — de kolomconfig-
+    uratie van de doelenboom waarin geïmporteerd wordt, meegegeven door
+    routes/imports.ts. Zonder valid_types (None) valt parse_workbook terug op
+    de vaste 8 standaardtypes (TYPE_MAP) — precies het gedrag van vóór de
+    configureerbare kolommen, gedekt door TestReferentietabelRijvalidatie
+    hierboven."""
+
+    def test_eigen_typenaam_wordt_geaccepteerd_met_valid_types(self):
+        content = nieuw_workbook(ref_rows=[
+            ['I1', 'Initiatief', 'Een initiatief', '', '', '', '', 1, 'Ja'],
+        ])
+        status, report, parsed = parse_workbook(content, valid_types=['Initiatief', 'Vermogen', 'Ambitie'])
+        assert status == 'ok'
+        assert parsed['elements'][0]['type'] == 'Initiatief'
+        assert not report['warnings']
+
+    def test_eigen_typenaam_zonder_valid_types_wordt_geweigerd(self):
+        # Zonder valid_types kent parse_workbook alleen de 8 standaardtypes
+        # (TYPE_MAP) — "Initiatief" bestaat daar niet in.
+        content = nieuw_workbook(ref_rows=[
+            ['I1', 'Initiatief', 'Een initiatief', '', '', '', '', 1, 'Ja'],
+        ])
+        status, report, parsed = parse_workbook(content)
+        assert status == 'failed'
+        assert any('Onbekend Type-label "Initiatief"' in w for w in report['warnings'])
+
+    def test_standaardtype_dat_niet_meer_in_valid_types_zit_wordt_geweigerd(self):
+        # De tenant heeft "Missie" hernoemd/verwijderd uit de kolomconfiguratie
+        # — de TYPE_MAP-alias mag dat niet alsnog stiekem terugzetten.
+        content = nieuw_workbook(ref_rows=[
+            ['M1', 'Missie', 'Onze missie', '', '', '', '', 1, 'Ja'],
+        ])
+        status, report, parsed = parse_workbook(content, valid_types=['Project', 'Capability'])
+        assert status == 'failed'
+        assert any('Onbekend Type-label "Missie"' in w for w in report['warnings'])
+
+    def test_matching_is_case_en_whitespace_ongevoelig_voor_eigen_types(self):
+        content = nieuw_workbook(ref_rows=[
+            ['I1', '  initiatief  ', 'Een initiatief', '', '', '', '', 1, 'Ja'],
+        ])
+        status, report, parsed = parse_workbook(content, valid_types=['Initiatief'])
+        # 'warning' i.p.v. 'ok': de afwijkende schrijfwijze wordt wel
+        # geaccepteerd, maar (net als bij een TYPE_MAP-alias) gemeld als
+        # genormaliseerd — geen data-verlies, dus geen 'failed'.
+        assert status == 'warning'
+        # De canonieke schrijfwijze uit valid_types wordt gebruikt, niet de
+        # (afwijkende hoofdletters/spaties) ruwe celwaarde.
+        assert parsed['elements'][0]['type'] == 'Initiatief'
+
+    def test_standaard_types_blijven_werken_met_valid_types_van_standaardconfig(self):
+        content = oud_workbook(ref_rows=[
+            ['P1', 'Project', 'Project 1', '', '', '', '', '', '', '', '', ''],
+            # "operationele baat" is een bekende TYPE_MAP-alias voor "Operationele benefit".
+            ['OB1', 'Operationele baat', 'OB 1', '', '', '', '', '', '', '', '', ''],
+        ])
+        standard = ['Project', 'Capability', 'Operationele benefit', 'Sub-benefit',
+                    'Programmabaat', 'Strategische benefit', 'Strategisch doel', 'Missie']
+        status, report, parsed = parse_workbook(content, valid_types=standard)
+        # 'warning': "Operationele baat" wordt via TYPE_MAP genormaliseerd naar
+        # "Operationele benefit" — dat wordt gemeld, maar geen dataverlies.
+        assert status == 'warning'
+        types = {e['code']: e['type'] for e in parsed['elements']}
+        assert types == {'P1': 'Project', 'OB1': 'Operationele benefit'}
+
+
 class TestRelaties:
     def test_capability_ob_en_project_capability_relaties_oud(self):
         content = oud_workbook(

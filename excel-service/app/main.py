@@ -14,7 +14,7 @@ from typing import Any, Literal
 from fastapi import Body, FastAPI, File, Query, UploadFile
 from fastapi.responses import JSONResponse, Response
 
-from .exporter import build_data_workbook, build_template_workbook
+from .exporter import build_data_workbook, build_template_workbook, is_standard_columns
 from .parser import parse_workbook
 
 app = FastAPI(title='doelenboom-excel-service', version='0.1.0')
@@ -28,7 +28,7 @@ def health():
 
 
 @app.post('/parse')
-async def parse(file: UploadFile = File(...)):
+async def parse(file: UploadFile = File(...), valid_types: list[str] = Query(default=[])):
     content = await file.read()
     if not content:
         return JSONResponse(status_code=400, content={
@@ -40,7 +40,13 @@ async def parse(file: UploadFile = File(...)):
             'parsed': None,
         })
 
-    status, report, parsed = parse_workbook(content, filename=file.filename or '')
+    # valid_types komt van routes/imports.ts (de kolomconfiguratie van de
+    # doelenboom waarin geïmporteerd wordt, zie api/src/columnConfig.ts) —
+    # zonder dit (lege lijst, bv. een oudere/losse aanroep) valt parse_workbook
+    # terug op de vaste set van de 8 standaardtypes (zie parser.py).
+    status, report, parsed = parse_workbook(
+        content, filename=file.filename or '', valid_types=valid_types or None
+    )
     return {'status': status, 'report': report, 'parsed': parsed}
 
 
@@ -52,13 +58,27 @@ async def export(
 ):
     tree = body.get('tree')
     meta = body.get('meta') or {}
+    # Kolomconfiguratie van de doelenboom (zie api/src/columnConfig.ts) — bij
+    # mode=data zit die ook al in tree['columns'], maar bij mode=template is er
+    # geen tree en moet de aanroeper 'm apart meegeven (nodig voor de dynamische
+    # Type-dropdown/validatielijst in het 'nieuw' formaat, zie exporter.py).
+    columns = body.get('columns') or (tree or {}).get('columns') or []
+
+    if format == 'oud' and not is_standard_columns(columns):
+        return JSONResponse(status_code=409, content={
+            'error': (
+                'Het "oud" Excel-formaat werkt alleen zolang de kolommen van deze doelenboom nog exact de '
+                '8 standaardkolommen zijn. Deze doelenboom heeft een aangepaste kolomconfiguratie — gebruik '
+                'het "nieuw" formaat.'
+            ),
+        })
 
     if mode == 'template':
-        content = build_template_workbook(format, meta)
+        content = build_template_workbook(format, meta, columns=columns)
     else:
         if tree is None:
             return JSONResponse(status_code=400, content={'error': 'mode=data vereist een "tree" in de body.'})
-        content = build_data_workbook(format, tree, meta)
+        content = build_data_workbook(format, tree, meta, columns=columns)
 
     filename = f'doelenboom_{format}_{mode}.xlsx'
     return Response(

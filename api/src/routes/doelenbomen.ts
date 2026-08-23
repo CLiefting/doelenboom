@@ -8,6 +8,7 @@ import {
   requireTenantRoleForTenantParam,
   tenantIdForDoelenboom,
 } from '../rbac.js';
+import { createDoelenboomConfigFromTenantDefault, copyDoelenboomConfig } from '../columnConfig.js';
 
 function isUniqueViolation(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { code?: string }).code === '23505';
@@ -88,17 +89,32 @@ doelenbomenRouter.post(
     if (!slug || !name) {
       return res.status(400).json({ error: 'slug en name zijn verplicht' });
     }
+    const client = await pool.connect();
     try {
-      const tenantDefault = await pool.query('select wipe_on_empty from tenants where id = $1', [req.params.tenantId]);
-      const defaultWipeOnEmpty = tenantDefault.rows[0]?.wipe_on_empty ?? false;
-      const result = await pool.query(
+      await client.query('begin');
+      const tenantRow = await client.query('select wipe_on_empty, name from tenants where id = $1', [req.params.tenantId]);
+      const defaultWipeOnEmpty = tenantRow.rows[0]?.wipe_on_empty ?? false;
+      const result = await client.query(
         `insert into doelenbomen (tenant_id, slug, name, wipe_on_empty)
          values ($1, $2, $3, $4) returning id, slug, name, read_only, wipe_on_empty, created_at`,
         [req.params.tenantId, slug, name, defaultWipeOnEmpty]
       );
+      // Eigen, onafhankelijke kopie van de tenant-default kolomconfiguratie
+      // (zie columnConfig.ts) — zonder dit zou de boomweergave straks geen
+      // kolommen kunnen renderen.
+      await createDoelenboomConfigFromTenantDefault(
+        client,
+        Number(req.params.tenantId),
+        tenantRow.rows[0]?.name ?? '',
+        result.rows[0].id
+      );
+      await client.query('commit');
       res.status(201).json(result.rows[0]);
     } catch (err) {
+      await client.query('rollback');
       res.status(409).json({ error: 'Doelenboom met deze slug bestaat al binnen deze tenant', detail: (err as Error).message });
+    } finally {
+      client.release();
     }
   }
 );
@@ -272,6 +288,12 @@ doelenbomenRouter.post('/doelenbomen/:id/duplicate', requireSysadmin, async (req
       [resolvedTenantId, slug, name]
     );
     const newDoelenboomId = newDoelenboom.rows[0].id;
+
+    // Eigen kopie van de kolomconfiguratie van de bron-doelenboom (niet de
+    // tenant-default — de bron kan zelf al een aangepaste config hebben, en
+    // de elementen hieronder worden zo dadelijk met dezelfde typenamen
+    // gekopieerd, dus moeten wel bij een bestaande kolom passen).
+    await copyDoelenboomConfig(client, Number(req.params.id), resolvedTenantId, newDoelenboomId);
 
     const elementsResult = await client.query(
       `select id, code, type, name, description, parent_text, kpi, taakveld, subtaakveld, sort_order

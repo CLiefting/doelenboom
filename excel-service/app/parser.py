@@ -123,11 +123,22 @@ def read_sheet(wb, sheet_name: str, field_aliases: dict[str, tuple[str, ...]]):
     return rows, True
 
 
-def parse_workbook(content: bytes, filename: str = '') -> tuple[str, dict, dict | None]:
+def parse_workbook(
+    content: bytes, filename: str = '', valid_types: list[str] | None = None
+) -> tuple[str, dict, dict | None]:
     warnings: list[str] = []
     errors: list[str] = []
     sheets_found: list[str] = []
     sheets_missing: list[str] = []
+
+    # Welke Type-waarden geldig zijn hangt sinds de configureerbare kolommen
+    # (zie docs/kolommen-configuratie-ontwerp.md) af van de kolomconfiguratie
+    # van de doelenboom waarin geïmporteerd wordt — de aanroeper (routes/imports.ts)
+    # geeft die hier altijd mee. Zonder valid_types (bv. een oudere aanroep, of
+    # los getest) vallen we terug op de historische, vaste set uit TYPE_MAP (de
+    # 8 standaardtypes) — zelfde gedrag als vóór de configureerbare kolommen.
+    allowed_types = set(valid_types) if valid_types is not None else set(TYPE_MAP.values())
+    allowed_by_norm = {norm(t): t for t in allowed_types}
 
     try:
         wb = load_workbook(io.BytesIO(content), data_only=True, read_only=True)
@@ -201,6 +212,16 @@ def parse_workbook(content: bytes, filename: str = '') -> tuple[str, dict, dict 
             skipped_historisch += 1
             continue
         type_norm = TYPE_MAP.get(type_key)
+        if type_norm is not None and type_norm not in allowed_types:
+            # Een TYPE_MAP-alias (bv. "operationele baat" -> "Operationele
+            # benefit") die bij déze doelenboom geen geldige kolom (meer) is
+            # (de tenant heeft de kolommen aangepast) — niet alsnog accepteren.
+            type_norm = None
+        if type_norm is None:
+            # Geen (geldige) TYPE_MAP-alias: probeer een directe, case/
+            # whitespace-ongevoelige match tegen de geconfigureerde type-namen
+            # van deze doelenboom — nodig voor eigen, niet-standaard kolommen.
+            type_norm = allowed_by_norm.get(type_key)
         if type_norm is None:
             warnings.append(f'Onbekend Type-label "{type_raw}" bij element {code} — rij overgeslagen.')
             continue

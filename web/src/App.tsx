@@ -3,15 +3,26 @@ import LoginPage from './pages/LoginPage';
 import PickerPage from './pages/PickerPage';
 import TreePage from './pages/TreePage';
 import ImportPage from './pages/ImportPage';
-import UserManagementPage from './pages/UserManagementPage';
+import TenantManagementPage from './pages/TenantManagementPage';
+import AccountManagementPage from './pages/AccountManagementPage';
 import ChangePasswordPage from './pages/ChangePasswordPage';
+import HelpPage from './pages/HelpPage';
 import LogoutFlow from './components/LogoutFlow';
 import VersionFooter from './components/VersionFooter';
 import { api } from './api';
 import { useSession } from './useSession';
 import type { DoelenboomSummary } from './types';
 
-type View = { name: 'picker' } | { name: 'tree' } | { name: 'import' } | { name: 'users' } | { name: 'password' };
+type View =
+  | { name: 'picker' }
+  | { name: 'tree' }
+  | { name: 'import' }
+  | { name: 'tenants' }
+  | { name: 'accounts' }
+  | { name: 'password' }
+  // 'from' onthoudt vanaf welk scherm Help geopend is (picker of tree), zodat
+  // "Terug" daar weer naartoe kan — Help is vanuit beide bereikbaar.
+  | { name: 'help'; from: 'picker' | 'tree' };
 
 const HEARTBEAT_INTERVAL_MS = 60_000;
 
@@ -73,12 +84,18 @@ export default function App() {
   }
 
   let content;
-  // 'users' staat expliciet vóór de doelenboom-fallback: Gebruikersbeheer is
-  // vanuit de picker bereikbaar zonder dat er al een doelenboom geselecteerd
-  // is, dus "!doelenboom" mag deze view niet overrulen (dat gold alleen voor
-  // 'import'/'tree', die wél een geselecteerde doelenboom nodig hebben).
-  if (view.name === 'users') {
-    content = <UserManagementPage token={session.token} user={session.user} onBack={() => setView({ name: 'picker' })} />;
+  // 'tenants'/'accounts' staan expliciet vóór de doelenboom-fallback: beide
+  // zijn vanuit de picker bereikbaar zonder dat er al een doelenboom
+  // geselecteerd is, dus "!doelenboom" mag deze views niet overrulen (dat
+  // gold alleen voor 'import'/'tree', die wél een geselecteerde doelenboom
+  // nodig hebben).
+  if (view.name === 'tenants') {
+    content = <TenantManagementPage token={session.token} user={session.user} onBack={() => setView({ name: 'picker' })} />;
+  } else if (view.name === 'accounts') {
+    content = <AccountManagementPage token={session.token} user={session.user} onBack={() => setView({ name: 'picker' })} />;
+  } else if (view.name === 'help') {
+    const returnView: View = view.from === 'tree' ? { name: 'tree' } : { name: 'picker' };
+    content = <HelpPage onBack={() => setView(returnView)} />;
   } else if (view.name === 'password') {
     content = (
       <ChangePasswordPage
@@ -101,7 +118,9 @@ export default function App() {
           setView({ name: 'tree' });
         }}
         onLogoutRequest={requestLogout}
-        onUsersRequest={() => setView({ name: 'users' })}
+        onTenantsRequest={() => setView({ name: 'tenants' })}
+        onAccountsRequest={() => setView({ name: 'accounts' })}
+        onHelpRequest={() => setView({ name: 'help', from: 'picker' })}
         onChangePasswordRequest={() => setView({ name: 'password' })}
       />
     );
@@ -122,6 +141,7 @@ export default function App() {
         onBack={() => setView({ name: 'picker' })}
         onImport={() => setView({ name: 'import' })}
         onLogoutRequest={requestLogout}
+        onHelpRequest={() => setView({ name: 'help', from: 'tree' })}
       />
     );
   }

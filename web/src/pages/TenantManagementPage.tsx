@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '../api';
+import ColumnConfigEditor from '../components/ColumnConfigEditor';
 import type {
   DoelenboomMemberRole,
   DoelenboomSummary,
@@ -7,19 +8,20 @@ import type {
   TenantRoleName,
   TenantSummary,
   User,
-  UserSummary,
 } from '../types';
 
-// Gebruikersbeheer — twee gedaantes in één scherm, afhankelijk van de rol van de
+// Tenantbeheer — twee gedaantes in één scherm, afhankelijk van de rol van de
 // ingelogde gebruiker:
-// - sysadmin: ziet alle tenants (kan nieuwe aanmaken) en alle accounts (kan
-//   nieuwe aanmaken, sysadmin-vlag zetten, verwijderen), en kan leden van elke
-//   tenant beheren.
+// - sysadmin: ziet alle tenants (kan nieuwe aanmaken), kan tenants verwijderen,
+//   standaardkolommen instellen, en kan doelenbomen + leden van elke tenant
+//   beheren.
 // - tenant-admin (niet-sysadmin met role='admin' in minstens één tenant): ziet
-//   alleen de tenant(s) waar hij/zij admin van is, kan daar leden toevoegen/
-//   wijzigen/verwijderen (en desgewenst een nieuw account aanmaken via die
-//   route) — geen tenant-aanmaak, geen zicht op andere tenants of accounts.
-export default function UserManagementPage({
+//   alleen de tenant(s) waar hij/zij admin van is, kan daar doelenbomen en
+//   leden beheren — geen tenant-aanmaak/verwijdering, geen standaardkolommen,
+//   geen zicht op andere tenants.
+// Let op: dit scherm gaat NIET over globale accounts (zie AccountManagementPage,
+// sysadmin-only) — "Leden" hier voegt iemand alleen toe aan déze tenant.
+export default function TenantManagementPage({
   token,
   user,
   onBack,
@@ -31,7 +33,6 @@ export default function UserManagementPage({
   const [tenants, setTenants] = useState<TenantSummary[] | null>(null);
   const [selectedTenantId, setSelectedTenantId] = useState<number | null>(null);
   const [members, setMembers] = useState<TenantMember[] | null>(null);
-  const [allUsers, setAllUsers] = useState<UserSummary[] | null>(null);
   const [doelenbomen, setDoelenbomen] = useState<DoelenboomSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -45,10 +46,7 @@ export default function UserManagementPage({
     // tenant(s) terug — geen aparte per-tenant call nodig, gewoon hieronder
     // client-side filteren op de geselecteerde tenant.
     api.doelenbomen(token).then(setDoelenbomen).catch((err) => setError(errMsg(err)));
-    if (user.isSysadmin) {
-      api.users(token).then(setAllUsers).catch((err) => setError(errMsg(err)));
-    }
-  }, [token, user.isSysadmin]);
+  }, [token]);
 
   function refreshDoelenbomen() {
     api.doelenbomen(token).then(setDoelenbomen).catch((err) => setError(errMsg(err)));
@@ -67,18 +65,13 @@ export default function UserManagementPage({
     api.tenantMembers(token, selectedTenantId).then(setMembers).catch((err) => setError(errMsg(err)));
   }
 
-  function refreshUsers() {
-    if (!user.isSysadmin) return;
-    api.users(token).then(setAllUsers).catch((err) => setError(errMsg(err)));
-  }
-
   return (
     <main style={styles.main}>
       <header style={styles.header}>
         <div>
-          <h1 style={styles.title}>Gebruikersbeheer</h1>
+          <h1 style={styles.title}>Tenantbeheer</h1>
           <p style={styles.subtitle}>
-            {user.isSysadmin ? 'Sysadmin — alle tenants en accounts.' : 'Leden beheren van jouw tenant(s).'}
+            {user.isSysadmin ? 'Sysadmin — alle tenants.' : 'Tenant(s), doelenbomen en leden beheren.'}
           </p>
         </div>
         <button onClick={onBack} style={btnStyle('ghost')}>← Terug</button>
@@ -173,6 +166,29 @@ export default function UserManagementPage({
         </section>
       )}
 
+      {/* Standaardkolommen: sysadmin-only (zie /api/tenants/:tenantId/column-config),
+          het sjabloon waarmee een NIEUWE doelenboom in deze tenant start (zie
+          createDoelenboomConfigFromTenantDefault in api/src/columnConfig.ts) —
+          wijzigt niets aan al bestaande doelenbomen, die hebben hun eigen kopie
+          (zie de "Kolommen"-knop per doelenboom hieronder). */}
+      {selectedTenantId != null && user.isSysadmin && (
+        <section style={styles.section}>
+          <h2 style={styles.h2}>
+            Standaardkolommen van {manageableTenants.find((t) => t.id === selectedTenantId)?.name ?? ''}
+          </h2>
+          <p style={styles.muted}>
+            Sjabloon waarmee een nieuwe doelenboom in deze tenant start. Bestaande doelenbomen hebben hun eigen,
+            onafhankelijke kolommen (zie "Kolommen" bij de doelenboom zelf hieronder) en merken een wijziging hier
+            dus niet.
+          </p>
+          <ColumnConfigEditor
+            key={selectedTenantId}
+            load={() => api.tenantColumnConfig(token, selectedTenantId)}
+            save={(columns) => api.updateTenantColumnConfig(token, selectedTenantId, columns)}
+          />
+        </section>
+      )}
+
       {selectedTenantId != null && (
         <section style={styles.section}>
           <h2 style={styles.h2}>
@@ -225,31 +241,6 @@ export default function UserManagementPage({
             setBusy={setBusy}
             setError={setError}
             onAdded={refreshMembers}
-          />
-        </section>
-      )}
-
-      {user.isSysadmin && (
-        <section style={styles.section}>
-          <h2 style={styles.h2}>Alle accounts</h2>
-          {!allUsers && <p>Laden…</p>}
-          {allUsers && (
-            <AllUsersTable
-              token={token}
-              users={allUsers}
-              currentUserId={user.id}
-              busy={busy}
-              setBusy={setBusy}
-              setError={setError}
-              onChanged={refreshUsers}
-            />
-          )}
-          <CreateUserForm
-            token={token}
-            busy={busy}
-            setBusy={setBusy}
-            setError={setError}
-            onCreated={refreshUsers}
           />
         </section>
       )}
@@ -442,6 +433,7 @@ function DoelenbomenSection({
   const [editingId, setEditingId] = useState<number | null>(null);
   const [duplicatingId, setDuplicatingId] = useState<number | null>(null);
   const [rolesEditingId, setRolesEditingId] = useState<number | null>(null);
+  const [columnsEditingId, setColumnsEditingId] = useState<number | null>(null);
 
   async function remove(d: DoelenboomSummary) {
     const ok = window.confirm(
@@ -514,6 +506,26 @@ function DoelenbomenSection({
               />
             );
           }
+          if (columnsEditingId === d.id) {
+            return (
+              <div key={d.id} style={styles.doelenboomEditRow}>
+                <p style={{ margin: 0, fontSize: 13.5, color: '#6c6f76' }}>
+                  Kolommen van "{d.name}" — eigen, onafhankelijke kolomconfiguratie van déze doelenboom (los van de
+                  standaardkolommen van de tenant). Een kolom verwijderen/hernoemen kan niet zolang er nog
+                  elementen van dat type bestaan.
+                </p>
+                <ColumnConfigEditor
+                  load={() => api.doelenboomColumnConfig(token, d.id)}
+                  save={(columns) => api.updateDoelenboomColumnConfig(token, d.id, columns)}
+                />
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button type="button" onClick={() => setColumnsEditingId(null)} style={btnStyle('ghost')} disabled={busy}>
+                    Sluiten
+                  </button>
+                </div>
+              </div>
+            );
+          }
           return (
             <div key={d.id} style={styles.doelenboomRow}>
               <div>
@@ -529,6 +541,9 @@ function DoelenbomenSection({
                 )}
                 <button disabled={busy} onClick={() => setRolesEditingId(d.id)} style={btnStyle('ghost')}>
                   Rollen per lid
+                </button>
+                <button disabled={busy} onClick={() => setColumnsEditingId(d.id)} style={btnStyle('ghost')}>
+                  Kolommen
                 </button>
                 <button disabled={busy} onClick={() => setEditingId(d.id)} style={btnStyle('ghost')}>
                   Bewerken
@@ -998,252 +1013,6 @@ function CreateTenantForm({ token, onCreated }: { token: string; onCreated: () =
         + Tenant aanmaken
       </button>
       {error && <span style={styles.error}>{error}</span>}
-    </form>
-  );
-}
-
-function AllUsersTable({
-  token,
-  users,
-  currentUserId,
-  busy,
-  setBusy,
-  setError,
-  onChanged,
-}: {
-  token: string;
-  users: UserSummary[];
-  currentUserId: number;
-  busy: boolean;
-  setBusy: (b: boolean) => void;
-  setError: (e: string | null) => void;
-  onChanged: () => void;
-}) {
-  async function toggleSysadmin(u: UserSummary) {
-    setBusy(true);
-    setError(null);
-    try {
-      await api.updateUser(token, u.id, { isSysadmin: !u.is_sysadmin });
-      onChanged();
-    } catch (err) {
-      setError(errMsg(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function remove(u: UserSummary) {
-    if (!window.confirm(`Account "${u.email}" volledig verwijderen? Dit kan niet ongedaan worden gemaakt.`)) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await api.deleteUser(token, u.id);
-      onChanged();
-    } catch (err) {
-      setError(errMsg(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const [resettingId, setResettingId] = useState<number | null>(null);
-
-  return (
-    <div style={styles.tableWrap}>
-    <table style={styles.table}>
-      <thead>
-        <tr>
-          <th style={styles.th}>E-mail</th>
-          <th style={styles.th}>Sysadmin</th>
-          <th style={styles.th}>Tenants</th>
-          <th style={styles.th}></th>
-        </tr>
-      </thead>
-      <tbody>
-        {users.map((u) => (
-          <tr key={u.id}>
-            <td style={styles.td}>
-              {u.email}
-              {u.must_change_password && (
-                <span style={styles.mustChangeBadge} title="Moet wachtwoord wijzigen bij volgende login">
-                  moet wachtwoord wijzigen
-                </span>
-              )}
-            </td>
-            <td style={styles.td}>
-              <input
-                type="checkbox"
-                checked={u.is_sysadmin}
-                disabled={busy}
-                onChange={() => toggleSysadmin(u)}
-              />
-            </td>
-            <td style={styles.td}>
-              {u.tenantRoles.length === 0
-                ? <span style={styles.muted}>—</span>
-                : u.tenantRoles.map((r) => `${r.tenantName} (${r.role})`).join(', ')}
-            </td>
-            <td style={styles.td}>
-              <button
-                disabled={busy}
-                onClick={() => setResettingId(resettingId === u.id ? null : u.id)}
-                style={btnStyle('ghost')}
-              >
-                Wachtwoord resetten
-              </button>
-              <button
-                disabled={busy || u.id === currentUserId}
-                onClick={() => remove(u)}
-                style={btnStyle('danger-text')}
-                title={u.id === currentUserId ? 'Je kunt je eigen account hier niet verwijderen' : ''}
-              >
-                Verwijderen
-              </button>
-              {resettingId === u.id && (
-                <ResetPasswordRow
-                  token={token}
-                  userId={u.id}
-                  busy={busy}
-                  setBusy={setBusy}
-                  setError={setError}
-                  onDone={() => {
-                    setResettingId(null);
-                    onChanged();
-                  }}
-                />
-              )}
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-    </div>
-  );
-}
-
-function ResetPasswordRow({
-  token,
-  userId,
-  busy,
-  setBusy,
-  setError,
-  onDone,
-}: {
-  token: string;
-  userId: number;
-  busy: boolean;
-  setBusy: (b: boolean) => void;
-  setError: (e: string | null) => void;
-  onDone: () => void;
-}) {
-  const [password, setPassword] = useState('');
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError(null);
-    try {
-      // mustChangePassword niet meegeven = standaard true (zie users.ts): de
-      // gebruiker moet dit tijdelijke wachtwoord bij de eerstvolgende login
-      // vervangen door een eigen wachtwoord.
-      await api.updateUser(token, userId, { password });
-      setPassword('');
-      onDone();
-    } catch (err) {
-      setError(errMsg(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <form onSubmit={submit} style={{ display: 'flex', gap: 6, marginTop: 6, alignItems: 'center' }}>
-      <input
-        style={styles.input}
-        type="password"
-        placeholder="nieuw tijdelijk wachtwoord (min. 8 tekens)"
-        required
-        minLength={8}
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-        autoFocus
-      />
-      <button style={btnStyle('primary')} type="submit" disabled={busy}>
-        Opslaan
-      </button>
-    </form>
-  );
-}
-
-function CreateUserForm({
-  token,
-  busy,
-  setBusy,
-  setError,
-  onCreated,
-}: {
-  token: string;
-  busy: boolean;
-  setBusy: (b: boolean) => void;
-  setError: (e: string | null) => void;
-  onCreated: () => void;
-}) {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [isSysadmin, setIsSysadmin] = useState(false);
-  const [mustChangePassword, setMustChangePassword] = useState(true);
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError(null);
-    try {
-      await api.createUser(token, { email, password, isSysadmin, mustChangePassword });
-      setEmail('');
-      setPassword('');
-      setIsSysadmin(false);
-      setMustChangePassword(true);
-      onCreated();
-    } catch (err) {
-      setError(errMsg(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <form onSubmit={submit} style={styles.inlineForm}>
-      <input
-        style={styles.input}
-        type="email"
-        placeholder="e-mail"
-        required
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-      />
-      <input
-        style={styles.input}
-        type="password"
-        placeholder="wachtwoord (min. 8 tekens)"
-        required
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-      />
-      <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13 }}>
-        <input type="checkbox" checked={isSysadmin} onChange={(e) => setIsSysadmin(e.target.checked)} />
-        sysadmin
-      </label>
-      <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13 }}>
-        <input
-          type="checkbox"
-          checked={mustChangePassword}
-          onChange={(e) => setMustChangePassword(e.target.checked)}
-        />
-        moet wachtwoord wijzigen bij volgende login
-      </label>
-      <button style={btnStyle('primary')} type="submit" disabled={busy}>
-        + Account aanmaken
-      </button>
     </form>
   );
 }

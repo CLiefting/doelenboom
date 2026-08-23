@@ -187,6 +187,29 @@ export const api = {
   deleteUser: (token: string, userId: number) =>
     request<void>(`/api/users/${userId}`, { method: 'DELETE' }, token),
 
+  // --- Kolomconfiguratie (zie docs/kolommen-configuratie-ontwerp.md) ---
+  // Tenant-default: sysadmin-only, het sjabloon waarmee een nieuwe doelenboom
+  // binnen die tenant start. Doelenboom-config: de eigen, onafhankelijke
+  // kolommenset van die ene doelenboom (lezen mag iedereen met toegang tot de
+  // doelenboom, wijzigen alleen met schrijfrechten — zie api/src/rbac.ts).
+  tenantColumnConfig: (token: string, tenantId: number) =>
+    request<{ columns: import('./types').ColumnDef[] }>(`/api/tenants/${tenantId}/column-config`, {}, token),
+
+  updateTenantColumnConfig: (token: string, tenantId: number, columns: import('./types').ColumnDef[]) =>
+    request<{ columns: import('./types').ColumnDef[] }>(`/api/tenants/${tenantId}/column-config`, {
+      method: 'PUT',
+      body: JSON.stringify({ columns }),
+    }, token),
+
+  doelenboomColumnConfig: (token: string, doelenboomId: number) =>
+    request<{ columns: import('./types').ColumnDef[] }>(`/api/doelenbomen/${doelenboomId}/column-config`, {}, token),
+
+  updateDoelenboomColumnConfig: (token: string, doelenboomId: number, columns: import('./types').ColumnDef[]) =>
+    request<{ columns: import('./types').ColumnDef[] }>(`/api/doelenbomen/${doelenboomId}/column-config`, {
+      method: 'PUT',
+      body: JSON.stringify({ columns }),
+    }, token),
+
   // --- Database-overzicht (sysadmin-only, /dbstat) ---
   dbStat: (token: string) => request<import('./types').DbStatTenant[]>('/api/dbstat', {}, token),
 

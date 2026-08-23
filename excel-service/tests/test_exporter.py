@@ -8,9 +8,10 @@ import io
 from openpyxl import load_workbook
 
 from app.exporter import (
-    NIEUW_SHEET_HEADERS, OUD_SHEET_HEADERS, build_data_workbook, build_template_workbook,
+    NIEUW_SHEET_HEADERS, OUD_SHEET_HEADERS, STANDARD_TYPE_NAMES,
+    build_data_workbook, build_template_workbook, is_standard_columns,
 )
-from tests.helpers import make_tree
+from tests.helpers import make_columns, make_tree, standard_columns
 
 
 def load(content: bytes):
@@ -108,3 +109,124 @@ class TestDataWorkbookNieuw:
         assert headers == NIEUW_SHEET_HEADERS['Referentietabel']
         row = next(wb['Referentietabel'].iter_rows(min_row=2, values_only=True))
         assert row[-1] == 'Ja'  # Actief
+
+
+class TestDynamischeTypeLijst:
+    """Kolomconfiguratie (zie docs/kolommen-configuratie-ontwerp.md) i.p.v. de
+    voorheen hardgecodeerde VALIDATIELIJSTEN['Type'] — de Type-kolom in
+    _Validatielijsten (en dus de dropdown op de Referentietabel) moet exact de
+    geconfigureerde kolommen van déze doelenboom weerspiegelen, in hun eigen
+    volgorde, niet meer de 8 standaardtypes."""
+
+    def test_custom_kolommen_in_validatielijsten_type_kolom(self):
+        columns = make_columns(['Initiatief', 'Vermogen', 'Ambitie'])
+        wb = load(build_template_workbook('nieuw', columns=columns))
+        val_ws = wb['_Validatielijsten']
+        headers = [c.value for c in val_ws[1]]
+        assert headers[0] == 'Type'
+        type_col_values = [row[0] for row in val_ws.iter_rows(min_row=2, max_col=1, values_only=True) if row[0]]
+        assert type_col_values == ['Initiatief', 'Vermogen', 'Ambitie']
+
+    def test_type_dropdown_range_past_zich_aan_aantal_kolommen_aan(self):
+        columns = make_columns(['A', 'B'])
+        wb = load(build_template_workbook('nieuw', columns=columns))
+        ref_ws = wb['Referentietabel']
+        type_dvs = [dv for dv in ref_ws.data_validations.dataValidation if 'B2:B10000' in str(dv.sqref)]
+        assert type_dvs
+        assert '$A$2:$A$3' in type_dvs[0].formula1  # 2 kolommen -> rijen 2 t/m 3
+
+    def test_zonder_columns_valt_terug_op_standaardtypes(self):
+        wb = load(build_template_workbook('nieuw'))
+        val_ws = wb['_Validatielijsten']
+        type_col_values = [row[0] for row in val_ws.iter_rows(min_row=2, max_col=1, values_only=True) if row[0]]
+        assert type_col_values == STANDARD_TYPE_NAMES
+
+    def test_build_data_workbook_haalt_columns_uit_tree_als_niet_apart_gegeven(self):
+        tree = make_tree(columns=make_columns(['Initiatief', 'Vermogen']))
+        wb = load(build_data_workbook('nieuw', tree))
+        val_ws = wb['_Validatielijsten']
+        type_col_values = [row[0] for row in val_ws.iter_rows(min_row=2, max_col=1, values_only=True) if row[0]]
+        assert type_col_values == ['Initiatief', 'Vermogen']
+
+
+class TestIsStandardColumns:
+    """Bepaalt of het 'oud' Excel-formaat nog aangeboden mag worden (zie
+    routes/exports.ts en main.py::export) — alleen als de kolommen exact de 8
+    standaardtypes zijn, in dezelfde volgorde."""
+
+    def test_standaardkolommen_zijn_standaard(self):
+        assert is_standard_columns(standard_columns()) is True
+
+    def test_andere_volgorde_is_niet_standaard(self):
+        reversed_cols = make_columns(list(reversed(STANDARD_TYPE_NAMES)))
+        assert is_standard_columns(reversed_cols) is False
+
+    def test_extra_kolom_is_niet_standaard(self):
+        cols = standard_columns() + make_columns(['Extra'])
+        assert is_standard_columns(cols) is False
+
+    def test_hernoemde_kolom_is_niet_standaard(self):
+        cols = make_columns(STANDARD_TYPE_NAMES[:-1] + ['Anders'])
+        assert is_standard_columns(cols) is False
+
+    def test_titel_kleur_wijzigingen_maken_niet_uit_alleen_typename_telt(self):
+        cols = standard_columns()
+        cols[0]['title'] = 'Een compleet andere titel'
+        cols[0]['color'] = '#FF00FF'
+        assert is_standard_columns(cols) is True
+
+
+class TestKolommenTab:
+    """Nieuwe 'Kolommen'-tab (zie exporter.py::_write_kolommen) — documenteert
+    de volledige kolomconfiguratie van de doelenboom in het geëxporteerde
+    bestand zelf, voor beide formaten en beide modi."""
+
+    HEADERS = [
+        'Volgorde', 'Type', 'Titel', 'Ondertitel', 'Kleur', 'Smal',
+        'Projectrol', 'Label naar volgende kolom', 'Lettergrootte knoop',
+    ]
+
+    def test_template_oud_heeft_kolommen_tab_met_standaardkolommen(self):
+        wb = load(build_template_workbook('oud', columns=standard_columns()))
+        assert 'Kolommen' in wb.sheetnames
+        ws = wb['Kolommen']
+        assert [c.value for c in ws[1]] == self.HEADERS
+        types = [row[1] for row in ws.iter_rows(min_row=2, values_only=True)]
+        assert types == STANDARD_TYPE_NAMES
+
+    def test_template_nieuw_heeft_kolommen_tab(self):
+        columns = make_columns(['Initiatief', 'Vermogen', 'Ambitie'])
+        wb = load(build_template_workbook('nieuw', columns=columns))
+        ws = wb['Kolommen']
+        types = [row[1] for row in ws.iter_rows(min_row=2, values_only=True)]
+        assert types == ['Initiatief', 'Vermogen', 'Ambitie']
+
+    def test_data_workbook_kolommen_tab_bevat_volledige_configuratie(self):
+        columns = make_columns(['Initiatief', 'Vermogen'])
+        columns[0]['title'] = 'Het initiatief'
+        columns[0]['subtitle'] = 'Ondertitel 1'
+        columns[0]['color'] = '#3E6FA6'
+        columns[0]['isNarrow'] = True
+        columns[0]['nodeFontSize'] = 12
+        columns[0]['relationLabelToNext'] = 'draagt bij aan'
+        tree = make_tree(columns=columns)
+        wb = load(build_data_workbook('nieuw', tree))
+        ws = wb['Kolommen']
+        rows = [row for row in ws.iter_rows(min_row=2, values_only=True)]
+        assert rows[0] == (0, 'Initiatief', 'Het initiatief', 'Ondertitel 1', '#3E6FA6', 'Ja', 'Ja', 'draagt bij aan', 12)
+        assert rows[1][5] == 'Nee'  # isNarrow default False -> 'Nee'
+        assert rows[1][6] == 'Nee'  # isProjectRole False voor de tweede kolom
+        # relationLabelToNext/nodeFontSize None -> geschreven als lege string,
+        # maar een leeg-tekst-cel komt bij het opnieuw inladen terug als None
+        # (zelfde openpyxl-gedrag als elders in deze testsuite, geen bug).
+        assert rows[1][7] is None
+        assert rows[1][8] is None
+
+    def test_kolommen_tab_gesorteerd_op_position_ongeacht_invoervolgorde(self):
+        columns = make_columns(['A', 'B', 'C'])
+        # Invoervolgorde expres door elkaar husselen — de tab moet toch op
+        # 'position' gesorteerd zijn, niet op de volgorde van de lijst.
+        shuffled = [columns[2], columns[0], columns[1]]
+        wb = load(build_template_workbook('nieuw', columns=shuffled))
+        types = [row[1] for row in wb['Kolommen'].iter_rows(min_row=2, values_only=True)]
+        assert types == ['A', 'B', 'C']

@@ -13,6 +13,7 @@ import { orgUnitsRouter } from './routes/orgUnits.js';
 import { edgesRouter } from './routes/edges.js';
 import { productsRouter } from './routes/products.js';
 import { projectStatusRouter } from './routes/projectStatus.js';
+import { columnConfigRouter } from './routes/columnConfig.js';
 import { dbstatRouter } from './routes/dbstat.js';
 import { sessionsRouter } from './routes/sessions.js';
 import { pool } from './db.js';
@@ -65,6 +66,7 @@ export function createApp() {
   app.use('/api', edgesRouter);
   app.use('/api', productsRouter);
   app.use('/api', projectStatusRouter);
+  app.use('/api', columnConfigRouter);
   app.use('/api/dbstat', dbstatRouter);
   app.use('/api/sessions', sessionsRouter);
 

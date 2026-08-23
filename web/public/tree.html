@@ -760,19 +760,20 @@
         <button class="btn ghost btn-icon" id="export-svg-btn" type="button" title="Exporteer als SVG" aria-label="Exporteer als SVG">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
         </button>
-        <!-- Bouwrichting omdraaien: standaard staat Project links en Missie
-             rechts (COL_ORDER, zie boot()); deze knop wisselt naar Missie
-             links/Project rechts (per doelenboom onthouden in localStorage,
+        <!-- Bouwrichting omdraaien: standaard staat de eerste kolom (in de
+             configuratie van deze doelenboom, zie tree.columns) links en de
+             laatste kolom rechts (COL_ORDER, zie boot()); deze knop wisselt
+             de fysieke volgorde om (per doelenboom onthouden in localStorage,
              zie flipColumnDirection()). Ververst de pagina om alles opnieuw
              en consistent op te bouwen — zelfde aanpak als reloadTreeKeepingFocus. -->
         <button class="btn ghost btn-icon" id="flip-columns-btn" type="button" title="Bouwrichting omdraaien" aria-label="Bouwrichting omdraaien">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h13"/><path d="m13 3 4 4-4 4"/><path d="M21 17H8"/><path d="m11 21-4-4 4-4"/></svg>
         </button>
-        <!-- Kijkrichting/anker wisselen: standaard start alleen Missie
-             zichtbaar en onthult "Kolom tonen" stap voor stap richting
-             Project (expandAnchor 'missie'); deze knop wisselt naar het
-             omgekeerde: alleen Project start zichtbaar, onthullen gaat
-             richting Missie (expandAnchor 'project') — zie
+        <!-- Kijkrichting/anker wisselen: standaard start alleen de laatste
+             kolom zichtbaar en onthult "Kolom tonen" stap voor stap richting
+             de eerste kolom (expandAnchor 'last'); deze knop wisselt naar het
+             omgekeerde: alleen de eerste kolom start zichtbaar, onthullen
+             gaat richting de laatste kolom (expandAnchor 'first') — zie
              flipExpandAnchor(). Los van #flip-columns-btn hierboven: de
              fysieke links/rechts-volgorde van de kolommen verandert hier
              niet mee. -->
@@ -820,6 +821,14 @@
           </div>
         </div>
       </div>
+      <!-- Help: los, altijd-zichtbaar icoon (i.p.v. in een dropdown) net als
+           "Exporteer als SVG" hierboven — is één directe actie, geen menu.
+           iframe-only omdat de helppagina een React-view in de parent-app is
+           (zie App.tsx: view 'help'), die in een losstaand geëxporteerd
+           bestand niet bestaat. -->
+      <button class="btn ghost btn-icon iframe-only" id="help-btn" type="button" title="Help" aria-label="Help">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.5 9a2.5 2.5 0 0 1 4.9.8c0 1.7-2.4 2-2.4 3.7"/><path d="M12 17.5h.01"/></svg>
+      </button>
       <div class="topbar-divider iframe-only"></div>
       <!-- Account-dropdown i.p.v. losse "Ingelogd als ..."-pil + Uitlog-knop:
            zelfde dropdown-stijl (file-menu*) als het Bestand-menu, voor een
@@ -886,16 +895,11 @@
       <p class="element-modal-hint">Velden met <span class="req-mark">*</span> zijn verplicht.</p>
       <form id="element-form">
         <label>Type <span class="req-mark">*</span>
-          <select id="element-field-type">
-            <option value="Project">Project</option>
-            <option value="Capability">Capability</option>
-            <option value="Operationele benefit">Operationele benefit</option>
-            <option value="Sub-benefit">Sub-benefit</option>
-            <option value="Programmabaat">Programmabaat</option>
-            <option value="Strategische benefit">Strategische benefit</option>
-            <option value="Strategisch doel">Strategisch doel</option>
-            <option value="Missie">Missie</option>
-          </select>
+          <!-- Opties worden bij het laden van de boom gevuld vanuit tree.columns
+               (zie runApp() in het script hieronder) — dit is per doelenboom
+               configureerbaar (zie docs/kolommen-configuratie-ontwerp.md), dus
+               geen vaste lijst meer hier. -->
+          <select id="element-field-type"></select>
         </label>
         <label>Code <span class="req-mark">*</span> <span class="field-note">(automatisch voorgesteld, mag je aanpassen)</span>
           <input type="text" id="element-field-code" autocomplete="off" required>
@@ -1067,16 +1071,9 @@
           </select>
         </label>
         <label>Type van het andere element
-          <select id="edge-field-other-type">
-            <option value="Project">Project</option>
-            <option value="Capability">Capability</option>
-            <option value="Operationele benefit">Operationele benefit</option>
-            <option value="Sub-benefit">Sub-benefit</option>
-            <option value="Programmabaat">Programmabaat</option>
-            <option value="Strategische benefit">Strategische benefit</option>
-            <option value="Strategisch doel">Strategisch doel</option>
-            <option value="Missie">Missie</option>
-          </select>
+          <!-- Zie de toelichting bij #element-field-type hierboven — ook deze
+               lijst wordt dynamisch gevuld vanuit tree.columns. -->
+          <select id="edge-field-other-type"></select>
         </label>
         <label>Ander element <span class="req-mark">*</span>
           <select id="edge-field-other"></select>
@@ -1181,15 +1178,14 @@
   <div id="hover-tooltip"></div>
 
 <script>
-// Vaste, richtingsonafhankelijke referentievolgorde (Project = index 0,
-// Missie = laatste index) — gebruikt voor alles wat "hoeveel kolommen zijn
-// er vanaf Missie onthuld" betekent (defaultHiddenCols/expandOneColumnLeft
-// in runApp) en voor het omdraaien van de fysieke weergavevolgorde in boot().
-// De fysieke weergavevolgorde (welke kolom links/rechts op het scherm staat)
-// is COL_ORDER, lokaal in boot() berekend uit deze constante + columnsReversed.
-const CANONICAL_COL_ORDER = ["project", "cap", "obe", "sub", "prog", "strat", "doel", "missie"];
-// Bouwrichting: false = standaard (Project links, Missie rechts), true =
-// omgedraaid (Missie links, Project rechts) — per doelenboom onthouden in
+// Sinds de configureerbare kolommen (zie docs/kolommen-configuratie-ontwerp.md)
+// komt de kolommenset zelf niet meer uit een vaste constante, maar uit
+// tree.columns (per doelenboom ingesteld, zie api/src/columnConfig.ts en
+// api/src/routes/tree.ts). CANONICAL_COL_ORDER (de "canonieke", d.w.z.
+// geconfigureerde position-volgorde, eerste kolom = index 0) wordt daarom nu
+// per boom berekend in runApp() zelf, niet hier als globale constante.
+// Bouwrichting: false = standaard (canonieke volgorde, eerste kolom links),
+// true = omgedraaid (laatste kolom links) — per doelenboom onthouden in
 // localStorage (colDirectionStorageKey()), gelezen aan het begin van boot().
 let columnsReversed = false;
 function colDirectionStorageKey() {
@@ -1205,19 +1201,22 @@ function flipColumnDirection() {
   window.location.reload();
 }
 
-// Kijkrichting/anker: 'missie' (standaard) = alleen Missie start zichtbaar,
-// "Kolom (links) tonen" onthult stap voor stap richting Project. 'project' =
-// precies andersom: alleen Project start zichtbaar, onthullen gaat richting
-// Missie. Dit is bewust LOS van columnsReversed hierboven — de fysieke
-// links/rechts-positie van de kolommen verandert hier niet mee, alleen welk
-// uiteinde het standaard-zichtbare anker is (zie ANCHOR_ORDER in runApp()).
-let expandAnchor = 'missie';
+// Kijkrichting/anker: 'last' (standaard, was vroeger altijd de Missie-kolom)
+// = alleen de laatste kolom start zichtbaar, "Kolom (links) tonen" onthult
+// stap voor stap richting de eerste kolom. 'first' (was vroeger altijd de
+// Project-kolom) = precies andersom. Dit is bewust LOS van columnsReversed
+// hierboven — de fysieke links/rechts-positie van de kolommen verandert hier
+// niet mee, alleen welk uiteinde het standaard-zichtbare anker is (zie
+// ANCHOR_ORDER in runApp()). Oudere, vóór de configureerbare kolommen in
+// localStorage opgeslagen waarden ('missie'/'project') worden bij het lezen
+// (zie boot()) nog steeds als 'last'/'first' herkend.
+let expandAnchor = 'last';
 function expandAnchorStorageKey() {
   return 'doelenboom-expand-anchor-' + (doelenboomId || '');
 }
 function flipExpandAnchor() {
   try {
-    localStorage.setItem(expandAnchorStorageKey(), expandAnchor === 'missie' ? 'project' : 'missie');
+    localStorage.setItem(expandAnchorStorageKey(), expandAnchor === 'last' ? 'first' : 'last');
   } catch (err) {
     // zie flipColumnDirection() hierboven
   }
@@ -1225,10 +1224,35 @@ function flipExpandAnchor() {
 }
 
 function runApp(data) {
-  const { DETAILS, EDGES, TOELICHTING, PROJECT_STATUS, PRODUCTS, TAGS, ELEMENT_TAGS, ORGS, OB_ORG } = data;
-  const COL_LABELS = {"project": "Project", "cap": "Capability", "obe": "Operationele benefit", "sub": "Sub-benefit " + CURRENT_TENANT_NAME, "prog": "Programmabaat " + CURRENT_TENANT_NAME, "strat": "Strategisch benefit " + CURRENT_TENANT_NAME, "doel": "Strategisch doel", "missie": "Missie " + CURRENT_TENANT_NAME};
-  const COL_COLORS = {"project": "#3E6FA6", "cap": "#6B4C8A", "obe": "#C05A2C", "sub": "#B8862E", "prog": "#2E7D5B", "strat": "#8FAADC", "doel": "#2F5597", "missie": "#203864"};
-  const COL_ARROWS = [{"from": "project", "to": "cap", "label": "ontwikkelt"}, {"from": "cap", "to": "obe", "label": "ondersteunt"}, {"from": "obe", "to": "sub", "label": "realiseert"}, {"from": "sub", "to": "prog", "label": "versterkt"}, {"from": "prog", "to": "strat", "label": "draagt bij aan"}, {"from": "strat", "to": "doel", "label": "ondersteunt"}, {"from": "doel", "to": "missie", "label": "geeft invulling aan"}];
+  const { DETAILS, EDGES, TOELICHTING, PROJECT_STATUS, PRODUCTS, TAGS, ELEMENT_TAGS, ORGS, OB_ORG, COLUMNS } = data;
+  // Alles hieronder komt nu uit tree.columns (per doelenboom geconfigureerd,
+  // zie docs/kolommen-configuratie-ontwerp.md) i.p.v. vaste, hardgecodeerde
+  // objecten — COLUMNS staat al gesorteerd op position (zie adaptTreeResponse).
+  // "key" is voortaan gewoon de type-naam zelf (bv. "Capability"): met vrij
+  // configureerbare kolommen is er geen aparte, kortere sleutel meer nodig,
+  // dus TYPE_TO_COLKEY (de oude vertaaltabel ernaartoe) is niet meer nodig.
+  const CANONICAL_COL_ORDER = COLUMNS.map((c) => c.typeName);
+  const COL_COLORS = {};
+  COLUMNS.forEach((c) => { COL_COLORS[c.typeName] = c.color; });
+  const COL_ARROWS = [];
+  for (let i = 0; i < COLUMNS.length - 1; i++) {
+    COL_ARROWS.push({ from: COLUMNS[i].typeName, to: COLUMNS[i + 1].typeName, label: COLUMNS[i].relationLabelToNext || '' });
+  }
+  // De kolom met isProjectRole=true (precies één, zie validateColumnsInput) —
+  // vervangt de vroegere harde d.type === 'Project'-vergelijkingen overal
+  // waar de projectkaart/planning-items/tijdlijnenoverzicht een element als
+  // "project" moeten herkennen, ongeacht hoe die kolom nu heet.
+  const PROJECT_ROLE_TYPE = (COLUMNS.find((c) => c.isProjectRole) || {}).typeName || null;
+
+  // De twee <select>-velden met "Type" (nieuw/bewerk-element-formulier en
+  // nieuwe-relatie-formulier) stonden voorheen met de 8 standaardtypes vast
+  // in de HTML — nu gevuld vanuit COLUMNS, zodat een tenant met een eigen
+  // kolommenconfiguratie ook echt alleen de eigen types ziet/kan kiezen.
+  const typeOptionsHtml = COLUMNS.map((c) => '<option value="' + escapeHtml(c.typeName) + '">' + escapeHtml(c.typeName) + '</option>').join('');
+  const elementFieldTypeEl = document.getElementById('element-field-type');
+  if (elementFieldTypeEl) elementFieldTypeEl.innerHTML = typeOptionsHtml;
+  const edgeFieldOtherTypeEl = document.getElementById('edge-field-other-type');
+  if (edgeFieldOtherTypeEl) edgeFieldOtherTypeEl.innerHTML = typeOptionsHtml;
 
   const columnsEl = document.getElementById('columns');
   const boardEl = document.getElementById('board');
@@ -1268,7 +1292,7 @@ function runApp(data) {
   // links/rechts-volgorde (COL_ORDER/columnsReversed, alleen gebruikt in
   // boot() voor de layout): dit bepaalt alleen "vanaf welk uiteinde onthullen
   // we, en in welke volgorde", niet waar dat fysiek op het scherm staat.
-  const ANCHOR_ORDER = expandAnchor === 'project'
+  const ANCHOR_ORDER = expandAnchor === 'first'
     ? CANONICAL_COL_ORDER.slice().reverse()
     : CANONICAL_COL_ORDER.slice();
 
@@ -1926,7 +1950,7 @@ function runApp(data) {
   // Klikken op een rij springt terug naar de boom, gefocust op dat project
   // (enterFocus), net als dubbelklikken op de node zelf.
   function renderTimelinesView() {
-    const allProjectIds = Object.keys(DETAILS).filter((id) => DETAILS[id].type === 'Project');
+    const allProjectIds = Object.keys(DETAILS).filter((id) => DETAILS[id].type === PROJECT_ROLE_TYPE);
     if (!allProjectIds.length) {
       timelinesViewEl.innerHTML = '<div class="timelines-view-empty">Geen projecten gevonden in deze doelenboom.</div>';
       return;
@@ -2023,7 +2047,7 @@ function runApp(data) {
         statusHtml = '<div class="timelines-gantt-status" style="color:' + col + '">&#9679; ' + titleCase(ps.projectstatus) + '</div>';
       }
       return '<div class="timelines-gantt-label-main">' +
-        '<span class="dp-code" style="background:' + COL_COLORS['project'] + '">' + escapeHtml(d.code) + '</span>' +
+        '<span class="dp-code" style="background:' + COL_COLORS[PROJECT_ROLE_TYPE] + '">' + escapeHtml(d.code) + '</span>' +
         '<span class="pp-name">' + escapeHtml(d.name) + '</span>' +
       '</div>' + statusHtml;
     }
@@ -2058,8 +2082,7 @@ function runApp(data) {
     let selectedChipHtml = '';
     const selectedDetail = selectedId !== null ? DETAILS[selectedId] : null;
     if (selectedDetail) {
-      const selColKey = TYPE_TO_COLKEY[selectedDetail.type];
-      const selColor = COL_COLORS[selColKey] || '#666';
+      const selColor = COL_COLORS[selectedDetail.type] || '#666';
       selectedChipHtml = ', verbonden met <span class="dp-code" style="background:' + selColor + '">' +
         escapeHtml(selectedDetail.code) + '</span> <strong>' + escapeHtml(selectedDetail.name) + '</strong>';
     }
@@ -2254,7 +2277,7 @@ function runApp(data) {
 
   function renderProjectPanel(id, color) {
     const d = DETAILS[id];
-    if (!d || d.type !== 'Project') {
+    if (!d || d.type !== PROJECT_ROLE_TYPE) {
       projectPanelEl.classList.remove('visible');
       projectPanelEl.innerHTML = '';
       return;
@@ -2307,7 +2330,7 @@ function runApp(data) {
     // in dit algemene detailpaneel is dan overbodige duplicatie. Voor alle
     // andere elementtypen (die geen projectkaart hebben) blijft dit de enige
     // plek om ze te beheren.
-    const isProject = d.type === 'Project';
+    const isProject = d.type === PROJECT_ROLE_TYPE;
     detailPanel.innerHTML =
       '<div class="dp-meta"><span class="dp-code" style="background:' + color + '">' + d.code + '</span>' +
       '<span class="dp-type">' + d.type + '</span>' + ragBadgeHtml(id) + '</div>' +
@@ -2980,6 +3003,10 @@ function runApp(data) {
   if (logoutBtn) logoutBtn.addEventListener('click', () => {
     window.parent.postMessage({ type: 'doelenboom-navigate', target: 'logout' }, PARENT_ORIGIN);
   });
+  const helpBtn = document.getElementById('help-btn');
+  if (helpBtn) helpBtn.addEventListener('click', () => {
+    window.parent.postMessage({ type: 'doelenboom-navigate', target: 'help' }, PARENT_ORIGIN);
+  });
 
   // ---- Excel-export: eerst formaat (oud/nieuw) kiezen, dan template/data ----
   const exportXlsxBtn = document.getElementById('export-xlsx-btn');
@@ -3041,6 +3068,24 @@ function runApp(data) {
 
   if (exportXlsxBtn) exportXlsxBtn.addEventListener('click', openExportModal);
   const exportFormatOudBtn = document.getElementById('export-format-oud');
+  // Het "oud" Excel-formaat hardcodeert Capability-OB/Project-Capability als
+  // aparte tabbladen (zie exporter.py::_fill_oud in excel-service) — dat
+  // klopt alleen nog als deze doelenboom exact de 8 standaardkolommen heeft
+  // (zelfde check als is_standard_columns/isStandardColumns server-side, zie
+  // routes/exports.ts). De API blokkeert dit sowieso (409) als het toch
+  // gebeurt — dit hier is puur om de knop niet aan te bieden als 'ie toch
+  // zou falen.
+  const STANDARD_TYPE_NAMES_FOR_EXPORT = [
+    'Project', 'Capability', 'Operationele benefit', 'Sub-benefit',
+    'Programmabaat', 'Strategische benefit', 'Strategisch doel', 'Missie',
+  ];
+  const isStandardColumnConfig =
+    CANONICAL_COL_ORDER.length === STANDARD_TYPE_NAMES_FOR_EXPORT.length &&
+    CANONICAL_COL_ORDER.every((t, i) => t === STANDARD_TYPE_NAMES_FOR_EXPORT[i]);
+  if (exportFormatOudBtn && !isStandardColumnConfig) {
+    exportFormatOudBtn.disabled = true;
+    exportFormatOudBtn.title = 'Niet beschikbaar: deze doelenboom heeft een aangepaste kolomconfiguratie. Gebruik het nieuwe formaat.';
+  }
   if (exportFormatOudBtn) exportFormatOudBtn.addEventListener('click', () => chooseExportFormat('oud'));
   const exportFormatNieuwBtn = document.getElementById('export-format-nieuw');
   if (exportFormatNieuwBtn) exportFormatNieuwBtn.addEventListener('click', () => chooseExportFormat('nieuw'));
@@ -3090,12 +3135,20 @@ function runApp(data) {
   // om de historische, per-tak-uiteenlopende codeschema's uit de Excel-brondata
   // (bv. "A1", "M1") na te bootsen, want dat zou gokken zijn. De voorgestelde code
   // staat gewoon zichtbaar in het veld en is altijd aan te passen vóór het opslaan.
+  // De 8 standaardtypes behouden hun vertrouwde prefix; een eigen, door de
+  // tenant toegevoegde kolom/type (zie docs/kolommen-configuratie-ontwerp.md)
+  // krijgt een automatisch afgeleide prefix uit de initialen van de typenaam.
   const TYPE_CODE_PREFIX = {
     'Project': 'P', 'Capability': 'C', 'Operationele benefit': 'OB', 'Sub-benefit': 'SB',
     'Programmabaat': 'PB', 'Strategische benefit': 'STB', 'Strategisch doel': 'SD', 'Missie': 'M',
   };
+  function codePrefixForType(type) {
+    if (TYPE_CODE_PREFIX[type]) return TYPE_CODE_PREFIX[type];
+    const initials = String(type || '').split(/[\s-]+/).filter(Boolean).map((w) => w[0]).join('').toUpperCase();
+    return initials || 'X';
+  }
   function suggestElementCode(type) {
-    const prefix = TYPE_CODE_PREFIX[type] || 'X';
+    const prefix = codePrefixForType(type);
     const re = new RegExp('^' + prefix + '(\\d+)$');
     let max = 0;
     Object.keys(DETAILS).forEach((code) => {
@@ -3197,7 +3250,7 @@ function runApp(data) {
     } else {
       elementModalTitle.textContent = 'Nieuw element';
       elementForm.reset();
-      elementFieldType.value = 'Project';
+      elementFieldType.value = CANONICAL_COL_ORDER[0] || '';
       elementFieldCode.value = suggestElementCode(elementFieldType.value);
       elementCodeAutoFilled = true;
       populateElementTagOrgCheckboxes(null);
@@ -3781,7 +3834,7 @@ function runApp(data) {
     edgeFieldOtherTypeLabel.style.display = '';
     edgeFieldOtherLabel.style.display = '';
     edgeFieldDirection.value = 'out';
-    const anchorType = DETAILS[anchorCode] ? DETAILS[anchorCode].type : 'Project';
+    const anchorType = DETAILS[anchorCode] ? DETAILS[anchorCode].type : (CANONICAL_COL_ORDER[0] || '');
     edgeFieldOtherType.value = anchorType;
     populateOtherElementOptions(anchorCode, anchorType);
     edgeFieldWeight.value = '';
@@ -4082,30 +4135,34 @@ function runApp(data) {
   // "Kolom (links) tonen" onthult altijd de volgende kolom richting het
   // uiteinde tegenover het anker (zie expandOneColumnLeft/ANCHOR_ORDER) —
   // welke fysieke kant dat is, hangt af van ZOWEL het anker (expandAnchor)
-  // als de bouwrichting (columnsReversed): bij anker 'missie' onthult je
-  // richting Project (fysiek links, tenzij omgedraaid); bij anker 'project'
-  // precies andersom, richting Missie (fysiek rechts, tenzij omgedraaid).
-  const revealTowardLeft = expandAnchor === 'missie' ? !columnsReversed : columnsReversed;
+  // als de bouwrichting (columnsReversed): bij anker 'last' onthult je
+  // richting de eerste kolom (fysiek links, tenzij omgedraaid); bij anker
+  // 'first' precies andersom, richting de laatste kolom (fysiek rechts,
+  // tenzij omgedraaid). De typenamen in de knoplabels/titels hieronder komen
+  // uit CANONICAL_COL_ORDER (dus uit tree.columns), niet meer hardgecodeerd.
+  const canonicalFirstType = CANONICAL_COL_ORDER[0] || '';
+  const canonicalLastType = CANONICAL_COL_ORDER[CANONICAL_COL_ORDER.length - 1] || '';
+  const revealTowardLeft = expandAnchor === 'last' ? !columnsReversed : columnsReversed;
   if (expandLeftBtn) {
     expandLeftBtn.textContent = revealTowardLeft ? '◀ Kolom links tonen' : 'Kolom rechts tonen ▶';
   }
   if (resetBtn) {
-    resetBtn.textContent = expandAnchor === 'project' ? '↺ Alleen Project' : '↺ Alleen Missie';
+    resetBtn.textContent = '↺ Alleen ' + (expandAnchor === 'first' ? canonicalFirstType : canonicalLastType);
   }
   const flipColumnsBtn = document.getElementById('flip-columns-btn');
   if (flipColumnsBtn) {
     flipColumnsBtn.classList.toggle('active', columnsReversed);
     flipColumnsBtn.title = columnsReversed
-      ? 'Bouwrichting omdraaien (nu: Missie links, Project rechts)'
-      : 'Bouwrichting omdraaien (nu: Project links, Missie rechts)';
+      ? 'Bouwrichting omdraaien (nu: ' + canonicalLastType + ' links, ' + canonicalFirstType + ' rechts)'
+      : 'Bouwrichting omdraaien (nu: ' + canonicalFirstType + ' links, ' + canonicalLastType + ' rechts)';
     flipColumnsBtn.addEventListener('click', flipColumnDirection);
   }
   const flipAnchorBtn = document.getElementById('flip-anchor-btn');
   if (flipAnchorBtn) {
-    flipAnchorBtn.classList.toggle('active', expandAnchor === 'project');
-    flipAnchorBtn.title = expandAnchor === 'project'
-      ? 'Kijkrichting wisselen (nu: vanuit Project, uitbreiden richting Missie)'
-      : 'Kijkrichting wisselen (nu: vanuit Missie, uitbreiden richting Project)';
+    flipAnchorBtn.classList.toggle('active', expandAnchor === 'first');
+    flipAnchorBtn.title = expandAnchor === 'first'
+      ? 'Kijkrichting wisselen (nu: vanuit ' + canonicalFirstType + ', uitbreiden richting ' + canonicalLastType + ')'
+      : 'Kijkrichting wisselen (nu: vanuit ' + canonicalLastType + ', uitbreiden richting ' + canonicalFirstType + ')';
     flipAnchorBtn.addEventListener('click', flipExpandAnchor);
   }
 
@@ -4139,9 +4196,10 @@ let userRole = 'gebruiker';
 // zonder opnieuw te hoeven fetchen.
 let lastTreeResponse = null;
 // Naam van de huidige tenant (bv. "Demo", "KMar") — gezet in boot() zodra de
-// boomdata bekend is, gebruikt om de eerder hardgecodeerde "KMar"/"FPBB"/"B&B"-
-// labels (COL_LABELS, COLUMN_HINTS.prog/strat, nodeInnerHtml) dynamisch te maken
-// zodat elke tenant zijn eigen naam in de kolomlabels/knoop-badge ziet.
+// boomdata bekend is, gebruikt in de topbar-subtitel en de footer. De
+// kolomtitels zelf (incl. eventuele tenantnaam, zie standardColumns() in
+// api/src/columnConfig.ts) komen sinds de configureerbare kolommen
+// rechtstreeks uit tree.columns, dus die gebruiken dit niet meer apart.
 let CURRENT_TENANT_NAME = '';
 
 function renderTopbarUser() {
@@ -4203,71 +4261,60 @@ function showToast(message, kind) {
   toastTimer = setTimeout(() => { el.classList.remove('visible'); }, 4500);
 }
 
-const TYPE_TO_COLKEY = {
-  'Project': 'project', 'Capability': 'cap', 'Operationele benefit': 'obe',
-  'Sub-benefit': 'sub', 'Programmabaat': 'prog', 'Strategische benefit': 'strat',
-  'Strategisch doel': 'doel', 'Missie': 'missie',
-};
-const COLUMN_HINTS = {
-  project: 'Welke projecten ontwikkelen deze capability?',
-  cap: 'Welk vermogen wordt hiermee opgebouwd?',
-  obe: 'Welke operationele verbetering levert dit op? Wat verandert er in de dagelijkse uitvoering?',
-  sub: 'Welk direct effect ontstaat hierdoor?',
-  // prog/strat worden in boot() overschreven zodra de tenantnaam bekend is
-  // (dit object bestaat al bij het parsen van het script, dus kan hier nog
-  // geen CURRENT_TENANT_NAME gebruiken — die is dan nog leeg).
-  prog: 'Welke waarde levert dit aan de tenant?',
-  strat: 'Wat betekent dit voor de tenant?',
-  doel: 'Welk doel ondersteunt dit?',
-  missie: 'Waarom doen we dit uiteindelijk?',
-};
-const NARROW_COLS = new Set(['project', 'cap']);
+// Kolommen komen sinds de configureerbare kolommen (zie
+// docs/kolommen-configuratie-ontwerp.md) niet meer uit vaste, hardgecodeerde
+// objecten (TYPE_TO_COLKEY/COLUMN_HINTS/NARROW_COLS/nodeFontSize), maar
+// rechtstreeks uit de meegegeven ColumnDef-rijen (tree.columns, zie
+// api/src/columnConfig.ts): title/subtitle/color/isNarrow/nodeFontSize staan
+// daar al per kolom in. "key" is nu gewoon de type-naam zelf.
 
-function nodeFontSize(colKey) {
-  if (colKey === 'doel') return 12;
-  if (colKey === 'strat' || colKey === 'missie') return 10;
-  return 8;
-}
-
-function nodeInnerHtml(colKey, el) {
+// Node-inhoud: de laatste kolom (voorheen altijd Missie) krijgt de
+// "capstone"-opmaak (titel in hoofdletters + naam, geen code), de
+// voorlaatste kolom (voorheen altijd Strategisch doel) toont alleen de naam
+// zonder code, alle andere kolommen tonen code + naam — gebaseerd op positie
+// in de kolommenketen, niet meer op een hardgecodeerde typenaam, zodat dit
+// exact hetzelfde oogt voor bestaande doelenbomen (waar die twee kolommen nog
+// steeds respectievelijk de laatste en voorlaatste zijn) én werkt voor elke
+// andere kolomconfiguratie.
+function nodeInnerHtml(col, idx, total, el) {
   const name = escapeHtml(el.name);
-  if (colKey === 'missie') return 'MISSIE ' + escapeHtml(CURRENT_TENANT_NAME.toUpperCase()) + '<br><br>' + name;
-  if (colKey === 'doel') return name;
+  if (idx === total - 1) return col.title.toUpperCase() + '<br><br>' + name;
+  if (idx === total - 2) return name;
   return escapeHtml(el.code) + '<br>' + name;
 }
 
-function buildColumnsHtml(details, colOrder, colLabels, colColors) {
+function buildColumnsHtml(details, columns) {
   const byCol = {};
-  colOrder.forEach((k) => { byCol[k] = []; });
+  columns.forEach((c) => { byCol[c.typeName] = []; });
   let unknownTypeCount = 0;
   Object.keys(details).forEach((id) => {
     const d = details[id];
-    const key = TYPE_TO_COLKEY[d.type];
-    if (!key || !byCol[key]) { unknownTypeCount += 1; return; } // onbekend type: overslaan, niet gokken
-    byCol[key].push(d);
+    if (!byCol[d.type]) { unknownTypeCount += 1; return; } // onbekend type: overslaan, niet gokken
+    byCol[d.type].push(d);
   });
   if (unknownTypeCount) {
     console.warn('[doelenboom] ' + unknownTypeCount + ' element(en) met een onbekend/niet-golden-thread Type overgeslagen.');
   }
 
-  return colOrder.map((key, idx) => {
-    const nodesHtml = byCol[key].map((d) =>
-      '<div class="node" data-id="' + escapeHtml(d.code) + '" style="background:' + colColors[key] +
-      '; color:#FFFFFF; font-size:' + nodeFontSize(key) + 'px;">' + nodeInnerHtml(key, d) + '</div>'
+  return columns.map((col, idx) => {
+    const fontSize = col.nodeFontSize || 8;
+    const nodesHtml = byCol[col.typeName].map((d) =>
+      '<div class="node" data-id="' + escapeHtml(d.code) + '" style="background:' + col.color +
+      '; color:#FFFFFF; font-size:' + fontSize + 'px;">' + nodeInnerHtml(col, idx, columns.length, d) + '</div>'
     ).join('');
-    const narrowCls = NARROW_COLS.has(key) ? ' narrow' : '';
-    return '<div class="column' + narrowCls + '" data-key="' + key + '" data-order="' + idx + '">' +
-      '<div class="col-header" style="border-top-color:' + colColors[key] + ';">' + escapeHtml(colLabels[key]) +
-      '<span class="col-hint">' + escapeHtml(COLUMN_HINTS[key] || '') + '</span></div>' +
+    const narrowCls = col.isNarrow ? ' narrow' : '';
+    return '<div class="column' + narrowCls + '" data-key="' + escapeHtml(col.typeName) + '" data-order="' + idx + '">' +
+      '<div class="col-header" style="border-top-color:' + col.color + ';">' + escapeHtml(col.title) +
+      '<span class="col-hint">' + escapeHtml(col.subtitle || '') + '</span></div>' +
       '<div class="col-nodes">' + nodesHtml + '</div></div>';
   }).join('');
 }
 
-function buildLegendHtml(colOrder, colLabels, colColors) {
-  return colOrder.map((key) =>
-    '<button class="legend-item" type="button" data-key="' + key + '">' +
-    '<span class="swatch" style="background:' + colColors[key] + '"></span>' +
-    '<span class="legend-label">' + escapeHtml(colLabels[key]) + '</span></button>'
+function buildLegendHtml(columns) {
+  return columns.map((col) =>
+    '<button class="legend-item" type="button" data-key="' + escapeHtml(col.typeName) + '">' +
+    '<span class="swatch" style="background:' + col.color + '"></span>' +
+    '<span class="legend-label">' + escapeHtml(col.title) + '</span></button>'
   ).join('');
 }
 
@@ -4337,7 +4384,12 @@ function adaptTreeResponse(tree) {
   const ELEMENT_TAGS = tree.elementTags || {};
   const OB_ORG = tree.obOrg || {};
 
-  return { DETAILS, EDGES, TOELICHTING, PROJECT_STATUS, PRODUCTS, TAGS, ELEMENT_TAGS, ORGS, OB_ORG };
+  // Kolommenconfiguratie van déze doelenboom (zie api/src/columnConfig.ts) —
+  // gesorteerd op position, zodat COLUMNS[0]/[COLUMNS.length-1] betrouwbaar de
+  // eerste/laatste kolom in de keten zijn (zie CANONICAL_COL_ORDER in runApp()).
+  const COLUMNS = (tree.columns || []).slice().sort((a, b) => a.position - b.position);
+
+  return { DETAILS, EDGES, TOELICHTING, PROJECT_STATUS, PRODUCTS, TAGS, ELEMENT_TAGS, ORGS, OB_ORG, COLUMNS };
 }
 
 function renderError(message) {
@@ -4362,14 +4414,9 @@ function boot(tree) {
     applyRole(tree.doelenboom.canWrite ? 'admin' : 'gebruiker');
   }
   CURRENT_TENANT_NAME = tree.doelenboom.tenant.name;
-  // COLUMN_HINTS.prog/strat bevatten de tenantnaam; dat object is al bij het
-  // parsen van het script aangemaakt (toen CURRENT_TENANT_NAME nog leeg was),
-  // dus hier alsnog bijwerken nu de echte naam bekend is.
-  COLUMN_HINTS.prog = 'Welke waarde levert dit aan ' + CURRENT_TENANT_NAME + '?';
-  COLUMN_HINTS.strat = 'Wat betekent dit voor ' + CURRENT_TENANT_NAME + '?';
 
   // Bouwrichting-voorkeur voor déze doelenboom lezen vóórdat de kolommen
-  // gebouwd worden (zie flipColumnDirection()/CANONICAL_COL_ORDER hierboven).
+  // gebouwd worden (zie flipColumnDirection() hierboven).
   try {
     columnsReversed = localStorage.getItem(colDirectionStorageKey()) === '1';
   } catch (err) {
@@ -4378,23 +4425,26 @@ function boot(tree) {
   // Kijkrichting/anker-voorkeur (zie expandAnchor/flipExpandAnchor hierboven)
   // — bewust los van columnsReversed: bepaalt alleen welke kolom standaard
   // zichtbaar is en welke kant "Kolom tonen" op ontvouwt, niet de fysieke
-  // links/rechts-volgorde van COL_ORDER hieronder.
+  // links/rechts-volgorde van COL_ORDER hieronder. Oudere, vóór de
+  // configureerbare kolommen opgeslagen waarden ('project'/'missie') worden
+  // hier nog als 'first'/'last' herkend.
   try {
-    expandAnchor = localStorage.getItem(expandAnchorStorageKey()) === 'project' ? 'project' : 'missie';
+    const storedAnchor = localStorage.getItem(expandAnchorStorageKey());
+    expandAnchor = (storedAnchor === 'project' || storedAnchor === 'first') ? 'first' : 'last';
   } catch (err) {
-    expandAnchor = 'missie';
+    expandAnchor = 'last';
   }
-  const COL_ORDER = columnsReversed
-    ? CANONICAL_COL_ORDER.slice().reverse()
-    : CANONICAL_COL_ORDER.slice();
-  const COL_LABELS = {"project": "Project", "cap": "Capability", "obe": "Operationele benefit", "sub": "Sub-benefit " + CURRENT_TENANT_NAME, "prog": "Programmabaat " + CURRENT_TENANT_NAME, "strat": "Strategisch benefit " + CURRENT_TENANT_NAME, "doel": "Strategisch doel", "missie": "Missie " + CURRENT_TENANT_NAME};
-  const COL_COLORS = {"project": "#3E6FA6", "cap": "#6B4C8A", "obe": "#C05A2C", "sub": "#B8862E", "prog": "#2E7D5B", "strat": "#8FAADC", "doel": "#2F5597", "missie": "#203864"};
 
   const data = adaptTreeResponse(tree);
+  // Fysieke weergavevolgorde (welke kolom links/rechts op het scherm staat):
+  // de geconfigureerde ("canonieke") volgorde, of omgedraaid bij
+  // columnsReversed — data.COLUMNS staat altijd canoniek gesorteerd (zie
+  // adaptTreeResponse), dus alleen hier fysiek omdraaien voor de layout.
+  const COL_ORDER = columnsReversed ? data.COLUMNS.slice().reverse() : data.COLUMNS.slice();
 
-  document.querySelector('.legend').innerHTML = buildLegendHtml(COL_ORDER, COL_LABELS, COL_COLORS);
+  document.querySelector('.legend').innerHTML = buildLegendHtml(COL_ORDER);
   document.getElementById('tag-org-filter').innerHTML = buildTagOrgFilterHtml(data.TAGS, data.ORGS);
-  document.getElementById('columns').innerHTML = buildColumnsHtml(data.DETAILS, COL_ORDER, COL_LABELS, COL_COLORS);
+  document.getElementById('columns').innerHTML = buildColumnsHtml(data.DETAILS, COL_ORDER);
 
   const titleEl = document.getElementById('app-title');
   if (titleEl) titleEl.textContent = 'Doelenboom — ' + tree.doelenboom.name;

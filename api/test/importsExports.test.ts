@@ -85,6 +85,16 @@ describe('imports/exports (Excel round-trip via excel-service)', () => {
         );
         const buf = await res.arrayBuffer();
         assert.ok(buf.byteLength > 0);
+
+        // Bestandsnaam: Doelenboom_<Tenant>_<Doelenboomnaam>_<JJMMDD>.xlsx —
+        // zie routes/exports.ts. setupWritableDoelenboom noemt de doelenboom
+        // "Testboom" (spatie-vrij, dus na sanitatie ongewijzigd); de datum
+        // wordt hier alleen op patroon gecontroleerd (niet op exacte waarde),
+        // om deze test niet te laten breken bij een dag-overgang tijdens de run.
+        const disposition = res.headers.get('content-disposition') ?? '';
+        const match = disposition.match(/filename="([^"]+)"/);
+        assert.ok(match, `verwacht een filename in Content-Disposition, kreeg: ${disposition}`);
+        assert.match(match![1], /^Doelenboom_.+_Testboom_\d{6}\.xlsx$/);
       });
     }
   }

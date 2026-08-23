@@ -17,7 +17,7 @@ import pytest
 
 from app.exporter import build_data_workbook
 from app.parser import parse_workbook
-from tests.helpers import make_tree
+from tests.helpers import make_columns, make_tree
 
 
 @pytest.mark.parametrize('format_', ['oud', 'nieuw'])
@@ -67,6 +67,34 @@ def test_rondgang_zonder_warnings_of_errors(format_):
     assert status == 'ok'
     assert report['warnings'] == []
     assert report['errors'] == []
+
+
+def test_rondgang_met_volledig_eigen_kolomconfiguratie():
+    # Kolomconfiguratie (zie docs/kolommen-configuratie-ontwerp.md) — een
+    # tenant met compleet eigen, niet-standaard types. Alleen zinvol voor het
+    # 'nieuw' formaat: 'oud' hardcodeert Capability/Operationele benefit/
+    # Project (zie exporter.py::_fill_oud) en wordt hiervoor sowieso al
+    # geblokkeerd op API-niveau (zie is_standard_columns, routes/exports.ts).
+    columns = make_columns(['Initiatief', 'Vermogen', 'Ambitie'])
+    tree = make_tree(
+        columns=columns,
+        elements=[
+            {'code': 'I1', 'type': 'Initiatief', 'name': 'Init 1', 'description': '', 'parent_text': '',
+             'kpi': '', 'taakveld': '', 'subtaakveld': '', 'sort_order': 1},
+            {'code': 'V1', 'type': 'Vermogen', 'name': 'Verm 1', 'description': '', 'parent_text': '',
+             'kpi': '', 'taakveld': '', 'subtaakveld': '', 'sort_order': 2},
+            {'code': 'A1', 'type': 'Ambitie', 'name': 'Onze ambitie', 'description': '', 'parent_text': '',
+             'kpi': '', 'taakveld': '', 'subtaakveld': '', 'sort_order': 3},
+        ],
+        edges=[{'source': 'I1', 'target': 'V1', 'weight': None, 'toelichting': ''}],
+        projectStatus={}, products={}, tags=[], elementTags={}, orgUnits=[], obOrg={},
+    )
+    xlsx = build_data_workbook('nieuw', tree)
+    status, report, parsed = parse_workbook(xlsx, valid_types=['Initiatief', 'Vermogen', 'Ambitie'])
+    assert status == 'ok', report['warnings']
+    assert {(e['code'], e['type']) for e in parsed['elements']} == {
+        ('I1', 'Initiatief'), ('V1', 'Vermogen'), ('A1', 'Ambitie'),
+    }
 
 
 def test_lege_boom_exporteert_en_importeert_zonder_te_crashen():

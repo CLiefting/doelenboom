@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { pool } from '../db.js';
 import { requireAuth } from '../auth.js';
 import { requireWritableDoelenboom } from '../rbac.js';
+import { getColumnsForDoelenboom } from '../columnConfig.js';
 
 // CRUD voor losse elementen (fase 1 van de CRUD-uitbreiding — zie ook de latere
 // fases voor tags/organisatieonderdelen en relaties). Dit bestaat naast, en is
@@ -19,11 +20,16 @@ elementsRouter.use(requireAuth);
 // moment van een path-loze .use() nog niet gevuld is.
 const requireAdmin = requireWritableDoelenboom('id');
 
-// Canonieke set — dezelfde als de check-constraint op elements.type in db/init.sql.
-const ELEMENT_TYPES = [
-  'Project', 'Capability', 'Operationele benefit', 'Sub-benefit',
-  'Programmabaat', 'Strategische benefit', 'Strategisch doel', 'Missie',
-];
+// Welke types geldig zijn, hangt sinds de configureerbare kolommen (zie
+// docs/kolommen-configuratie-ontwerp.md) af van de columns-configuratie van
+// déze doelenboom — niet meer van een vaste, globale lijst (de oude
+// check-constraint op elements.type is daarom ook verwijderd, zie
+// db/migrations/0001_column_configs.sql). Vandaar hier een async lookup i.p.v.
+// een module-level constante.
+async function validTypeNames(doelenboomId: string): Promise<string[]> {
+  const columns = await getColumnsForDoelenboom(doelenboomId);
+  return columns.map((c) => c.typeName);
+}
 
 type ElementInput = {
   errors: string[];
@@ -44,9 +50,10 @@ function readElementBody(body: unknown, { requireCode = true }: { requireCode?: 
   const name = typeof b.name === 'string' ? b.name.trim() : '';
 
   if (requireCode && !code) errors.push('Code is verplicht.');
-  if (!type || !ELEMENT_TYPES.includes(type)) {
-    errors.push(`Type moet één van de volgende zijn: ${ELEMENT_TYPES.join(', ')}.`);
-  }
+  // Of dit type ook daadwerkelijk als kolom bestaat in déze doelenboom, wordt
+  // hierna async gecontroleerd (zie validTypeNames) — hier alleen checken dat
+  // er iets is ingevuld.
+  if (!type) errors.push('Type is verplicht.');
   if (!name) errors.push('Naam is verplicht.');
 
   return {
@@ -74,6 +81,10 @@ elementsRouter.post('/doelenbomen/:id/elements', requireAdmin, async (req, res) 
   if (input.errors.length) return res.status(400).json({ error: input.errors.join(' ') });
 
   const doelenboomId = req.params.id;
+  const validTypes = await validTypeNames(doelenboomId);
+  if (!validTypes.includes(input.type)) {
+    return res.status(400).json({ error: `Type moet één van de volgende zijn: ${validTypes.join(', ')}.` });
+  }
   try {
     const maxOrder = await pool.query(
       'select coalesce(max(sort_order), 0) as max_order from elements where doelenboom_id = $1',
@@ -108,6 +119,11 @@ elementsRouter.put('/doelenbomen/:id/elements/:code', requireAdmin, async (req, 
   const input = readElementBody(req.body, { requireCode: false });
   if (input.errors.length) return res.status(400).json({ error: input.errors.join(' ') });
   const newCode = input.code || req.params.code;
+
+  const validTypes = await validTypeNames(req.params.id);
+  if (!validTypes.includes(input.type)) {
+    return res.status(400).json({ error: `Type moet één van de volgende zijn: ${validTypes.join(', ')}.` });
+  }
 
   try {
     const result = await pool.query(
