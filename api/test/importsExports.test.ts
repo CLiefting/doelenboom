@@ -36,6 +36,18 @@ describe('imports/exports (Excel round-trip via excel-service)', () => {
     const sysadminToken = await login(email, 'wachtwoord123');
     ({ doelenboomId, tenantId, adminToken } = await setupWritableDoelenboom(sysadminToken, PREFIX));
 
+    // Dit testbestand dateert van vóór het licentiemodel (module-gating, zie
+    // license.ts/rbac.ts requireModule) — een verse tenant start met geen
+    // enkele module actief, dus zonder dit zou het aanmaken van de producten/
+    // projectstatus hieronder stilzwijgend niets doen (de write-routes
+    // blokkeren dat al server-side) én zou GET .../tree straks een lege
+    // products/projectStatus teruggeven voor zowel de bron- als de
+    // geïmporteerde doelenboom (zelfde tenant, dus één keer activeren volstaat
+    // voor beide). Zie hetzelfde patroon in products.test.ts/projectStatus.test.ts.
+    await req('PUT', `/api/tenants/${tenantId}/license/modules/projecten`, {
+      token: sysadminToken, body: { active: true },
+    });
+
     // Een nieuwe doelenboom wordt automatisch gezaaid met één voorbeeldelement
     // per standaardkolom, verbonden in kolomvolgorde (zie exampleTree.ts) —
     // die "verticale" voorbeeldketen (bv. Sub-benefit->Programmabaat) overleeft
