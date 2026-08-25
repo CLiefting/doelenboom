@@ -155,6 +155,13 @@ describe('doelenbomen', () => {
 
   it('duplicate kopieert elementen/edges/producten/tags/org-units naar een nieuwe doelenboom', async () => {
     const { tenantId, adminToken } = await makeTenantWithAdmin(sysadminToken, `${PREFIX}-t5`, `${PREFIX}-t5-admin@test.local`);
+    // Producten horen bij de "Projecten"-module (zie license.ts/routes/products.ts
+    // requireModule) — voor deze test gaat het puur om het kopieergedrag van
+    // /duplicate, dus activeren we de module hier expliciet, los van de
+    // licentie-specifieke tests in licenses.test.ts.
+    await req('PUT', `/api/tenants/${tenantId}/license/modules/projecten`, {
+      token: sysadminToken, body: { active: true },
+    });
     const boom = await req('POST', `/api/tenants/${tenantId}/doelenbomen`, {
       token: adminToken, body: { slug: 'bron', name: 'Bron' },
     });
@@ -185,9 +192,14 @@ describe('doelenbomen', () => {
     assert.equal(dup.status, 201);
     const newId = dup.body.id;
 
+    // "Bron" is zelf al gezaaid met 1 voorbeeldelement per standaardkolom
+    // (8 kolommen -> 8 elementen V1..V8, 7 edges, zie exampleTree.ts) bovenop
+    // de hier expliciet toegevoegde P1/C1/edge — duplicate kopieert alles.
     const newTree = await req('GET', `/api/doelenbomen/${newId}/tree`, { token: sysadminToken });
-    assert.equal(newTree.body.elements.length, 2);
-    assert.equal(newTree.body.edges.length, 1);
+    assert.equal(newTree.body.elements.length, 10);
+    assert.equal(newTree.body.edges.length, 8);
+    assert.ok(newTree.body.elements.some((e: { code: string }) => e.code === 'P1'));
+    assert.ok(newTree.body.elements.some((e: { code: string }) => e.code === 'C1'));
     assert.equal(newTree.body.products['P1']?.length, 1);
     assert.equal(newTree.body.tags.length, 1);
   });

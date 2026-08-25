@@ -1,6 +1,7 @@
 import { Response, NextFunction } from 'express';
 import { pool } from './db.js';
 import { AuthedRequest } from './auth.js';
+import { hasModule, isLicenseExpired } from './license.js';
 
 // Rolmodel (zie db/init.sql voor de tabellen):
 // - sysadmin (users.is_sysadmin): globaal, mag alles — incl. tenants en
@@ -138,6 +139,52 @@ export function requireWritableDoelenboom(
       return res
         .status(403)
         .json({ error: 'Deze doelenboom staat op alleen-lezen; alleen een sysadmin kan wijzigingen aanbrengen.' });
+    }
+
+    // Licentie-einddatum (zie license.ts isLicenseExpired,
+    // doelenboom_licentiemodel.md) — zelfde enforcement-plek als de
+    // read_only-check hierboven: een verlopen licentie maakt de hele tenant
+    // read-only voor iedereen behalve sysadmin, net als vandaag al geldt voor
+    // een doelenboom die individueel op read-only staat.
+    if (await isLicenseExpired(tenantId)) {
+      return res.status(403).json({
+        error: 'De licentie van deze tenant is verlopen; alleen een sysadmin kan nog wijzigingen aanbrengen.',
+      });
+    }
+    next();
+  };
+}
+
+// Middleware-factory voor module-gebonden functies (zie license.ts en
+// doelenboom_licentiemodel.md §3) — bv. de "Projecten"-module op
+// routes/products.ts en routes/projectStatus.ts. Sysadmin mag altijd door
+// (zelfde conventie als de rest van dit bestand). Voor iedereen anders: leidt
+// de tenant af uit de doelenboom (resolveDoelenboomId, zelfde vorm als bij
+// requireWritableDoelenboom hierboven) en controleert of die module actief
+// is. Bewust een eigen, aparte check (niet gecombineerd met
+// requireWritableDoelenboom) zodat routes beide onafhankelijk kunnen
+// combineren: eerst "mag deze gebruiker hier schrijven", dan "heeft de
+// licentie deze module" — een duidelijker foutmelding per situatie dan één
+// gecombineerde check zou geven.
+export function requireModule(
+  moduleKey: string,
+  resolveDoelenboomId: string | ((req: AuthedRequest) => Promise<number | string | null> | number | string | null)
+) {
+  return async (req: AuthedRequest, res: Response, next: NextFunction) => {
+    if (req.user?.isSysadmin) return next();
+
+    const doelenboomId =
+      typeof resolveDoelenboomId === 'string' ? req.params[resolveDoelenboomId] : await resolveDoelenboomId(req);
+    if (doelenboomId == null) return res.status(404).json({ error: 'Niet gevonden.' });
+
+    const tenantId = await tenantIdForDoelenboom(doelenboomId);
+    if (tenantId == null) return res.status(404).json({ error: 'Niet gevonden.' });
+
+    const active = await hasModule(tenantId, moduleKey);
+    if (!active) {
+      return res.status(403).json({
+        error: `Deze functie vereist de module "${moduleKey}", die niet actief is voor de licentie van deze tenant.`,
+      });
     }
     next();
   };

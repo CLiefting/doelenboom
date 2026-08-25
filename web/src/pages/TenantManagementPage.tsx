@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '../api';
 import ColumnConfigEditor from '../components/ColumnConfigEditor';
+import TenantLicensePanel from '../components/TenantLicensePanel';
 import type {
   DoelenboomMemberRole,
   DoelenboomSummary,
@@ -87,18 +88,23 @@ export default function TenantManagementPage({
           <p style={styles.muted}>Klik op een tenant om de leden (rol admin/gebruiker) te beheren.</p>
         )}
         <div style={styles.tenantList}>
-          {manageableTenants.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setSelectedTenantId(t.id)}
-              style={{
-                ...btnStyle(selectedTenantId === t.id ? 'primary' : 'ghost'),
-                textAlign: 'left',
-              }}
-            >
-              {t.name} <span style={{ opacity: 0.6, fontSize: 12 }}>({t.slug})</span>
-            </button>
-          ))}
+          {manageableTenants.map((t) => {
+            const licenseBorder = licenseBorderColor(t.license_end_date);
+            return (
+              <button
+                key={t.id}
+                onClick={() => setSelectedTenantId(t.id)}
+                style={{
+                  ...btnStyle(selectedTenantId === t.id ? 'primary' : 'ghost'),
+                  textAlign: 'left',
+                  ...(licenseBorder ? { borderColor: licenseBorder, borderWidth: 2 } : {}),
+                }}
+                title={licenseBorderTitle(t.license_end_date)}
+              >
+                {t.name} <span style={{ opacity: 0.6, fontSize: 12 }}>({t.slug})</span>
+              </button>
+            );
+          })}
         </div>
         {user.isSysadmin && (
           <CreateTenantForm
@@ -109,6 +115,21 @@ export default function TenantManagementPage({
           />
         )}
       </section>
+
+      {/* Licentie: sysadmin-only (zie /api/tenants/:tenantId/license, api/src/license.ts
+          en doelenboom_licentiemodel.md) — welk tier deze tenant heeft en welke
+          modules actief zijn. Toewijzen is een commerciële beslissing, geen
+          zelfbedieningsactie voor een tenant-admin. Staat bewust boven
+          "Instellingen": de licentie (incl. einddatum) bepaalt of de tenant
+          hieronder überhaupt nog te wijzigen is. */}
+      {selectedTenantId != null && user.isSysadmin && (
+        <section style={styles.section}>
+          <h2 style={styles.h2}>
+            Licentie van {manageableTenants.find((t) => t.id === selectedTenantId)?.name ?? ''}
+          </h2>
+          <TenantLicensePanel key={selectedTenantId} token={token} tenantId={selectedTenantId} />
+        </section>
+      )}
 
       {selectedTenantId != null && (
         <section style={styles.section}>
@@ -252,6 +273,73 @@ function errMsg(err: unknown): string {
   return err instanceof ApiError ? err.message : 'Er ging iets mis.';
 }
 
+// Herkent specifiek de "licentielimiet bereikt"-fout (zie LicenseLimitError /
+// assertCanAddAdmin / assertCanCreateBoom in api/src/license.ts — 403 met een
+// bericht dat altijd met deze tekst begint). Los van andere 403's (geen
+// sysadmin, geen tenant-toegang, licentie verlopen, ...), die gewoon de
+// generieke foutmelding houden — dit hier krijgt een eigen, duidelijk
+// herkenbare waarschuwing i.p.v. een rode foutregel, omdat het geen bug is
+// maar een verwachte, actie-baar-op-te-lossen situatie (afbouwen of upgraden).
+function licenseLimitMessage(err: unknown): string | null {
+  if (err instanceof ApiError && err.status === 403 && err.message.startsWith('Limiet van tier')) {
+    return err.message;
+  }
+  return null;
+}
+
+function LicenseLimitWarning({ message }: { message: string }) {
+  return (
+    <p style={styles.licenseWarning}>
+      <strong>Licentielimiet bereikt.</strong> {message}
+    </p>
+  );
+}
+
+// Generieke, lokale foutmelding vlak onder een formulier (i.p.v. alleen de
+// gedeelde foutbalk bovenaan de pagina, die makkelijk buiten beeld valt als
+// je verderop in het scherm een lid/doelenboom aan het toevoegen bent) — bv.
+// "wachtwoord (min. 8 tekens) is verplicht" bij een nog onbekend e-mailadres.
+// Ziet er bewust anders uit dan LicenseLimitWarning hierboven (rood i.p.v.
+// amber): dit IS een fout die de gebruiker moet corrigeren, geen normale
+// "eerst afbouwen of upgraden"-situatie.
+function FormErrorNotice({ message }: { message: string }) {
+  return <p style={styles.formErrorNotice}>{message}</p>;
+}
+
+// Kleurindicatie op de tenant-knop obv licentie-einddatum (t.license_end_date,
+// "YYYY-MM-DD" of null): geen einddatum blijft ongewijzigd (geen kleur),
+// groen als de datum verder dan een maand weg is, oranje binnen een maand
+// (nog niet verlopen), rood als de datum al voorbij is. Zuivere
+// string-vergelijking werkt hier omdat "YYYY-MM-DD" lexicografisch al
+// chronologisch sorteert.
+function licenseBorderColor(endDate: string | null): string | undefined {
+  if (!endDate) return undefined;
+  const today = new Date();
+  const todayStr = today.toISOString().slice(0, 10);
+  if (endDate < todayStr) return '#DC3545'; // rood — al verlopen
+  const oneMonthOut = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, today.getUTCDate()));
+  const oneMonthStr = oneMonthOut.toISOString().slice(0, 10);
+  if (endDate <= oneMonthStr) return '#E8A33D'; // oranje — binnen een maand
+  return '#2e7d32'; // groen — verder dan een maand weg
+}
+
+function licenseBorderTitle(endDate: string | null): string | undefined {
+  if (!endDate) return undefined;
+  const color = licenseBorderColor(endDate);
+  const nl = formatDateNL(endDate);
+  if (color === '#DC3545') return `Licentie verlopen op ${nl}`;
+  if (color === '#E8A33D') return `Licentie verloopt binnenkort: ${nl}`;
+  return `Licentie geldig t/m ${nl}`;
+}
+
+// "YYYY-MM-DD" -> "dd-mm-jjjj", zelfde conventie als TenantLicensePanel.tsx.
+function formatDateNL(dateStr: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
+  if (!m) return dateStr;
+  const [, y, mo, d] = m;
+  return `${d}-${mo}-${y}`;
+}
+
 function MemberTable({
   token,
   tenantId,
@@ -269,14 +357,21 @@ function MemberTable({
   setError: (e: string | null) => void;
   onChanged: () => void;
 }) {
+  const [licenseWarning, setLicenseWarning] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+
   async function changeRole(userId: number, role: TenantRoleName) {
     setBusy(true);
     setError(null);
+    setLicenseWarning(null);
+    setFormError(null);
     try {
       await api.updateTenantMemberRole(token, tenantId, userId, role);
       onChanged();
     } catch (err) {
-      setError(errMsg(err));
+      const licMsg = licenseLimitMessage(err);
+      if (licMsg) setLicenseWarning(licMsg);
+      else setFormError(errMsg(err));
     } finally {
       setBusy(false);
     }
@@ -299,6 +394,9 @@ function MemberTable({
   if (members.length === 0) return <p style={styles.muted}>Nog geen leden.</p>;
 
   return (
+    <div>
+    {licenseWarning && <LicenseLimitWarning message={licenseWarning} />}
+    {formError && <FormErrorNotice message={formError} />}
     <div style={styles.tableWrap}>
     <table style={styles.table}>
       <thead>
@@ -333,6 +431,7 @@ function MemberTable({
       </tbody>
     </table>
     </div>
+    </div>
   );
 }
 
@@ -354,11 +453,15 @@ function AddMemberForm({
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState<TenantRoleName>('gebruiker');
+  const [licenseWarning, setLicenseWarning] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
+    setLicenseWarning(null);
+    setFormError(null);
     try {
       await api.addTenantMember(token, tenantId, { email, password: password || undefined, role });
       setEmail('');
@@ -366,37 +469,43 @@ function AddMemberForm({
       setRole('gebruiker');
       onAdded();
     } catch (err) {
-      setError(errMsg(err));
+      const licMsg = licenseLimitMessage(err);
+      if (licMsg) setLicenseWarning(licMsg);
+      else setFormError(errMsg(err));
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <form onSubmit={submit} style={styles.inlineForm}>
-      <input
-        style={styles.input}
-        type="email"
-        placeholder="e-mail"
-        required
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-      />
-      <input
-        style={styles.input}
-        type="password"
-        placeholder="wachtwoord (alleen bij nieuw account)"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-      />
-      <select style={styles.select} value={role} onChange={(e) => setRole(e.target.value as TenantRoleName)}>
-        <option value="admin">admin</option>
-        <option value="gebruiker">gebruiker</option>
-      </select>
-      <button style={btnStyle('primary')} type="submit" disabled={busy}>
-        + Lid toevoegen
-      </button>
-    </form>
+    <div>
+      <form onSubmit={submit} style={styles.inlineForm}>
+        <input
+          style={styles.input}
+          type="email"
+          placeholder="e-mail"
+          required
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+        />
+        <input
+          style={styles.input}
+          type="password"
+          placeholder="wachtwoord (alleen bij nieuw account)"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+        />
+        <select style={styles.select} value={role} onChange={(e) => setRole(e.target.value as TenantRoleName)}>
+          <option value="admin">admin</option>
+          <option value="gebruiker">gebruiker</option>
+        </select>
+        <button style={btnStyle('primary')} type="submit" disabled={busy}>
+          + Lid toevoegen
+        </button>
+      </form>
+      {licenseWarning && <LicenseLimitWarning message={licenseWarning} />}
+      {formError && <FormErrorNotice message={formError} />}
+    </div>
   );
 }
 
@@ -869,31 +978,41 @@ function CreateDoelenboomForm({
 }) {
   const [slug, setSlug] = useState('');
   const [name, setName] = useState('');
+  const [licenseWarning, setLicenseWarning] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
+    setLicenseWarning(null);
+    setFormError(null);
     try {
       await api.createDoelenboom(token, tenantId, { slug, name });
       setSlug('');
       setName('');
       onCreated();
     } catch (err) {
-      setError(errMsg(err));
+      const licMsg = licenseLimitMessage(err);
+      if (licMsg) setLicenseWarning(licMsg);
+      else setFormError(errMsg(err));
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <form onSubmit={submit} style={styles.inlineForm}>
-      <input style={styles.input} placeholder="slug" required value={slug} onChange={(e) => setSlug(e.target.value)} />
-      <input style={styles.input} placeholder="naam" required value={name} onChange={(e) => setName(e.target.value)} />
-      <button style={btnStyle('primary')} type="submit" disabled={busy}>
-        + Doelenboom aanmaken
-      </button>
-    </form>
+    <div>
+      <form onSubmit={submit} style={styles.inlineForm}>
+        <input style={styles.input} placeholder="slug" required value={slug} onChange={(e) => setSlug(e.target.value)} />
+        <input style={styles.input} placeholder="naam" required value={name} onChange={(e) => setName(e.target.value)} />
+        <button style={btnStyle('primary')} type="submit" disabled={busy}>
+          + Doelenboom aanmaken
+        </button>
+      </form>
+      {licenseWarning && <LicenseLimitWarning message={licenseWarning} />}
+      {formError && <FormErrorNotice message={formError} />}
+    </div>
   );
 }
 
@@ -1048,6 +1167,19 @@ const styles: Record<string, React.CSSProperties> = {
   mustChangeBadge: {
     marginLeft: 8, fontSize: 11, color: '#946200', background: '#FFF3CD',
     border: '1px solid #FFE69C', borderRadius: 999, padding: '2px 8px',
+  },
+  // Functionele waarschuwing bij een bereikte licentielimiet (zie
+  // licenseLimitMessage/LicenseLimitWarning hierboven) — bewust amber i.p.v.
+  // rood: dit is geen fout in de app, maar een verwachte, oplosbare situatie.
+  licenseWarning: {
+    margin: '10px 0 0', fontSize: 13, lineHeight: 1.5, color: '#946200',
+    background: '#FFF3CD', border: '1px solid #FFE69C', borderRadius: 8, padding: '8px 12px',
+  },
+  // Generieke lokale foutmelding (zie FormErrorNotice hierboven) — zelfde
+  // vorm als licenseWarning, maar rood i.p.v. amber.
+  formErrorNotice: {
+    margin: '10px 0 0', fontSize: 13, lineHeight: 1.5, color: '#842029',
+    background: '#F8D7DA', border: '1px solid #F1AEB5', borderRadius: 8, padding: '8px 12px',
   },
   doelenboomRow: {
     display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8,

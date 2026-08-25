@@ -17,7 +17,15 @@ describe('project-status (PUT upsert + DELETE)', () => {
     const email = `${PREFIX}-sysadmin@test.local`;
     await createSysadminUser(email, 'wachtwoord123');
     const sysadminToken = await login(email, 'wachtwoord123');
-    ({ doelenboomId, adminToken, gebruikerToken } = await setupWritableDoelenboom(sysadminToken, PREFIX));
+    let tenantId: number;
+    ({ tenantId, doelenboomId, adminToken, gebruikerToken } = await setupWritableDoelenboom(sysadminToken, PREFIX));
+    // Projectstatus hoort bij de "Projecten"-module (zie license.ts/
+    // routes/projectStatus.ts requireModule) — dit testbestand dateert van
+    // vóór het licentiemodel en test puur de CRUD-mechaniek zelf, dus
+    // activeren we de module hier expliciet i.p.v. elke test daarmee te belasten.
+    await req('PUT', `/api/tenants/${tenantId}/license/modules/projecten`, {
+      token: sysadminToken, body: { active: true },
+    });
     await req('POST', `/api/doelenbomen/${doelenboomId}/elements`, {
       token: adminToken, body: { code: 'P1', type: 'Project', name: 'Project 1' },
     });

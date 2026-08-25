@@ -63,7 +63,7 @@ export const api = {
   updateDoelenboom: (
     token: string,
     doelenboomId: number,
-    body: { name: string; slug?: string; readOnly?: boolean; wipeOnEmpty?: boolean }
+    body: { name: string; slug?: string; readOnly?: boolean; wipeOnEmpty?: boolean; archived?: boolean }
   ) =>
     request<import('./types').DoelenboomBase>(`/api/doelenbomen/${doelenboomId}`, {
       method: 'PUT',
@@ -208,6 +208,58 @@ export const api = {
     request<{ columns: import('./types').ColumnDef[] }>(`/api/doelenbomen/${doelenboomId}/column-config`, {
       method: 'PUT',
       body: JSON.stringify({ columns }),
+    }, token),
+
+  // --- Licentiemodel (zie doelenboom_licentiemodel.md) ---
+  // Tiers/modules-catalogus: lezen mag iedereen ingelogd, wijzigen is
+  // sysadmin-only (de server handhaaft dit, zie api/src/routes/licenses.ts).
+  tiers: (token: string) => request<import('./types').Tier[]>('/api/tiers', {}, token),
+
+  createTier: (token: string, body: { name: string; maxAdmins: number; maxBomen: number; sortOrder: number }) =>
+    request<import('./types').Tier>('/api/tiers', { method: 'POST', body: JSON.stringify(body) }, token),
+
+  updateTier: (
+    token: string,
+    tierId: number,
+    body: Partial<{ name: string; maxAdmins: number; maxBomen: number; sortOrder: number }>
+  ) => request<import('./types').Tier>(`/api/tiers/${tierId}`, { method: 'PUT', body: JSON.stringify(body) }, token),
+
+  deleteTier: (token: string, tierId: number) => request<void>(`/api/tiers/${tierId}`, { method: 'DELETE' }, token),
+
+  modules: (token: string) => request<import('./types').ModuleDef[]>('/api/modules', {}, token),
+
+  createModule: (token: string, body: { key: string; name: string; description: string }) =>
+    request<import('./types').ModuleDef>('/api/modules', { method: 'POST', body: JSON.stringify(body) }, token),
+
+  updateModule: (token: string, moduleId: number, body: Partial<{ name: string; description: string }>) =>
+    request<import('./types').ModuleDef>(`/api/modules/${moduleId}`, { method: 'PUT', body: JSON.stringify(body) }, token),
+
+  deleteModule: (token: string, moduleId: number) =>
+    request<void>(`/api/modules/${moduleId}`, { method: 'DELETE' }, token),
+
+  // Per-tenant licentie: huidig tier + actieve modules + gebruik. Lezen mag
+  // een sysadmin of tenant-admin van díe tenant; wijzigen (tier/modules) is
+  // sysadmin-only.
+  tenantLicense: (token: string, tenantId: number) =>
+    request<import('./types').TenantLicense>(`/api/tenants/${tenantId}/license`, {}, token),
+
+  setTenantTier: (token: string, tenantId: number, tierId: number | null) =>
+    request<import('./types').TenantLicense>(`/api/tenants/${tenantId}/license/tier`, {
+      method: 'PUT',
+      body: JSON.stringify({ tierId }),
+    }, token),
+
+  setTenantModule: (token: string, tenantId: number, moduleKey: string, active: boolean) =>
+    request<import('./types').TenantLicense>(`/api/tenants/${tenantId}/license/modules/${moduleKey}`, {
+      method: 'PUT',
+      body: JSON.stringify({ active }),
+    }, token),
+
+  // endDate: "YYYY-MM-DD" of null (geen einddatum ingesteld/nooit verlopen).
+  setTenantLicenseEndDate: (token: string, tenantId: number, endDate: string | null) =>
+    request<import('./types').TenantLicense>(`/api/tenants/${tenantId}/license/end-date`, {
+      method: 'PUT',
+      body: JSON.stringify({ endDate }),
     }, token),
 
   // --- Database-overzicht (sysadmin-only, /dbstat) ---

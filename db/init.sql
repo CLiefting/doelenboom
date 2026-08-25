@@ -277,3 +277,63 @@ create table if not exists excel_imports (
   published_at timestamptz
 );
 create index if not exists idx_imports_doelenboom on excel_imports(doelenboom_id);
+
+-- Licentiemodel (zie doelenboom_licentiemodel.md en
+-- doelenboom_licentie_datamodel.drawio in het Doelenboom-project, en
+-- db/migrations/0002_licenses.sql voor de toelichting bij elk onderdeel
+-- hieronder — hier verder niet herhaald, dit is dezelfde DDL zodat een verse
+-- installatie meteen op v2 van het schema start).
+
+create table if not exists tiers (
+  id bigserial primary key,
+  name text not null unique,
+  max_admins integer not null check (max_admins > 0),
+  max_bomen integer not null check (max_bomen > 0),
+  sort_order integer not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists modules (
+  id bigserial primary key,
+  key text not null unique check (key ~ '^[a-z0-9][a-z0-9_-]*$'),
+  name text not null,
+  description text not null default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists tenant_modules (
+  tenant_id bigint not null references tenants(id) on delete cascade,
+  module_id bigint not null references modules(id) on delete cascade,
+  activated_at timestamptz not null default now(),
+  primary key (tenant_id, module_id)
+);
+
+alter table tenants add column if not exists tier_id bigint references tiers(id) on delete set null;
+alter table tenants add column if not exists lifetime_trees_created integer not null default 0;
+-- Licentie-einddatum (zie db/migrations/0003_license_expiry.sql voor de
+-- volledige toelichting) — null = geen einddatum ingesteld/nooit verlopen.
+alter table tenants add column if not exists license_end_date date;
+
+alter table doelenbomen add column if not exists archived_at timestamptz;
+create index if not exists idx_doelenbomen_tenant_active
+  on doelenbomen(tenant_id) where archived_at is null;
+
+insert into tiers (name, max_admins, max_bomen, sort_order) values
+  ('Single-Use', 1, 5, 0),
+  ('Brons', 2, 10, 1),
+  ('Zilver', 5, 25, 2),
+  ('Goud', 10, 100, 3),
+  ('Diamant', 25, 100, 4)
+on conflict (name) do nothing;
+
+insert into modules (key, name, description) values
+  (
+    'projecten',
+    'Projecten',
+    'Uitgebreide projectmanagement-features: status, RAG-status, producten/deliverables en planning. ' ||
+    'De Project-node en de koppeling naar Capability blijven altijd onderdeel van de basis-boom, ook zonder ' ||
+    'deze module — alleen deze verdiepende laag zit erachter.'
+  )
+on conflict (key) do nothing;

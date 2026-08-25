@@ -3,6 +3,7 @@ import { pool } from '../db.js';
 import { requireAuth, AuthedRequest } from '../auth.js';
 import { requireTenantRoleForDoelenboomParam, getEffectiveRoleForDoelenboom } from '../rbac.js';
 import { getColumnsForDoelenboom } from '../columnConfig.js';
+import { getActiveModuleKeys, isLicenseExpired } from '../license.js';
 
 export const treeRouter = Router();
 treeRouter.use(requireAuth);
@@ -125,6 +126,24 @@ export async function fetchTree(doelenboomId: string) {
 
   const columns = await getColumnsForDoelenboom(doelenboomId);
 
+  // Licentiegating van de "Projecten"-module (status/RAG/producten/planning
+  // — zie doelenboom_licentiemodel.md §3): zonder de module levert dit hier
+  // gewoon lege objecten op, i.p.v. dat de frontend zelf per veld moet
+  // filteren. Eén enforcement-punt dat automatisch ook de Excel-export dekt
+  // (routes/exports.ts roept fetchTree() rechtstreeks aan). De Project-node
+  // zelf (elements/edges) blijft altijd intact — alleen de verdiepende laag
+  // wordt hier weggelaten. activeModules gaat wél altijd mee, ook leeg, zodat
+  // de frontend (tree.html) daarop de "+ Product"/"Bewerken"-knoppen kan
+  // verbergen i.p.v. tonen-maar-laten-mislukken (zie ook requireModule in
+  // routes/products.ts / routes/projectStatus.ts voor de schrijfkant).
+  const activeModules = await getActiveModuleKeys(doelenboomResult.rows[0].tenant_id);
+  const projectenActive = activeModules.includes('projecten');
+  // Licentie-einddatum (zie license.ts isLicenseExpired,
+  // doelenboom_licentiemodel.md) — gaat mee zodat tree.html een watermerk kan
+  // tonen ("Licentie verlopen voor {tenant}") en de writability van de
+  // ingelogde gebruiker er hieronder al rekening mee houdt.
+  const licenseExpired = await isLicenseExpired(doelenboomResult.rows[0].tenant_id);
+
   return {
     columns,
     doelenboom: {
@@ -145,12 +164,14 @@ export async function fetchTree(doelenboomId: string) {
       weight: r.weight,
       toelichting: r.toelichting,
     })),
-    projectStatus,
-    products,
+    projectStatus: projectenActive ? projectStatus : {},
+    products: projectenActive ? products : {},
     tags: tagsResult.rows,
     elementTags,
     orgUnits: orgUnitsResult.rows,
     obOrg,
+    activeModules,
+    licenseExpired,
   };
 }
 
@@ -165,7 +186,8 @@ treeRouter.get('/:id/tree', requireTenantRoleForDoelenboomParam('gebruiker', 'id
   const effectiveRole = req.user!.isSysadmin
     ? 'admin'
     : (await getEffectiveRoleForDoelenboom(req.user!.id, req.params.id)) ?? 'gebruiker';
-  const canWrite = req.user!.isSysadmin || (effectiveRole === 'admin' && !tree.doelenboom.readOnly);
+  const canWrite =
+    req.user!.isSysadmin || (effectiveRole === 'admin' && !tree.doelenboom.readOnly && !tree.licenseExpired);
 
   res.json({ ...tree, doelenboom: { ...tree.doelenboom, effectiveRole, canWrite } });
 });

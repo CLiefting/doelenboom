@@ -9,6 +9,8 @@ import {
   tenantIdForDoelenboom,
 } from '../rbac.js';
 import { createDoelenboomConfigFromTenantDefault, copyDoelenboomConfig } from '../columnConfig.js';
+import { seedExampleTree } from '../exampleTree.js';
+import { assertCanCreateBoom, incrementLifetimeTreesCreated, LicenseLimitError } from '../license.js';
 
 function isUniqueViolation(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { code?: string }).code === '23505';
@@ -24,7 +26,10 @@ doelenbomenRouter.use(requireAuth);
 // alleen doelenbomen van tenants waar hij/zij lid van is (rol maakt niet uit,
 // gebruiker mag ook lezen). Zonder deze filter zag elke ingelogde gebruiker
 // vroeger alle tenants door elkaar in de picker.
-const DOELENBOOM_FIELDS = 'd.id, d.slug, d.name, d.read_only, d.wipe_on_empty, d.created_at';
+// archived_at (als "archivedAt"): zie license.ts — een gearchiveerde
+// doelenboom telt niet mee als "actieve" boom voor de tier-limiet (§5,
+// doelenboom_licentiemodel.md), maar blijft verder gewoon bestaan/leesbaar.
+const DOELENBOOM_FIELDS = 'd.id, d.slug, d.name, d.read_only, d.wipe_on_empty, d.archived_at as "archivedAt", d.created_at';
 
 doelenbomenRouter.get('/doelenbomen', async (req: AuthedRequest, res) => {
   if (req.user!.isSysadmin) {
@@ -68,7 +73,8 @@ doelenbomenRouter.get(
   requireTenantRoleForTenantParam('gebruiker', 'tenantId'),
   async (req, res) => {
     const result = await pool.query(
-      'select id, slug, name, read_only, wipe_on_empty, created_at from doelenbomen where tenant_id = $1 order by name',
+      'select id, slug, name, read_only, wipe_on_empty, archived_at as "archivedAt", created_at ' +
+        'from doelenbomen where tenant_id = $1 order by name',
       [req.params.tenantId]
     );
     res.json(result.rows);
@@ -80,7 +86,10 @@ doelenbomenRouter.get(
 // gebruikers. wipe_on_empty wordt geseed vanuit tenants.wipe_on_empty (de
 // "standaardinstelling" van de tenant, zie db/init.sql) zodat je 'm niet elke
 // keer opnieuw hoeft te zetten — na aanmaken is 't gewoon een eigen,
-// onafhankelijk instelbare vlag op déze doelenboom.
+// onafhankelijk instelbare vlag op déze doelenboom. Na het aanmaken van de
+// kolomconfiguratie wordt de doelenboom ook meteen gevuld met één
+// voorbeeldelement per kolom (zie exampleTree.ts) — zonder dit zou een
+// gloednieuwe doelenboom een volledig leeg scherm tonen.
 doelenbomenRouter.post(
   '/tenants/:tenantId/doelenbomen',
   requireTenantRoleForTenantParam('admin', 'tenantId'),
@@ -89,6 +98,14 @@ doelenbomenRouter.post(
     if (!slug || !name) {
       return res.status(400).json({ error: 'slug en name zijn verplicht' });
     }
+    // Vóór de transactie: telt tegen de tier-limiet (actieve bomen, zie
+    // license.ts) — geen tier ingesteld = onbeperkt, dan is dit een no-op.
+    try {
+      await assertCanCreateBoom(req.params.tenantId);
+    } catch (err) {
+      if (err instanceof LicenseLimitError) return res.status(403).json({ error: err.message });
+      throw err;
+    }
     const client = await pool.connect();
     try {
       await client.query('begin');
@@ -96,7 +113,7 @@ doelenbomenRouter.post(
       const defaultWipeOnEmpty = tenantRow.rows[0]?.wipe_on_empty ?? false;
       const result = await client.query(
         `insert into doelenbomen (tenant_id, slug, name, wipe_on_empty)
-         values ($1, $2, $3, $4) returning id, slug, name, read_only, wipe_on_empty, created_at`,
+         values ($1, $2, $3, $4) returning id, slug, name, read_only, wipe_on_empty, archived_at as "archivedAt", created_at`,
         [req.params.tenantId, slug, name, defaultWipeOnEmpty]
       );
       // Eigen, onafhankelijke kopie van de tenant-default kolomconfiguratie
@@ -108,6 +125,12 @@ doelenbomenRouter.post(
         tenantRow.rows[0]?.name ?? '',
         result.rows[0].id
       );
+      // Eén voorbeeldelement per kolom, met elkaar verbonden (zie
+      // exampleTree.ts) — zodat een nieuwe, verder lege doelenboom meteen een
+      // werkend voorbeeldpad toont in plaats van een leeg scherm.
+      await seedExampleTree(client, result.rows[0].id);
+      // Telt alleen op, nooit omlaag — zie license.ts incrementLifetimeTreesCreated.
+      await incrementLifetimeTreesCreated(client, req.params.tenantId);
       await client.query('commit');
       res.status(201).json(result.rows[0]);
     } catch (err) {
@@ -119,13 +142,20 @@ doelenbomenRouter.post(
   }
 );
 
-// PUT /api/doelenbomen/:id — { name?, slug?, readOnly?, wipeOnEmpty? }. Dit zijn
-// instellingen van de doelenboom zelf (naam/slug/alleen-lezen/auto-leegmaken),
-// geen "boom-inhoud" — daarom hier bewust requireTenantRoleForDoelenboomParam
-// i.p.v. requireWritableDoelenboom: een tenant-admin mag de read-only-vlag
-// altijd zelf weer uitzetten, ook als de doelenboom op dit moment read-only
-// staat (anders zou een tenant-admin zichzelf kunnen buitensluiten zonder
-// sysadmin erbij te hoeven halen).
+// PUT /api/doelenbomen/:id — { name?, slug?, readOnly?, wipeOnEmpty?, archived? }.
+// Dit zijn instellingen van de doelenboom zelf (naam/slug/alleen-lezen/
+// auto-leegmaken/gearchiveerd), geen "boom-inhoud" — daarom hier bewust
+// requireTenantRoleForDoelenboomParam i.p.v. requireWritableDoelenboom: een
+// tenant-admin mag de read-only-vlag altijd zelf weer uitzetten, ook als de
+// doelenboom op dit moment read-only staat (anders zou een tenant-admin
+// zichzelf kunnen buitensluiten zonder sysadmin erbij te hoeven halen).
+// "archived" (zie license.ts/doelenboom_licentiemodel.md §5): een
+// gearchiveerde doelenboom telt niet mee als "actief" voor de tier-limiet.
+// De-archiveren verhoogt het aantal actieve bomen weer met één, dus dat gaat
+// via dezelfde limiet-check als het aanmaken van een nieuwe boom
+// (assertCanCreateBoom telt deze boom, terwijl 'ie nog archived_at != null
+// heeft, niet mee — dus "activeBomen >= max" klopt precies voor de situatie
+// ná de-archivering).
 doelenbomenRouter.put(
   '/doelenbomen/:id',
   requireTenantRoleForDoelenboomParam('admin', 'id'),
@@ -135,19 +165,39 @@ doelenbomenRouter.put(
     const slug = typeof b.slug === 'string' ? b.slug.trim() : '';
     const readOnly = typeof b.readOnly === 'boolean' ? b.readOnly : undefined;
     const wipeOnEmpty = typeof b.wipeOnEmpty === 'boolean' ? b.wipeOnEmpty : undefined;
+    const archived = typeof b.archived === 'boolean' ? b.archived : undefined;
     if (!name) return res.status(400).json({ error: 'Naam is verplicht.' });
 
-    const current = await pool.query('select slug, read_only, wipe_on_empty from doelenbomen where id = $1', [req.params.id]);
+    const current = await pool.query(
+      'select tenant_id, slug, read_only, wipe_on_empty, archived_at from doelenbomen where id = $1',
+      [req.params.id]
+    );
     if (current.rows.length === 0) return res.status(404).json({ error: 'Doelenboom niet gevonden.' });
     const newSlug = slug || current.rows[0].slug;
     const newReadOnly = readOnly === undefined ? current.rows[0].read_only : readOnly;
     const newWipeOnEmpty = wipeOnEmpty === undefined ? current.rows[0].wipe_on_empty : wipeOnEmpty;
+    const wasArchived = current.rows[0].archived_at != null;
+    const willBeArchived = archived === undefined ? wasArchived : archived;
+
+    if (!wasArchived && willBeArchived === false) {
+      // geen wijziging, geen limiet-check nodig
+    } else if (wasArchived && !willBeArchived) {
+      // De-archiveren: telt weer mee als actieve boom, dus tegen de tier-limiet aan.
+      try {
+        await assertCanCreateBoom(current.rows[0].tenant_id);
+      } catch (err) {
+        if (err instanceof LicenseLimitError) return res.status(403).json({ error: err.message });
+        throw err;
+      }
+    }
 
     try {
       const result = await pool.query(
-        `update doelenbomen set name = $1, slug = $2, read_only = $3, wipe_on_empty = $4
-         where id = $5 returning id, slug, name, read_only, wipe_on_empty, created_at`,
-        [name, newSlug, newReadOnly, newWipeOnEmpty, req.params.id]
+        `update doelenbomen set name = $1, slug = $2, read_only = $3, wipe_on_empty = $4,
+           archived_at = case when $5 then coalesce(archived_at, now()) else null end
+         where id = $6
+         returning id, slug, name, read_only, wipe_on_empty, archived_at as "archivedAt", created_at`,
+        [name, newSlug, newReadOnly, newWipeOnEmpty, willBeArchived, req.params.id]
       );
       res.json(result.rows[0]);
     } catch (err) {
@@ -284,10 +334,17 @@ doelenbomenRouter.post('/doelenbomen/:id/duplicate', requireSysadmin, async (req
 
     const newDoelenboom = await client.query(
       `insert into doelenbomen (tenant_id, slug, name)
-       values ($1, $2, $3) returning id, slug, name, read_only, wipe_on_empty, created_at`,
+       values ($1, $2, $3) returning id, slug, name, read_only, wipe_on_empty, archived_at as "archivedAt", created_at`,
       [resolvedTenantId, slug, name]
     );
     const newDoelenboomId = newDoelenboom.rows[0].id;
+    // Sysadmin-only route (zie de rbac-check hierboven) — bewust géén
+    // tier-limiet-check hier, consistent met de rest van deze codebase waar
+    // een sysadmin altijd door mag; het is aan de sysadmin zelf om nadien de
+    // tier van de doeltenant bij te stellen indien nodig. Wél de
+    // lifetime-teller bijwerken, want dat is puur rapportage/upsell-
+    // signalering (zie license.ts), geen enforcement.
+    await incrementLifetimeTreesCreated(client, resolvedTenantId);
 
     // Eigen kopie van de kolomconfiguratie van de bron-doelenboom (niet de
     // tenant-default — de bron kan zelf al een aangepaste config hebben, en

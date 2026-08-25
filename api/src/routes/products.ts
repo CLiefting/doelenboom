@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { pool } from '../db.js';
 import { requireAuth } from '../auth.js';
-import { requireWritableDoelenboom } from '../rbac.js';
+import { requireWritableDoelenboom, requireModule } from '../rbac.js';
 
 // CRUD voor producten/deliverables ("planning items") van een element — tot nu
 // toe alleen te vullen via Excel-import (routes/imports.ts); dit hier is de
@@ -13,6 +13,11 @@ export const productsRouter = Router();
 productsRouter.use(requireAuth);
 // Per route meegeven (niet via router.use()) — zie toelichting in elements.ts.
 const requireAdmin = requireWritableDoelenboom('id');
+// Producten/deliverables horen bij de "Projecten"-module (zie
+// doelenboom_licentiemodel.md §3) — GET .../tree levert al lege data als de
+// module ontbreekt (routes/tree.ts), dit hier blokkeert daarnaast expliciet
+// de schrijfkant met een duidelijke foutmelding i.p.v. een stille no-op.
+const requireProjectenModule = requireModule('projecten', 'id');
 
 const PRODUCT_TYPES = ['deliverable', 'mijlpaal'];
 
@@ -68,7 +73,7 @@ async function findElementId(doelenboomId: string, code: string): Promise<number
 }
 
 // POST /api/doelenbomen/:id/elements/:code/products — nieuw planning item.
-productsRouter.post('/doelenbomen/:id/elements/:code/products', requireAdmin, async (req, res) => {
+productsRouter.post('/doelenbomen/:id/elements/:code/products', requireAdmin, requireProjectenModule, async (req, res) => {
   const input = readProductBody(req.body);
   if (input.errors.length) return res.status(400).json({ error: input.errors.join(' ') });
 
@@ -88,7 +93,7 @@ productsRouter.post('/doelenbomen/:id/elements/:code/products', requireAdmin, as
 });
 
 // PUT /api/doelenbomen/:id/elements/:code/products/:productId — bijwerken.
-productsRouter.put('/doelenbomen/:id/elements/:code/products/:productId', requireAdmin, async (req, res) => {
+productsRouter.put('/doelenbomen/:id/elements/:code/products/:productId', requireAdmin, requireProjectenModule, async (req, res) => {
   const input = readProductBody(req.body);
   if (input.errors.length) return res.status(400).json({ error: input.errors.join(' ') });
 
@@ -112,7 +117,7 @@ productsRouter.put('/doelenbomen/:id/elements/:code/products/:productId', requir
 });
 
 // DELETE /api/doelenbomen/:id/elements/:code/products/:productId
-productsRouter.delete('/doelenbomen/:id/elements/:code/products/:productId', requireAdmin, async (req, res) => {
+productsRouter.delete('/doelenbomen/:id/elements/:code/products/:productId', requireAdmin, requireProjectenModule, async (req, res) => {
   const elementId = await findElementId(req.params.id, req.params.code);
   if (!elementId) return res.status(404).json({ error: `Element "${req.params.code}" niet gevonden.` });
 

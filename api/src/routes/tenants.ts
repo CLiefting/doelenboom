@@ -3,22 +3,35 @@ import { pool } from '../db.js';
 import { requireAuth, AuthedRequest } from '../auth.js';
 import { requireSysadmin, requireTenantRoleForTenantParam } from '../rbac.js';
 import { createTenantDefaultConfig } from '../columnConfig.js';
+import { assertCanAddAdmin, computeDefaultLicenseEndDate, LicenseLimitError } from '../license.js';
 
 export const tenantsRouter = Router();
 tenantsRouter.use(requireAuth);
 
 const TENANT_SELECT_FIELDS = 'id, slug, name, wipe_on_empty, session_timeout_minutes, created_at';
 
+// Licentie-einddatum als losse, expliciet met to_char geformatteerde kolom
+// ("YYYY-MM-DD" of null) — bewust NIET in TENANT_SELECT_FIELDS hierboven,
+// want die constante wordt elders (zie de niet-sysadmin-tak hieronder)
+// naïef op ', ' gesplitst om een tabel-alias (t.) in te voegen; een
+// to_char(...)-expressie bevat zelf een ', ' en zou die truc breken. Zelfde
+// to_char-conventie als license.ts getTenantLicense (endDate) — voorkomt dat
+// de pg-driver hier een DATE-kolom als JS Date-object teruggeeft.
+const LICENSE_END_DATE_SELECT = `to_char(license_end_date, 'YYYY-MM-DD') as license_end_date`;
+
 // Sysadmin ziet alle tenants; iedereen anders alleen de tenants waar hij/zij lid
 // van is (nodig voor bv. "in welke tenant mag ik een doelenboom aanmaken" of het
-// eigen ledenbeheer-scherm van een tenant-admin).
+// eigen ledenbeheer-scherm van een tenant-admin). license_end_date gaat mee
+// zodat Tenantbeheer per tenant een kleurindicatie kan tonen (zie
+// TenantManagementPage.tsx licenseBorderColor).
 tenantsRouter.get('/', async (req: AuthedRequest, res) => {
   if (req.user!.isSysadmin) {
-    const result = await pool.query(`select ${TENANT_SELECT_FIELDS} from tenants order by name`);
+    const result = await pool.query(`select ${TENANT_SELECT_FIELDS}, ${LICENSE_END_DATE_SELECT} from tenants order by name`);
     return res.json(result.rows);
   }
   const result = await pool.query(
-    `select t.${TENANT_SELECT_FIELDS.split(', ').join(', t.')}, tu.role as my_role
+    `select t.${TENANT_SELECT_FIELDS.split(', ').join(', t.')}, tu.role as my_role,
+            to_char(t.license_end_date, 'YYYY-MM-DD') as license_end_date
      from tenants t join tenant_users tu on tu.tenant_id = t.id
      where tu.user_id = $1
      order by t.name`,
@@ -39,10 +52,15 @@ tenantsRouter.post('/', requireSysadmin, async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('begin');
+    // Default licentie-einddatum: einde van de aanmaakmaand + 12 maanden
+    // (jaarlicentie, zie license.ts computeDefaultLicenseEndDate en
+    // doelenboom_licentiemodel.md) — een sysadmin kan dit later altijd
+    // verlengen/wijzigen/wissen via het licentiescherm in Tenantbeheer.
+    const defaultLicenseEndDate = computeDefaultLicenseEndDate(new Date());
     const result = await client.query(
-      `insert into tenants (slug, name, wipe_on_empty, session_timeout_minutes)
-       values ($1, $2, $3, $4) returning ${TENANT_SELECT_FIELDS}`,
-      [slug, name, !!wipeOnEmpty, Number.isFinite(sessionTimeoutMinutes) ? sessionTimeoutMinutes : 30]
+      `insert into tenants (slug, name, wipe_on_empty, session_timeout_minutes, license_end_date)
+       values ($1, $2, $3, $4, $5) returning ${TENANT_SELECT_FIELDS}, ${LICENSE_END_DATE_SELECT}`,
+      [slug, name, !!wipeOnEmpty, Number.isFinite(sessionTimeoutMinutes) ? sessionTimeoutMinutes : 30, defaultLicenseEndDate]
     );
     await createTenantDefaultConfig(client, result.rows[0].id, result.rows[0].name);
     await client.query('commit');
@@ -71,7 +89,7 @@ tenantsRouter.put('/:id', requireTenantRoleForTenantParam('admin', 'id'), async 
        wipe_on_empty = coalesce($1, wipe_on_empty),
        session_timeout_minutes = coalesce($2, session_timeout_minutes)
      where id = $3
-     returning ${TENANT_SELECT_FIELDS}`,
+     returning ${TENANT_SELECT_FIELDS}, ${LICENSE_END_DATE_SELECT}`,
     [typeof wipeOnEmpty === 'boolean' ? wipeOnEmpty : null, sessionTimeoutMinutes ?? null, req.params.id]
   );
   if (result.rows.length === 0) return res.status(404).json({ error: 'Tenant niet gevonden' });
@@ -135,6 +153,26 @@ tenantsRouter.post('/:tenantId/members', requireTenantRoleForTenantParam('admin'
     userId = created.rows[0].id;
   }
 
+  // Licentielimiet (zie license.ts/doelenboom_licentiemodel.md §5): alleen
+  // relevant als deze gebruiker hierdoor NIEUW admin van deze tenant wordt —
+  // een al-bestaande admin (bv. e-mailadres bestond al met role='admin') mag
+  // altijd zonder limiet-check opnieuw als admin worden toegevoegd, dat is
+  // geen extra admin.
+  if (role === 'admin') {
+    const alreadyAdmin = await pool.query(
+      `select 1 from tenant_users where tenant_id = $1 and user_id = $2 and role = 'admin'`,
+      [req.params.tenantId, userId]
+    );
+    if (alreadyAdmin.rows.length === 0) {
+      try {
+        await assertCanAddAdmin(req.params.tenantId);
+      } catch (err) {
+        if (err instanceof LicenseLimitError) return res.status(403).json({ error: err.message });
+        throw err;
+      }
+    }
+  }
+
   await pool.query(
     `insert into tenant_users (tenant_id, user_id, role) values ($1, $2, $3)
      on conflict (tenant_id, user_id) do update set role = excluded.role`,
@@ -148,6 +186,22 @@ tenantsRouter.put('/:tenantId/members/:userId', requireTenantRoleForTenantParam(
   if (role !== 'admin' && role !== 'gebruiker') {
     return res.status(400).json({ error: 'role moet "admin" of "gebruiker" zijn.' });
   }
+
+  if (role === 'admin') {
+    const alreadyAdmin = await pool.query(
+      `select 1 from tenant_users where tenant_id = $1 and user_id = $2 and role = 'admin'`,
+      [req.params.tenantId, req.params.userId]
+    );
+    if (alreadyAdmin.rows.length === 0) {
+      try {
+        await assertCanAddAdmin(req.params.tenantId);
+      } catch (err) {
+        if (err instanceof LicenseLimitError) return res.status(403).json({ error: err.message });
+        throw err;
+      }
+    }
+  }
+
   const result = await pool.query(
     `update tenant_users set role = $1 where tenant_id = $2 and user_id = $3 returning id`,
     [role, req.params.tenantId, req.params.userId]

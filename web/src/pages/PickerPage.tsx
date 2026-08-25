@@ -9,6 +9,7 @@ export default function PickerPage({
   onLogoutRequest,
   onTenantsRequest,
   onAccountsRequest,
+  onLicensesRequest,
   onHelpRequest,
   onChangePasswordRequest,
 }: {
@@ -18,6 +19,7 @@ export default function PickerPage({
   onLogoutRequest: () => void;
   onTenantsRequest: () => void;
   onAccountsRequest: () => void;
+  onLicensesRequest: () => void;
   onHelpRequest: () => void;
   onChangePasswordRequest: () => void;
 }) {
@@ -56,6 +58,7 @@ export default function PickerPage({
             <UserMenu
               user={user}
               onAccountsRequest={onAccountsRequest}
+              onLicensesRequest={onLicensesRequest}
               onChangePasswordRequest={onChangePasswordRequest}
               onLogoutRequest={onLogoutRequest}
             />
@@ -101,11 +104,13 @@ export default function PickerPage({
 function UserMenu({
   user,
   onAccountsRequest,
+  onLicensesRequest,
   onChangePasswordRequest,
   onLogoutRequest,
 }: {
   user: User;
   onAccountsRequest: () => void;
+  onLicensesRequest: () => void;
   onChangePasswordRequest: () => void;
   onLogoutRequest: () => void;
 }) {
@@ -155,6 +160,18 @@ function UserMenu({
               }}
             >
               Accountbeheer
+            </button>
+          )}
+          {user.isSysadmin && (
+            <button
+              role="menuitem"
+              style={styles.dropdownItem}
+              onClick={() => {
+                setOpen(false);
+                onLicensesRequest();
+              }}
+            >
+              Licentiebeheer
             </button>
           )}
           {user.isSysadmin && (

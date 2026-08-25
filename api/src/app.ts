@@ -14,6 +14,7 @@ import { edgesRouter } from './routes/edges.js';
 import { productsRouter } from './routes/products.js';
 import { projectStatusRouter } from './routes/projectStatus.js';
 import { columnConfigRouter } from './routes/columnConfig.js';
+import { licensesRouter } from './routes/licenses.js';
 import { dbstatRouter } from './routes/dbstat.js';
 import { sessionsRouter } from './routes/sessions.js';
 import { pool } from './db.js';
@@ -67,6 +68,9 @@ export function createApp() {
   app.use('/api', productsRouter);
   app.use('/api', projectStatusRouter);
   app.use('/api', columnConfigRouter);
+  // Definieert zelf zowel '/tiers'/'/modules' als '/tenants/:tenantId/license/...'
+  // — vandaar op '/api' gemount, net als doelenbomenRouter hierboven.
+  app.use('/api', licensesRouter);
   app.use('/api/dbstat', dbstatRouter);
   app.use('/api/sessions', sessionsRouter);
 

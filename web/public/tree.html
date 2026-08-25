@@ -146,6 +146,30 @@
   }
   .node.search-miss { opacity: 0.2; }
 
+  /* Boomfilter (Ctrl/Cmd-klik of lang indrukken op een vak): opzettelijk een
+     ander kleuraccent (blauw) dan de oranje pad-highlight (.node.active/
+     .is-selected) en de amberkleurige zoek-highlight (.node.search-hit)
+     hierboven, zodat de drie los van elkaar leesbaar blijven als ze
+     tegelijk voorkomen. .filter-picked = "zit in de (nog niet
+     toegepaste/bij te werken) selectie"; .filter-hidden = "valt buiten de
+     tóégepaste filter" (verbergt het vak volledig, i.p.v. dimmen — zie
+     computeElementFilterKeepSet/applyElementFilter). */
+  .node.filter-picked {
+    box-shadow: 0 0 0 3px #2f6fed, 0 0 0 7px rgba(47,111,237,0.35), 0 3px 8px rgba(0,0,0,0.3);
+  }
+  .node.filter-hidden { display: none; }
+  .col-empty-note {
+    font-size: 11px; color: #999; text-align: center; font-style: italic;
+    padding: 6px 4px;
+  }
+  .filter-status {
+    display: none; align-items: center; gap: 8px; font-size: 12.5px; color: #666;
+    background: #eef3ff; border: 1px solid #cddbfa; border-radius: 999px;
+    padding: 6px 8px 6px 14px;
+  }
+  .filter-status.visible { display: flex; }
+  .filter-status .filter-status-text { font-weight: 600; color: #2f6fed; }
+
   .controls {
     display: flex; justify-content: center; align-items: center; gap: 10px;
     flex-wrap: wrap; margin-bottom: 22px;
@@ -238,6 +262,23 @@
      bericht vanuit React binnenkomt met role !== 'admin'. De API is de echte
      autorisatiegrens (rbac.ts) — dit is puur UI. */
   body.read-only .crud-only { display: none !important; }
+
+  /* Watermerk "Licentie verlopen voor {tenant}" — zie renderLicenseExpiredWatermark()
+     verderop, aangeroepen vanuit boot() op basis van tree.licenseExpired
+     (server-side al berekend, zie routes/tree.ts isLicenseExpired). Puur
+     visueel: de eigenlijke schrijfblokkade zit al in canWrite (dat leidt hier
+     tot body.read-only, zie hierboven) en server-side in
+     requireWritableDoelenboom (rbac.ts) — dit is alleen de zichtbare melding. */
+  #license-expired-watermark {
+    display: none; position: fixed; inset: 0; z-index: 250; pointer-events: none;
+    align-items: center; justify-content: center; overflow: hidden;
+  }
+  #license-expired-watermark.visible { display: flex; }
+  #license-expired-watermark span {
+    font-size: 44px; font-weight: 800; color: rgba(220, 53, 69, 0.16);
+    text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap;
+    transform: rotate(-28deg); user-select: none;
+  }
 
   /* Losstaand geëxporteerd HTML-bestand (zie exportStaticHtml() verderop) —
      verbergt alles wat een levende React-ouder/API-verbinding nodig heeft
@@ -754,6 +795,10 @@
         <button class="search-clear-btn" id="search-clear-btn" title="Wis zoekopdracht" aria-label="Wis zoekopdracht">&times;</button>
       </div>
       <span class="search-count" id="search-count"></span>
+      <!-- Alleen zichtbaar zolang er zoekresultaten zijn (zie runSearch) — voegt
+           alle huidige matches in één keer toe aan de boomfilter-selectie en
+           past die direct toe (zie filterFromSearchBtn-listener). -->
+      <button class="btn ghost btn-xs" id="filter-from-search-btn" type="button" style="display:none;">Filter op resultaten</button>
     </div>
     <div class="topbar-right">
       <div class="topbar-actions">
@@ -847,7 +892,7 @@
   </div>
 
   <div class="page-header">
-    <p class="hint">Klik op een vak om het volledige verbonden pad te markeren. Houd de muis boven een vak voor de omschrijving. Dubbelklik om in te zoomen op dat element, &eacute;&eacute;n niveau erboven en alle onderliggende elementen.</p>
+    <p class="hint">Klik op een vak om het volledige verbonden pad te markeren. Houd de muis boven een vak voor de omschrijving. Dubbelklik om in te zoomen op dat element, &eacute;&eacute;n niveau erboven en alle onderliggende elementen. Ctrl/Cmd-klik (op mobiel: lang indrukken) om een vak toe te voegen aan de boomfilter en druk daarna op "Toon deze bomen" om alleen de bomen te zien die de geselecteerde elementen raken.</p>
   </div>
 
   <div class="legend"></div>
@@ -858,6 +903,15 @@
     <button class="btn ghost" id="reset-btn" type="button">&#8635; Alleen Missie</button>
     <button class="btn ghost crud-only" id="new-element-btn" type="button">+ Nieuw element</button>
     <button class="btn back-btn" id="back-btn" style="display:none;">&#8592; Terug naar vorig scherm</button>
+    <!-- Boomfilter: Ctrl/Cmd-klik (of op touch: lang indrukken) op een vak
+         voegt het toe aan filter-selection (zie tree.html-script hieronder,
+         toggleFilterPick) — deze pil verschijnt zodra die selectie niet leeg
+         is en/of het filter al is toegepast (updateFilterStatusUI). -->
+    <span class="filter-status" id="filter-status">
+      <span class="filter-status-text" id="filter-status-text"></span>
+      <button class="btn ghost btn-xs" id="filter-apply-btn" type="button">Toon deze bomen</button>
+      <button class="btn ghost btn-xs" id="filter-clear-btn" type="button">Wis</button>
+    </span>
   </div>
 
   <!-- Overzicht van alle project-tijdlijnen in één lijst (zie #timelines-view-btn
@@ -1224,7 +1278,15 @@ function flipExpandAnchor() {
 }
 
 function runApp(data) {
-  const { DETAILS, EDGES, TOELICHTING, PROJECT_STATUS, PRODUCTS, TAGS, ELEMENT_TAGS, ORGS, OB_ORG, COLUMNS } = data;
+  const { DETAILS, EDGES, TOELICHTING, PROJECT_STATUS, PRODUCTS, TAGS, ELEMENT_TAGS, ORGS, OB_ORG, COLUMNS, ACTIVE_MODULES } = data;
+  // Licentiemodel (zie doelenboom_licentiemodel.md §3/§6, api/src/license.ts):
+  // welke modules de licentie van deze tenant actief heeft. PROJECT_STATUS/
+  // PRODUCTS zijn al server-side leeggemaakt als 'projecten' ontbreekt
+  // (routes/tree.ts) — dat dekt de dáta. projectenActive hieronder is voor de
+  // UI zelf: knoppen/kaarten van de Projecten-module helemaal weglaten i.p.v.
+  // tonen-maar-laten-mislukken ("verbergen, niet uitgrijzen", zie het
+  // licentiedocument §6).
+  const projectenActive = (ACTIVE_MODULES || []).indexOf('projecten') !== -1;
   // Alles hieronder komt nu uit tree.columns (per doelenboom geconfigureerd,
   // zie docs/kolommen-configuratie-ontwerp.md) i.p.v. vaste, hardgecodeerde
   // objecten — COLUMNS staat al gesorteerd op position (zie adaptTreeResponse).
@@ -1271,6 +1333,11 @@ function runApp(data) {
   const searchInput = document.getElementById('search-input');
   const searchClearBtn = document.getElementById('search-clear-btn');
   const searchCountEl = document.getElementById('search-count');
+  const filterFromSearchBtn = document.getElementById('filter-from-search-btn');
+  const filterStatusEl = document.getElementById('filter-status');
+  const filterStatusTextEl = document.getElementById('filter-status-text');
+  const filterApplyBtn = document.getElementById('filter-apply-btn');
+  const filterClearBtn = document.getElementById('filter-clear-btn');
   const SVG_NS = 'http://www.w3.org/2000/svg';
 
   function normalizeSearch(s) {
@@ -1313,6 +1380,19 @@ function runApp(data) {
   // project-tijdlijnenoverzicht (zie showTimelinesView) — gezet door
   // enterFocus(node, returnTarget), gelezen/gereset door goBackFromFocus().
   let focusReturnTarget = null;
+
+  // ---- Boomfilter: verberg alles behalve de bomen die de geselecteerde
+  // elementen raken (Ctrl/Cmd-klik, lang indrukken, of "Filter op
+  // resultaten" bij zoeken — zie verderop). filterSelection is de (nog te
+  // bewerken) verzameling "picks"; elementFilterActive/filterKeepIds zijn
+  // pas gezet ná op "Toon deze bomen" drukken. Los van hiddenCols
+  // (kolomzichtbaarheid) en focusId (dubbelklik-zoom) — die drie
+  // mechanismen combineren via losse CSS-classes op .node i.p.v. elkaars
+  // state te overschrijven, zie applyElementFilter/computeEffectiveEdges.
+  let filterSelection = new Set();
+  let elementFilterActive = false;
+  let filterKeepIds = null;
+  let lastSearchMatchIds = [];
 
   function applyVisibility() {
     if (focusId !== null) return;
@@ -1401,8 +1481,12 @@ function runApp(data) {
     n.appendChild(dot);
   });
 
-  // ---- Tags / organisatieonderdelen filter: click a chip to highlight all elements carrying it ----
-  let activeTagFilter = null; // { kind: 'tag'|'org', id: string }
+  // ---- Tags / organisatieonderdelen filter: click chips to highlight all elements
+  // carrying ANY van de geselecteerde tags/organisatieonderdelen (OF-conditie,
+  // dus de unie van alle geselecteerde chips — niet alleen binnen één groep,
+  // maar ook tag+org door elkaar). Meerdere chips tegelijk aan te zetten (geen
+  // radio-gedrag meer), elke chip is een aparte toggle. ----
+  let activeTagFilters = new Set(); // Set van "kind:id" strings, bv. "tag:T1"
 
   function elementsForTag(tagId) {
     return Object.keys(ELEMENT_TAGS).filter(id => (ELEMENT_TAGS[id] || []).includes(tagId));
@@ -1414,13 +1498,19 @@ function runApp(data) {
   function applyTagFilter() {
     document.querySelectorAll('.node').forEach(n => n.classList.remove('tag-active', 'tag-dimmed'));
     document.querySelectorAll('.chip-filter').forEach(el => el.classList.remove('chip-filter-active'));
-    if (!activeTagFilter) return;
+    if (activeTagFilters.size === 0) return;
 
-    const ids = activeTagFilter.kind === 'tag' ? elementsForTag(activeTagFilter.id) : elementsForOrg(activeTagFilter.id);
-    const idSet = new Set(ids);
+    // Unie (OF) van de elementen die bij minstens één geselecteerde chip horen.
+    const idSet = new Set();
+    activeTagFilters.forEach(key => {
+      const sep = key.indexOf(':');
+      const kind = key.slice(0, sep), id = key.slice(sep + 1);
+      const ids = kind === 'tag' ? elementsForTag(id) : elementsForOrg(id);
+      ids.forEach(elId => idSet.add(elId));
+    });
 
     let changed = false;
-    ids.forEach(id => {
+    idSet.forEach(id => {
       const el = document.querySelector('.node[data-id="' + id + '"]');
       if (!el) return;
       const key = el.closest('.column').dataset.key;
@@ -1433,17 +1523,22 @@ function runApp(data) {
       n.classList.toggle('tag-active', on);
       n.classList.toggle('tag-dimmed', !on);
     });
-    const btn = document.querySelector('.chip-filter[data-kind="' + activeTagFilter.kind + '"][data-value="' + activeTagFilter.id + '"]');
-    if (btn) btn.classList.add('chip-filter-active');
+    activeTagFilters.forEach(key => {
+      const sep = key.indexOf(':');
+      const kind = key.slice(0, sep), id = key.slice(sep + 1);
+      const btn = document.querySelector('.chip-filter[data-kind="' + kind + '"][data-value="' + id + '"]');
+      if (btn) btn.classList.add('chip-filter-active');
+    });
   }
 
   document.querySelectorAll('.chip-filter').forEach(btn => {
     btn.addEventListener('click', () => {
       const kind = btn.dataset.kind, id = btn.dataset.value;
-      if (activeTagFilter && activeTagFilter.kind === kind && activeTagFilter.id === id) {
-        activeTagFilter = null;
+      const key = kind + ':' + id;
+      if (activeTagFilters.has(key)) {
+        activeTagFilters.delete(key);
       } else {
-        activeTagFilter = { kind, id };
+        activeTagFilters.add(key);
       }
       applyTagFilter();
     });
@@ -1470,7 +1565,7 @@ function runApp(data) {
     const nodeVisible = {};
     document.querySelectorAll('.node').forEach(n => {
       const col = n.closest('.column');
-      nodeVisible[n.dataset.id] = !col.classList.contains('hidden') && !n.classList.contains('node-hidden');
+      nodeVisible[n.dataset.id] = !col.classList.contains('hidden') && !n.classList.contains('node-hidden') && !n.classList.contains('filter-hidden');
     });
 
     const forward = {};
@@ -1512,7 +1607,7 @@ function runApp(data) {
     const nodeRects = {};
     document.querySelectorAll('.node').forEach(n => {
       const col = n.closest('.column');
-      if (col.classList.contains('hidden') || n.classList.contains('node-hidden')) return;
+      if (col.classList.contains('hidden') || n.classList.contains('node-hidden') || n.classList.contains('filter-hidden')) return;
       const r = n.getBoundingClientRect();
       nodeRects[n.dataset.id] = {
         right: r.right - boardRect.left,
@@ -1694,12 +1789,139 @@ function runApp(data) {
     applyHighlightToDOM();
   }
 
+  // ---- Boomfilter ----
+  function toggleFilterPick(id) {
+    if (focusId !== null) return;
+    if (filterSelection.has(id)) filterSelection.delete(id); else filterSelection.add(id);
+    const node = document.querySelector('.node[data-id="' + id + '"]');
+    if (node) node.classList.toggle('filter-picked', filterSelection.has(id));
+    updateFilterStatusUI();
+  }
+
+  // Loopt (net als computeFocusSet hierboven) over de rúwe EDGES — bewust
+  // niet over currentEffectiveEdges, want die "bridget" al door kolommen die
+  // op dit moment toevallig verborgen zijn (hiddenCols). Zou je die
+  // gebruiken, dan zou het filter tussenliggende elementen van een verborgen
+  // kolom nooit meenemen in filterKeepIds — toon je die kolom later alsnog,
+  // dan lijkt het filter daar onterecht "gaten" te hebben. Zo blijft het
+  // filter een zuivere boomstructuur-vraag, los van wat er nu net in beeld is.
+  function computeElementFilterKeepSet(ids) {
+    const forward = {}, backward = {};
+    EDGES.forEach(e => {
+      (forward[e.source] = forward[e.source] || []).push(e.target);
+      (backward[e.target] = backward[e.target] || []).push(e.source);
+    });
+    const keep = new Set();
+    function walkFwd(cur) {
+      (forward[cur] || []).forEach(next => { if (!keep.has(next)) { keep.add(next); walkFwd(next); } });
+    }
+    function walkBack(cur) {
+      (backward[cur] || []).forEach(prev => { if (!keep.has(prev)) { keep.add(prev); walkBack(prev); } });
+    }
+    ids.forEach(id => {
+      keep.add(id);
+      walkFwd(id);
+      walkBack(id);
+    });
+    return keep;
+  }
+
+  function updateColumnEmptyNotes() {
+    document.querySelectorAll('.column').forEach(col => {
+      const wrap = col.querySelector('.col-nodes');
+      if (!wrap) return;
+      let note = wrap.querySelector('.col-empty-note');
+      const anyVisible = Array.from(wrap.querySelectorAll('.node')).some(n => !n.classList.contains('filter-hidden'));
+      if (elementFilterActive && !anyVisible) {
+        if (!note) {
+          note = document.createElement('div');
+          note.className = 'col-empty-note';
+          note.textContent = 'Geen elementen na filter';
+          wrap.appendChild(note);
+        }
+      } else if (note) {
+        note.remove();
+      }
+    });
+  }
+
+  function updateFilterStatusUI() {
+    const pickCount = filterSelection.size;
+    filterStatusEl.classList.toggle('visible', pickCount > 0 || elementFilterActive);
+    filterStatusTextEl.textContent = elementFilterActive
+      ? (filterKeepIds ? filterKeepIds.size : 0) + ' elementen zichtbaar (' + pickCount + ' geselecteerd)'
+      : pickCount + ' geselecteerd';
+    filterApplyBtn.disabled = pickCount === 0 || focusId !== null;
+    filterApplyBtn.textContent = elementFilterActive ? 'Filter bijwerken' : 'Toon deze bomen';
+    filterClearBtn.disabled = focusId !== null;
+  }
+
+  function applyElementFilter() {
+    if (focusId !== null || filterSelection.size === 0) return;
+    filterKeepIds = computeElementFilterKeepSet(Array.from(filterSelection));
+    elementFilterActive = true;
+    deselect();
+    document.querySelectorAll('.node').forEach(n => {
+      n.classList.toggle('filter-hidden', !filterKeepIds.has(n.dataset.id));
+    });
+    updateColumnEmptyNotes();
+    updateFilterStatusUI();
+    hideTooltip();
+    requestAnimationFrame(() => setTimeout(() => { drawEdges(); drawColumnArrows(); }, 280));
+  }
+
+  function clearElementFilter() {
+    filterSelection.clear();
+    elementFilterActive = false;
+    filterKeepIds = null;
+    document.querySelectorAll('.node').forEach(n => n.classList.remove('filter-picked', 'filter-hidden'));
+    updateColumnEmptyNotes();
+    updateFilterStatusUI();
+    requestAnimationFrame(() => setTimeout(() => { drawEdges(); drawColumnArrows(); }, 280));
+  }
+
+  filterApplyBtn.addEventListener('click', applyElementFilter);
+  filterClearBtn.addEventListener('click', clearElementFilter);
+  filterFromSearchBtn.addEventListener('click', () => {
+    lastSearchMatchIds.forEach(id => {
+      filterSelection.add(id);
+      const node = document.querySelector('.node[data-id="' + id + '"]');
+      if (node) node.classList.add('filter-picked');
+    });
+    updateFilterStatusUI();
+    applyElementFilter();
+  });
+  updateFilterStatusUI();
+
   columnsEl.addEventListener('click', (ev) => {
     const node = ev.target.closest('.node');
     if (!node) { deselect(); return; }
     const id = node.dataset.id;
+    if (ev.metaKey || ev.ctrlKey) { toggleFilterPick(id); return; }
     if (selectedId === id) { deselect(); } else { selectNode(id); }
   });
+
+  // Lang indrukken (touch) doet hetzelfde als Ctrl/Cmd-klik, want op mobiel
+  // is er geen modifier-toets. suppressNextClick voorkomt dat de synthetische
+  // click die de browser ná een touch nog stuurt ook nog eens
+  // selectNode/deselect triggert (zie click-listener hierboven).
+  let longPressTimer = null;
+  let suppressNextClick = false;
+  columnsEl.addEventListener('touchstart', (ev) => {
+    const node = ev.target.closest('.node');
+    if (!node) return;
+    clearTimeout(longPressTimer);
+    longPressTimer = setTimeout(() => {
+      suppressNextClick = true;
+      toggleFilterPick(node.dataset.id);
+    }, 550);
+  }, { passive: true });
+  ['touchend', 'touchmove', 'touchcancel'].forEach(evName => {
+    columnsEl.addEventListener(evName, () => clearTimeout(longPressTimer), { passive: true });
+  });
+  columnsEl.addEventListener('click', (ev) => {
+    if (suppressNextClick) { suppressNextClick = false; ev.stopImmediatePropagation(); ev.preventDefault(); }
+  }, true);
 
   // ---- Detail panel (shown while zoomed in on an element) ----
   function fieldHtml(label, value) {
@@ -2183,14 +2405,24 @@ function runApp(data) {
     const tagsHtml = tagsChipsInlineHtml(id);
     const orgHtml = orgChipsInlineHtml(id);
 
+    // Status/RAG-groep (projectstatus, rapportagetoelichting) hoort bij de
+    // Projecten-module (zie doelenboom_licentiemodel.md §3) — zonder die
+    // module is PROJECT_STATUS server-side al leeggemaakt (routes/tree.ts),
+    // maar de "Bewerken"-knop moet ook echt verdwijnen i.p.v. te tonen en dan
+    // op een 403 te stuiten. Tags/organisatieonderdelen horen bij de
+    // doelenboom-kern, niet bij Projecten, en blijven dus altijd zichtbaar.
+    const statusGroupHtml = projectenActive
+      ? '<div class="pp-header-group">' + statusHtml +
+          '<button type="button" class="btn ghost btn-xs project-status-edit-btn crud-only" data-code="' + escapeHtml(id) + '">Bewerken</button>' +
+        '</div>' +
+        '<span class="pp-header-divider"></span>'
+      : '';
+
     let html = '<div class="pp-header">' +
       '<span class="dp-code" style="background:' + color + '">' + escapeHtml(d.code) + '</span>' +
       '<span class="pp-name">' + escapeHtml(d.name) + '</span>' +
       '<span class="pp-header-divider"></span>' +
-      '<div class="pp-header-group">' + statusHtml +
-        '<button type="button" class="btn ghost btn-xs project-status-edit-btn crud-only" data-code="' + escapeHtml(id) + '">Bewerken</button>' +
-      '</div>' +
-      '<span class="pp-header-divider"></span>' +
+      statusGroupHtml +
       '<div class="pp-header-group"><span class="pp-header-label">Tags</span>' +
         (tagsHtml || '<span class="dp-empty-note-inline">geen</span>') +
         '<button type="button" class="btn ghost btn-xs dp-add-tag-btn crud-only" data-code="' + escapeHtml(id) + '">+ Tag</button>' +
@@ -2213,6 +2445,14 @@ function runApp(data) {
   }
 
   function projectSectionHtml(id) {
+    // Producten/deliverables/tijdlijn horen bij de Projecten-module (zie
+    // doelenboom_licentiemodel.md §3) — zonder die module is PRODUCTS
+    // server-side al leeggemaakt (routes/tree.ts), maar zonder deze check zou
+    // hier nog een lege "Producten / deliverables"-titel met een "+ Product"
+    // -knop verschijnen die op een 403 zou stuiten. Verbergen, niet
+    // uitgrijzen.
+    if (!projectenActive) return '';
+
     const products = PRODUCTS[id] || [];
 
     // Tijdlijn bovenaan het paneel (onder de header, vóór producten) — geeft in
@@ -2398,7 +2638,9 @@ function runApp(data) {
     showAllBtn.disabled = true;
     resetBtn.disabled = true;
     expandLeftBtn.disabled = true;
+    filterFromSearchBtn.style.display = 'none';
     backBtn.style.display = '';
+    updateFilterStatusUI(); // zet ook filter-apply/-clear op disabled zolang focusId gezet is
 
     requestAnimationFrame(() => setTimeout(() => { drawEdges(); drawColumnArrows(); }, 280));
   }
@@ -2417,6 +2659,7 @@ function runApp(data) {
     showAllBtn.disabled = false;
     resetBtn.disabled = false;
     backBtn.style.display = 'none';
+    updateFilterStatusUI();
     applyVisibility(); // also refreshes expandLeftBtn state
   }
 
@@ -2580,6 +2823,8 @@ function runApp(data) {
     searchClearBtn.classList.remove('visible');
     searchCountEl.textContent = '';
     searchCountEl.classList.remove('has-query');
+    lastSearchMatchIds = [];
+    filterFromSearchBtn.style.display = 'none';
   }
 
   function runSearch() {
@@ -2604,6 +2849,8 @@ function runApp(data) {
     } else {
       searchCountEl.textContent = matchIds.length + ' van ' + Object.keys(DETAILS).length + ' elementen gevonden';
     }
+    lastSearchMatchIds = matchIds;
+    filterFromSearchBtn.style.display = (focusId === null && matchIds.length > 0) ? '' : 'none';
 
     // Auto-reveal every column that contains at least one match
     if (matchIds.length > 0) {
@@ -2831,7 +3078,7 @@ function runApp(data) {
     // Nodes: rect + wrapped, vertically centered text + RAG/tag corner markers.
     document.querySelectorAll('.node').forEach(node => {
       const col = node.closest('.column');
-      if (col.classList.contains('hidden') || node.classList.contains('node-hidden')) return;
+      if (col.classList.contains('hidden') || node.classList.contains('node-hidden') || node.classList.contains('filter-hidden')) return;
       if (selectedId !== null && !activeNodeIds.has(node.dataset.id)) return;
       const r = node.getBoundingClientRect();
       const x = r.left - boardRect.left, y = r.top - boardRect.top;
@@ -4214,6 +4461,27 @@ function applyRole(role) {
   document.body.classList.toggle('read-only', userRole !== 'admin');
 }
 
+// Toont/verbergt het "Licentie verlopen voor {tenant}"-watermerk. Wordt
+// vanuit boot() aangeroepen op basis van tree.licenseExpired. Het element
+// wordt lazy aangemaakt (niet in de statische HTML) zodat een oudere
+// geëxporteerde standalone-export (window.__STATIC_TREE__, zonder dit veld)
+// gewoon niets toont i.p.v. te crashen.
+function renderLicenseExpiredWatermark(licenseExpired, tenantName) {
+  let el = document.getElementById('license-expired-watermark');
+  if (!licenseExpired) {
+    if (el) el.classList.remove('visible');
+    return;
+  }
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'license-expired-watermark';
+    el.innerHTML = '<span></span>';
+    document.body.appendChild(el);
+  }
+  el.querySelector('span').textContent = 'Licentie verlopen voor ' + tenantName;
+  el.classList.add('visible');
+}
+
 function escapeHtml(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -4389,7 +4657,12 @@ function adaptTreeResponse(tree) {
   // eerste/laatste kolom in de keten zijn (zie CANONICAL_COL_ORDER in runApp()).
   const COLUMNS = (tree.columns || []).slice().sort((a, b) => a.position - b.position);
 
-  return { DETAILS, EDGES, TOELICHTING, PROJECT_STATUS, PRODUCTS, TAGS, ELEMENT_TAGS, ORGS, OB_ORG, COLUMNS };
+  // Zie doelenboom_licentiemodel.md §3/§6 — module-keys die de licentie van
+  // deze tenant actief heeft (bv. ['projecten']), gebruikt in runApp() om
+  // Projecten-specifieke UI te verbergen i.p.v. te tonen-maar-te-laten-falen.
+  const ACTIVE_MODULES = tree.activeModules || [];
+
+  return { DETAILS, EDGES, TOELICHTING, PROJECT_STATUS, PRODUCTS, TAGS, ELEMENT_TAGS, ORGS, OB_ORG, COLUMNS, ACTIVE_MODULES };
 }
 
 function renderError(message) {
@@ -4414,6 +4687,12 @@ function boot(tree) {
     applyRole(tree.doelenboom.canWrite ? 'admin' : 'gebruiker');
   }
   CURRENT_TENANT_NAME = tree.doelenboom.tenant.name;
+  // Watermerk voor een verlopen licentie (zie renderLicenseExpiredWatermark()
+  // hierboven) — niet getoond in een standalone export, die heeft sowieso al
+  // altijd 'gebruiker' en geen licenseExpired-veld.
+  if (!document.body.classList.contains('standalone')) {
+    renderLicenseExpiredWatermark(tree.licenseExpired === true, CURRENT_TENANT_NAME);
+  }
 
   // Bouwrichting-voorkeur voor déze doelenboom lezen vóórdat de kolommen
   // gebouwd worden (zie flipColumnDirection() hierboven).

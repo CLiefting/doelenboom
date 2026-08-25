@@ -9,6 +9,7 @@ import {
   tenantIdForDoelenboom,
 } from '../rbac.js';
 import { getColumnsForDoelenboom } from '../columnConfig.js';
+import { hasModule } from '../license.js';
 
 // Voor routes met :id = import-id (niet doelenboom-id): eerst de doelenboom van
 // deze import opzoeken, dan pas de tenant daarvan.
@@ -146,6 +147,16 @@ importsRouter.post(
     await client.query('begin');
     const doelenboomId = imp.doelenboom_id;
 
+    // Projectstatus/producten horen bij de "Projecten"-module (zie
+    // doelenboom_licentiemodel.md §3, en de gating in routes/products.ts /
+    // routes/projectStatus.ts voor de directe-bewerken-variant). Zonder de
+    // module worden die twee onderdelen van het Excel-bestand hier stil
+    // overgeslagen — de rest van de import (elementen/relaties/tags/
+    // organisatieonderdelen) gaat gewoon door, dat hoort niet bij deze module.
+    const tenantIdForModuleCheck = await tenantIdForDoelenboom(doelenboomId);
+    const projectenActive =
+      tenantIdForModuleCheck != null && (await hasModule(tenantIdForModuleCheck, 'projecten'));
+
     // Volledige vervanging: eerst alles weg wat aan deze doelenboom hangt.
     await client.query('delete from elements where doelenboom_id = $1', [doelenboomId]); // cascade → edges/project_status/products/element_tags/ob_org_relations
     await client.query('delete from tags where doelenboom_id = $1', [doelenboomId]); // cascade → element_tags
@@ -172,25 +183,27 @@ importsRouter.post(
       );
     }
 
-    for (const [code, ps] of Object.entries(parsed.projectStatus ?? {})) {
-      const elementId = elementIdByCode.get(code);
-      if (!elementId) continue;
-      await client.query(
-        `insert into project_status (element_id, projectstatus, rag, toelichting, gerapporteerd_op, cluster_ppt)
-         values ($1,$2,$3,$4,$5,$6)`,
-        [elementId, ps.projectstatus ?? '', ps.rag ?? '', ps.toelichting ?? '', ps.gerapporteerdOp || null, ps.clusterPpt ?? '']
-      );
-    }
-
-    for (const [code, prods] of Object.entries(parsed.products ?? {})) {
-      const elementId = elementIdByCode.get(code);
-      if (!elementId) continue;
-      for (const p of prods) {
+    if (projectenActive) {
+      for (const [code, ps] of Object.entries(parsed.projectStatus ?? {})) {
+        const elementId = elementIdByCode.get(code);
+        if (!elementId) continue;
         await client.query(
-          `insert into products (element_id, code, name, type, omschrijving, pct_gereed, verwachte_datum, werkelijke_datum, opmerking)
-           values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-          [elementId, p.code ?? '', p.name, p.type ?? 'deliverable', p.omschrijving ?? '', p.pctGereed ?? 0, p.verwachteDatum || null, p.werkelijkeDatum || null, p.opmerking ?? '']
+          `insert into project_status (element_id, projectstatus, rag, toelichting, gerapporteerd_op, cluster_ppt)
+           values ($1,$2,$3,$4,$5,$6)`,
+          [elementId, ps.projectstatus ?? '', ps.rag ?? '', ps.toelichting ?? '', ps.gerapporteerdOp || null, ps.clusterPpt ?? '']
         );
+      }
+
+      for (const [code, prods] of Object.entries(parsed.products ?? {})) {
+        const elementId = elementIdByCode.get(code);
+        if (!elementId) continue;
+        for (const p of prods) {
+          await client.query(
+            `insert into products (element_id, code, name, type, omschrijving, pct_gereed, verwachte_datum, werkelijke_datum, opmerking)
+             values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+            [elementId, p.code ?? '', p.name, p.type ?? 'deliverable', p.omschrijving ?? '', p.pctGereed ?? 0, p.verwachteDatum || null, p.werkelijkeDatum || null, p.opmerking ?? '']
+          );
+        }
       }
     }
 

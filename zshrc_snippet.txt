@@ -1,8 +1,6 @@
-# Doelenboom: lokaal starten met "doelenboom -local -start"
-doelenboom() {
-  if [[ "$*" == *"-local"* && "$*" == *"-start"* ]]; then
-    ~/OneDrive/src/doelenboom/start.sh
-  else
-    echo "Gebruik: doelenboom -local -start"
-  fi
-}
+# Doelenboom: lokale stack starten/herstarten met "doelenboom -local -restart"
+# (zie scripts/doelenboom-cli.sh voor wat dit precies doet en welke andere
+# vlaggen er zijn — dit is bewust alleen nog maar een dunne alias ernaartoe,
+# geen losse eigen implementatie meer, om te voorkomen dat de twee uit de pas
+# gaan lopen zoals eerder gebeurd is).
+alias doelenboom="$HOME/OneDrive/src/doelenboom/scripts/doelenboom-cli.sh"

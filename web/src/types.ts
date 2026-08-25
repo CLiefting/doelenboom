@@ -75,6 +75,10 @@ export type TenantSummary = {
   session_timeout_minutes: number;
   created_at: string;
   my_role?: TenantRoleName; // alleen aanwezig als niet-sysadmin dit ophaalt
+  // "YYYY-MM-DD" of null (geen einddatum ingesteld/nooit verlopen) — zie
+  // license.ts/routes/tenants.ts LICENSE_END_DATE_SELECT. Gebruikt door
+  // TenantManagementPage om per tenant een kleurindicatie te tonen.
+  license_end_date: string | null;
 };
 
 // Basisvorm zoals POST/PUT /api/doelenbomen die teruggeven (geen tenant-join
@@ -87,6 +91,9 @@ export type DoelenboomBase = {
   name: string;
   read_only: boolean;
   wipe_on_empty: boolean;
+  // null = actief. Zie license.ts/doelenboom_licentiemodel.md §5 — een
+  // gearchiveerde doelenboom telt niet mee voor de tier-limiet.
+  archivedAt: string | null;
   created_at: string;
 };
 
@@ -172,6 +179,49 @@ export type TreeResponse = {
   elementTags: Record<string, string[]>;
   orgUnits: OrgUnit[];
   obOrg: Record<string, ObOrgRelation[]>;
+  // Module-keys die de licentie van deze tenant actief heeft (bv.
+  // ['projecten']) — zie doelenboom_licentiemodel.md §3. projectStatus/
+  // products hierboven zijn al server-side leeggemaakt als een module
+  // ontbreekt (routes/tree.ts); dit veld is voor de UI om knoppen als
+  // "+ Product" te verbergen i.p.v. te tonen-maar-te-laten-mislukken.
+  activeModules: string[];
+  // Licentie-einddatum van de tenant verstreken? (zie license.ts
+  // isLicenseExpired, doelenboom_licentiemodel.md) — canWrite hierboven houdt
+  // hier al rekening mee (false als verlopen, behalve voor sysadmin); dit
+  // veld is voor de UI om een watermerk te tonen ("Licentie verlopen voor
+  // {tenant}", zie tree.html).
+  licenseExpired: boolean;
+};
+
+// --- Licentiemodel (zie doelenboom_licentiemodel.md) ---
+
+export type Tier = {
+  id: number;
+  name: string;
+  maxAdmins: number;
+  maxBomen: number;
+  sortOrder: number;
+};
+
+export type ModuleDef = {
+  id: number;
+  key: string;
+  name: string;
+  description: string;
+};
+
+export type TenantLicense = {
+  tier: Tier | null;
+  activeModules: string[];
+  // "YYYY-MM-DD" of null (geen einddatum ingesteld/nooit verlopen). expired
+  // is puur afgeleid, al server-side berekend (license.ts getTenantLicense).
+  endDate: string | null;
+  expired: boolean;
+  usage: {
+    activeAdmins: number;
+    activeBomen: number;
+    lifetimeBomenAangemaakt: number;
+  };
 };
 
 export type ImportSummary = {

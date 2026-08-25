@@ -36,6 +36,18 @@ describe('imports/exports (Excel round-trip via excel-service)', () => {
     const sysadminToken = await login(email, 'wachtwoord123');
     ({ doelenboomId, tenantId, adminToken } = await setupWritableDoelenboom(sysadminToken, PREFIX));
 
+    // Een nieuwe doelenboom wordt automatisch gezaaid met één voorbeeldelement
+    // per standaardkolom, verbonden in kolomvolgorde (zie exampleTree.ts) —
+    // die "verticale" voorbeeldketen (bv. Sub-benefit->Programmabaat) overleeft
+    // een 'oud'-formaat-rondgang niet (zie toelichting hieronder), dus zou de
+    // full-roundtrip-vergelijking verderop laten mislukken. Verwijder de
+    // voorbeeldelementen daarom eerst, zodat alleen de hieronder bewust
+    // gekozen, wél-rondgangbestendige fixture overblijft.
+    const seeded = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: adminToken });
+    for (const el of seeded.body.elements as { code: string }[]) {
+      await req('DELETE', `/api/doelenbomen/${doelenboomId}/elements/${el.code}`, { token: adminToken });
+    }
+
     // Alleen Capability->Operationele-benefit- en Project->Capability-edges
     // hebben een eigen tabblad in het "oud" Excel-formaat (zie exporter.py
     // _fill_oud) en overleven dus een export+import-rondgang; "verticale" edges

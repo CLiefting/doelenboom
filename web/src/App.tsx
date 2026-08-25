@@ -5,6 +5,7 @@ import TreePage from './pages/TreePage';
 import ImportPage from './pages/ImportPage';
 import TenantManagementPage from './pages/TenantManagementPage';
 import AccountManagementPage from './pages/AccountManagementPage';
+import LicenseCatalogPage from './pages/LicenseCatalogPage';
 import ChangePasswordPage from './pages/ChangePasswordPage';
 import HelpPage from './pages/HelpPage';
 import LogoutFlow from './components/LogoutFlow';
@@ -19,6 +20,7 @@ type View =
   | { name: 'import' }
   | { name: 'tenants' }
   | { name: 'accounts' }
+  | { name: 'licenses' }
   | { name: 'password' }
   // 'from' onthoudt vanaf welk scherm Help geopend is (picker of tree), zodat
   // "Terug" daar weer naartoe kan — Help is vanuit beide bereikbaar.
@@ -93,6 +95,8 @@ export default function App() {
     content = <TenantManagementPage token={session.token} user={session.user} onBack={() => setView({ name: 'picker' })} />;
   } else if (view.name === 'accounts') {
     content = <AccountManagementPage token={session.token} user={session.user} onBack={() => setView({ name: 'picker' })} />;
+  } else if (view.name === 'licenses') {
+    content = <LicenseCatalogPage token={session.token} onBack={() => setView({ name: 'picker' })} />;
   } else if (view.name === 'help') {
     const returnView: View = view.from === 'tree' ? { name: 'tree' } : { name: 'picker' };
     content = <HelpPage onBack={() => setView(returnView)} />;
@@ -120,6 +124,7 @@ export default function App() {
         onLogoutRequest={requestLogout}
         onTenantsRequest={() => setView({ name: 'tenants' })}
         onAccountsRequest={() => setView({ name: 'accounts' })}
+        onLicensesRequest={() => setView({ name: 'licenses' })}
         onHelpRequest={() => setView({ name: 'help', from: 'picker' })}
         onChangePasswordRequest={() => setView({ name: 'password' })}
       />

@@ -145,6 +145,12 @@ describe('kolomconfiguratie', () => {
     const del = await req('DELETE', `/api/doelenbomen/${boomId}/elements/P1`, { token: adminToken });
     assert.equal(del.status, 204);
 
+    // Een nieuwe doelenboom wordt automatisch gezaaid met één voorbeeldelement
+    // per kolom (zie exampleTree.ts) — voor de Project-kolom is dat V1. Ook
+    // dat moet weg voordat de Project-kolom verwijderd mag worden.
+    const delSeed = await req('DELETE', `/api/doelenbomen/${boomId}/elements/V1`, { token: adminToken });
+    assert.equal(delSeed.status, 204);
+
     const nowAllowed = await req('PUT', `/api/doelenbomen/${boomId}/column-config`, {
       token: adminToken, body: { columns: withoutProject.map((c: any, i: number) => ({ ...c, isProjectRole: i === 0, position: i })) },
     });
@@ -162,6 +168,15 @@ describe('kolomconfiguratie', () => {
       token: adminToken, body: { code: 'I1', type: 'Initiatief', name: 'Init 1' },
     });
     assert.equal(rejected.status, 400);
+
+    // Een nieuwe doelenboom wordt automatisch gezaaid met één voorbeeldelement
+    // per standaardkolom (zie exampleTree.ts) — die moeten eerst weg, anders
+    // blokkeert de kolomconfig-PUT hieronder (kolommen verwijderen mag niet
+    // zolang er nog elementen van dat type bestaan).
+    const seeded = await req('GET', `/api/doelenbomen/${boomId}/tree`, { token: adminToken });
+    for (const el of seeded.body.elements as { code: string }[]) {
+      await req('DELETE', `/api/doelenbomen/${boomId}/elements/${el.code}`, { token: adminToken });
+    }
 
     const put = await req('PUT', `/api/doelenbomen/${boomId}/column-config`, {
       token: adminToken,
@@ -217,12 +232,21 @@ describe('kolomconfiguratie', () => {
       token: adminToken, body: { slug: `${PREFIX}-dup-bron`, name: 'Dup bron' },
     });
     const sourceId = source.body.id as number;
-    await req('PUT', `/api/doelenbomen/${sourceId}/column-config`, {
+
+    // Zie toelichting hierboven: eerst de automatisch gezaaide
+    // voorbeeldelementen weg, anders blokkeert de kolomconfig-PUT.
+    const seeded = await req('GET', `/api/doelenbomen/${sourceId}/tree`, { token: adminToken });
+    for (const el of seeded.body.elements as { code: string }[]) {
+      await req('DELETE', `/api/doelenbomen/${sourceId}/elements/${el.code}`, { token: adminToken });
+    }
+
+    const putCfg = await req('PUT', `/api/doelenbomen/${sourceId}/column-config`, {
       token: adminToken,
       body: { columns: [
         { typeName: 'EigenTypeVanBron', title: 'Eigen', subtitle: '', color: '#3E6FA6', isNarrow: false, nodeFontSize: null, isProjectRole: true, relationLabelToNext: null },
       ] },
     });
+    assert.equal(putCfg.status, 200);
 
     const dup = await req('POST', `/api/doelenbomen/${sourceId}/duplicate`, {
       token: sysadminToken, body: { slug: `${PREFIX}-dup-kopie`, name: 'Dup kopie' },

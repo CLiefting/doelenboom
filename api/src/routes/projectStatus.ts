@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { pool } from '../db.js';
 import { requireAuth } from '../auth.js';
-import { requireWritableDoelenboom } from '../rbac.js';
+import { requireWritableDoelenboom, requireModule } from '../rbac.js';
 
 // CRUD voor de projectstatus van een element (project_status, 1-op-1 via
 // element_id als primary key — zie db/init.sql). Tot nu toe alleen te vullen
@@ -13,6 +13,9 @@ export const projectStatusRouter = Router();
 projectStatusRouter.use(requireAuth);
 // Per route meegeven (niet via router.use()) — zie toelichting in elements.ts.
 const requireAdmin = requireWritableDoelenboom('id');
+// Projectstatus hoort bij de "Projecten"-module — zie de toelichting bij
+// requireProjectenModule in routes/products.ts.
+const requireProjectenModule = requireModule('projecten', 'id');
 
 // Lege string is een geldige "nog niet gezet"-waarde (zelfde als het db-default
 // en wat de Excel-parser gebruikt) — vandaar in beide lijsten.
@@ -29,7 +32,7 @@ async function findElementId(doelenboomId: string, code: string): Promise<number
 }
 
 // PUT /api/doelenbomen/:id/elements/:code/project-status — upsert.
-projectStatusRouter.put('/doelenbomen/:id/elements/:code/project-status', requireAdmin, async (req, res) => {
+projectStatusRouter.put('/doelenbomen/:id/elements/:code/project-status', requireAdmin, requireProjectenModule, async (req, res) => {
   const b = (req.body ?? {}) as Record<string, unknown>;
   const projectstatus = typeof b.projectstatus === 'string' ? b.projectstatus : '';
   const rag = typeof b.rag === 'string' ? b.rag : '';
@@ -66,7 +69,7 @@ projectStatusRouter.put('/doelenbomen/:id/elements/:code/project-status', requir
 
 // DELETE /api/doelenbomen/:id/elements/:code/project-status — status wissen
 // (terug naar "nog geen status gerapporteerd").
-projectStatusRouter.delete('/doelenbomen/:id/elements/:code/project-status', requireAdmin, async (req, res) => {
+projectStatusRouter.delete('/doelenbomen/:id/elements/:code/project-status', requireAdmin, requireProjectenModule, async (req, res) => {
   const elementId = await findElementId(req.params.id, req.params.code);
   if (!elementId) return res.status(404).json({ error: `Element "${req.params.code}" niet gevonden.` });
 
