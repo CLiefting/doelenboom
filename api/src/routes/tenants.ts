@@ -132,9 +132,9 @@ tenantsRouter.post('/:tenantId/members', requireTenantRoleForTenantParam('admin'
   const b = (req.body ?? {}) as Record<string, unknown>;
   const email = typeof b.email === 'string' ? b.email.trim().toLowerCase() : '';
   const password = typeof b.password === 'string' ? b.password : '';
-  const role = b.role === 'admin' || b.role === 'gebruiker' ? b.role : '';
+  const role = b.role === 'admin' || b.role === 'gebruiker' || b.role === 'bezoeker' ? b.role : '';
   if (!email || !role) {
-    return res.status(400).json({ error: 'E-mailadres en rol (admin/gebruiker) zijn verplicht.' });
+    return res.status(400).json({ error: 'E-mailadres en rol (admin/gebruiker/bezoeker) zijn verplicht.' });
   }
 
   const existing = await pool.query('select id from users where email = $1', [email]);
@@ -183,8 +183,8 @@ tenantsRouter.post('/:tenantId/members', requireTenantRoleForTenantParam('admin'
 
 tenantsRouter.put('/:tenantId/members/:userId', requireTenantRoleForTenantParam('admin', 'tenantId'), async (req, res) => {
   const role = (req.body ?? {}).role;
-  if (role !== 'admin' && role !== 'gebruiker') {
-    return res.status(400).json({ error: 'role moet "admin" of "gebruiker" zijn.' });
+  if (role !== 'admin' && role !== 'gebruiker' && role !== 'bezoeker') {
+    return res.status(400).json({ error: 'role moet "admin", "gebruiker" of "bezoeker" zijn.' });
   }
 
   if (role === 'admin') {

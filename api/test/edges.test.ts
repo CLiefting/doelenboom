@@ -11,13 +11,14 @@ describe('edges (relaties tussen elementen)', () => {
   let doelenboomId: number;
   let adminToken: string;
   let gebruikerToken: string;
+  let bezoekerToken: string;
 
   before(async () => {
     await startTestServer();
     const email = `${PREFIX}-sysadmin@test.local`;
     await createSysadminUser(email, 'wachtwoord123');
     const sysadminToken = await login(email, 'wachtwoord123');
-    ({ doelenboomId, adminToken, gebruikerToken } = await setupWritableDoelenboom(sysadminToken, PREFIX));
+    ({ doelenboomId, adminToken, gebruikerToken, bezoekerToken } = await setupWritableDoelenboom(sysadminToken, PREFIX));
     await req('POST', `/api/doelenbomen/${doelenboomId}/elements`, {
       token: adminToken, body: { code: 'P1', type: 'Project', name: 'Project 1' },
     });
@@ -46,10 +47,10 @@ describe('edges (relaties tussen elementen)', () => {
     });
     assert.equal(unknownSource.status, 404);
 
-    const gebruiker = await req('POST', `/api/doelenbomen/${doelenboomId}/edges`, {
-      token: gebruikerToken, body: { source: 'P1', target: 'C1' },
+    const bezoeker = await req('POST', `/api/doelenbomen/${doelenboomId}/edges`, {
+      token: bezoekerToken, body: { source: 'P1', target: 'C1' },
     });
-    assert.equal(gebruiker.status, 403);
+    assert.equal(bezoeker.status, 403);
   });
 
   it('aanmaken, dubbele relatie geeft 409, PUT wijzigt weight/toelichting, DELETE verwijdert', async () => {
@@ -77,5 +78,20 @@ describe('edges (relaties tussen elementen)', () => {
     assert.equal(del.status, 204);
     const delAgain = await req('DELETE', `/api/doelenbomen/${doelenboomId}/edges/P1/C1`, { token: adminToken });
     assert.equal(delAgain.status, 404);
+  });
+
+  it('gebruiker mag relaties aanmaken/wijzigen/verwijderen (losse boom-inhoud)', async () => {
+    const created = await req('POST', `/api/doelenbomen/${doelenboomId}/edges`, {
+      token: gebruikerToken, body: { source: 'P1', target: 'C1' },
+    });
+    assert.equal(created.status, 201);
+
+    const updated = await req('PUT', `/api/doelenbomen/${doelenboomId}/edges/P1/C1`, {
+      token: gebruikerToken, body: { weight: 'primair', toelichting: 'Door gebruiker' },
+    });
+    assert.equal(updated.status, 200);
+
+    const del = await req('DELETE', `/api/doelenbomen/${doelenboomId}/edges/P1/C1`, { token: gebruikerToken });
+    assert.equal(del.status, 204);
   });
 });

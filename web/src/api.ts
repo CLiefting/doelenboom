@@ -78,7 +78,7 @@ export const api = {
   doelenboomMemberRoles: (token: string, doelenboomId: number) =>
     request<import('./types').DoelenboomMemberRole[]>(`/api/doelenbomen/${doelenboomId}/member-roles`, {}, token),
 
-  setDoelenboomMemberRole: (token: string, doelenboomId: number, userId: number, role: 'admin' | 'gebruiker' | null) =>
+  setDoelenboomMemberRole: (token: string, doelenboomId: number, userId: number, role: import('./types').TenantRoleName | null) =>
     request<void>(`/api/doelenbomen/${doelenboomId}/member-roles/${userId}`, {
       method: 'PUT',
       body: JSON.stringify({ role }),
@@ -157,13 +157,13 @@ export const api = {
   tenantMembers: (token: string, tenantId: number) =>
     request<import('./types').TenantMember[]>(`/api/tenants/${tenantId}/members`, {}, token),
 
-  addTenantMember: (token: string, tenantId: number, body: { email: string; password?: string; role: 'admin' | 'gebruiker' }) =>
+  addTenantMember: (token: string, tenantId: number, body: { email: string; password?: string; role: import('./types').TenantRoleName }) =>
     request<{ userId: number; email: string; role: string }>(`/api/tenants/${tenantId}/members`, {
       method: 'POST',
       body: JSON.stringify(body),
     }, token),
 
-  updateTenantMemberRole: (token: string, tenantId: number, userId: number, role: 'admin' | 'gebruiker') =>
+  updateTenantMemberRole: (token: string, tenantId: number, userId: number, role: import('./types').TenantRoleName) =>
     request<{ userId: number; role: string }>(`/api/tenants/${tenantId}/members/${userId}`, {
       method: 'PUT',
       body: JSON.stringify({ role }),

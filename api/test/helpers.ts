@@ -119,11 +119,14 @@ export async function cleanupByPrefix(prefix: string): Promise<void> {
 }
 
 // Veelgebruikte fixture voor de CRUD-testbestanden (elements/tags/orgUnits/
-// edges/products/projectStatus): een tenant met een admin- en een gebruiker-
-// account, plus één schrijfbare (niet read-only) doelenboom erin — allemaal
-// via de echte API-routes aangemaakt (sysadmin -> tenant -> leden -> doelenboom),
-// zodat elk testbestand niet zelf steeds dezelfde vier requests hoeft te
-// herhalen vóór het de route kan testen waar het eigenlijk om gaat.
+// edges/products/projectStatus): een tenant met een admin-, een gebruiker- en
+// een bezoeker-account, plus één schrijfbare (niet read-only) doelenboom erin
+// — allemaal via de echte API-routes aangemaakt (sysadmin -> tenant -> leden
+// -> doelenboom), zodat elk testbestand niet zelf steeds dezelfde requests
+// hoeft te herhalen vóór het de route kan testen waar het eigenlijk om gaat.
+// Rolmodel (zie api/src/rbac.ts): 'gebruiker' mag losse boom-inhoud wijzigen
+// (elementen/relaties/tags-koppelingen/projectstatus/producten), niet de
+// kolommen/instellingen/import — 'bezoeker' mag alleen lezen.
 export async function setupWritableDoelenboom(sysadminToken: string, prefix: string) {
   const tenant = await req('POST', '/api/tenants', { token: sysadminToken, body: { slug: prefix, name: prefix } });
   const tenantId = tenant.body.id as number;
@@ -140,10 +143,16 @@ export async function setupWritableDoelenboom(sysadminToken: string, prefix: str
   });
   const gebruikerToken = await login(gebruikerEmail, 'wachtwoord123');
 
+  const bezoekerEmail = `${prefix}-bezoeker@test.local`;
+  await req('POST', `/api/tenants/${tenantId}/members`, {
+    token: sysadminToken, body: { email: bezoekerEmail, password: 'wachtwoord123', role: 'bezoeker' },
+  });
+  const bezoekerToken = await login(bezoekerEmail, 'wachtwoord123');
+
   const boom = await req('POST', `/api/tenants/${tenantId}/doelenbomen`, {
     token: adminToken, body: { slug: 'boom', name: 'Testboom' },
   });
   const doelenboomId = boom.body.id as number;
 
-  return { tenantId, doelenboomId, adminToken, gebruikerToken };
+  return { tenantId, doelenboomId, adminToken, gebruikerToken, bezoekerToken };
 }

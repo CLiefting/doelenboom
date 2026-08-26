@@ -55,7 +55,7 @@ doelenbomenRouter.get('/doelenbomen', async (req: AuthedRequest, res) => {
 
 doelenbomenRouter.get(
   '/doelenbomen/:id',
-  requireTenantRole('gebruiker', (req) => tenantIdForDoelenboom(req.params.id)),
+  requireTenantRole('bezoeker', (req) => tenantIdForDoelenboom(req.params.id)),
   async (req, res) => {
     const result = await pool.query(
       `select ${DOELENBOOM_FIELDS}, t.id as tenant_id, t.slug as tenant_slug, t.name as tenant_name
@@ -70,7 +70,7 @@ doelenbomenRouter.get(
 
 doelenbomenRouter.get(
   '/tenants/:tenantId/doelenbomen',
-  requireTenantRoleForTenantParam('gebruiker', 'tenantId'),
+  requireTenantRoleForTenantParam('bezoeker', 'tenantId'),
   async (req, res) => {
     const result = await pool.query(
       'select id, slug, name, read_only, wipe_on_empty, archived_at as "archivedAt", created_at ' +
@@ -249,7 +249,7 @@ doelenbomenRouter.get(
   }
 );
 
-// PUT /api/doelenbomen/:id/member-roles/:userId — { role: 'admin' | 'gebruiker' | null }.
+// PUT /api/doelenbomen/:id/member-roles/:userId — { role: 'admin' | 'gebruiker' | 'bezoeker' | null }.
 // null verwijdert de override (terug naar de tenant-rol). De gebruiker moet
 // wél lid zijn van de tenant van deze doelenboom — een override kan geen
 // toegang geven aan iemand die geen tenant-lid is, alleen de rol bijstellen
@@ -259,9 +259,10 @@ doelenbomenRouter.put(
   requireTenantRoleForDoelenboomParam('admin', 'id'),
   async (req, res) => {
     const b = (req.body ?? {}) as Record<string, unknown>;
-    const role = b.role === 'admin' || b.role === 'gebruiker' ? b.role : b.role === null ? null : undefined;
+    const role =
+      b.role === 'admin' || b.role === 'gebruiker' || b.role === 'bezoeker' ? b.role : b.role === null ? null : undefined;
     if (role === undefined) {
-      return res.status(400).json({ error: 'role moet "admin", "gebruiker" of null zijn.' });
+      return res.status(400).json({ error: 'role moet "admin", "gebruiker", "bezoeker" of null zijn.' });
     }
 
     const member = await pool.query(

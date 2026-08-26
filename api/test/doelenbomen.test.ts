@@ -57,7 +57,7 @@ describe('doelenbomen', () => {
     assert.equal(dup.status, 409);
   });
 
-  it('GET /api/doelenbomen/:id/tree geeft effectiveRole/canWrite correct terug', async () => {
+  it('GET /api/doelenbomen/:id/tree geeft effectiveRole/canWrite/canWriteContent correct terug', async () => {
     const { tenantId, adminToken } = await makeTenantWithAdmin(sysadminToken, `${PREFIX}-t2`, `${PREFIX}-t2-admin@test.local`);
     const boom = await req('POST', `/api/tenants/${tenantId}/doelenbomen`, {
       token: adminToken, body: { slug: 'boom2', name: 'Boom 2' },
@@ -70,20 +70,39 @@ describe('doelenbomen', () => {
     });
     const gebruikerToken = await login(gebruikerEmail, 'wachtwoord123');
 
+    const bezoekerEmail = `${PREFIX}-t2-bezoeker@test.local`;
+    await req('POST', `/api/tenants/${tenantId}/members`, {
+      token: sysadminToken, body: { email: bezoekerEmail, password: 'wachtwoord123', role: 'bezoeker' },
+    });
+    const bezoekerToken = await login(bezoekerEmail, 'wachtwoord123');
+
     const asAdmin = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: adminToken });
     assert.equal(asAdmin.status, 200);
     assert.equal(asAdmin.body.doelenboom.effectiveRole, 'admin');
     assert.equal(asAdmin.body.doelenboom.canWrite, true);
+    assert.equal(asAdmin.body.doelenboom.canWriteContent, true);
 
+    // 'gebruiker' mag geen kolommen/instellingen (canWrite=false), maar wel de
+    // losse boom-inhoud (canWriteContent=true) — dat is precies het onderscheid
+    // dat de rol 'gebruiker' toevoegt t.o.v. de oude, puur read-only betekenis.
     const asGebruiker = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: gebruikerToken });
     assert.equal(asGebruiker.status, 200);
     assert.equal(asGebruiker.body.doelenboom.effectiveRole, 'gebruiker');
     assert.equal(asGebruiker.body.doelenboom.canWrite, false);
+    assert.equal(asGebruiker.body.doelenboom.canWriteContent, true);
+
+    // 'bezoeker' is de nieuwe, volledig read-only rol — geen van beide.
+    const asBezoeker = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: bezoekerToken });
+    assert.equal(asBezoeker.status, 200);
+    assert.equal(asBezoeker.body.doelenboom.effectiveRole, 'bezoeker');
+    assert.equal(asBezoeker.body.doelenboom.canWrite, false);
+    assert.equal(asBezoeker.body.doelenboom.canWriteContent, false);
 
     const asSysadmin = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: sysadminToken });
     assert.equal(asSysadmin.status, 200);
     assert.equal(asSysadmin.body.doelenboom.effectiveRole, 'admin');
     assert.equal(asSysadmin.body.doelenboom.canWrite, true);
+    assert.equal(asSysadmin.body.doelenboom.canWriteContent, true);
   });
 
   it('read_only blokkeert canWrite ook voor een tenant-admin, maar niet voor sysadmin', async () => {
@@ -100,9 +119,13 @@ describe('doelenbomen', () => {
 
     const tree = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: adminToken });
     assert.equal(tree.body.doelenboom.canWrite, false);
+    // read-only blokkeert ook canWriteContent voor een admin — geen enkele
+    // niet-sysadmin rol mag nog iets wijzigen, zie requireWritableDoelenboom.
+    assert.equal(tree.body.doelenboom.canWriteContent, false);
 
     const sysadminTree = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: sysadminToken });
     assert.equal(sysadminTree.body.doelenboom.canWrite, true);
+    assert.equal(sysadminTree.body.doelenboom.canWriteContent, true);
 
     // Een tenant-admin mag read-only altijd zelf weer uitzetten (zie rbac.ts-
     // toelichting bij requireTenantRoleForDoelenboomParam) — anders sluit die

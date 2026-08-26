@@ -18,7 +18,7 @@ exportsRouter.use(requireAuth);
 // gevuld met de huidige inhoud van deze doelenboom. We halen de boom altijd op (ook bij
 // mode=template) omdat de Configuratie-tab sowieso weet moet hebben van welke
 // doelenboom/tenant het bestand afkomstig is.
-exportsRouter.get('/doelenbomen/:id/export', requireTenantRoleForDoelenboomParam('gebruiker', 'id'), async (req: AuthedRequest, res) => {
+exportsRouter.get('/doelenbomen/:id/export', requireTenantRoleForDoelenboomParam('bezoeker', 'id'), async (req: AuthedRequest, res) => {
   const format = req.query.format === 'nieuw' ? 'nieuw' : 'oud';
   const mode = req.query.mode === 'template' ? 'template' : 'data';
 

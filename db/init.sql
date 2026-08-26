@@ -61,11 +61,15 @@ create table if not exists tenants (
 -- Koppelt gebruikers aan tenants met een rol (zie het commentaar bij de
 -- users-tabel). Sysadmins hebben hier bewust geen rij voor nodig — hun toegang
 -- volgt uit users.is_sysadmin en geldt voor alle tenants.
+-- Rolmodel (zie api/src/rbac.ts): 'admin' (boom-inhoud + instellingen),
+-- 'gebruiker' (alleen losse boom-inhoud: elementen/relaties/tags-koppelingen/
+-- projectstatus/producten, geen kolommen/instellingen/import), 'bezoeker'
+-- (alleen lezen).
 create table if not exists tenant_users (
   id bigserial primary key,
   tenant_id bigint not null references tenants(id) on delete cascade,
   user_id bigint not null references users(id) on delete cascade,
-  role text not null check (role in ('admin', 'gebruiker')),
+  role text not null check (role in ('admin', 'gebruiker', 'bezoeker')),
   created_at timestamptz not null default now(),
   unique (tenant_id, user_id)
 );
@@ -107,7 +111,7 @@ create table if not exists doelenbomen (
 create table if not exists doelenboom_user_roles (
   doelenboom_id bigint not null references doelenbomen(id) on delete cascade,
   user_id bigint not null references users(id) on delete cascade,
-  role text not null check (role in ('admin', 'gebruiker')),
+  role text not null check (role in ('admin', 'gebruiker', 'bezoeker')),
   primary key (doelenboom_id, user_id)
 );
 

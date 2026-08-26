@@ -179,15 +179,28 @@ export async function fetchTree(doelenboomId: string) {
 // schrijfbaarheid van de ingelogde gebruiker mee, zodat de frontend niet zelf
 // (met kans op afwijkende logica) hoeft te herleiden uit tenantRoles + read_only
 // + een eventuele per-doelenboom rol-override (zie getEffectiveRoleForDoelenboom).
-treeRouter.get('/:id/tree', requireTenantRoleForDoelenboomParam('gebruiker', 'id'), async (req: AuthedRequest, res) => {
+// minRole='bezoeker' hier: lezen mag iedereen die lid is van de tenant, ook de
+// laagste rol — de rol zelf (effectiveRole/canWrite/canWriteContent hieronder)
+// bepaalt vervolgens wat de frontend aan schrijf-UI toont.
+treeRouter.get('/:id/tree', requireTenantRoleForDoelenboomParam('bezoeker', 'id'), async (req: AuthedRequest, res) => {
   const tree = await fetchTree(req.params.id);
   if (!tree) return res.status(404).json({ error: 'Doelenboom niet gevonden' });
 
   const effectiveRole = req.user!.isSysadmin
     ? 'admin'
-    : (await getEffectiveRoleForDoelenboom(req.user!.id, req.params.id)) ?? 'gebruiker';
-  const canWrite =
-    req.user!.isSysadmin || (effectiveRole === 'admin' && !tree.doelenboom.readOnly && !tree.licenseExpired);
+    : (await getEffectiveRoleForDoelenboom(req.user!.id, req.params.id)) ?? 'bezoeker';
+  // "Geblokkeerd": read-only-vlag of verlopen licentie zet iedereen behalve
+  // sysadmin terug naar puur lezen — ongeacht effectiveRole (zie ook
+  // requireWritableDoelenboom in rbac.ts, dezelfde regel server-side).
+  const blocked = !req.user!.isSysadmin && (tree.doelenboom.readOnly || tree.licenseExpired);
+  // canWrite: mag de "instellingen"-laag (kolommen, doelenboom-instellingen,
+  // Excel-import, tag-/org-catalogus) wijzigen — ongewijzigde betekenis t.o.v.
+  // vóór de bezoeker-rol, puur admin.
+  const canWrite = req.user!.isSysadmin || (effectiveRole === 'admin' && !blocked);
+  // canWriteContent: mag de "losse boom-inhoud" wijzigen (elementen, relaties,
+  // tags/org-koppelingen op een element, projectstatus/producten) — nieuw,
+  // ook waar voor de rol 'gebruiker'. Elke canWrite-gebruiker kan ook dit.
+  const canWriteContent = req.user!.isSysadmin || ((effectiveRole === 'admin' || effectiveRole === 'gebruiker') && !blocked);
 
-  res.json({ ...tree, doelenboom: { ...tree.doelenboom, effectiveRole, canWrite } });
+  res.json({ ...tree, doelenboom: { ...tree.doelenboom, effectiveRole, canWrite, canWriteContent } });
 });

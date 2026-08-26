@@ -25,13 +25,14 @@ describe('kolomconfiguratie', () => {
   let doelenboomId: number;
   let adminToken: string;
   let gebruikerToken: string;
+  let bezoekerToken: string;
 
   before(async () => {
     await startTestServer();
     const email = `${PREFIX}-sysadmin@test.local`;
     await createSysadminUser(email, 'wachtwoord123');
     sysadminToken = await login(email, 'wachtwoord123');
-    ({ tenantId, doelenboomId, adminToken, gebruikerToken } = await setupWritableDoelenboom(sysadminToken, PREFIX));
+    ({ tenantId, doelenboomId, adminToken, gebruikerToken, bezoekerToken } = await setupWritableDoelenboom(sysadminToken, PREFIX));
   });
 
   after(async () => {
@@ -71,14 +72,24 @@ describe('kolomconfiguratie', () => {
     assert.equal(putAsAdmin.status, 403);
   });
 
-  it('doelenboom-config lezen mag een gebruiker (alleen-lezen), wijzigen niet', async () => {
+  it('doelenboom-config lezen mag gebruiker én bezoeker, wijzigen alleen admin — ook "gebruiker" niet', async () => {
     const getAsGebruiker = await req('GET', `/api/doelenbomen/${doelenboomId}/column-config`, { token: gebruikerToken });
     assert.equal(getAsGebruiker.status, 200);
+    const getAsBezoeker = await req('GET', `/api/doelenbomen/${doelenboomId}/column-config`, { token: bezoekerToken });
+    assert.equal(getAsBezoeker.status, 200);
 
+    // "gebruiker" mag wel losse boom-inhoud wijzigen (zie elements/edges/tags/
+    // orgUnits/products/projectStatus-tests), maar expliciet NIET de
+    // kolomconfiguratie — dat blijft, net als bezoeker, admin-only.
     const putAsGebruiker = await req('PUT', `/api/doelenbomen/${doelenboomId}/column-config`, {
       token: gebruikerToken, body: { columns: [] },
     });
     assert.equal(putAsGebruiker.status, 403);
+
+    const putAsBezoeker = await req('PUT', `/api/doelenbomen/${doelenboomId}/column-config`, {
+      token: bezoekerToken, body: { columns: [] },
+    });
+    assert.equal(putAsBezoeker.status, 403);
   });
 
   it('validatie: lege lijst, dubbele type-naam, ontbrekende/meerdere projectrol, ongeldige kleur', async () => {

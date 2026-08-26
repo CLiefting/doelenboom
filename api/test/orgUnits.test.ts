@@ -11,13 +11,14 @@ describe('org-units CRUD + koppelen aan elementen', () => {
   let doelenboomId: number;
   let adminToken: string;
   let gebruikerToken: string;
+  let bezoekerToken: string;
 
   before(async () => {
     await startTestServer();
     const email = `${PREFIX}-sysadmin@test.local`;
     await createSysadminUser(email, 'wachtwoord123');
     const sysadminToken = await login(email, 'wachtwoord123');
-    ({ doelenboomId, adminToken, gebruikerToken } = await setupWritableDoelenboom(sysadminToken, PREFIX));
+    ({ doelenboomId, adminToken, gebruikerToken, bezoekerToken } = await setupWritableDoelenboom(sysadminToken, PREFIX));
     await req('POST', `/api/doelenbomen/${doelenboomId}/elements`, {
       token: adminToken, body: { code: 'OB1', type: 'Operationele benefit', name: 'OB 1' },
     });
@@ -91,5 +92,25 @@ describe('org-units CRUD + koppelen aan elementen', () => {
 
     const unlinked = await req('DELETE', `/api/doelenbomen/${doelenboomId}/elements/OB1/org-units/${orgCode}`, { token: adminToken });
     assert.equal(unlinked.status, 204);
+  });
+
+  it('gebruiker mag een org-unit aan een element koppelen/ontkoppelen, bezoeker niet — de catalogus zelf blijft admin-only', async () => {
+    const org = await req('POST', `/api/doelenbomen/${doelenboomId}/org-units`, { token: adminToken, body: { name: 'Gebruiker-koppel-OE' } });
+    const orgCode = org.body.code;
+
+    const bezoekerLink = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/OB1/org-units`, {
+      token: bezoekerToken, body: { orgCode },
+    });
+    assert.equal(bezoekerLink.status, 403);
+
+    const gebruikerLink = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/OB1/org-units`, {
+      token: gebruikerToken, body: { orgCode },
+    });
+    assert.equal(gebruikerLink.status, 201);
+
+    const gebruikerUnlink = await req('DELETE', `/api/doelenbomen/${doelenboomId}/elements/OB1/org-units/${orgCode}`, {
+      token: gebruikerToken,
+    });
+    assert.equal(gebruikerUnlink.status, 204);
   });
 });

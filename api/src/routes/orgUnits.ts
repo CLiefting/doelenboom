@@ -12,7 +12,11 @@ orgUnitsRouter.use(requireAuth);
 // Per route meegeven (niet via router.use()) — zie toelichting in elements.ts.
 // requireWritableDoelenboom i.p.v. requireTenantRoleForDoelenboomParam: blokkeert
 // ook tenant-admins zodra de doelenboom op read-only staat (zie rbac.ts).
+// Twee niveaus, zelfde opzet als tags.ts: de org-unit-CATALOGUS zelf blijft
+// admin-only, een org-unit aan een element KOPPELEN (ob_org_relations,
+// onderaan dit bestand) mag ook door de rol 'gebruiker'.
 const requireAdmin = requireWritableDoelenboom('id');
+const requireEditor = requireWritableDoelenboom('id', 'gebruiker');
 
 function isUniqueViolation(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { code?: string }).code === '23505';
@@ -123,7 +127,7 @@ function readRelationBody(body: unknown) {
 // POST /api/doelenbomen/:id/elements/:code/org-units — { orgCode, relatietype, toelichting, status }
 // koppelt een bestaand organisatieonderdeel aan een element. Voor het aanmaken van het
 // organisatieonderdeel zelf, zie POST /doelenbomen/:id/org-units hierboven.
-orgUnitsRouter.post('/doelenbomen/:id/elements/:code/org-units', requireAdmin, async (req, res) => {
+orgUnitsRouter.post('/doelenbomen/:id/elements/:code/org-units', requireEditor, async (req, res) => {
   const input = readRelationBody(req.body);
   if (!input.orgCode) return res.status(400).json({ error: 'Organisatieonderdeel is verplicht.' });
 
@@ -154,7 +158,7 @@ orgUnitsRouter.post('/doelenbomen/:id/elements/:code/org-units', requireAdmin, a
 // PUT /api/doelenbomen/:id/elements/:code/org-units/:orgCode — alleen relatietype/
 // toelichting/status; welk organisatieonderdeel gekoppeld is, wijzig je door de
 // koppeling te verwijderen en opnieuw aan te maken (zelfde aanpak als bij edges.ts).
-orgUnitsRouter.put('/doelenbomen/:id/elements/:code/org-units/:orgCode', requireAdmin, async (req, res) => {
+orgUnitsRouter.put('/doelenbomen/:id/elements/:code/org-units/:orgCode', requireEditor, async (req, res) => {
   const input = readRelationBody({ ...(req.body as Record<string, unknown>), orgCode: req.params.orgCode });
   const result = await pool.query(
     `update ob_org_relations set relatietype = $1, toelichting = $2, status = $3
@@ -171,7 +175,7 @@ orgUnitsRouter.put('/doelenbomen/:id/elements/:code/org-units/:orgCode', require
 });
 
 // DELETE /api/doelenbomen/:id/elements/:code/org-units/:orgCode
-orgUnitsRouter.delete('/doelenbomen/:id/elements/:code/org-units/:orgCode', requireAdmin, async (req, res) => {
+orgUnitsRouter.delete('/doelenbomen/:id/elements/:code/org-units/:orgCode', requireEditor, async (req, res) => {
   const result = await pool.query(
     `delete from ob_org_relations
      where element_id = (select id from elements where doelenboom_id = $1 and code = $2)

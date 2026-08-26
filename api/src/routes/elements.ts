@@ -13,12 +13,14 @@ import { getColumnsForDoelenboom } from '../columnConfig.js';
 export const elementsRouter = Router();
 elementsRouter.use(requireAuth);
 
-// Alle schrijfacties hieronder (create/update/delete) vereisen tenant-admin (of
-// sysadmin), én mag de doelenboom niet op read-only staan (zie rbac.ts) — lezen
-// gebeurt via routes/tree.ts, dat zijn eigen (lichtere) check heeft. Let op: dit
-// moet per route meegegeven worden (niet via router.use()), omdat :id op het
-// moment van een path-loze .use() nog niet gevuld is.
-const requireAdmin = requireWritableDoelenboom('id');
+// Alle schrijfacties hieronder (create/update/delete) vereisen minimaal de rol
+// 'gebruiker' (of hoger: admin/sysadmin) — elementen zijn "losse boom-inhoud",
+// zie rbac.ts requireWritableDoelenboom. De doelenboom mag niet op read-only
+// staan (zie rbac.ts) — lezen gebeurt via routes/tree.ts, dat zijn eigen
+// (lichtere) check heeft. Let op: dit moet per route meegegeven worden (niet
+// via router.use()), omdat :id op het moment van een path-loze .use() nog niet
+// gevuld is.
+const requireEditor = requireWritableDoelenboom('id', 'gebruiker');
 
 // Welke types geldig zijn, hangt sinds de configureerbare kolommen (zie
 // docs/kolommen-configuratie-ontwerp.md) af van de columns-configuratie van
@@ -76,7 +78,7 @@ const ELEMENT_SELECT_FIELDS =
   'code, type, name, description, parent_text, kpi, taakveld, subtaakveld, sort_order';
 
 // POST /api/doelenbomen/:id/elements — nieuw element aanmaken.
-elementsRouter.post('/doelenbomen/:id/elements', requireAdmin, async (req, res) => {
+elementsRouter.post('/doelenbomen/:id/elements', requireEditor, async (req, res) => {
   const input = readElementBody(req.body);
   if (input.errors.length) return res.status(400).json({ error: input.errors.join(' ') });
 
@@ -115,7 +117,7 @@ elementsRouter.post('/doelenbomen/:id/elements', requireAdmin, async (req, res) 
 // mee wijzigen; er wordt niets anders naar code verwezen dan puur tekstueel in
 // parent_text, dus hernoemen is veilig t.o.v. edges/tags/producten die via het
 // interne numerieke id gekoppeld zijn).
-elementsRouter.put('/doelenbomen/:id/elements/:code', requireAdmin, async (req, res) => {
+elementsRouter.put('/doelenbomen/:id/elements/:code', requireEditor, async (req, res) => {
   const input = readElementBody(req.body, { requireCode: false });
   if (input.errors.length) return res.status(400).json({ error: input.errors.join(' ') });
   const newCode = input.code || req.params.code;
@@ -146,7 +148,7 @@ elementsRouter.put('/doelenbomen/:id/elements/:code', requireAdmin, async (req, 
 // DELETE /api/doelenbomen/:id/elements/:code — verwijdert het element en (via
 // on delete cascade in db/init.sql) alles wat eraan hangt: relaties, projectstatus,
 // producten, tag- en organisatie-koppelingen.
-elementsRouter.delete('/doelenbomen/:id/elements/:code', requireAdmin, async (req, res) => {
+elementsRouter.delete('/doelenbomen/:id/elements/:code', requireEditor, async (req, res) => {
   const result = await pool.query(
     'delete from elements where doelenboom_id = $1 and code = $2 returning id',
     [req.params.id, req.params.code]

@@ -85,7 +85,7 @@ export default function TenantManagementPage({
         {!tenants && <p>Laden…</p>}
         {tenants && manageableTenants.length === 0 && <p style={styles.muted}>Geen tenants om te beheren.</p>}
         {tenants && manageableTenants.length > 0 && (
-          <p style={styles.muted}>Klik op een tenant om de leden (rol admin/gebruiker) te beheren.</p>
+          <p style={styles.muted}>Klik op een tenant om de leden (rol admin/gebruiker/bezoeker) te beheren.</p>
         )}
         <div style={styles.tenantList}>
           {manageableTenants.map((t) => {
@@ -419,6 +419,7 @@ function MemberTable({
               >
                 <option value="admin">admin</option>
                 <option value="gebruiker">gebruiker</option>
+                <option value="bezoeker">bezoeker</option>
               </select>
             </td>
             <td style={styles.td}>
@@ -498,6 +499,7 @@ function AddMemberForm({
         <select style={styles.select} value={role} onChange={(e) => setRole(e.target.value as TenantRoleName)}>
           <option value="admin">admin</option>
           <option value="gebruiker">gebruiker</option>
+          <option value="bezoeker">bezoeker</option>
         </select>
         <button style={btnStyle('primary')} type="submit" disabled={busy}>
           + Lid toevoegen
@@ -910,7 +912,7 @@ function DoelenboomMemberRolesSection({
 
   useEffect(load, [token, doelenboom.id]);
 
-  async function setRole(userId: number, role: 'admin' | 'gebruiker' | null) {
+  async function setRole(userId: number, role: TenantRoleName | null) {
     setBusy(true);
     setError(null);
     try {
@@ -942,11 +944,12 @@ function DoelenboomMemberRolesSection({
                 style={styles.select}
                 value={r.overrideRole ?? ''}
                 disabled={busy}
-                onChange={(e) => setRole(r.userId, e.target.value ? (e.target.value as 'admin' | 'gebruiker') : null)}
+                onChange={(e) => setRole(r.userId, e.target.value ? (e.target.value as TenantRoleName) : null)}
               >
                 <option value="">(zelfde als tenant: {r.tenantRole})</option>
                 <option value="admin">Admin (op deze doelenboom)</option>
                 <option value="gebruiker">Gebruiker (op deze doelenboom)</option>
+                <option value="bezoeker">Bezoeker (op deze doelenboom)</option>
               </select>
             </div>
           ))}

@@ -12,7 +12,9 @@ import { requireWritableDoelenboom, requireModule } from '../rbac.js';
 export const productsRouter = Router();
 productsRouter.use(requireAuth);
 // Per route meegeven (niet via router.use()) — zie toelichting in elements.ts.
-const requireAdmin = requireWritableDoelenboom('id');
+// minRole='gebruiker': producten/deliverables zijn "losse boom-inhoud" bij een
+// element, net als elementen/relaties/tags-koppelingen.
+const requireEditor = requireWritableDoelenboom('id', 'gebruiker');
 // Producten/deliverables horen bij de "Projecten"-module (zie
 // doelenboom_licentiemodel.md §3) — GET .../tree levert al lege data als de
 // module ontbreekt (routes/tree.ts), dit hier blokkeert daarnaast expliciet
@@ -73,7 +75,7 @@ async function findElementId(doelenboomId: string, code: string): Promise<number
 }
 
 // POST /api/doelenbomen/:id/elements/:code/products — nieuw planning item.
-productsRouter.post('/doelenbomen/:id/elements/:code/products', requireAdmin, requireProjectenModule, async (req, res) => {
+productsRouter.post('/doelenbomen/:id/elements/:code/products', requireEditor, requireProjectenModule, async (req, res) => {
   const input = readProductBody(req.body);
   if (input.errors.length) return res.status(400).json({ error: input.errors.join(' ') });
 
@@ -93,7 +95,7 @@ productsRouter.post('/doelenbomen/:id/elements/:code/products', requireAdmin, re
 });
 
 // PUT /api/doelenbomen/:id/elements/:code/products/:productId — bijwerken.
-productsRouter.put('/doelenbomen/:id/elements/:code/products/:productId', requireAdmin, requireProjectenModule, async (req, res) => {
+productsRouter.put('/doelenbomen/:id/elements/:code/products/:productId', requireEditor, requireProjectenModule, async (req, res) => {
   const input = readProductBody(req.body);
   if (input.errors.length) return res.status(400).json({ error: input.errors.join(' ') });
 
@@ -117,7 +119,7 @@ productsRouter.put('/doelenbomen/:id/elements/:code/products/:productId', requir
 });
 
 // DELETE /api/doelenbomen/:id/elements/:code/products/:productId
-productsRouter.delete('/doelenbomen/:id/elements/:code/products/:productId', requireAdmin, requireProjectenModule, async (req, res) => {
+productsRouter.delete('/doelenbomen/:id/elements/:code/products/:productId', requireEditor, requireProjectenModule, async (req, res) => {
   const elementId = await findElementId(req.params.id, req.params.code);
   if (!elementId) return res.status(404).json({ error: `Element "${req.params.code}" niet gevonden.` });
 

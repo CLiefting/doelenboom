@@ -53,7 +53,7 @@ columnConfigRouter.put('/tenants/:tenantId/column-config', requireSysadmin, asyn
 
 columnConfigRouter.get(
   '/doelenbomen/:id/column-config',
-  requireTenantRoleForDoelenboomParam('gebruiker', 'id'),
+  requireTenantRoleForDoelenboomParam('bezoeker', 'id'),
   async (req, res) => {
     const columns = await getColumnsForDoelenboom(req.params.id);
     res.json({ columns });

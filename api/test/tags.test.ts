@@ -11,13 +11,14 @@ describe('tags CRUD + koppelen aan elementen', () => {
   let doelenboomId: number;
   let adminToken: string;
   let gebruikerToken: string;
+  let bezoekerToken: string;
 
   before(async () => {
     await startTestServer();
     const email = `${PREFIX}-sysadmin@test.local`;
     await createSysadminUser(email, 'wachtwoord123');
     const sysadminToken = await login(email, 'wachtwoord123');
-    ({ doelenboomId, adminToken, gebruikerToken } = await setupWritableDoelenboom(sysadminToken, PREFIX));
+    ({ doelenboomId, adminToken, gebruikerToken, bezoekerToken } = await setupWritableDoelenboom(sysadminToken, PREFIX));
     await req('POST', `/api/doelenbomen/${doelenboomId}/elements`, {
       token: adminToken, body: { code: 'P1', type: 'Project', name: 'Project 1' },
     });
@@ -96,5 +97,25 @@ describe('tags CRUD + koppelen aan elementen', () => {
     assert.equal(unlinked.status, 204);
     const unlinkedAgain = await req('DELETE', `/api/doelenbomen/${doelenboomId}/elements/P1/tags/${tagCode}`, { token: adminToken });
     assert.equal(unlinkedAgain.status, 404);
+  });
+
+  it('gebruiker mag een tag aan een element koppelen/ontkoppelen, bezoeker niet — de catalogus zelf blijft admin-only', async () => {
+    const tag = await req('POST', `/api/doelenbomen/${doelenboomId}/tags`, { token: adminToken, body: { name: 'Gebruiker-koppel-tag' } });
+    const tagCode = tag.body.code;
+
+    const bezoekerLink = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P1/tags`, {
+      token: bezoekerToken, body: { tagCode },
+    });
+    assert.equal(bezoekerLink.status, 403);
+
+    const gebruikerLink = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P1/tags`, {
+      token: gebruikerToken, body: { tagCode },
+    });
+    assert.equal(gebruikerLink.status, 201);
+
+    const gebruikerUnlink = await req('DELETE', `/api/doelenbomen/${doelenboomId}/elements/P1/tags/${tagCode}`, {
+      token: gebruikerToken,
+    });
+    assert.equal(gebruikerUnlink.status, 204);
   });
 });

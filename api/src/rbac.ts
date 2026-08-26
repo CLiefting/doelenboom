@@ -7,11 +7,30 @@ import { hasModule, isLicenseExpired } from './license.js';
 // - sysadmin (users.is_sysadmin): globaal, mag alles — incl. tenants en
 //   gebruikers beheren. Geen tenant_users-rij nodig, geldt overal.
 // - admin (tenant_users.role = 'admin'): mag lezen én wijzigen binnen die ene
-//   tenant (elementen/relaties/tags/org-eenheden/imports, tenant-instellingen,
-//   leden van die tenant) — mag geen tenants aanmaken en geen andere tenants
-//   beheren.
-// - gebruiker (tenant_users.role = 'gebruiker'): alleen lezen binnen die tenant.
-export type TenantRole = 'admin' | 'gebruiker';
+//   tenant — alle boom-inhoud (elementen/relaties/tags/org-eenheden/imports),
+//   ÉN de "instellingen"-laag: kolomconfiguratie, doelenboom-instellingen
+//   (naam/slug/alleen-lezen/archiveren), tenant-instellingen, leden van die
+//   tenant. Mag geen tenants aanmaken en geen andere tenants beheren.
+// - gebruiker (tenant_users.role = 'gebruiker'): mag lezen én de "losse
+//   boom-inhoud" wijzigen binnen die tenant — elementen aanmaken/bewerken/
+//   verwijderen, relaties tussen elementen, tags/organisatieonderdelen aan
+//   een element koppelen (niet de tag/org-catalogus zelf beheren), en
+//   projectstatus/producten. Mag NIET de kolomconfiguratie of overige
+//   instellingen wijzigen, geen Excel importeren, en geen leden/tenants
+//   beheren — dat blijft admin/sysadmin (zie requireWritableDoelenboom's
+//   minRole-param hieronder voor de precieze knip per route).
+// - bezoeker (tenant_users.role = 'bezoeker'): alleen lezen binnen die
+//   tenant — geen enkele schrijfactie.
+export type TenantRole = 'admin' | 'gebruiker' | 'bezoeker';
+
+// Rangorde voor "minimaal deze rol nodig"-checks hieronder — hoger getal =
+// meer rechten. sysadmin zit hier bewust buiten (die mag altijd door, los
+// van deze rangorde, zie elke functie hieronder).
+const ROLE_RANK: Record<TenantRole, number> = { bezoeker: 0, gebruiker: 1, admin: 2 };
+
+function roleAtLeast(role: TenantRole, minRole: TenantRole): boolean {
+  return ROLE_RANK[role] >= ROLE_RANK[minRole];
+}
 
 export async function getTenantRole(userId: number, tenantId: number | string): Promise<TenantRole | null> {
   const result = await pool.query(
@@ -57,8 +76,10 @@ export function requireSysadmin(req: AuthedRequest, res: Response, next: NextFun
 
 // Middleware-factory: sysadmin mag altijd door. Anders wordt via resolveTenantId
 // (dat de tenant afleidt uit bv. req.params.id / req.params.tenantId) de rol van
-// deze gebruiker in die tenant opgezocht. minRole='gebruiker' betekent "moet lid
-// zijn" (lezen mag), minRole='admin' betekent "moet tenant-admin zijn" (schrijven).
+// deze gebruiker in die tenant opgezocht, en vergeleken tegen minRole via de
+// rangorde hierboven (ROLE_RANK) — minRole='bezoeker' betekent "moet lid zijn"
+// (lezen mag, elke rol volstaat), minRole='gebruiker' betekent "moet gebruiker
+// of admin zijn", minRole='admin' betekent "moet tenant-admin zijn" (schrijven).
 export function requireTenantRole(
   minRole: TenantRole,
   resolveTenantId: (req: AuthedRequest) => Promise<number | null> | number | null
@@ -71,8 +92,8 @@ export function requireTenantRole(
 
     const role = await getTenantRole(req.user!.id, tenantId);
     if (!role) return res.status(403).json({ error: 'Geen toegang tot deze tenant.' });
-    if (minRole === 'admin' && role !== 'admin') {
-      return res.status(403).json({ error: 'Alleen een tenant-admin mag dit wijzigen.' });
+    if (!roleAtLeast(role, minRole)) {
+      return res.status(403).json({ error: `Deze actie vereist minimaal de rol "${minRole}" binnen deze tenant.` });
     }
     next();
   };
@@ -93,8 +114,8 @@ export function requireTenantRoleForDoelenboomParam(minRole: TenantRole, paramNa
 
     const role = await getEffectiveRoleForDoelenboom(req.user!.id, doelenboomId);
     if (!role) return res.status(403).json({ error: 'Geen toegang tot deze tenant.' });
-    if (minRole === 'admin' && role !== 'admin') {
-      return res.status(403).json({ error: 'Alleen een admin (tenant- of doelenboom-specifiek) mag dit wijzigen.' });
+    if (!roleAtLeast(role, minRole)) {
+      return res.status(403).json({ error: `Deze actie vereist minimaal de rol "${minRole}" (tenant- of doelenboom-specifiek).` });
     }
     next();
   };
@@ -105,19 +126,29 @@ export function requireTenantRoleForTenantParam(minRole: TenantRole, paramName =
   return requireTenantRole(minRole, (req) => Number(req.params[paramName]));
 }
 
-// Voor content-schrijfroutes binnen een doelenboom (elementen/relaties/tags/
-// organisatieonderdelen/imports — niet de doelenboom-instellingen zelf, zie
-// db/init.sql bij doelenbomen.read_only). Sysadmin mag altijd door. Voor
+// Voor schrijfroutes binnen een doelenboom. Sysadmin mag altijd door. Voor
 // iedereen anders geldt de EFFECTIEVE rol (tenant-rol, tenzij overruled voor
-// déze doelenboom, zie doelenboom_user_roles) — die moet 'admin' zijn EN de
-// doelenboom mag niet op read-only staan — zo blokkeert read-only iedereen
-// behalve sysadmin, ook een admin die normaal wél zou mogen schrijven.
+// déze doelenboom, zie doelenboom_user_roles) — die moet minstens minRole zijn
+// (rangorde, zie ROLE_RANK hierboven) EN de doelenboom mag niet op read-only
+// staan — zo blokkeert read-only iedereen behalve sysadmin, ook een admin die
+// normaal wél zou mogen schrijven.
+//
+// minRole (default 'admin'): de meeste schrijfroutes zijn nog steeds
+// admin-only — de "instellingen"-laag (kolomconfiguratie, doelenboom
+// hernoemen/read-only/archiveren, Excel-import, tag-/org-catalogus zelf
+// beheren). Voor de "losse boom-inhoud" (elementen, relaties, tags/org-
+// koppelingen ÓP een element, projectstatus/producten — zie routes/elements.ts,
+// edges.ts, tags.ts, orgUnits.ts, products.ts, projectStatus.ts) geven die
+// routes hier expliciet minRole='gebruiker' mee, zodat ook de rol 'gebruiker'
+// (niet alleen 'admin') erdoorheen mag — de read-only/licentie-check hieronder
+// blijft in beide gevallen gelden.
 //
 // resolveDoelenboomId: net als bij requireTenantRole hierboven, óf de naam van
 // de route-param die direct het doelenboom-id bevat, óf een functie die 'm
 // afleidt (bv. via een tussenliggend import-id, zie imports.ts).
 export function requireWritableDoelenboom(
-  resolveDoelenboomId: string | ((req: AuthedRequest) => Promise<number | string | null> | number | string | null)
+  resolveDoelenboomId: string | ((req: AuthedRequest) => Promise<number | string | null> | number | string | null),
+  minRole: TenantRole = 'admin'
 ) {
   return async (req: AuthedRequest, res: Response, next: NextFunction) => {
     const doelenboomId =
@@ -130,8 +161,13 @@ export function requireWritableDoelenboom(
     if (tenantId == null) return res.status(404).json({ error: 'Niet gevonden.' });
     const role = await getEffectiveRoleForDoelenboom(req.user!.id, doelenboomId);
     if (!role) return res.status(403).json({ error: 'Geen toegang tot deze tenant.' });
-    if (role !== 'admin') {
-      return res.status(403).json({ error: 'Alleen een admin (tenant- of doelenboom-specifiek) mag dit wijzigen.' });
+    if (!roleAtLeast(role, minRole)) {
+      return res.status(403).json({
+        error:
+          minRole === 'admin'
+            ? 'Alleen een admin (tenant- of doelenboom-specifiek) mag dit wijzigen.'
+            : 'Alleen een admin of gebruiker (tenant- of doelenboom-specifiek) mag dit wijzigen.',
+      });
     }
 
     const result = await pool.query('select read_only from doelenbomen where id = $1', [doelenboomId]);

@@ -12,7 +12,13 @@ tagsRouter.use(requireAuth);
 // Per route meegeven (niet via router.use()) — zie toelichting in elements.ts.
 // requireWritableDoelenboom i.p.v. requireTenantRoleForDoelenboomParam: blokkeert
 // ook tenant-admins zodra de doelenboom op read-only staat (zie rbac.ts).
+// Twee niveaus: de tag-CATALOGUS zelf (aanmaken/bewerken/verwijderen van een tag
+// in de stamlijst) blijft admin-only, net als de overige "instellingen"-laag —
+// zie requireAdmin hieronder. Een tag aan een element KOPPELEN/ontkoppelen
+// (element_tags, onderaan dit bestand) is "losse boom-inhoud" en mag ook door
+// de rol 'gebruiker' — zie requireEditor.
 const requireAdmin = requireWritableDoelenboom('id');
+const requireEditor = requireWritableDoelenboom('id', 'gebruiker');
 
 function isUniqueViolation(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { code?: string }).code === '23505';
@@ -111,7 +117,7 @@ async function findTagId(doelenboomId: string, code: string): Promise<number | n
 // POST /api/doelenbomen/:id/elements/:code/tags — { tagCode, toelichting } koppelt een
 // bestaande tag aan een element. Voor het aanmaken van de tag zelf, zie
 // POST /doelenbomen/:id/tags hierboven.
-tagsRouter.post('/doelenbomen/:id/elements/:code/tags', requireAdmin, async (req, res) => {
+tagsRouter.post('/doelenbomen/:id/elements/:code/tags', requireEditor, async (req, res) => {
   const b = (req.body ?? {}) as Record<string, unknown>;
   const tagCode = typeof b.tagCode === 'string' ? b.tagCode.trim() : '';
   const toelichting = typeof b.toelichting === 'string' ? b.toelichting.trim() : '';
@@ -139,7 +145,7 @@ tagsRouter.post('/doelenbomen/:id/elements/:code/tags', requireAdmin, async (req
 
 // DELETE /api/doelenbomen/:id/elements/:code/tags/:tagCode — ontkoppelt alleen; de tag
 // zelf (in de stamlijst) blijft bestaan.
-tagsRouter.delete('/doelenbomen/:id/elements/:code/tags/:tagCode', requireAdmin, async (req, res) => {
+tagsRouter.delete('/doelenbomen/:id/elements/:code/tags/:tagCode', requireEditor, async (req, res) => {
   const result = await pool.query(
     `delete from element_tags
      where element_id = (select id from elements where doelenboom_id = $1 and code = $2)

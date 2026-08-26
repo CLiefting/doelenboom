@@ -14,7 +14,9 @@ edgesRouter.use(requireAuth);
 // Per route meegeven (niet via router.use()) — zie toelichting in elements.ts.
 // requireWritableDoelenboom i.p.v. requireTenantRoleForDoelenboomParam: blokkeert
 // ook tenant-admins zodra de doelenboom op read-only staat (zie rbac.ts).
-const requireAdmin = requireWritableDoelenboom('id');
+// minRole='gebruiker': relaties zijn, net als elementen, "losse boom-inhoud" —
+// niet alleen admin.
+const requireEditor = requireWritableDoelenboom('id', 'gebruiker');
 
 const WEIGHTS = ['primair', 'ondersteunend'];
 
@@ -39,7 +41,7 @@ function readToelichting(body: unknown): string {
 }
 
 // POST /api/doelenbomen/:id/edges — { source, target, weight, toelichting }
-edgesRouter.post('/doelenbomen/:id/edges', requireAdmin, async (req, res) => {
+edgesRouter.post('/doelenbomen/:id/edges', requireEditor, async (req, res) => {
   const b = (req.body ?? {}) as Record<string, unknown>;
   const source = typeof b.source === 'string' ? b.source.trim() : '';
   const target = typeof b.target === 'string' ? b.target.trim() : '';
@@ -71,7 +73,7 @@ edgesRouter.post('/doelenbomen/:id/edges', requireAdmin, async (req, res) => {
 });
 
 // PUT /api/doelenbomen/:id/edges/:source/:target — alleen weight/toelichting.
-edgesRouter.put('/doelenbomen/:id/edges/:source/:target', requireAdmin, async (req, res) => {
+edgesRouter.put('/doelenbomen/:id/edges/:source/:target', requireEditor, async (req, res) => {
   const weight = readWeight(req.body);
   const toelichting = readToelichting(req.body);
   const result = await pool.query(
@@ -87,7 +89,7 @@ edgesRouter.put('/doelenbomen/:id/edges/:source/:target', requireAdmin, async (r
 });
 
 // DELETE /api/doelenbomen/:id/edges/:source/:target
-edgesRouter.delete('/doelenbomen/:id/edges/:source/:target', requireAdmin, async (req, res) => {
+edgesRouter.delete('/doelenbomen/:id/edges/:source/:target', requireEditor, async (req, res) => {
   const result = await pool.query(
     `delete from edges
      where doelenboom_id = $1

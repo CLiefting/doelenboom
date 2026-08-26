@@ -12,6 +12,7 @@ describe('products (planning items) CRUD', () => {
   let doelenboomId: number;
   let adminToken: string;
   let gebruikerToken: string;
+  let bezoekerToken: string;
 
   before(async () => {
     await startTestServer();
@@ -19,7 +20,7 @@ describe('products (planning items) CRUD', () => {
     await createSysadminUser(email, 'wachtwoord123');
     const sysadminToken = await login(email, 'wachtwoord123');
     let tenantId: number;
-    ({ tenantId, doelenboomId, adminToken, gebruikerToken } = await setupWritableDoelenboom(sysadminToken, PREFIX));
+    ({ tenantId, doelenboomId, adminToken, gebruikerToken, bezoekerToken } = await setupWritableDoelenboom(sysadminToken, PREFIX));
     // Producten horen bij de "Projecten"-module (zie license.ts/routes/products.ts
     // requireModule) — dit testbestand dateert van vóór het licentiemodel en test
     // puur de CRUD-mechaniek zelf, dus activeren we de module hier expliciet i.p.v.
@@ -59,10 +60,27 @@ describe('products (planning items) CRUD', () => {
     });
     assert.equal(unknownElement.status, 404);
 
-    const gebruiker = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P1/products`, {
-      token: gebruikerToken, body: { name: 'X' },
+    const bezoeker = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P1/products`, {
+      token: bezoekerToken, body: { name: 'X' },
     });
-    assert.equal(gebruiker.status, 403);
+    assert.equal(bezoeker.status, 403);
+  });
+
+  it('gebruiker mag producten aanmaken/wijzigen/verwijderen (losse boom-inhoud)', async () => {
+    const created = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P1/products`, {
+      token: gebruikerToken, body: { name: 'Door gebruiker' },
+    });
+    assert.equal(created.status, 201);
+
+    const updated = await req('PUT', `/api/doelenbomen/${doelenboomId}/elements/P1/products/${created.body.id}`, {
+      token: gebruikerToken, body: { name: 'Door gebruiker gewijzigd', pctGereed: 25 },
+    });
+    assert.equal(updated.status, 200);
+
+    const del = await req('DELETE', `/api/doelenbomen/${doelenboomId}/elements/P1/products/${created.body.id}`, {
+      token: gebruikerToken,
+    });
+    assert.equal(del.status, 204);
   });
 
   it('type default is deliverable; mijlpaal expliciet meegeven werkt', async () => {

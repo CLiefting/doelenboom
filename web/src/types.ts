@@ -1,4 +1,4 @@
-export type TenantRoleName = 'admin' | 'gebruiker';
+export type TenantRoleName = 'admin' | 'gebruiker' | 'bezoeker';
 
 export type UserTenantRole = {
   tenantId: number;
@@ -168,7 +168,13 @@ export type TreeResponse = {
     name: string;
     readOnly: boolean;
     effectiveRole: TenantRoleName;
+    // canWrite: mag de "instellingen"-laag wijzigen (kolommen, doelenboom-
+    // instellingen, Excel-import, tag-/org-catalogus) — alleen admin/sysadmin.
     canWrite: boolean;
+    // canWriteContent: mag de "losse boom-inhoud" wijzigen (elementen,
+    // relaties, tags/org-koppelingen op een element, projectstatus/producten)
+    // — admin/sysadmin én de rol 'gebruiker'. Zie api/src/routes/tree.ts.
+    canWriteContent: boolean;
     tenant: { id: number; slug: string; name: string };
   };
   elements: Element[];

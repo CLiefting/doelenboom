@@ -86,7 +86,7 @@ importsRouter.post(
 
 importsRouter.get(
   '/doelenbomen/:doelenboomId/imports',
-  requireTenantRoleForDoelenboomParam('gebruiker', 'doelenboomId'),
+  requireTenantRoleForDoelenboomParam('bezoeker', 'doelenboomId'),
   async (req, res) => {
   const result = await pool.query(
     `select id, filename, uploaded_at, status, published_at
@@ -98,7 +98,7 @@ importsRouter.get(
 
 importsRouter.get(
   '/imports/:id',
-  requireTenantRole('gebruiker', (req) => tenantIdForImport(req.params.id)),
+  requireTenantRole('bezoeker', (req) => tenantIdForImport(req.params.id)),
   async (req, res) => {
     const result = await pool.query(
       `select id, doelenboom_id, filename, uploaded_at, status, report_json, published_at

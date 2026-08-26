@@ -12,13 +12,14 @@ describe('elements CRUD', () => {
   let doelenboomId: number;
   let adminToken: string;
   let gebruikerToken: string;
+  let bezoekerToken: string;
 
   before(async () => {
     await startTestServer();
     const email = `${PREFIX}-sysadmin@test.local`;
     await createSysadminUser(email, 'wachtwoord123');
     sysadminToken = await login(email, 'wachtwoord123');
-    ({ doelenboomId, adminToken, gebruikerToken } = await setupWritableDoelenboom(sysadminToken, PREFIX));
+    ({ doelenboomId, adminToken, gebruikerToken, bezoekerToken } = await setupWritableDoelenboom(sysadminToken, PREFIX));
   });
 
   after(async () => {
@@ -27,11 +28,17 @@ describe('elements CRUD', () => {
     await closePool();
   });
 
-  it('gebruiker (alleen-lezen) mag geen element aanmaken', async () => {
-    const res = await req('POST', `/api/doelenbomen/${doelenboomId}/elements`, {
-      token: gebruikerToken, body: { code: 'X1', type: 'Project', name: 'Mag niet' },
+  it('bezoeker (alleen-lezen) mag geen element aanmaken; gebruiker wel', async () => {
+    const bezoeker = await req('POST', `/api/doelenbomen/${doelenboomId}/elements`, {
+      token: bezoekerToken, body: { code: 'X1', type: 'Project', name: 'Mag niet' },
     });
-    assert.equal(res.status, 403);
+    assert.equal(bezoeker.status, 403);
+
+    const gebruiker = await req('POST', `/api/doelenbomen/${doelenboomId}/elements`, {
+      token: gebruikerToken, body: { code: 'X2', type: 'Project', name: 'Mag wel' },
+    });
+    assert.equal(gebruiker.status, 201);
+    assert.equal(gebruiker.body.code, 'X2');
   });
 
   it('admin kan een element aanmaken; validatie op type/naam/code', async () => {
@@ -75,8 +82,8 @@ describe('elements CRUD', () => {
     });
     assert.equal(notFound.status, 404);
 
-    const gebruikerDelete = await req('DELETE', `/api/doelenbomen/${doelenboomId}/elements/P2b`, { token: gebruikerToken });
-    assert.equal(gebruikerDelete.status, 403);
+    const bezoekerDelete = await req('DELETE', `/api/doelenbomen/${doelenboomId}/elements/P2b`, { token: bezoekerToken });
+    assert.equal(bezoekerDelete.status, 403);
 
     const del = await req('DELETE', `/api/doelenbomen/${doelenboomId}/elements/P2b`, { token: adminToken });
     assert.equal(del.status, 204);

@@ -12,7 +12,9 @@ import { requireWritableDoelenboom, requireModule } from '../rbac.js';
 export const projectStatusRouter = Router();
 projectStatusRouter.use(requireAuth);
 // Per route meegeven (niet via router.use()) — zie toelichting in elements.ts.
-const requireAdmin = requireWritableDoelenboom('id');
+// minRole='gebruiker': projectstatus is "losse boom-inhoud" bij een element,
+// net als elementen/relaties/tags-koppelingen/producten.
+const requireEditor = requireWritableDoelenboom('id', 'gebruiker');
 // Projectstatus hoort bij de "Projecten"-module — zie de toelichting bij
 // requireProjectenModule in routes/products.ts.
 const requireProjectenModule = requireModule('projecten', 'id');
@@ -32,7 +34,7 @@ async function findElementId(doelenboomId: string, code: string): Promise<number
 }
 
 // PUT /api/doelenbomen/:id/elements/:code/project-status — upsert.
-projectStatusRouter.put('/doelenbomen/:id/elements/:code/project-status', requireAdmin, requireProjectenModule, async (req, res) => {
+projectStatusRouter.put('/doelenbomen/:id/elements/:code/project-status', requireEditor, requireProjectenModule, async (req, res) => {
   const b = (req.body ?? {}) as Record<string, unknown>;
   const projectstatus = typeof b.projectstatus === 'string' ? b.projectstatus : '';
   const rag = typeof b.rag === 'string' ? b.rag : '';
@@ -69,7 +71,7 @@ projectStatusRouter.put('/doelenbomen/:id/elements/:code/project-status', requir
 
 // DELETE /api/doelenbomen/:id/elements/:code/project-status — status wissen
 // (terug naar "nog geen status gerapporteerd").
-projectStatusRouter.delete('/doelenbomen/:id/elements/:code/project-status', requireAdmin, requireProjectenModule, async (req, res) => {
+projectStatusRouter.delete('/doelenbomen/:id/elements/:code/project-status', requireEditor, requireProjectenModule, async (req, res) => {
   const elementId = await findElementId(req.params.id, req.params.code);
   if (!elementId) return res.status(404).json({ error: `Element "${req.params.code}" niet gevonden.` });
 

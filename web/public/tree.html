@@ -239,11 +239,16 @@
 
   .dp-crud-actions { display: flex; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 1px solid #eee; }
 
-  /* Rol 'gebruiker' (alleen lezen) — verbergt alle schrijf-acties. Zie
-     applyRole() verderop: body krijgt de class 'read-only' zodra het init-
-     bericht vanuit React binnenkomt met role !== 'admin'. De API is de echte
-     autorisatiegrens (rbac.ts) — dit is puur UI. */
+  /* Drie rollen (zie applyRole() verderop + api/src/rbac.ts): 'bezoeker'
+     (alleen lezen), 'gebruiker' (mag losse boom-inhoud wijzigen — elementen,
+     relaties, tags/org-koppelingen op een element, projectstatus/producten)
+     en 'admin' (ook kolommen/instellingen/import). body krijgt 'read-only'
+     zodra de rol 'bezoeker' is (verbergt .crud-only — alle boom-inhoud-
+     schrijfacties) en 'role-admin' alleen bij 'admin' (toont .admin-only —
+     de instellingen-laag: kolommen, tag-/org-catalogus, Excel-import). De
+     API is de echte autorisatiegrens (rbac.ts) — dit is puur UI. */
   body.read-only .crud-only { display: none !important; }
+  body:not(.role-admin) .admin-only { display: none !important; }
 
   /* Watermerk "Licentie verlopen voor {tenant}" — zie renderLicenseExpiredWatermark()
      verderop, aangeroepen vanuit boot() op basis van tree.licenseExpired
@@ -880,7 +885,7 @@
             <div class="tag-org-filter" id="tag-org-filter"></div>
           </div>
         </div>
-        <button class="btn ghost btn-sm crud-only" id="manage-tags-orgs-btn" type="button" title="Tags &amp; organisatieonderdelen beheren">Beheer</button>
+        <button class="btn ghost btn-sm admin-only" id="manage-tags-orgs-btn" type="button" title="Tags &amp; organisatieonderdelen beheren">Beheer</button>
         <!-- Bestand-menu bevat alleen nog acties die een levende parent-app +
              API nodig hebben (Excel-import/export) of die in een al-geëxporteerd
              losstaand bestand geen zin hebben (nogmaals exporteren als HTML) — dus
@@ -890,8 +895,8 @@
         <div class="file-menu iframe-only" id="file-menu">
           <button class="btn ghost btn-sm" id="file-menu-btn" type="button">Bestand &#9662;</button>
           <div class="file-menu-dropdown" id="file-menu-dropdown">
-            <button type="button" class="file-menu-item crud-only" id="nav-import-btn">Importeer Excel</button>
-            <div class="file-menu-separator crud-only"></div>
+            <button type="button" class="file-menu-item admin-only" id="nav-import-btn">Importeer Excel</button>
+            <div class="file-menu-separator admin-only"></div>
             <button type="button" class="file-menu-item" id="export-xlsx-btn">Exporteer als Excel</button>
             <button type="button" class="file-menu-item" id="export-html-btn">Exporteer als HTML-bestand</button>
           </div>
@@ -1114,7 +1119,7 @@
       <section class="ref-modal-section">
         <h4>Tags</h4>
         <div class="ref-list" id="tags-list"></div>
-        <form id="tag-form" class="ref-form crud-only">
+        <form id="tag-form" class="ref-form admin-only">
           <div class="ref-form-row">
             <input type="text" id="tag-field-name" placeholder="Naam" autocomplete="off" required>
             <input type="text" id="tag-field-categorie" placeholder="Categorie (optioneel)" autocomplete="off">
@@ -1130,7 +1135,7 @@
       <section class="ref-modal-section">
         <h4>Organisatieonderdelen</h4>
         <div class="ref-list" id="orgunits-list"></div>
-        <form id="orgunit-form" class="ref-form crud-only">
+        <form id="orgunit-form" class="ref-form admin-only">
           <input type="text" id="orgunit-field-name" placeholder="Naam" autocomplete="off" required>
           <input type="text" id="orgunit-field-omschrijving" placeholder="Omschrijving (optioneel)" autocomplete="off">
           <div class="ref-form-actions">
@@ -4037,7 +4042,7 @@ function runApp(data) {
           '<div class="ref-list-item-main"><strong>' + escapeHtml(item.name) + '</strong>' +
           (metaParts.length ? '<span class="ref-list-item-meta">' + escapeHtml(metaParts.join(' · ')) + '</span>' : '') +
           '<span class="ref-list-item-code">' + escapeHtml(code) + '</span></div>' +
-          '<div class="ref-list-item-actions crud-only">' +
+          '<div class="ref-list-item-actions admin-only">' +
             '<button type="button" class="btn ghost btn-xs ref-edit-btn" data-code="' + escapeHtml(code) + '">Bewerken</button>' +
             '<button type="button" class="btn ghost btn-xs ref-delete-btn" data-code="' + escapeHtml(code) + '">Verwijderen</button>' +
           '</div></div>';
@@ -4572,12 +4577,14 @@ function runApp(data) {
 
 let PARENT_ORIGIN = '*';
 let apiUrl = null, authToken = null, doelenboomId = null, userEmail = null;
-// 'admin' (kan wijzigen) of 'gebruiker' (alleen lezen) — bepaald door React op
-// basis van de tenant-rol van de ingelogde gebruiker (zie TreePage.tsx). De
-// daadwerkelijke autorisatie gebeurt sowieso op de API (rbac.ts) — dit hier
-// bepaalt alleen welke CRUD-knoppen zichtbaar zijn. Standaard 'gebruiker'
-// (veiligste optie) totdat het echte init-bericht binnenkomt.
-let userRole = 'gebruiker';
+// 'admin' (mag alles), 'gebruiker' (mag losse boom-inhoud wijzigen) of
+// 'bezoeker' (alleen lezen) — de eerste, voorlopige waarde komt van React op
+// basis van de tenant-rol van de ingelogde gebruiker (zie TreePage.tsx),
+// daarna overschreven met de gezaghebbende waarde uit GET .../tree (zie
+// boot()). De daadwerkelijke autorisatie gebeurt sowieso op de API (rbac.ts)
+// — dit hier bepaalt alleen welke CRUD-knoppen zichtbaar zijn. Standaard
+// 'bezoeker' (veiligste optie) totdat het echte init-bericht binnenkomt.
+let userRole = 'bezoeker';
 // Onbewerkte laatst-geladen boomdata (zelfde vorm als GET .../tree) — bewaard
 // zodat exportStaticHtml() 'm kan inbakken in een losstaand HTML-bestand
 // zonder opnieuw te hoeven fetchen.
@@ -4597,8 +4604,14 @@ function renderTopbarUser() {
 }
 
 function applyRole(role) {
-  userRole = role === 'admin' ? 'admin' : 'gebruiker';
-  document.body.classList.toggle('read-only', userRole !== 'admin');
+  // Onbekende/ontbrekende waarde valt terug op 'bezoeker', de meest beperkte
+  // stand (zie de toelichting bij 'let userRole' hierboven).
+  userRole = (role === 'admin' || role === 'gebruiker') ? role : 'bezoeker';
+  // 'read-only' verbergt .crud-only (alle boom-inhoud-schrijfacties) — alleen
+  // bij 'bezoeker'. 'role-admin' toont .admin-only (kolommen/instellingen/
+  // import/tag-org-catalogus) — alleen bij 'admin'. Zie de CSS hierboven.
+  document.body.classList.toggle('read-only', userRole === 'bezoeker');
+  document.body.classList.toggle('role-admin', userRole === 'admin');
 }
 
 // Toont/verbergt het "Licentie verlopen voor {tenant}"-watermerk. Wordt
@@ -4818,13 +4831,15 @@ function boot(tree) {
   // De rol die de parent-app (React) via postMessage meegaf vóórdat de echte
   // boomdata er was, is maar een gok (kent geen per-doelenboom rol-overrides,
   // zie doelenboom_user_roles). GET .../tree berekent de echte, effectieve
-  // schrijfbaarheid server-side (tree.doelenboom.canWrite) — die is hier
-  // leidend en overschrijft die eerdere gok. Een losstaand geëxporteerd
-  // HTML-bestand (standalone) moet echter altijd 'gebruiker' blijven, ongeacht
-  // wat canWrite op het moment van exporteren was — anders zou een export
-  // gemaakt door een admin daarna zelf ook weer schrijfbaar lijken.
+  // schrijfbaarheid server-side (tree.doelenboom.canWrite/canWriteContent,
+  // zie routes/tree.ts) — die is hier leidend en overschrijft die eerdere
+  // gok: canWrite -> 'admin', anders canWriteContent -> 'gebruiker', anders
+  // 'bezoeker'. Een losstaand geëxporteerd HTML-bestand (standalone) moet
+  // echter altijd 'bezoeker' blijven, ongeacht wat canWrite/canWriteContent
+  // op het moment van exporteren waren — anders zou een export gemaakt door
+  // een admin/gebruiker daarna zelf ook weer schrijfbaar lijken.
   if (typeof tree.doelenboom.canWrite === 'boolean' && !document.body.classList.contains('standalone')) {
-    applyRole(tree.doelenboom.canWrite ? 'admin' : 'gebruiker');
+    applyRole(tree.doelenboom.canWrite ? 'admin' : (tree.doelenboom.canWriteContent ? 'gebruiker' : 'bezoeker'));
   }
   CURRENT_TENANT_NAME = tree.doelenboom.tenant.name;
   // Watermerk voor een verlopen licentie (zie renderLicenseExpiredWatermark()
@@ -4897,7 +4912,7 @@ function fetchAndBoot() {
 // er precies één plek die bepaalt "hoe laad ik de boom" voor alle scenario's
 // (live in de React-app, standalone/debuggen via querystring, of een export).
 if (window.__STATIC_TREE__) {
-  applyRole('gebruiker');
+  applyRole('bezoeker');
   document.body.classList.add('standalone');
   renderTopbarUser();
   boot(window.__STATIC_TREE__);
@@ -4927,9 +4942,9 @@ if (window.__STATIC_TREE__) {
       apiUrl = qApi; authToken = qToken; doelenboomId = qId;
       userEmail = params.get('user') || null;
       // Standalone/debug-modus buiten de React-app: standaard 'admin' (tenzij
-      // expliciet ?role=gebruiker meegegeven), zodat lokaal testen van CRUD niet
-      // wordt gehinderd — dit pad wordt in productie nooit gebruikt (de React-app
-      // gebruikt altijd de postMessage-handshake hierboven).
+      // expliciet ?role=gebruiker of ?role=bezoeker meegegeven), zodat lokaal
+      // testen van CRUD niet wordt gehinderd — dit pad wordt in productie nooit
+      // gebruikt (de React-app gebruikt altijd de postMessage-handshake hierboven).
       applyRole(params.get('role') || 'admin');
       renderTopbarUser();
       fetchAndBoot();
