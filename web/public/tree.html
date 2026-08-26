@@ -547,27 +547,24 @@
   .activities-chevron { display: inline-block; font-size: 9px; color: #aab0b8; transition: transform 0.15s; }
   .dp-activities-body { margin-bottom: 4px; }
   .activity-gantt-wrap { margin: 4px 0 4px; }
-  /* Twee LOSSE grids (as-rij en elke activiteitenrij) met identieke
-     grid-template-columns i.p.v. één gedeelde grid met "display:contents"-rijen
-     — dat laatste leek elegant, maar de expliciet-gepositioneerde as
-     (grid-column:2) liet in rij 1 een gat vallen dat de auto-plaatsing van de
-     eerste activiteitenrij (naam/balk/knoppen) opvulde, met als gevolg dat
-     naam en balk niet meer op dezelfde regel stonden — precies het probleem
-     dat hierna gemeld werd. Met losse, even-brede grids als gestapelde
-     broertjes/zusjes lijnen de kolommen nog steeds pixel-exact uit, zonder
-     die valkuil. */
-  .activity-gantt-axis-row, .activity-gantt-row {
-    display: grid; grid-template-columns: minmax(90px, 150px) 1fr 74px; gap: 8px; align-items: center;
-  }
+  /* De as (.activity-gantt-axis-track) en elke balk-track (.activity-row-track)
+     zijn bewust GEEN kolom in een label|track|knoppen-grid meer (dat gaf een
+     as die links/rechts een stuk smaller was dan de projecttijdlijn erboven,
+     dus niet op dezelfde verticale lijn begon/eindigde). Nu allebei simpele
+     volle-breedte blokken, exact zoals .timeline-chart van de projecttijdlijn
+     hierboven — zelfde ouder-breedte (#project-panel), dus 0%/100% valt voor
+     beide op precies dezelfde pixel. Naam + bewerken/verwijderen-knoppen staan
+     daarom op een eigen regel BOVEN de balk i.p.v. ernaast.
+  */
   .activity-gantt-axis-track { position: relative; height: 34px; }
-  .activity-gantt-rows { display: flex; flex-direction: column; gap: 2px; }
+  .activity-gantt-rows { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+  .activity-row-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 3px; }
   .activity-row-label {
-    font-size: 12px; color: #333; font-weight: 600; overflow: hidden; text-overflow: ellipsis;
-    white-space: nowrap; padding: 3px 0;
+    font-size: 12px; color: #333; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .activity-row-track { position: relative; height: 14px; background: #eef0f3; border-radius: 4px; }
   .activity-bar { position: absolute; top: 0; bottom: 0; background: var(--navy); border-radius: 4px; min-width: 6px; }
-  .activity-row-actions { display: flex; gap: 4px; justify-content: flex-end; }
+  .activity-row-actions { display: flex; gap: 4px; flex-shrink: 0; }
   .activity-add-row { margin-top: 8px; }
 
   /* Overzicht "alle project-tijdlijnen" (#timelines-view) — een losse lijst
@@ -2463,23 +2460,21 @@ function runApp(data) {
       const title = escapeHtml(a.name) + ' — ' + formatDateNL(a.startDate) + ' t/m ' + formatDateNL(a.endDate) +
         (a.omschrijving ? ' — ' + escapeHtml(a.omschrijving) : '');
       return '<div class="activity-gantt-row">' +
-        '<div class="activity-row-label" title="' + escapeHtml(a.name) + '">' + escapeHtml(a.name) + '</div>' +
+        '<div class="activity-row-head">' +
+          '<span class="activity-row-label" title="' + escapeHtml(a.name) + '">' + escapeHtml(a.name) + '</span>' +
+          '<span class="activity-row-actions crud-only">' +
+            '<button type="button" class="btn ghost btn-xs activity-edit-btn" data-code="' + escapeHtml(id) + '" data-id="' + escapeHtml(String(a.dbId)) + '" title="Bewerken">&#9998;</button>' +
+            '<button type="button" class="btn ghost btn-xs activity-delete-btn" data-code="' + escapeHtml(id) + '" data-id="' + escapeHtml(String(a.dbId)) + '" title="Verwijderen">&times;</button>' +
+          '</span>' +
+        '</div>' +
         '<div class="activity-row-track">' +
           '<div class="activity-bar" style="left:' + left + '%;width:' + width + '%" title="' + title + '"></div>' +
-        '</div>' +
-        '<div class="activity-row-actions crud-only">' +
-          '<button type="button" class="btn ghost btn-xs activity-edit-btn" data-code="' + escapeHtml(id) + '" data-id="' + escapeHtml(String(a.dbId)) + '" title="Bewerken">&#9998;</button>' +
-          '<button type="button" class="btn ghost btn-xs activity-delete-btn" data-code="' + escapeHtml(id) + '" data-id="' + escapeHtml(String(a.dbId)) + '" title="Verwijderen">&times;</button>' +
         '</div>' +
       '</div>';
     }).join('');
 
     return '<div class="activity-gantt-wrap">' +
-      '<div class="activity-gantt-axis-row">' +
-        '<span></span>' +
-        '<div class="activity-gantt-axis-track">' + ticksHtml + labelsHtml + todayHtml + '</div>' +
-        '<span></span>' +
-      '</div>' +
+      '<div class="activity-gantt-axis-track">' + ticksHtml + labelsHtml + todayHtml + '</div>' +
       '<div class="activity-gantt-rows">' + rowsHtml + '</div>' +
     '</div>';
   }
