@@ -75,7 +75,15 @@ export default function TreePage({
       ref={iframeRef}
       src={`/tree.html?doelenboom=${doelenboom.id}`}
       title={`Doelenboom — ${doelenboom.name}`}
-      style={{ border: 'none', width: '100vw', height: '100vh', display: 'block' }}
+      // 100% i.p.v. een vaste 100vw/100vh: die vaste viewport-eenheden hielden
+      // geen rekening met de systeemmelding-banner (AnnouncementBanner, zie
+      // App.tsx) die er eventueel bovenaan gerenderd wordt — de iframe schoof
+      // dan gewoon door tót de bovenkant van de viewport, óók als daar al de
+      // banner stond, met als gevolg dat die de topbar (met "Terug"/"Filters"/
+      // "Uitloggen"/"Help") aan het zicht onttrok. Nu vult de iframe exact zijn
+      // ouder (de flex:1-contentcontainer in App.tsx), die zelf al rekening
+      // houdt met de bannerhoogte.
+      style={{ border: 'none', width: '100%', height: '100%', display: 'block' }}
     />
   );
 }

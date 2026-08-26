@@ -51,8 +51,18 @@ export default function AnnouncementBanner() {
 }
 
 const styles: Record<string, React.CSSProperties> = {
+  // Bewust GEEN position:fixed (dat was de eerdere opzet): dit component werd
+  // dan over de rest van de pagina heen getekend, inclusief de topbar van
+  // tree.html (dat zelf een full-screen <iframe> is, zie TreePage.tsx) — met
+  // als gevolg dat de banner de "Terug"/"Filters"/"Uitloggen"/"Help"-knoppen
+  // erin verborg en onklikbaar maakte. Nu gewoon een normaal blok bovenaan de
+  // flex-kolom in App.tsx: dat duwt al het andere (inclusief de iframe, die
+  // zijn hoogte via 100% van zijn flex:1-container krijgt i.p.v. een vaste
+  // 100vh) simpelweg naar beneden, in plaats van eroverheen te liggen.
+  // position:relative blijft nodig zodat de losse sluitknop (position:absolute
+  // hieronder) relatief aan déze balk blijft geankerd.
   banner: {
-    position: 'fixed', top: 0, left: 0, right: 0, zIndex: 9999,
+    position: 'relative', flexShrink: 0, width: '100%', zIndex: 10,
     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16,
     background: '#FFF3CD', borderBottom: '1px solid #FFE69C', color: '#664d03',
     padding: '0.6rem 2.5rem 0.6rem 1rem', fontSize: 14, fontWeight: 600,

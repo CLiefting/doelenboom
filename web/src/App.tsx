@@ -37,6 +37,16 @@ type View =
 
 const HEARTBEAT_INTERVAL_MS = 60_000;
 
+// Flex-kolom over de volledige viewporthoogte: AnnouncementBanner (normale
+// flow, geen position:fixed meer — zie dat component) hoort bovenaan en duwt
+// de rest gewoon naar beneden. De inhoud daaronder krijgt via flex:1 exact de
+// resterende hoogte (dus 100vh min de bannerhoogte, of gewoon 100vh als er
+// geen banner actief is) — belangrijk voor TreePage.tsx, die zijn <iframe>
+// (tree.html) op 100% van déze container laat meeschalen i.p.v. een vaste
+// 100vh, anders zou de banner alsnog de topbar van de boomweergave verbergen.
+const pageStyle: React.CSSProperties = { display: 'flex', flexDirection: 'column', height: '100vh' };
+const contentAreaStyle: React.CSSProperties = { flex: '1 1 auto', minHeight: 0, overflow: 'auto' };
+
 export default function App() {
   const { session, setSession } = useSession();
   const [doelenboom, setDoelenboom] = useState<DoelenboomSummary | null>(null);
@@ -75,8 +85,12 @@ export default function App() {
   if (!session) {
     return (
       <>
-        <AnnouncementBanner />
-        <LoginPage notice={authNotice} onLoggedIn={(token, user) => setSession({ token, user })} />
+        <div style={pageStyle}>
+          <AnnouncementBanner />
+          <div style={contentAreaStyle}>
+            <LoginPage notice={authNotice} onLoggedIn={(token, user) => setSession({ token, user })} />
+          </div>
+        </div>
         <VersionFooter />
       </>
     );
@@ -88,14 +102,16 @@ export default function App() {
   // resetten van dit account).
   if (session.user.mustChangePassword) {
     return (
-      <>
+      <div style={pageStyle}>
         <AnnouncementBanner />
-        <ChangePasswordPage
-          token={session.token}
-          forced
-          onDone={(user) => setSession({ ...session, user })}
-        />
-      </>
+        <div style={contentAreaStyle}>
+          <ChangePasswordPage
+            token={session.token}
+            forced
+            onDone={(user) => setSession({ ...session, user })}
+          />
+        </div>
+      </div>
     );
   }
 
@@ -178,8 +194,10 @@ export default function App() {
 
   return (
     <>
-      <AnnouncementBanner />
-      {content}
+      <div style={pageStyle}>
+        <AnnouncementBanner />
+        <div style={contentAreaStyle}>{content}</div>
+      </div>
       {loggingOut && (
         <LogoutFlow token={session.token} onDone={finishLogout} onCancel={() => setLoggingOut(false)} />
       )}
