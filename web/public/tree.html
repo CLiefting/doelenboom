@@ -569,6 +569,7 @@
   }
   .activity-row-label {
     font-size: 12px; color: #333; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    min-width: 0; /* nodig zodat de ellipsis blijft werken met de WBS-inspring-margin hieronder */
   }
   .activity-row-track { position: relative; height: 14px; background: #eef0f3; border-radius: 4px; }
   .activity-bar { position: absolute; top: 0; bottom: 0; background: var(--navy); border-radius: 4px; min-width: 6px; }
@@ -594,6 +595,17 @@
   /* WBS-nummer tussen haakjes vóór de taaknaam — kleiner en lichter dan de
      naam zelf. */
   .activity-row-wbs { font-size: 10.5px; font-weight: 400; color: #999; }
+  /* In-/uitklapchevron vóór een fase ("summary task") die zelf onderliggende
+     taken heeft (zie wbsHasChildren) — alleen dán aanwezig, anders geen
+     chevron (niets om in/uit te klappen). Zelfde interactiepatroon als
+     .activities-chevron hierboven, maar per rij i.p.v. voor de hele sectie.
+     Onderliggende taken krijgen bovendien wat inspringing (wbsIndentPx) op
+     basis van hun WBS-diepte, zodat de hiërarchie ook zichtbaar is zonder
+     dat er iets is ingeklapt. */
+  .activity-row-chevron {
+    display: inline-block; width: 11px; font-size: 9px; color: #aab0b8; cursor: pointer;
+    user-select: none; transition: transform 0.15s; text-align: center; flex-shrink: 0;
+  }
   /* Afhankelijkheid-pijlen tussen activiteiten (dependencyArrowsHtml) — een
      los overlay-laag bovenop .activity-gantt-rows (pointer-events:none, dus
      klikbaarheid van de balkjes/knoppen eronder blijft intact), opgebouwd uit
@@ -2661,15 +2673,41 @@ function runApp(data) {
         '<span class="timeline-today-label">vandaag</span></div>';
     }
 
+    // In-/uitklappen van fases (summary tasks) o.b.v. hun WBS-nummer: een
+    // onderliggende taak is elke activiteit wiens WBS met "<wbs>." begint, op
+    // elke diepte (dus ook kleinkinderen van een geneste fase). Alleen
+    // mogelijk voor via MS Project geïmporteerde activiteiten (wbs is null
+    // voor handmatig aangemaakte) — zonder wbs is er geen hiërarchie bekend,
+    // dus zo'n activiteit krijgt nooit een chevron en kan ook nooit door een
+    // collapse verborgen worden. collapsedSummaries[id] (zie
+    // toggleSummaryCollapse hieronder) onthoudt per project welke fases
+    // dichtgeklapt staan, puur voor de sessie — reset bij een herlaad, net als
+    // de "Activiteiten"-sectie zelf die ook altijd dichtgeklapt opent.
+    const collapsedWbs = collapsedSummaries[id] || null;
+    function isHiddenByCollapse(wbs) {
+      if (!collapsedWbs || !collapsedWbs.size || !wbs) return false;
+      for (const cw of collapsedWbs) {
+        if (wbs !== cw && wbs.indexOf(cw + '.') === 0) return true;
+      }
+      return false;
+    }
+    function hasChildren(wbs) {
+      if (!wbs) return false;
+      return activities.some((other) => other.wbs && other.wbs !== wbs && other.wbs.indexOf(wbs + '.') === 0);
+    }
+
     // Alleen activiteiten met geldige data krijgen een rij (net als voorheen)
     // — maar hier vooraf gefilterd tot een eigen array, zodat de rij-INDEX
     // (gebruikt voor de vaste Y-positie van zowel de rij zelf als een
     // eventuele afhankelijkheid-pijl erop/eraf) altijd overeenkomt met de
     // daadwerkelijk gerenderde volgorde — een activiteit die stilzwijgend
-    // wordt overgeslagen (ongeldige datum) zou anders de rij-index van alle
-    // ERNA gerenderde activiteiten laten verschuiven t.o.v. hun werkelijke
-    // positie in de flex-kolom.
-    const renderable = activities.filter((a) => !isNaN(parseDateFlexible(a.startDate)) && !isNaN(parseDateFlexible(a.endDate)));
+    // wordt overgeslagen (ongeldige datum, of verborgen door een ingeklapte
+    // fase hierboven) zou anders de rij-index van alle ERNA gerenderde
+    // activiteiten laten verschuiven t.o.v. hun werkelijke positie in de
+    // flex-kolom.
+    const renderable = activities
+      .filter((a) => !isHiddenByCollapse(a.wbs))
+      .filter((a) => !isNaN(parseDateFlexible(a.startDate)) && !isNaN(parseDateFlexible(a.endDate)));
     // dbId -> layout-info, voor de afhankelijkheid-pijlen hieronder (per
     // afhankelijkheidstype het juiste ankerpunt: FS/FF vanaf het einde van de
     // voorganger, SS/SF vanaf het begin; FS/SS naar het begin van de
@@ -2712,6 +2750,20 @@ function runApp(data) {
       // WBS-nummer (indien aanwezig, dus via MS Project geïmporteerd) tussen
       // haakjes in kleiner lettertype vóór de taaknaam.
       const wbsLabel = a.wbs ? '<span class="activity-row-wbs">(' + escapeHtml(a.wbs) + ')</span> ' : '';
+      // Inspringen op basis van WBS-diepte (aantal punten in het nummer) —
+      // maakt de hiërarchie in één oogopslag zichtbaar, ook zonder dat er iets
+      // is ingeklapt. Een chevron verschijnt alleen bij een fase die zelf
+      // onderliggende taken heeft (childrenExist) — klikken erop klapt die
+      // in/uit via toggleSummaryCollapse (event-delegation in
+      // onDetailAreaClick, .activity-row-chevron).
+      const depth = a.wbs ? a.wbs.split('.').length - 1 : 0;
+      const indentStyle = depth ? ' style="margin-left:' + (depth * 14) + 'px"' : '';
+      const childrenExist = a.isSummary && hasChildren(a.wbs);
+      const isCollapsed = childrenExist && !!(collapsedWbs && collapsedWbs.has(a.wbs));
+      const chevronHtml = childrenExist
+        ? '<span class="activity-row-chevron" data-code="' + escapeHtml(id) + '" data-wbs="' + escapeHtml(a.wbs) +
+            '" title="' + (isCollapsed ? 'Uitklappen' : 'Inklappen') + '">' + (isCollapsed ? '&#9656;' : '&#9662;') + '</span> '
+        : '';
       // Geen chips/knoppen voor afhankelijkheden IN de rij zelf — dat zou de
       // rij een variabele hoogte geven (chips kunnen wrappen) en daarmee de
       // vaste-hoogte-aanname breken waarop de pijl-overlay hierboven leunt
@@ -2721,7 +2773,8 @@ function runApp(data) {
       // Gantt is hier puur het passieve visuele resultaat daarvan.
       return '<div class="activity-gantt-row">' +
         '<div class="activity-row-head">' +
-          '<span class="activity-row-label" title="' + escapeHtml(a.name) + '">' +
+          '<span class="activity-row-label"' + indentStyle + ' title="' + escapeHtml(a.name) + '">' +
+            chevronHtml +
             (a.isMilestone ? '<span class="activity-row-milestone-badge" title="Mijlpaal">&#9670;</span> ' : '') +
             wbsLabel + escapeHtml(a.name) +
           '</span>' +
@@ -2785,6 +2838,30 @@ function runApp(data) {
         ';top:' + (y2 - 4) + 'px"></div>';
       return segA + segV + segB + arrowhead;
     }).join('');
+  }
+
+  // Welke fases (summary tasks) per project dichtgeklapt staan — key:
+  // projectcode, value: Set van WBS-nummers (zie isHiddenByCollapse/
+  // hasChildren in activityGanttHtml hierboven). Puur voor de sessie, net als
+  // de open/dicht-status van de hele "Activiteiten"-sectie: geen reden om dit
+  // te laten overleven aan een herlaad (reloadTreeKeepingFocus doet altijd
+  // een volledige window.location.reload()).
+  const collapsedSummaries = {};
+
+  // Klapt één fase in/uit (toggleSummaryCollapse, aangeroepen vanuit
+  // onDetailAreaClick bij een klik op .activity-row-chevron) door alleen de
+  // Gantt-rijen opnieuw op te bouwen — niet de hele projectkaart — zodat de
+  // rest van het paneel (tijdlijn, producten, open/dicht-status van de
+  // "Activiteiten"-sectie zelf) ongemoeid blijft.
+  function toggleSummaryCollapse(projectCode, wbs) {
+    if (!projectCode || !wbs) return;
+    const set = collapsedSummaries[projectCode] || (collapsedSummaries[projectCode] = new Set());
+    if (set.has(wbs)) set.delete(wbs); else set.add(wbs);
+    const wrapEl = projectPanelEl.querySelector('.activity-gantt-wrap');
+    if (!wrapEl) return;
+    const activities = ACTIVITIES[projectCode] || [];
+    const bounds = computeProjectTimelineBounds(PRODUCTS[projectCode] || []);
+    wrapEl.outerHTML = activityGanttHtml(projectCode, activities, bounds, DEPENDENCIES[projectCode] || []);
   }
 
   // Titel + inklapbare body ("Activiteiten") onder de tijdlijn van een project
@@ -5161,6 +5238,14 @@ function runApp(data) {
         body.style.display = isOpen ? 'none' : '';
         if (chevron) chevron.innerHTML = isOpen ? '&#9656;' : '&#9662;';
       }
+      return;
+    }
+    // In-/uitklappen van één fase (summary task) in de Gantt-balk — zie
+    // toggleSummaryCollapse (bouwt alleen .activity-gantt-wrap opnieuw op,
+    // i.p.v. de hele projectkaart).
+    const summaryChevron = ev.target.closest('.activity-row-chevron');
+    if (summaryChevron) {
+      toggleSummaryCollapse(summaryChevron.dataset.code, summaryChevron.dataset.wbs);
       return;
     }
     const activityAddBtn = ev.target.closest('.activity-add-btn');
