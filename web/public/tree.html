@@ -2308,6 +2308,24 @@ function runApp(data) {
     return markers;
   }
 
+  // As-grenzen (bounds/quarterly) van de PROJECT-tijdlijn, op basis van
+  // producten/mijlpalen — losgetrokken uit productTimelineHtml zodat
+  // activityGanttHtml exact dezelfde as kan hergebruiken. "Projecttijdlijn is
+  // leidend": de activiteiten-Gantt volgt deze as i.p.v. zijn eigen bereik uit
+  // de activiteiten-datums te berekenen (zie activitiesSectionHtml/
+  // projectSectionHtml). null als het project geen enkele gedateerde
+  // product/mijlpaal heeft — dan is er geen projectas om op aan te sluiten.
+  function computeProjectTimelineBounds(products) {
+    const markers = buildTimelineMarkers(products);
+    if (!markers.length) return null;
+    const rawMinT = markers[0].t;
+    const rawMaxT = markers[markers.length - 1].t;
+    return timelineBandBoundaries(
+      rawMinT === rawMaxT ? rawMinT - 86400000 : rawMinT,
+      rawMinT === rawMaxT ? rawMaxT + 86400000 : rawMaxT
+    );
+  }
+
   // Tijdbalk boven de producten/deliverables-lijst van een project: plot zowel de
   // verwachte als de werkelijke opleverdatum van elk planning item op één horizontale
   // as, onderverdeeld in maand- of kwartaalvlakken, met een symbool dat verschilt
@@ -2384,22 +2402,30 @@ function runApp(data) {
   // ---- Activiteiten: inklapbare planning met start-/einddatum per project ----
   // Anders dan producten/mijlpalen (één los moment) beslaat een activiteit een
   // periode, dus een lichte Gantt-achtige balk per activiteit i.p.v. een punt-
-  // marker. Hergebruikt timelineBandBoundaries/timelineBandLabel hierboven
-  // voor dezelfde maand-/kwartaalas als de projecttijdlijn.
-  function activityGanttHtml(id, activities) {
-    let minT = Infinity, maxT = -Infinity;
-    activities.forEach((a) => {
-      const s = parseDateFlexible(a.startDate);
-      const e = parseDateFlexible(a.endDate);
-      if (!isNaN(s)) minT = Math.min(minT, s);
-      if (!isNaN(e)) maxT = Math.max(maxT, e);
-    });
-    if (!isFinite(minT) || !isFinite(maxT)) return '<div class="dp-empty-note">Geen geldige data bij de activiteiten.</div>';
-
-    const { bounds, quarterly } = timelineBandBoundaries(
-      minT === maxT ? minT - 86400000 : minT,
-      minT === maxT ? maxT + 86400000 : maxT
-    );
+  // marker. projectBounds (van computeProjectTimelineBounds) is, indien
+  // aanwezig, LEIDEND: dezelfde as als de projecttijdlijn erboven, zodat beide
+  // in één oogopslag vergelijkbaar zijn — de activiteiten-datums bepalen dan
+  // dus NIET zelf het getoonde bereik meer (activiteiten die er geheel of
+  // gedeeltelijk buiten vallen worden geclipt, zie pctFor hieronder). Alleen
+  // als het project geen enkele gedateerde product/mijlpaal heeft (dus geen
+  // projectas bestaat) valt dit terug op het eigen bereik van de activiteiten.
+  function activityGanttHtml(id, activities, projectBounds) {
+    let boundsInfo = projectBounds || null;
+    if (!boundsInfo) {
+      let minT = Infinity, maxT = -Infinity;
+      activities.forEach((a) => {
+        const s = parseDateFlexible(a.startDate);
+        const e = parseDateFlexible(a.endDate);
+        if (!isNaN(s)) minT = Math.min(minT, s);
+        if (!isNaN(e)) maxT = Math.max(maxT, e);
+      });
+      if (!isFinite(minT) || !isFinite(maxT)) return '<div class="dp-empty-note">Geen geldige data bij de activiteiten.</div>';
+      boundsInfo = timelineBandBoundaries(
+        minT === maxT ? minT - 86400000 : minT,
+        minT === maxT ? maxT + 86400000 : maxT
+      );
+    }
+    const { bounds, quarterly } = boundsInfo;
     const axisMinT = bounds[0];
     const axisMaxT = bounds[bounds.length - 1];
     const pctFor = (t) => ((t - axisMinT) / (axisMaxT - axisMinT)) * 100;
@@ -2426,8 +2452,14 @@ function runApp(data) {
       const s = parseDateFlexible(a.startDate);
       const e = parseDateFlexible(a.endDate);
       if (isNaN(s) || isNaN(e)) return '';
-      const left = pctFor(s);
-      const width = Math.max(pctFor(e) - left, 1.5);
+      // Geclipt binnen [0,100]%: bij een gedeelde, project-leidende as (zie
+      // hierboven) kan een activiteit er (deels) buiten vallen — dan een
+      // balkje tegen de rand i.p.v. de gedeelde as op te rekken (dat zou 'm
+      // juist weer laten afwijken van de projecttijdlijn erboven). De echte
+      // datums blijven altijd zichtbaar via de title-tooltip.
+      const left = Math.min(Math.max(pctFor(s), 0), 100);
+      const right = Math.min(Math.max(pctFor(e), 0), 100);
+      const width = Math.max(right - left, 1.5);
       const title = escapeHtml(a.name) + ' — ' + formatDateNL(a.startDate) + ' t/m ' + formatDateNL(a.endDate) +
         (a.omschrijving ? ' — ' + escapeHtml(a.omschrijving) : '');
       return '<div class="activity-gantt-row">' +
@@ -2457,7 +2489,7 @@ function runApp(data) {
   // in onDetailAreaClick), zodat een project zonder activiteiten geen extra
   // ruimte inneemt en een project mét activiteiten niet altijd meteen de hele
   // Gantt-balk toont.
-  function activitiesSectionHtml(id) {
+  function activitiesSectionHtml(id, projectBounds) {
     if (!projectenActive) return '';
     const activities = ACTIVITIES[id] || [];
     let html = '<div class="dp-activities-title">' +
@@ -2467,7 +2499,7 @@ function runApp(data) {
     html += '<div class="dp-activities-body" style="display:none">';
     html += activities.length === 0
       ? '<div class="dp-empty-note">Nog geen activiteiten gepland voor dit project.</div>'
-      : activityGanttHtml(id, activities);
+      : activityGanttHtml(id, activities, projectBounds);
     // "+ Activiteit" staat bewust ONDER de lijst (i.p.v. in de titelbalk erboven,
     // zoals bij Producten) — bij meerdere activiteiten is dat de plek waar de
     // blik na het lezen van de laatste rij toch al staat.
@@ -2783,8 +2815,11 @@ function runApp(data) {
 
     // Activiteiten-planning (start-/einddatum, kunnen er meerdere zijn) staat
     // bewust ónder de tijdlijn, als eigen inklapbare sectie — zie
-    // activitiesSectionHtml hierboven.
-    html += activitiesSectionHtml(id);
+    // activitiesSectionHtml hierboven. Krijgt hier expliciet dezelfde as als
+    // de projecttijdlijn hierboven mee (computeProjectTimelineBounds):
+    // "projecttijdlijn is leidend", dus geen eigen, mogelijk afwijkend bereik
+    // op basis van alleen de activiteiten-datums.
+    html += activitiesSectionHtml(id, computeProjectTimelineBounds(products));
 
     html += '<div class="dp-products-title"><span>Producten / deliverables' + (products.length ? ' (' + products.length + ')' : '') + '</span>' +
       '<button type="button" class="btn ghost btn-xs product-add-btn crud-only" data-code="' + escapeHtml(id) + '">+ Product</button>' +
