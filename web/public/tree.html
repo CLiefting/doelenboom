@@ -564,8 +564,17 @@
   }
   .activity-row-track { position: relative; height: 14px; background: #eef0f3; border-radius: 4px; }
   .activity-bar { position: absolute; top: 0; bottom: 0; background: var(--navy); border-radius: 4px; min-width: 6px; }
+  /* Mijlpaal-activiteit: ruit-icoon gecentreerd op de track i.p.v. een balkje
+     — zie activityGanttHtml (timelineLegendIcon('mijlpaal', true)). */
+  .activity-milestone-marker { position: absolute; top: 50%; transform: translate(-50%, -50%); line-height: 0; }
+  .activity-row-milestone-badge { color: #c9660a; font-size: 10px; vertical-align: 1px; }
   .activity-row-actions { display: flex; gap: 4px; flex-shrink: 0; }
   .activity-add-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  .activity-field-milestone-label {
+    display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: #444;
+    font-weight: 400; margin-top: 2px;
+  }
+  .activity-field-milestone-label input { display: inline-block; width: auto; margin: 0; }
 
   /* Importeren van taken uit MS Project (XML-export) — zie parseMppProjectXml/
      openMppImportModal. Een bredere variant van .element-modal, want de
@@ -1170,6 +1179,9 @@
         </label>
         <label>Omschrijving
           <textarea id="activity-field-omschrijving" rows="2"></textarea>
+        </label>
+        <label class="activity-field-milestone-label">
+          <input type="checkbox" id="activity-field-milestone"> Mijlpaal (toont een ruit-icoon op de startdatum i.p.v. een balkje)
         </label>
         <p class="element-modal-status" id="activity-modal-status"></p>
         <div class="element-modal-actions">
@@ -2557,19 +2569,29 @@ function runApp(data) {
       const left = Math.min(Math.max(pctFor(s), 0), 100);
       const right = Math.min(Math.max(pctFor(e), 0), 100);
       const width = Math.max(right - left, 1.5);
-      const title = escapeHtml(a.name) + ' — ' + formatDateNL(a.startDate) + ' t/m ' + formatDateNL(a.endDate) +
+      const dateLabel = a.isMilestone ? formatDateNL(a.startDate) : formatDateNL(a.startDate) + ' t/m ' + formatDateNL(a.endDate);
+      const title = escapeHtml(a.name) + ' — ' + (a.isMilestone ? 'mijlpaal ' : '') + dateLabel +
         (a.omschrijving ? ' — ' + escapeHtml(a.omschrijving) : '');
+      // Mijlpaal: ruit-icoon op de (start)datum i.p.v. een balkje — zelfde
+      // visuele taal als de ruit in de projecttijdlijn hierboven
+      // (timelineLegendIcon), gevuld zodat 'm goed opvalt tussen de balkjes.
+      const track = a.isMilestone
+        ? '<span class="activity-milestone-marker" style="left:' + left + '%" title="' + title + '">' +
+            timelineLegendIcon('mijlpaal', true) +
+          '</span>'
+        : '<div class="activity-bar" style="left:' + left + '%;width:' + width + '%" title="' + title + '"></div>';
       return '<div class="activity-gantt-row">' +
         '<div class="activity-row-head">' +
-          '<span class="activity-row-label" title="' + escapeHtml(a.name) + '">' + escapeHtml(a.name) + '</span>' +
+          '<span class="activity-row-label" title="' + escapeHtml(a.name) + '">' +
+            (a.isMilestone ? '<span class="activity-row-milestone-badge" title="Mijlpaal">&#9670;</span> ' : '') +
+            escapeHtml(a.name) +
+          '</span>' +
           '<span class="activity-row-actions crud-only">' +
             '<button type="button" class="btn ghost btn-xs activity-edit-btn" data-code="' + escapeHtml(id) + '" data-id="' + escapeHtml(String(a.dbId)) + '" title="Bewerken">&#9998;</button>' +
             '<button type="button" class="btn ghost btn-xs activity-delete-btn" data-code="' + escapeHtml(id) + '" data-id="' + escapeHtml(String(a.dbId)) + '" title="Verwijderen">&times;</button>' +
           '</span>' +
         '</div>' +
-        '<div class="activity-row-track">' +
-          '<div class="activity-bar" style="left:' + left + '%;width:' + width + '%" title="' + title + '"></div>' +
-        '</div>' +
+        '<div class="activity-row-track">' + track + '</div>' +
       '</div>';
     }).join('');
 
@@ -4204,6 +4226,7 @@ function runApp(data) {
   const activityFieldStart = document.getElementById('activity-field-start');
   const activityFieldEnd = document.getElementById('activity-field-end');
   const activityFieldOmschrijving = document.getElementById('activity-field-omschrijving');
+  const activityFieldMilestone = document.getElementById('activity-field-milestone');
   const activityModalCancelBtn = document.getElementById('activity-modal-cancel');
 
   let activityModalMode = 'create';
@@ -4229,6 +4252,7 @@ function runApp(data) {
       activityFieldStart.value = toDateInputValue(existing.startDate);
       activityFieldEnd.value = toDateInputValue(existing.endDate);
       activityFieldOmschrijving.value = existing.omschrijving || '';
+      activityFieldMilestone.checked = !!existing.isMilestone;
     } else {
       activityModalTitle.textContent = 'Nieuwe activiteit';
       activityForm.reset();
@@ -4253,6 +4277,7 @@ function runApp(data) {
       startDate: activityFieldStart.value || null,
       endDate: activityFieldEnd.value || null,
       omschrijving: activityFieldOmschrijving.value.trim(),
+      isMilestone: activityFieldMilestone.checked,
     };
     if (!payload.name) { setActivityModalStatus('Naam is verplicht.'); return; }
     if (!payload.startDate || !payload.endDate) { setActivityModalStatus('Start- en einddatum zijn verplicht.'); return; }
@@ -4479,7 +4504,8 @@ function runApp(data) {
         return;
       }
       seenUids.add(task.uid);
-      const changed = existing.name !== task.name || existing.startDate !== task.startDate || existing.endDate !== task.endDate;
+      const changed = existing.name !== task.name || existing.startDate !== task.startDate ||
+        existing.endDate !== task.endDate || !!existing.isMilestone !== !!task.milestone;
       plan.push({
         action: changed ? 'update' : 'unchanged',
         task: task,
@@ -4657,6 +4683,7 @@ function runApp(data) {
                 endDate: item.task.endDate,
                 omschrijving: 'Geïmporteerd uit MS Project' + (item.task.wbs ? ' (WBS ' + item.task.wbs + ')' : ''),
                 mppUid: item.task.uid,
+                isMilestone: item.task.milestone,
               }),
             }
           );
@@ -4674,6 +4701,7 @@ function runApp(data) {
                 endDate: item.task.endDate,
                 omschrijving: item.existingOmschrijving,
                 mppUid: item.task.uid,
+                isMilestone: item.task.milestone,
               }),
             }
           );
@@ -5639,6 +5667,8 @@ function adaptTreeResponse(tree) {
       // Alleen gezet voor via MS Project geïmporteerde activiteiten — zie
       // computeMppImportPlan hierboven.
       mppUid: a.mppUid || null,
+      // Bepaalt of activityGanttHtml een ruit-icoon toont i.p.v. een balkje.
+      isMilestone: !!a.isMilestone,
     }));
   });
 

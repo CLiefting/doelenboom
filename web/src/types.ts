@@ -169,6 +169,10 @@ export type Activity = {
   // bijwerken/verwijderen i.p.v. dubbele rijen aan te maken (tree.html:
   // computeMppImportPlan). null voor handmatig aangemaakte activiteiten.
   mppUid: string | null;
+  // Bij MS Project-import overgenomen van de taak z'n Milestone-vlag (ook
+  // handmatig te zetten) — bepaalt of de Gantt-balk (tree.html:
+  // activityGanttHtml) een ruit-icoon toont i.p.v. een balkje van één dag.
+  isMilestone: boolean;
 };
 
 export type Tag = { code: string; name: string; categorie: string; omschrijving: string };

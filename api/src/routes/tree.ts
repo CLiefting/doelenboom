@@ -56,7 +56,7 @@ export async function fetchTree(doelenboomId: string) {
   );
 
   const activitiesResult = await pool.query(
-    `select el.code as element_code, a.id, a.name, a.start_date, a.end_date, a.omschrijving, a.mpp_uid
+    `select el.code as element_code, a.id, a.name, a.start_date, a.end_date, a.omschrijving, a.mpp_uid, a.is_milestone
      from activities a join elements el on el.id = a.element_id
      where el.doelenboom_id = $1
      order by a.start_date, a.id`,
@@ -128,6 +128,7 @@ export async function fetchTree(doelenboomId: string) {
       // Alleen gezet voor via MS Project geïmporteerde activiteiten — zie
       // computeMppImportPlan (tree.html) en het kolomcommentaar in db/init.sql.
       mppUid: row.mpp_uid,
+      isMilestone: row.is_milestone,
     });
   }
 

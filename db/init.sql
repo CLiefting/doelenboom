@@ -252,6 +252,10 @@ create index if not exists idx_products_element on products(element_id);
 -- om-te-verwijderen i.p.v. steeds dubbele rijen toe te voegen (zie
 -- computeMppImportPlan in tree.html) — NULL voor handmatig aangemaakte
 -- activiteiten, die een herimport nooit aanraakt.
+-- is_milestone: bij MS Project-import 1-op-1 overgenomen van de taak z'n
+-- Milestone-vlag (start = eind bij een mijlpaal); ook handmatig te zetten via
+-- het activiteiten-formulier. Bepaalt of de Gantt-balk (activityGanttHtml)
+-- een ruit-icoon toont i.p.v. een balkje van één dag.
 create table if not exists activities (
   id bigserial primary key,
   element_id bigint not null references elements(id) on delete cascade,
@@ -259,7 +263,8 @@ create table if not exists activities (
   start_date date not null,
   end_date date not null,
   omschrijving text not null default '',
-  mpp_uid text
+  mpp_uid text,
+  is_milestone boolean not null default false
 );
 create index if not exists idx_activities_element on activities(element_id);
 create index if not exists idx_activities_mpp_uid on activities(element_id, mpp_uid) where mpp_uid is not null;

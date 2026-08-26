@@ -163,6 +163,43 @@ describe('activities (activiteiten-planning) CRUD', () => {
     });
   });
 
+  // isMilestone — zie activityGanttHtml (tree.html): bepaalt of de Gantt een
+  // ruit-icoon toont i.p.v. een balkje. Anders dan mppUid wordt dit veld door
+  // ALLE aanroepers (formulier én import) altijd meegestuurd, dus geen
+  // coalesce-gedrag: een PUT zonder isMilestone zet 'm gewoon op false.
+  describe('isMilestone', () => {
+    it('standaard false; kan gezet worden bij aanmaken', async () => {
+      const zonder = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P1/activities`, {
+        token: adminToken, body: { name: 'Gewone activiteit', startDate: '2026-09-01', endDate: '2026-09-05' },
+      });
+      assert.equal(zonder.body.isMilestone, false);
+
+      const mijlpaal = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P1/activities`, {
+        token: adminToken,
+        body: { name: 'Mijlpaal', startDate: '2026-09-10', endDate: '2026-09-10', isMilestone: true },
+      });
+      assert.equal(mijlpaal.body.isMilestone, true);
+
+      const tree = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: adminToken });
+      const inTree = tree.body.activities['P1'].find((a: any) => a.id === mijlpaal.body.id);
+      assert.equal(inTree.isMilestone, true);
+    });
+
+    it('een PUT zonder isMilestone in de body zet het terug op false (geen coalesce, i.t.t. mppUid)', async () => {
+      const created = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P1/activities`, {
+        token: adminToken,
+        body: { name: 'Was mijlpaal', startDate: '2026-09-01', endDate: '2026-09-01', isMilestone: true },
+      });
+      assert.equal(created.body.isMilestone, true);
+
+      const updated = await req('PUT', `/api/doelenbomen/${doelenboomId}/elements/P1/activities/${created.body.id}`, {
+        token: adminToken,
+        body: { name: 'Was mijlpaal', startDate: '2026-09-01', endDate: '2026-09-05' },
+      });
+      assert.equal(updated.body.isMilestone, false);
+    });
+  });
+
   // DELETE .../activities (zonder :activityId) — wist in één keer ALLE
   // activiteiten van een project-element, gebruikt door de "Alles wissen"-knop
   // in tree.html (deleteAllActivities, na bevestiging via showConfirm). Eigen

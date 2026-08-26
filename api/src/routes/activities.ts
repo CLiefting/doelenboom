@@ -38,7 +38,7 @@ const requireProjectenModule = requireModule('projecten', 'id');
 // SQL-aliassen zodat de kolomnamen 1-op-1 matchen met wat tree.ts/de frontend
 // al verwacht (camelCase), zonder dat de aanroeper zelf hoeft te mappen.
 const ACTIVITY_SELECT_FIELDS =
-  'id, name, start_date as "startDate", end_date as "endDate", omschrijving, mpp_uid as "mppUid"';
+  'id, name, start_date as "startDate", end_date as "endDate", omschrijving, mpp_uid as "mppUid", is_milestone as "isMilestone"';
 
 type ActivityInput = {
   errors: string[];
@@ -47,6 +47,7 @@ type ActivityInput = {
   endDate: string | null;
   omschrijving: string;
   mppUid: string | null;
+  isMilestone: boolean;
 };
 
 // "YYYY-MM-DD" — zelfde eenvoudige check als elders in de codebase voor
@@ -78,6 +79,11 @@ function readActivityBody(body: unknown): ActivityInput {
     // tree.html) — bij een gewone create/edit via het formulier ontbreekt dit
     // veld, en blijft de activiteit dus terecht "handmatig" (mpp_uid = null).
     mppUid: typeof b.mppUid === 'string' && b.mppUid ? b.mppUid : null,
+    // Anders dan mppUid hierboven: dit veld wordt door ALLE aanroepers altijd
+    // meegestuurd (het formulier heeft een eigen checkbox, de import stuurt
+    // task.milestone mee) — dus gewoon een gewoon boolean-veld, geen coalesce
+    // nodig in de PUT hieronder.
+    isMilestone: b.isMilestone === true,
   };
 }
 
@@ -95,10 +101,10 @@ activitiesRouter.post('/doelenbomen/:id/elements/:code/activities', requireEdito
   if (!elementId) return res.status(404).json({ error: `Element "${req.params.code}" niet gevonden.` });
 
   const result = await pool.query(
-    `insert into activities (element_id, name, start_date, end_date, omschrijving, mpp_uid)
-     values ($1,$2,$3,$4,$5,$6)
+    `insert into activities (element_id, name, start_date, end_date, omschrijving, mpp_uid, is_milestone)
+     values ($1,$2,$3,$4,$5,$6,$7)
      returning ${ACTIVITY_SELECT_FIELDS}`,
-    [elementId, input.name, input.startDate, input.endDate, input.omschrijving, input.mppUid]
+    [elementId, input.name, input.startDate, input.endDate, input.omschrijving, input.mppUid, input.isMilestone]
   );
   res.status(201).json(result.rows[0]);
 });
@@ -120,10 +126,10 @@ activitiesRouter.put('/doelenbomen/:id/elements/:code/activities/:activityId', r
   // bewust een waarde voor mee.
   const result = await pool.query(
     `update activities
-     set name = $1, start_date = $2, end_date = $3, omschrijving = $4, mpp_uid = coalesce($5, mpp_uid)
-     where id = $6 and element_id = $7
+     set name = $1, start_date = $2, end_date = $3, omschrijving = $4, mpp_uid = coalesce($5, mpp_uid), is_milestone = $6
+     where id = $7 and element_id = $8
      returning ${ACTIVITY_SELECT_FIELDS}`,
-    [input.name, input.startDate, input.endDate, input.omschrijving, input.mppUid, req.params.activityId, elementId]
+    [input.name, input.startDate, input.endDate, input.omschrijving, input.mppUid, input.isMilestone, req.params.activityId, elementId]
   );
   if (result.rows.length === 0) return res.status(404).json({ error: 'Activiteit niet gevonden.' });
   res.json(result.rows[0]);
