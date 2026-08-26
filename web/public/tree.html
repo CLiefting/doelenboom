@@ -1581,7 +1581,7 @@ function flipExpandAnchor() {
 }
 
 function runApp(data) {
-  const { DETAILS, EDGES, TOELICHTING, PROJECT_STATUS, PRODUCTS, ACTIVITIES, TAGS, ELEMENT_TAGS, ORGS, OB_ORG, COLUMNS, ACTIVE_MODULES } = data;
+  const { DETAILS, EDGES, TOELICHTING, PROJECT_STATUS, PRODUCTS, ACTIVITIES, DEPENDENCIES, TAGS, ELEMENT_TAGS, ORGS, OB_ORG, COLUMNS, ACTIVE_MODULES } = data;
   // Licentiemodel (zie doelenboom_licentiemodel.md §3/§6, api/src/license.ts):
   // welke modules de licentie van deze tenant actief heeft. PROJECT_STATUS/
   // PRODUCTS zijn al server-side leeggemaakt als 'projecten' ontbreekt
@@ -6047,7 +6047,7 @@ function adaptTreeResponse(tree) {
   // Projecten-specifieke UI te verbergen i.p.v. te tonen-maar-te-laten-falen.
   const ACTIVE_MODULES = tree.activeModules || [];
 
-  return { DETAILS, EDGES, TOELICHTING, PROJECT_STATUS, PRODUCTS, ACTIVITIES, TAGS, ELEMENT_TAGS, ORGS, OB_ORG, COLUMNS, ACTIVE_MODULES };
+  return { DETAILS, EDGES, TOELICHTING, PROJECT_STATUS, PRODUCTS, ACTIVITIES, DEPENDENCIES, TAGS, ELEMENT_TAGS, ORGS, OB_ORG, COLUMNS, ACTIVE_MODULES };
 }
 
 function renderError(message) {
