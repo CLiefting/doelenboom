@@ -4,8 +4,24 @@ import { AuthedRequest } from './auth.js';
 import { hasModule, isLicenseExpired } from './license.js';
 
 // Rolmodel (zie db/init.sql voor de tabellen):
-// - sysadmin (users.is_sysadmin): globaal, mag alles — incl. tenants en
-//   gebruikers beheren. Geen tenant_users-rij nodig, geldt overal.
+// - sysadmin (users.is_sysadmin): platformbeheer — tenants aanmaken/verwijderen,
+//   licenties/tiers, leden van een tenant (en hun rol) toevoegen/wijzigen/
+//   verwijderen, accounts beheren. GEEN tenant_users-rij nodig voor dat alles.
+//   Sysadmin mag echter NIET zomaar de boom-inhoud van een tenant zien of
+//   wijzigen (elementen/relaties/tags/org-koppelingen/projectstatus/producten/
+//   kolommen/imports/exports, en de tree-view zelf) — dat vereist, net als voor
+//   iedereen, een echte koppeling aan die tenant/doelenboom via tenant_users
+//   (evt. met een doelenboom_user_roles-override), zie requireWritableDoelenboom/
+//   requireModule hieronder (géén sysadmin-bypass meer) en
+//   requireTenantRoleForDoelenboomParam's allowSysadmin-optie (default false).
+//   Dit is bewust zo vanwege privacy: een platformbeheerder hoeft niet in de
+//   inhoud van een klant te kunnen kijken om de tenant te kunnen beheren. Twee
+//   uitzonderingen blijven wél zonder koppeling toegankelijk (puur metadata,
+//   geen inhoud): de doelenbomen-lijst (naam/slug/alleen-lezen-status, zie
+//   routes/doelenbomen.ts GET /doelenbomen en GET /tenants/:id/doelenbomen) en
+//   de doelenboom-"instellingen" zelf (naam/slug wijzigen, alleen-lezen aan/uit,
+//   archiveren, verwijderen, en doelenboom_user_roles-overrides beheren — zie
+//   de allowSysadmin:true-routes in routes/doelenbomen.ts).
 // - admin (tenant_users.role = 'admin'): mag lezen én wijzigen binnen die ene
 //   tenant — alle boom-inhoud (elementen/relaties/tags/org-eenheden/imports),
 //   ÉN de "instellingen"-laag: kolomconfiguratie, doelenboom-instellingen
@@ -104,9 +120,19 @@ export function requireTenantRole(
 // tenzij overruled voor déze doelenboom via doelenboom_user_roles) — dus een
 // tenant-admin die op deze ene doelenboom is teruggezet naar 'gebruiker' verliest
 // hier ook de rechten om 'm te hernoemen/verwijderen/op read-only te zetten.
-export function requireTenantRoleForDoelenboomParam(minRole: TenantRole, paramName = 'id') {
+//
+// opts.allowSysadmin (default false): sysadmin mag hier NIET automatisch door —
+// zie het rolmodel hierboven (privacy: geen inhoud zonder koppeling). Alleen de
+// paar routes die écht "instellingen"/toegangsbeheer zijn i.p.v. boom-inhoud
+// (doelenboom hernoemen/archiveren/verwijderen, doelenboom_user_roles-overrides
+// — zie routes/doelenbomen.ts) zetten dit expliciet op true.
+export function requireTenantRoleForDoelenboomParam(
+  minRole: TenantRole,
+  paramName = 'id',
+  opts: { allowSysadmin?: boolean } = {}
+) {
   return async (req: AuthedRequest, res: Response, next: NextFunction) => {
-    if (req.user?.isSysadmin) return next();
+    if (opts.allowSysadmin && req.user?.isSysadmin) return next();
 
     const doelenboomId = req.params[paramName];
     const tenantId = await tenantIdForDoelenboom(doelenboomId);
@@ -126,12 +152,16 @@ export function requireTenantRoleForTenantParam(minRole: TenantRole, paramName =
   return requireTenantRole(minRole, (req) => Number(req.params[paramName]));
 }
 
-// Voor schrijfroutes binnen een doelenboom. Sysadmin mag altijd door. Voor
-// iedereen anders geldt de EFFECTIEVE rol (tenant-rol, tenzij overruled voor
-// déze doelenboom, zie doelenboom_user_roles) — die moet minstens minRole zijn
-// (rangorde, zie ROLE_RANK hierboven) EN de doelenboom mag niet op read-only
-// staan — zo blokkeert read-only iedereen behalve sysadmin, ook een admin die
-// normaal wél zou mogen schrijven.
+// Voor schrijfroutes binnen een doelenboom (boom-inhoud — zie het rolmodel
+// hierboven: hier geldt bewust GEEN sysadmin-bypass, ook een sysadmin heeft een
+// echte koppeling aan de tenant nodig). Voor iedereen — sysadmin incluis — geldt
+// de EFFECTIEVE rol (tenant-rol, tenzij overruled voor déze doelenboom, zie
+// doelenboom_user_roles) — die moet minstens minRole zijn (rangorde, zie
+// ROLE_RANK hierboven) EN de doelenboom mag niet op read-only staan. Een
+// doelenboom weer van read-only af halen kan alleen via de "instellingen"-route
+// (routes/doelenbomen.ts PUT /doelenbomen/:id, die bewust
+// requireTenantRoleForDoelenboomParam gebruikt i.p.v. deze functie) door een
+// tenant-admin (of een sysadmin die zichzelf daar expliciet voor toegang geeft).
 //
 // minRole (default 'admin'): de meeste schrijfroutes zijn nog steeds
 // admin-only — de "instellingen"-laag (kolomconfiguratie, doelenboom
@@ -155,8 +185,6 @@ export function requireWritableDoelenboom(
       typeof resolveDoelenboomId === 'string' ? req.params[resolveDoelenboomId] : await resolveDoelenboomId(req);
     if (doelenboomId == null) return res.status(404).json({ error: 'Niet gevonden.' });
 
-    if (req.user?.isSysadmin) return next();
-
     const tenantId = await tenantIdForDoelenboom(doelenboomId);
     if (tenantId == null) return res.status(404).json({ error: 'Niet gevonden.' });
     const role = await getEffectiveRoleForDoelenboom(req.user!.id, doelenboomId);
@@ -172,19 +200,18 @@ export function requireWritableDoelenboom(
 
     const result = await pool.query('select read_only from doelenbomen where id = $1', [doelenboomId]);
     if (result.rows[0]?.read_only) {
-      return res
-        .status(403)
-        .json({ error: 'Deze doelenboom staat op alleen-lezen; alleen een sysadmin kan wijzigingen aanbrengen.' });
+      return res.status(403).json({
+        error: 'Deze doelenboom staat op alleen-lezen; een tenant-admin kan dit uitzetten via de doelenboom-instellingen.',
+      });
     }
 
     // Licentie-einddatum (zie license.ts isLicenseExpired,
     // doelenboom_licentiemodel.md) — zelfde enforcement-plek als de
     // read_only-check hierboven: een verlopen licentie maakt de hele tenant
-    // read-only voor iedereen behalve sysadmin, net als vandaag al geldt voor
-    // een doelenboom die individueel op read-only staat.
+    // read-only voor iedereen, ongeacht rol.
     if (await isLicenseExpired(tenantId)) {
       return res.status(403).json({
-        error: 'De licentie van deze tenant is verlopen; alleen een sysadmin kan nog wijzigingen aanbrengen.',
+        error: 'De licentie van deze tenant is verlopen; neem contact op om te verlengen.',
       });
     }
     next();
@@ -193,10 +220,10 @@ export function requireWritableDoelenboom(
 
 // Middleware-factory voor module-gebonden functies (zie license.ts en
 // doelenboom_licentiemodel.md §3) — bv. de "Projecten"-module op
-// routes/products.ts en routes/projectStatus.ts. Sysadmin mag altijd door
-// (zelfde conventie als de rest van dit bestand). Voor iedereen anders: leidt
-// de tenant af uit de doelenboom (resolveDoelenboomId, zelfde vorm als bij
-// requireWritableDoelenboom hierboven) en controleert of die module actief
+// routes/products.ts en routes/projectStatus.ts. Geen sysadmin-bypass (zelfde
+// conventie als requireWritableDoelenboom hierboven — dit gate't boom-inhoud).
+// Leidt de tenant af uit de doelenboom (resolveDoelenboomId, zelfde vorm als
+// bij requireWritableDoelenboom hierboven) en controleert of die module actief
 // is. Bewust een eigen, aparte check (niet gecombineerd met
 // requireWritableDoelenboom) zodat routes beide onafhankelijk kunnen
 // combineren: eerst "mag deze gebruiker hier schrijven", dan "heeft de
@@ -207,8 +234,6 @@ export function requireModule(
   resolveDoelenboomId: string | ((req: AuthedRequest) => Promise<number | string | null> | number | string | null)
 ) {
   return async (req: AuthedRequest, res: Response, next: NextFunction) => {
-    if (req.user?.isSysadmin) return next();
-
     const doelenboomId =
       typeof resolveDoelenboomId === 'string' ? req.params[resolveDoelenboomId] : await resolveDoelenboomId(req);
     if (doelenboomId == null) return res.status(404).json({ error: 'Niet gevonden.' });

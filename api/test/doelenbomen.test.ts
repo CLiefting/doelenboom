@@ -98,34 +98,50 @@ describe('doelenbomen', () => {
     assert.equal(asBezoeker.body.doelenboom.canWrite, false);
     assert.equal(asBezoeker.body.doelenboom.canWriteContent, false);
 
-    const asSysadmin = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: sysadminToken });
-    assert.equal(asSysadmin.status, 200);
-    assert.equal(asSysadmin.body.doelenboom.effectiveRole, 'admin');
-    assert.equal(asSysadmin.body.doelenboom.canWrite, true);
-    assert.equal(asSysadmin.body.doelenboom.canWriteContent, true);
+    // Privacy (zie rbac.ts rolmodel-comment): sysadmin heeft GEEN automatische
+    // toegang meer tot boom-inhoud zonder zelf gekoppeld te zijn.
+    const asSysadminUnlinked = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: sysadminToken });
+    assert.equal(asSysadminUnlinked.status, 403);
+
+    // Koppel sysadmin alsnog als admin aan deze tenant (via ledenbeheer, dat
+    // blijft wél sysadmin-only toegankelijk) — dan werkt het gewoon, net als
+    // voor iedere andere admin.
+    const sysadminEmail = `${PREFIX}-admin@test.local`;
+    await req('POST', `/api/tenants/${tenantId}/members`, {
+      token: sysadminToken, body: { email: sysadminEmail, password: 'wachtwoord123', role: 'admin' },
+    });
+    const asSysadminLinked = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: sysadminToken });
+    assert.equal(asSysadminLinked.status, 200);
+    assert.equal(asSysadminLinked.body.doelenboom.effectiveRole, 'admin');
+    assert.equal(asSysadminLinked.body.doelenboom.canWrite, true);
+    assert.equal(asSysadminLinked.body.doelenboom.canWriteContent, true);
   });
 
-  it('read_only blokkeert canWrite ook voor een tenant-admin, maar niet voor sysadmin', async () => {
+  it('read_only blokkeert canWrite voor iedereen, ook een gekoppelde sysadmin — settings blijven bereikbaar voor sysadmin', async () => {
     const { tenantId, adminToken } = await makeTenantWithAdmin(sysadminToken, `${PREFIX}-t3`, `${PREFIX}-t3-admin@test.local`);
     const boom = await req('POST', `/api/tenants/${tenantId}/doelenbomen`, {
       token: adminToken, body: { slug: 'boom3', name: 'Boom 3' },
     });
     const doelenboomId = boom.body.id;
 
+    // Doelenboom-instellingen (readOnly aan/uit) blijven sysadmin-toegankelijk
+    // zonder koppeling (zie rbac.ts: allowSysadmin:true op deze route) — dat is
+    // precies de "gematigde" uitzondering, geen boom-inhoud.
     const setReadOnly = await req('PUT', `/api/doelenbomen/${doelenboomId}`, {
-      token: adminToken, body: { name: 'Boom 3', readOnly: true },
+      token: sysadminToken, body: { name: 'Boom 3', readOnly: true },
     });
     assert.equal(setReadOnly.status, 200);
 
     const tree = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: adminToken });
     assert.equal(tree.body.doelenboom.canWrite, false);
     // read-only blokkeert ook canWriteContent voor een admin — geen enkele
-    // niet-sysadmin rol mag nog iets wijzigen, zie requireWritableDoelenboom.
+    // rol mag nog iets wijzigen, zie requireWritableDoelenboom.
     assert.equal(tree.body.doelenboom.canWriteContent, false);
 
+    // Sysadmin is hier niet gekoppeld aan de tenant, dus krijgt sowieso al 403
+    // op de boom-inhoud (los van read-only) — zie de vorige test.
     const sysadminTree = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: sysadminToken });
-    assert.equal(sysadminTree.body.doelenboom.canWrite, true);
-    assert.equal(sysadminTree.body.doelenboom.canWriteContent, true);
+    assert.equal(sysadminTree.status, 403);
 
     // Een tenant-admin mag read-only altijd zelf weer uitzetten (zie rbac.ts-
     // toelichting bij requireTenantRoleForDoelenboomParam) — anders sluit die
@@ -218,7 +234,12 @@ describe('doelenbomen', () => {
     // "Bron" is zelf al gezaaid met 1 voorbeeldelement per standaardkolom
     // (8 kolommen -> 8 elementen V1..V8, 7 edges, zie exampleTree.ts) bovenop
     // de hier expliciet toegevoegde P1/C1/edge — duplicate kopieert alles.
-    const newTree = await req('GET', `/api/doelenbomen/${newId}/tree`, { token: sysadminToken });
+    // /duplicate is sysadmin-only maar de kopie landt (zonder targetTenantId/
+    // newTenant) in dezelfde tenant als de bron — sysadmin is daar zelf niet
+    // aan gekoppeld (privacy, zie rbac.ts), dus de resulterende boom lezen we
+    // via adminToken (die is wél tenant-lid en heeft dus toegang tot elke
+    // doelenboom in die tenant, inclusief deze nieuwe).
+    const newTree = await req('GET', `/api/doelenbomen/${newId}/tree`, { token: adminToken });
     assert.equal(newTree.body.elements.length, 10);
     assert.equal(newTree.body.edges.length, 8);
     assert.ok(newTree.body.elements.some((e: { code: string }) => e.code === 'P1'));
@@ -236,5 +257,56 @@ describe('doelenbomen', () => {
     assert.equal(del.status, 204);
     const getAfter = await req('GET', `/api/doelenbomen/${boom.body.id}`, { token: adminToken });
     assert.equal(getAfter.status, 404);
+  });
+
+  // Privacy (zie rbac.ts rolmodel-comment): een ongekoppelde sysadmin mag nog
+  // wél de doelenbomen-lijst zien en de "instellingen"-laag van een doelenboom
+  // beheren (naam/slug/alleen-lezen/archiveren/verwijderen, en wie welke rol
+  // heeft) — dat is de "gematigde" uitzondering. Maar géén enkele boom-inhoud:
+  // niet de tree zelf (al gedekt door eerdere tests hierboven), niet de
+  // kolomconfiguratie, en niet imports/exports.
+  it('sysadmin zonder koppeling: wel de doelenbomen-lijst en -instellingen, geen boom-inhoud (kolommen/import/export)', async () => {
+    const { tenantId, adminToken } = await makeTenantWithAdmin(sysadminToken, `${PREFIX}-t7`, `${PREFIX}-t7-admin@test.local`);
+    const boom = await req('POST', `/api/tenants/${tenantId}/doelenbomen`, {
+      token: adminToken, body: { slug: 'boom7', name: 'Boom 7' },
+    });
+    const doelenboomId = boom.body.id;
+
+    // Lijst + los item: metadata, geen inhoud — sysadmin ziet dit zonder koppeling.
+    const list = await req('GET', '/api/doelenbomen', { token: sysadminToken });
+    assert.equal(list.status, 200);
+    assert.ok(list.body.some((d: { id: number }) => d.id === doelenboomId));
+
+    const tenantList = await req('GET', `/api/tenants/${tenantId}/doelenbomen`, { token: sysadminToken });
+    assert.equal(tenantList.status, 200);
+    assert.ok(tenantList.body.some((d: { id: number }) => d.id === doelenboomId));
+
+    const single = await req('GET', `/api/doelenbomen/${doelenboomId}`, { token: sysadminToken });
+    assert.equal(single.status, 200);
+
+    // Instellingen: hernoemen mag zonder koppeling.
+    const rename = await req('PUT', `/api/doelenbomen/${doelenboomId}`, {
+      token: sysadminToken, body: { name: 'Boom 7 hernoemd door sysadmin' },
+    });
+    assert.equal(rename.status, 200);
+    assert.equal(rename.body.name, 'Boom 7 hernoemd door sysadmin');
+
+    // Member-roles beheren (wie is admin/gebruiker/bezoeker) mag ook zonder
+    // koppeling — dat IS precies hoe sysadmin iemand anders koppelt.
+    const roles = await req('GET', `/api/doelenbomen/${doelenboomId}/member-roles`, { token: sysadminToken });
+    assert.equal(roles.status, 200);
+
+    // Boom-inhoud: allemaal 403 zonder koppeling.
+    const tree = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: sysadminToken });
+    assert.equal(tree.status, 403);
+
+    const columns = await req('GET', `/api/doelenbomen/${doelenboomId}/column-config`, { token: sysadminToken });
+    assert.equal(columns.status, 403);
+
+    const exportRes = await req('GET', `/api/doelenbomen/${doelenboomId}/export?format=oud&mode=data`, { token: sysadminToken });
+    assert.equal(exportRes.status, 403);
+
+    const imports = await req('GET', `/api/doelenbomen/${doelenboomId}/imports`, { token: sysadminToken });
+    assert.equal(imports.status, 403);
   });
 });

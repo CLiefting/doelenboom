@@ -43,6 +43,12 @@ export const authRouter = Router();
 // naar gebruiker) zonder dat de gebruiker opnieuw hoeft in te loggen. Tenant-
 // rollen worden dus altijd live opgezocht (zie rbac.ts). /me geeft ze wel mee als
 // gemakslijstje voor de frontend-UI (welke tenants zie ik, welke rol heb ik erin).
+//
+// fetchTenantRoles draait voor IEDEREEN, sysadmin incluis: sinds sysadmin geen
+// automatische toegang meer heeft tot boom-inhoud (privacy, zie rbac.ts
+// rolmodel-comment) kan een sysadmin best een eigen tenant_users-rij hebben
+// (bv. zichzelf tijdelijk als admin gekoppeld om een klant te helpen) — de
+// frontend moet die net als bij iedere andere gebruiker kunnen tonen.
 authRouter.post('/login', async (req, res) => {
   const { email, password } = req.body ?? {};
   if (!email || !password) {
@@ -95,12 +101,12 @@ async function fetchTenantRoles(userId: number) {
     tenantId: r.tenant_id,
     tenantSlug: r.tenant_slug,
     tenantName: r.tenant_name,
-    role: r.role as 'admin' | 'gebruiker',
+    role: r.role as 'admin' | 'gebruiker' | 'bezoeker',
   }));
 }
 
 authRouter.get('/me', requireAuth, async (req: AuthedRequest, res) => {
-  const tenantRoles = req.user!.isSysadmin ? [] : await fetchTenantRoles(req.user!.id);
+  const tenantRoles = await fetchTenantRoles(req.user!.id);
   const mcp = await pool.query('select must_change_password from users where id = $1', [req.user!.id]);
   res.json({ user: { ...req.user, mustChangePassword: mcp.rows[0]?.must_change_password ?? false, tenantRoles } });
 });
@@ -133,7 +139,7 @@ authRouter.post('/change-password', requireAuth, async (req: AuthedRequest, res)
     `update users set password_hash = crypt($1, gen_salt('bf')), must_change_password = false where id = $2`,
     [newPassword, req.user!.id]
   );
-  const tenantRoles = req.user!.isSysadmin ? [] : await fetchTenantRoles(req.user!.id);
+  const tenantRoles = await fetchTenantRoles(req.user!.id);
   res.json({ user: { ...req.user, mustChangePassword: false, tenantRoles } });
 });
 

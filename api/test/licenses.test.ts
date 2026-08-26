@@ -12,12 +12,12 @@ const PREFIX = unique('lic');
 // tenant (tier + modules + handhaving) — zie ook routes/licenses.ts.
 describe('licenties', () => {
   let sysadminToken: string;
+  const sysadminEmail = `${PREFIX}-admin@test.local`;
 
   before(async () => {
     await startTestServer();
-    const email = `${PREFIX}-admin@test.local`;
-    await createSysadminUser(email, 'wachtwoord123');
-    sysadminToken = await login(email, 'wachtwoord123');
+    await createSysadminUser(sysadminEmail, 'wachtwoord123');
+    sysadminToken = await login(sysadminEmail, 'wachtwoord123');
   });
 
   after(async () => {
@@ -354,14 +354,25 @@ describe('licenties', () => {
       assert.deepEqual(tree.body.products, {});
       assert.deepEqual(tree.body.projectStatus, {});
 
-      // Sysadmin mag altijd door, module of niet (zelfde bypass-conventie als
-      // de rest van rbac.ts).
-      const alsSysadmin = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P1/products`, {
+      // Sysadmin heeft hier geen eigen koppeling aan de tenant (privacy, zie
+      // rbac.ts) en krijgt dus sowieso al 403 — vóórdat de module-check
+      // (requireModule, ook zonder sysadmin-bypass) er nog aan te pas komt.
+      const alsOngekoppeldeSysadmin = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P1/products`, {
         token: sysadminToken, body: { name: 'Deliverable via sysadmin' },
       });
-      assert.equal(alsSysadmin.status, 201);
+      assert.equal(alsOngekoppeldeSysadmin.status, 403);
 
-      void tenantId;
+      // Ook een sysadmin die zichzelf wél als gebruiker koppelt blijft
+      // geblokkeerd door de module-gate zelf (geen sysadmin-bypass in
+      // requireModule) — dezelfde foutmelding als voor adminToken hierboven.
+      await req('POST', `/api/tenants/${tenantId}/members`, {
+        token: sysadminToken, body: { email: sysadminEmail, password: 'wachtwoord123', role: 'gebruiker' },
+      });
+      const alsGekoppeldeSysadmin = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P1/products`, {
+        token: sysadminToken, body: { name: 'Deliverable via gekoppelde sysadmin' },
+      });
+      assert.equal(alsGekoppeldeSysadmin.status, 403);
+      assert.match(alsGekoppeldeSysadmin.body.error, /projecten/);
     });
 
     it('met de module actief: schrijven naar producten werkt en de boom levert de data', async () => {

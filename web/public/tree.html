@@ -4909,6 +4909,13 @@ function fetchAndBoot() {
   fetch(apiUrl + '/api/doelenbomen/' + doelenboomId + '/tree', {
     headers: { Authorization: 'Bearer ' + authToken },
   }).then((res) => {
+    // 403 hier betekent meestal "geen koppeling aan deze tenant/doelenboom"
+    // (bv. een sysadmin die niet zelf als admin/gebruiker/bezoeker is
+    // toegevoegd — zie rbac.ts) i.p.v. een generieke fout, dus een gerichtere
+    // melding dan de rest van de HTTP-statussen.
+    if (res.status === 403) {
+      throw new Error('Je hebt geen toegang tot deze doelenboom. Vraag een tenant-admin om je als admin, gebruiker of bezoeker aan deze tenant/doelenboom te koppelen.');
+    }
     if (!res.ok) throw new Error('Kon boom niet laden (HTTP ' + res.status + ')');
     return res.json();
   }).then(boot).catch((err) => renderError(err && err.message ? err.message : 'Onbekende fout bij laden van de boom.'));

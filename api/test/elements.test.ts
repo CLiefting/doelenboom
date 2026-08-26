@@ -9,6 +9,8 @@ const PREFIX = unique('elements');
 
 describe('elements CRUD', () => {
   let sysadminToken: string;
+  let sysadminEmail: string;
+  let tenantId: number;
   let doelenboomId: number;
   let adminToken: string;
   let gebruikerToken: string;
@@ -16,10 +18,10 @@ describe('elements CRUD', () => {
 
   before(async () => {
     await startTestServer();
-    const email = `${PREFIX}-sysadmin@test.local`;
-    await createSysadminUser(email, 'wachtwoord123');
-    sysadminToken = await login(email, 'wachtwoord123');
-    ({ doelenboomId, adminToken, gebruikerToken, bezoekerToken } = await setupWritableDoelenboom(sysadminToken, PREFIX));
+    sysadminEmail = `${PREFIX}-sysadmin@test.local`;
+    await createSysadminUser(sysadminEmail, 'wachtwoord123');
+    sysadminToken = await login(sysadminEmail, 'wachtwoord123');
+    ({ tenantId, doelenboomId, adminToken, gebruikerToken, bezoekerToken } = await setupWritableDoelenboom(sysadminToken, PREFIX));
   });
 
   after(async () => {
@@ -92,11 +94,33 @@ describe('elements CRUD', () => {
     assert.equal(delAgain.status, 404);
   });
 
-  it('sysadmin mag altijd schrijven, ook al is deze geen tenant-lid', async () => {
+  it('sysadmin mag NIET schrijven zonder zelf gekoppeld te zijn (privacy) — na koppeling als gebruiker wel', async () => {
+    const blocked = await req('POST', `/api/doelenbomen/${doelenboomId}/elements`, {
+      token: sysadminToken, body: { code: 'P3', type: 'Project', name: 'Door ongekoppelde sysadmin' },
+    });
+    assert.equal(blocked.status, 403);
+
+    // Zelfde privacy-check op lezen: ook GET .../tree is dicht zonder koppeling.
+    const blockedRead = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: sysadminToken });
+    assert.equal(blockedRead.status, 403);
+
+    // Koppel sysadmin alsnog als gebruiker aan deze tenant (ledenbeheer blijft
+    // sysadmin-only toegankelijk, zie rbac.ts) — dan werkt schrijven gewoon,
+    // precies zoals voor elke andere gebruiker met die rol.
+    const link = await req('POST', `/api/tenants/${tenantId}/members`, {
+      token: sysadminToken, body: { email: sysadminEmail, password: 'wachtwoord123', role: 'gebruiker' },
+    });
+    assert.equal(link.status, 201);
+    // De JWT bevat geen tenant-rollen (die worden live opgezocht, zie
+    // auth.ts) — dus geen nieuwe login nodig, hetzelfde sysadminToken volstaat.
     const created = await req('POST', `/api/doelenbomen/${doelenboomId}/elements`, {
-      token: sysadminToken, body: { code: 'P3', type: 'Project', name: 'Door sysadmin' },
+      token: sysadminToken, body: { code: 'P3', type: 'Project', name: 'Door gekoppelde sysadmin' },
     });
     assert.equal(created.status, 201);
+
+    // Weer ontkoppelen zodat latere tests in dit bestand (die ongekoppelde
+    // sysadmin-toegang verwachten te weigeren) niet per ongeluk slagen.
+    await req('DELETE', `/api/tenants/${tenantId}/members/${link.body.userId}`, { token: sysadminToken });
   });
 
   it('read-only doelenboom blokkeert schrijven, ook voor de tenant-admin', async () => {

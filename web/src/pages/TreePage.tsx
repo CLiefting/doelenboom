@@ -30,16 +30,19 @@ export default function TreePage({
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   // Alleen een voorlopige gok vóórdat tree.html de echte boomdata heeft
-  // opgehaald: de rol hangt niet meer alleen af van de tenant-brede rol en
+  // opgehaald: de rol hangt niet alleen af van de tenant-brede rol en
   // doelenboom.read_only, maar kan ook per doelenboom overruled zijn (zie
   // doelenboom_user_roles / getEffectiveRoleForDoelenboom in api/src/rbac.ts)
   // — dat weet dit component niet, dus laten we tree.html zelf de knop-
   // zichtbaarheid corrigeren zodra GET .../tree binnen is (boot() roept daar
-  // applyRole(tree.doelenboom.canWrite ? 'admin' : 'gebruiker') aan). Deze
-  // voorlopige waarde voorkomt alleen een korte flits van de verkeerde UI
-  // vlak na het laden — de daadwerkelijke autorisatie wordt sowieso altijd
-  // server-side afgedwongen, ongeacht wat hier staat.
-  const role: 'admin' | 'gebruiker' = user.isSysadmin ? 'admin' : 'gebruiker';
+  // applyRole aan op basis van canWrite/canWriteContent). Deze voorlopige
+  // waarde voorkomt alleen een korte flits van de verkeerde UI vlak na het
+  // laden — de daadwerkelijke autorisatie wordt sowieso altijd server-side
+  // afgedwongen, ongeacht wat hier staat. Altijd 'bezoeker' als gok, ook voor
+  // sysadmin: sysadmin heeft standaard GEEN toegang tot boom-inhoud (privacy,
+  // zie rbac.ts) tenzij zelf als admin/gebruiker/bezoeker aan deze tenant
+  // gekoppeld — 'admin' gokken zou hier dus vaker fout dan goed zijn.
+  const role: 'bezoeker' = 'bezoeker';
 
   useEffect(() => {
     function sendInit() {

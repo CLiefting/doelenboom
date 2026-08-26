@@ -158,7 +158,10 @@ doelenbomenRouter.post(
 // ná de-archivering).
 doelenbomenRouter.put(
   '/doelenbomen/:id',
-  requireTenantRoleForDoelenboomParam('admin', 'id'),
+  // allowSysadmin: true — dit zijn doelenboom-"instellingen"/toegangsbeheer,
+  // geen boom-inhoud (zie rbac.ts rolmodel-comment en de gematigde
+  // sysadmin-scope hierboven bij deze route).
+  requireTenantRoleForDoelenboomParam('admin', 'id', { allowSysadmin: true }),
   async (req, res) => {
     const b = (req.body ?? {}) as Record<string, unknown>;
     const name = typeof b.name === 'string' ? b.name.trim() : '';
@@ -211,7 +214,10 @@ doelenbomenRouter.put(
 // Zelfde toegang als hernoemen/read-only (tenant-beheer, niet "boom-inhoud").
 doelenbomenRouter.delete(
   '/doelenbomen/:id',
-  requireTenantRoleForDoelenboomParam('admin', 'id'),
+  // allowSysadmin: true — dit zijn doelenboom-"instellingen"/toegangsbeheer,
+  // geen boom-inhoud (zie rbac.ts rolmodel-comment en de gematigde
+  // sysadmin-scope hierboven bij deze route).
+  requireTenantRoleForDoelenboomParam('admin', 'id', { allowSysadmin: true }),
   async (req, res) => {
     const result = await pool.query('delete from doelenbomen where id = $1 returning id', [req.params.id]);
     if (result.rowCount === 0) return res.status(404).json({ error: 'Doelenboom niet gevonden.' });
@@ -226,7 +232,10 @@ doelenbomenRouter.delete(
 // tenant-admin moet dit voor zijn eigen tenant kunnen beheren.
 doelenbomenRouter.get(
   '/doelenbomen/:id/member-roles',
-  requireTenantRoleForDoelenboomParam('admin', 'id'),
+  // allowSysadmin: true — dit zijn doelenboom-"instellingen"/toegangsbeheer,
+  // geen boom-inhoud (zie rbac.ts rolmodel-comment en de gematigde
+  // sysadmin-scope hierboven bij deze route).
+  requireTenantRoleForDoelenboomParam('admin', 'id', { allowSysadmin: true }),
   async (req, res) => {
     const result = await pool.query(
       `select u.id as user_id, u.email, tu.role as tenant_role, dur.role as override_role
@@ -256,7 +265,10 @@ doelenbomenRouter.get(
 // binnen een doelenboom die diegene al mag zien.
 doelenbomenRouter.put(
   '/doelenbomen/:id/member-roles/:userId',
-  requireTenantRoleForDoelenboomParam('admin', 'id'),
+  // allowSysadmin: true — dit zijn doelenboom-"instellingen"/toegangsbeheer,
+  // geen boom-inhoud (zie rbac.ts rolmodel-comment en de gematigde
+  // sysadmin-scope hierboven bij deze route).
+  requireTenantRoleForDoelenboomParam('admin', 'id', { allowSysadmin: true }),
   async (req, res) => {
     const b = (req.body ?? {}) as Record<string, unknown>;
     const role =
