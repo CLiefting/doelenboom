@@ -541,22 +541,34 @@
   .dp-activities-title {
     display: flex; align-items: center; justify-content: space-between; gap: 8px;
     font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;
-    color: #999; margin: 18px 0 10px;
+    color: #999; margin: 4px 0 8px;
   }
   .activities-toggle-label { display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
   .activities-chevron { display: inline-block; font-size: 9px; color: #aab0b8; transition: transform 0.15s; }
   .dp-activities-body { margin-bottom: 4px; }
   .activity-gantt-wrap { margin: 4px 0 4px; }
-  .activity-gantt-grid { display: grid; grid-template-columns: minmax(90px, 150px) 1fr 74px; gap: 8px; }
-  .activity-gantt-axis-track { position: relative; height: 34px; grid-column: 2; }
-  .activity-gantt-row { display: contents; }
+  /* Twee LOSSE grids (as-rij en elke activiteitenrij) met identieke
+     grid-template-columns i.p.v. één gedeelde grid met "display:contents"-rijen
+     — dat laatste leek elegant, maar de expliciet-gepositioneerde as
+     (grid-column:2) liet in rij 1 een gat vallen dat de auto-plaatsing van de
+     eerste activiteitenrij (naam/balk/knoppen) opvulde, met als gevolg dat
+     naam en balk niet meer op dezelfde regel stonden — precies het probleem
+     dat hierna gemeld werd. Met losse, even-brede grids als gestapelde
+     broertjes/zusjes lijnen de kolommen nog steeds pixel-exact uit, zonder
+     die valkuil. */
+  .activity-gantt-axis-row, .activity-gantt-row {
+    display: grid; grid-template-columns: minmax(90px, 150px) 1fr 74px; gap: 8px; align-items: center;
+  }
+  .activity-gantt-axis-track { position: relative; height: 34px; }
+  .activity-gantt-rows { display: flex; flex-direction: column; gap: 2px; }
   .activity-row-label {
     font-size: 12px; color: #333; font-weight: 600; overflow: hidden; text-overflow: ellipsis;
-    white-space: nowrap; align-self: center; padding: 3px 0;
+    white-space: nowrap; padding: 3px 0;
   }
-  .activity-row-track { position: relative; height: 14px; background: #eef0f3; border-radius: 4px; align-self: center; }
+  .activity-row-track { position: relative; height: 14px; background: #eef0f3; border-radius: 4px; }
   .activity-bar { position: absolute; top: 0; bottom: 0; background: var(--navy); border-radius: 4px; min-width: 6px; }
-  .activity-row-actions { display: flex; gap: 4px; justify-content: flex-end; align-self: center; }
+  .activity-row-actions { display: flex; gap: 4px; justify-content: flex-end; }
+  .activity-add-row { margin-top: 8px; }
 
   /* Overzicht "alle project-tijdlijnen" (#timelines-view) — een losse lijst
      van kaarten, één per project, elk met dezelfde tijdbalk als in de
@@ -2431,10 +2443,12 @@ function runApp(data) {
     }).join('');
 
     return '<div class="activity-gantt-wrap">' +
-      '<div class="activity-gantt-grid">' +
+      '<div class="activity-gantt-axis-row">' +
+        '<span></span>' +
         '<div class="activity-gantt-axis-track">' + ticksHtml + labelsHtml + todayHtml + '</div>' +
-        rowsHtml +
+        '<span></span>' +
       '</div>' +
+      '<div class="activity-gantt-rows">' + rowsHtml + '</div>' +
     '</div>';
   }
 
@@ -2449,12 +2463,17 @@ function runApp(data) {
     let html = '<div class="dp-activities-title">' +
       '<span class="activities-toggle-label"><span class="activities-chevron">&#9656;</span> Activiteiten' +
         (activities.length ? ' (' + activities.length + ')' : '') + '</span>' +
-      '<button type="button" class="btn ghost btn-xs activity-add-btn crud-only" data-code="' + escapeHtml(id) + '">+ Activiteit</button>' +
     '</div>';
     html += '<div class="dp-activities-body" style="display:none">';
     html += activities.length === 0
       ? '<div class="dp-empty-note">Nog geen activiteiten gepland voor dit project.</div>'
       : activityGanttHtml(id, activities);
+    // "+ Activiteit" staat bewust ONDER de lijst (i.p.v. in de titelbalk erboven,
+    // zoals bij Producten) — bij meerdere activiteiten is dat de plek waar de
+    // blik na het lezen van de laatste rij toch al staat.
+    html += '<div class="activity-add-row crud-only">' +
+      '<button type="button" class="btn ghost btn-xs activity-add-btn" data-code="' + escapeHtml(id) + '">+ Activiteit</button>' +
+    '</div>';
     html += '</div>';
     return html;
   }
