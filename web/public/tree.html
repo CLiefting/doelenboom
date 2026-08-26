@@ -140,24 +140,6 @@
   .search-clear-btn:hover { background: #c9ccd2; }
   .search-count { font-size: 12px; color: #666; text-align: right; }
   .search-count.has-query { color: var(--navy); font-weight: 600; }
-  .node.search-hit {
-    box-shadow: 0 0 0 3px #ffb703, 0 0 0 7px rgba(255,183,3,0.35), 0 3px 8px rgba(0,0,0,0.3);
-    opacity: 1;
-  }
-  .node.search-miss { opacity: 0.2; }
-
-  /* Boomfilter (Ctrl/Cmd-klik of lang indrukken op een vak): opzettelijk een
-     ander kleuraccent (blauw) dan de oranje pad-highlight (.node.active/
-     .is-selected) en de amberkleurige zoek-highlight (.node.search-hit)
-     hierboven, zodat de drie los van elkaar leesbaar blijven als ze
-     tegelijk voorkomen. .filter-picked = "zit in de (nog niet
-     toegepaste/bij te werken) selectie"; .filter-hidden = "valt buiten de
-     tóégepaste filter" (verbergt het vak volledig, i.p.v. dimmen — zie
-     computeElementFilterKeepSet/applyElementFilter). */
-  .node.filter-picked {
-    box-shadow: 0 0 0 3px #2f6fed, 0 0 0 7px rgba(47,111,237,0.35), 0 3px 8px rgba(0,0,0,0.3);
-  }
-  .node.filter-hidden { display: none; }
   .col-empty-note {
     font-size: 11px; color: #999; text-align: center; font-style: italic;
     padding: 6px 4px;
@@ -371,8 +353,18 @@
   .ref-form-actions { display: flex; justify-content: flex-end; gap: 8px; }
   .ref-modal-status { font-size: 12px; color: #DC3545; min-height: 16px; margin: 12px 0 0; }
 
-  /* Workspace: canvas (left) + detail panel sidebar (right) */
+  /* Workspace: canvas-kolom (links) + detail panel sidebar (rechts) */
   .workspace { display: flex; gap: 20px; align-items: flex-start; }
+  /* De boom (.canvas-wrap) én de projectkaart (.project-panel, zie verderop)
+     staan samen in deze kolom, zodat de kaart altijd direct onder de boom
+     aansluit — voorheen stond .project-panel als los, pagina-breed blok ná
+     .workspace, waardoor de kaart pas begon na de HOOGSTE van de twee
+     workspace-kolommen (vaak de detail-panel sidebar rechts, met z'n
+     kpi/taakveld/verbindingen-inhoud), i.p.v. na de vaak veel kortere boom
+     zelf — dat gaf bij een klein/uitgezoomd boomdeel een lege, verwarrende
+     "gat" onder de boom voordat de kaart begon. .detail-panel blijft
+     ongewijzigd de rechterkolom van .workspace. */
+  .canvas-col { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
 
   /* Focus detail panel */
   .detail-panel {
@@ -423,7 +415,8 @@
   body:not(.read-only) .dp-org-chip { cursor: pointer; }
   body:not(.read-only) .dp-org-chip:hover { filter: brightness(0.96); }
 
-  /* Project status + products panel, shown below the tree */
+  /* Project status + products panel — staat in .canvas-col, direct onder
+     .canvas-wrap (zie .workspace hierboven), dus altijd meteen onder de boom. */
   .project-panel {
     display: none;
     margin-top: 20px; background: #ffffff;
@@ -655,6 +648,32 @@
     position: relative;
   }
   .node:hover { box-shadow: 0 3px 6px rgba(0,0,0,0.25); }
+  /* .search-hit/.filter-picked staan bewust NÁ .node:hover (i.p.v. bij de
+     zoekbalk-/Boomfilter-UI verderop, waar ze oorspronkelijk stonden): bij
+     gelijke CSS-specificiteit (elk twee selectoren: .node + modifier) wint
+     anders de latere regel in de stylesheet, en dat was tot voor kort
+     .node:hover — zodra de muis nog boven een net Cmd/Ctrl-geklikt of
+     zoek-gematcht vak stond, verdween de blauwe/amberkleurige rand
+     onzichtbaar onder :hover's eigen (subtielere) schaduw, tot je de muis
+     wegbewoog. Nu staan deze ná :hover, net als .active/.is-selected/
+     .tag-active/.focus-target hieronder, die dit probleem al niet hadden. */
+  .node.search-hit {
+    box-shadow: 0 0 0 3px #ffb703, 0 0 0 7px rgba(255,183,3,0.35), 0 3px 8px rgba(0,0,0,0.3);
+    opacity: 1;
+  }
+  .node.search-miss { opacity: 0.2; }
+  /* Boomfilter (Ctrl/Cmd-klik of lang indrukken op een vak): opzettelijk een
+     ander kleuraccent (blauw) dan de oranje pad-highlight (.node.active/
+     .is-selected hieronder) en de amberkleurige zoek-highlight
+     (.node.search-hit hierboven), zodat de drie los van elkaar leesbaar
+     blijven als ze tegelijk voorkomen. .filter-picked = "zit in de (nog niet
+     toegepaste/bij te werken) selectie"; .filter-hidden = "valt buiten de
+     tóégepaste filter" (verbergt het vak volledig, i.p.v. dimmen — zie
+     computeElementFilterKeepSet/applyElementFilter). */
+  .node.filter-picked {
+    box-shadow: 0 0 0 3px #2f6fed, 0 0 0 7px rgba(47,111,237,0.35), 0 3px 8px rgba(0,0,0,0.3);
+  }
+  .node.filter-hidden { display: none; }
   .node.dimmed { opacity: 0.25; }
   .node-tag-dot {
     position: absolute; top: 3px; right: 3px; width: 6px; height: 6px; border-radius: 50%;
@@ -684,11 +703,23 @@
     fill: none; stroke: #9aa5b1; stroke-width: 1.3;
     transition: stroke 0.15s ease, stroke-width 0.15s ease, opacity 0.2s ease;
   }
-  .edge.active-edge { stroke: var(--accent); stroke-width: 2.6; opacity: 1; }
-  .edge.dimmed { opacity: 0.15; }
+  .edge.active-edge { stroke: var(--accent); stroke-width: 3.2; opacity: 1; }
   .edge.edge-primair { stroke-width: 1.8; }
   .edge.edge-ondersteunend { stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.75; }
   .edge.edge-ondersteunend.active-edge { stroke-dasharray: none; opacity: 1; }
+  /* .dimmed staat bewust ná edge-primair/edge-ondersteunend: bij gelijke
+     CSS-specificiteit (elk twee classes) wint anders de latere regel
+     hierboven (edge-ondersteunend z'n eigen opacity:0.75) en bleef een
+     gedimde ondersteunende relatie alsnog vrijwel normaal zichtbaar. dimmed
+     en active-edge sluiten elkaar altijd uit (zie applyHighlightToDOM:
+     classList.toggle is exclusief per element), dus deze volgorde kan
+     active-edge nooit overschrijven. Zeer lichte kleur + lage dekking, en
+     dun getrokken (i.p.v. de eigen edge-primair/edge-ondersteunend-breedte),
+     zodat een gemarkeerd pad (klik op een vak, of Boomfilter-picks) er
+     duidelijk bovenuit springt — drawEdges() tekent bovendien de gemarkeerde
+     lijnen zelf als laatste, zodat ze bij kruisingen boven de gedimde lijnen
+     liggen i.p.v. eronder te kunnen wegvallen. */
+  .edge.dimmed { stroke: #dde1e5; stroke-width: 1; opacity: 0.6; }
   .col-arrow-line { stroke: var(--navy); stroke-width: 2.2; }
   .col-arrow-head { fill: var(--navy); }
 
@@ -1217,16 +1248,18 @@
   <div class="app-toast" id="app-toast"></div>
 
   <div class="workspace">
-  <div class="canvas-wrap">
-    <div class="board" id="board">
-      <svg class="connectors" id="connectors"></svg>
-      <div id="col-arrows"></div>
-      <div class="columns" id="columns"></div>
+  <div class="canvas-col">
+    <div class="canvas-wrap">
+      <div class="board" id="board">
+        <svg class="connectors" id="connectors"></svg>
+        <div id="col-arrows"></div>
+        <div class="columns" id="columns"></div>
+      </div>
     </div>
+    <div class="project-panel" id="project-panel"></div>
   </div>
   <div class="detail-panel" id="detail-panel"></div>
   </div>
-  <div class="project-panel" id="project-panel"></div>
   <footer id="app-footer"></footer>
 
   <div id="hover-tooltip"></div>
@@ -1594,7 +1627,51 @@ function runApp(data) {
       walk(nodeId, nodeId, 0);
     });
 
-    return effective;
+    // Boomfilter (elementFilterActive, zie "---- Boomfilter ----" verderop)
+    // houdt bewust de VOLLEDIGE samenhangende component vast rond de gepickte
+    // elementen (computeElementFilterKeepSet loopt bidirectioneel over de
+    // rúwe EDGES) — dat neemt ook zijtakken mee die niet op hetzelfde pad
+    // liggen, en bij een breed vertakte boom geeft dat al snel een dichte mesh
+    // van lijnen. Twee opeenvolgende verfijningen voor de GETEKENDE lijnen
+    // (de zichtbare/gehouden ELEMENTEN zelf blijven ongemoeid — dat blijft
+    // computeElementFilterKeepSet's bredere "hele samenhangende component"):
+    if (!elementFilterActive) return effective;
+
+    // 1) alleen verbindingen tussen elementen die in ÉÉN kolom afstand van
+    //    elkaar staan — een verbinding die een kolom overslaat (bv.
+    //    Capability rechtstreeks naar Programmabaat) is op zich geldige data,
+    //    maar oogt in de gefilterde weergave als een storende, ver
+    //    doorlopende lijn. "Afstand" wordt bepaald op de ZICHTBARE
+    //    kolomvolgorde (hiddenCols eruit gefilterd) i.p.v. de volledige
+    //    CANONICAL_COL_ORDER: als een kolom verborgen is, heeft walk()
+    //    hierboven de verbinding er al doorheen gebrugd (bv. Operationele
+    //    benefit -> Programmabaat FPBB met Sub-benefit FPBB verborgen) en is
+    //    dat in de zichtbare boom gewoon een verbinding tussen naast elkaar
+    //    liggende kolommen — die moet hier NIET alsnog als "te ver" sneuvelen.
+    const visibleColOrder = CANONICAL_COL_ORDER.filter(t => !hiddenCols.has(t));
+    const adjacentOnly = effective.filter(e => {
+      const sType = DETAILS[e.source] && DETAILS[e.source].type;
+      const tType = DETAILS[e.target] && DETAILS[e.target].type;
+      const sIdx = visibleColOrder.indexOf(sType);
+      const tIdx = visibleColOrder.indexOf(tType);
+      // Onbekend/niet-gevonden type: niet aannemen dat het "te ver" is —
+      // gewoon tonen (kan gebeuren bij een niet-standaard kolomconfiguratie).
+      if (sIdx === -1 || tIdx === -1) return true;
+      return Math.abs(sIdx - tIdx) === 1;
+    });
+
+    // 2) alleen verbindingen die daadwerkelijk op het verbonden pad van (een
+    //    van) de gepickte elementen liggen. Zonder deze stap kon een lijn
+    //    tussen twee toevallig-allebei-zichtbare elementen blijven staan
+    //    terwijl die lijn zelf nergens' pad is — elk van de twee eindpunten
+    //    kan om een HELEMAAL ANDERE reden gehouden zijn (bv. elk op het pad
+    //    van een ANDERE pick), zonder dat de verbinding daartussen ergens toe
+    //    doet. reachableSets() hergebruikt dezelfde traversal als de
+    //    pad-markering (computeActiveSets), nu toegepast op adjacentOnly
+    //    i.p.v. de nog niet bijgewerkte currentEffectiveEdges.
+    if (filterSelection.size === 0) return adjacentOnly;
+    const reach = reachableSets(Array.from(filterSelection), adjacentOnly);
+    return adjacentOnly.filter(e => reach.edgeKeys.has(e.source + '|' + e.target));
   }
 
   function drawEdges() {
@@ -1618,7 +1695,21 @@ function runApp(data) {
 
     currentEffectiveEdges = computeEffectiveEdges();
 
-    currentEffectiveEdges.forEach(e => {
+    // Is er een pad gemarkeerd (losse klik, zie selectNode — de enige trigger
+    // voor computeEdgeHighlightIds)? Teken de bijbehorende lijnen dan als
+    // laatste, zodat ze bóven de gedimde lijnen liggen i.p.v. er (bij een
+    // kruising) onder te kunnen wegvallen.
+    const highlightIds = computeEdgeHighlightIds();
+    const activeKeysForDraw = highlightIds ? computeActiveSets(highlightIds).edgeKeys : null;
+    const orderedEdges = activeKeysForDraw
+      ? [...currentEffectiveEdges].sort((a, b) => {
+          const aActive = activeKeysForDraw.has(a.source + '|' + a.target) ? 1 : 0;
+          const bActive = activeKeysForDraw.has(b.source + '|' + b.target) ? 1 : 0;
+          return aActive - bActive;
+        })
+      : currentEffectiveEdges;
+
+    orderedEdges.forEach(e => {
       const s = nodeRects[e.source];
       const t = nodeRects[e.target];
       if (!s || !t) return;
@@ -1723,27 +1814,58 @@ function runApp(data) {
   window.addEventListener('resize', () => { drawEdges(); drawColumnArrows(); });
 
   // ---- Click-to-highlight full connected path ----
-  function computeActiveSets(id) {
+  // Kern-traversal: het volledige verbonden pad (voorwaarts + achterwaarts,
+  // vanaf elk meegegeven element) binnen een EXPLICIET meegegeven edge-lijst
+  // — bewust geen closure over currentEffectiveEdges, zodat computeEffective-
+  // Edges() hieronder 'm ook kan gebruiken op de zojuist berekende, nog niet
+  // aan currentEffectiveEdges toegekende lijst (anders zou je de vorige,
+  // verouderde lijst te pakken krijgen — currentEffectiveEdges wordt pas ná
+  // computeEffectiveEdges() z'n return-waarde bijgewerkt, zie drawEdges()).
+  function reachableSets(idList, edgeList) {
     const forward = {}, backward = {};
-    currentEffectiveEdges.forEach(e => {
+    edgeList.forEach(e => {
       (forward[e.source] = forward[e.source] || []).push(e.target);
       (backward[e.target] = backward[e.target] || []).push(e.source);
     });
-    const nodes = new Set([id]);
+    const nodes = new Set(idList);
     const edgeKeys = new Set();
-    (function walk(cur) {
+    function walkFwd(cur) {
       (forward[cur] || []).forEach(next => {
         edgeKeys.add(cur + '|' + next);
-        if (!nodes.has(next)) { nodes.add(next); walk(next); }
+        if (!nodes.has(next)) { nodes.add(next); walkFwd(next); }
       });
-    })(id);
-    (function walk(cur) {
+    }
+    function walkBack(cur) {
       (backward[cur] || []).forEach(prev => {
         edgeKeys.add(prev + '|' + cur);
-        if (!nodes.has(prev)) { nodes.add(prev); walk(prev); }
+        if (!nodes.has(prev)) { nodes.add(prev); walkBack(prev); }
       });
-    })(id);
+    }
+    idList.forEach(id => { walkFwd(id); walkBack(id); });
     return { nodes, edgeKeys };
+  }
+
+  // Accepteert zowel één id (losse klik, zie selectNode) als een array van
+  // id's (unie van meerdere Boomfilter-picks, zie applyHighlightToDOM
+  // hieronder) — draait op de HUIDIGE currentEffectiveEdges (voor het
+  // kleuren/dimmen van al getekende lijnen; zie reachableSets hierboven voor
+  // de variant die computeEffectiveEdges() gebruikt om te bepalen wélke
+  // lijnen er überhaupt getekend worden bij een toegepaste Boomfilter).
+  function computeActiveSets(ids) {
+    const idList = Array.isArray(ids) ? ids : [ids];
+    return reachableSets(idList, currentEffectiveEdges);
+  }
+
+  // Welk element bepaalt op dit moment de lijnkleuring (de oranje "golden
+  // thread")? Uitsluitend een los geklikt vak (selectedId) — een
+  // Boomfilter-pick (filterSelection — Ctrl/Cmd-klik, zie "---- Boomfilter
+  // ----" verderop) markeert alleen de node zelf (.filter-picked); zonder
+  // een klik blijven de lijnen neutraal grijs/wit, ook tijdens het picken.
+  // null = geen markering, alle lijnen normaal. Gedeeld door
+  // applyHighlightToDOM (klassen) en drawEdges (tekenvolgorde).
+  function computeEdgeHighlightIds() {
+    if (selectedId !== null) return [selectedId];
+    return null;
   }
 
   function applyHighlightToDOM() {
@@ -1757,9 +1879,12 @@ function runApp(data) {
         n.classList.toggle('dimmed', !activeNodeIds.has(nid));
       }
     });
+
+    const highlightIds = computeEdgeHighlightIds();
+    activeEdgeKeys = highlightIds ? computeActiveSets(highlightIds).edgeKeys : new Set();
     edgeEls.forEach(e => {
       const key = e.dataset.source + '|' + e.dataset.target;
-      if (selectedId === null) {
+      if (!highlightIds) {
         e.classList.remove('active-edge', 'dimmed');
       } else {
         const on = activeEdgeKeys.has(key);
@@ -1796,6 +1921,10 @@ function runApp(data) {
     const node = document.querySelector('.node[data-id="' + id + '"]');
     if (node) node.classList.toggle('filter-picked', filterSelection.has(id));
     updateFilterStatusUI();
+    // Node-status (o.a. .filter-picked-gerelateerde state) meteen consistent
+    // houden. Lijnen kleuren hierdoor NIET oranje — dat gebeurt uitsluitend
+    // via een expliciete klik (selectedId), zie computeEdgeHighlightIds().
+    applyHighlightToDOM();
   }
 
   // Loopt (net als computeFocusSet hierboven) over de rúwe EDGES — bewust
@@ -1877,6 +2006,7 @@ function runApp(data) {
     document.querySelectorAll('.node').forEach(n => n.classList.remove('filter-picked', 'filter-hidden'));
     updateColumnEmptyNotes();
     updateFilterStatusUI();
+    applyHighlightToDOM();
     requestAnimationFrame(() => setTimeout(() => { drawEdges(); drawColumnArrows(); }, 280));
   }
 
@@ -1893,11 +2023,21 @@ function runApp(data) {
   });
   updateFilterStatusUI();
 
+  // Ctrl/Cmd-klik (Boomfilter-pick) op 'mousedown' i.p.v. pas op 'click'
+  // (mouseup): geeft meteen visuele feedback (de .filter-picked-rand, zie
+  // .node.filter-picked hierboven) zodra de muisknop ingedrukt wordt, i.p.v.
+  // pas na loslaten. De click-listener hieronder handelt zo'n klik dus NIET
+  // nogmaals af (anders zou hij het net gezette pick weer terugdraaien).
+  columnsEl.addEventListener('mousedown', (ev) => {
+    const node = ev.target.closest('.node');
+    if (!node) return;
+    if (ev.metaKey || ev.ctrlKey) toggleFilterPick(node.dataset.id);
+  });
   columnsEl.addEventListener('click', (ev) => {
     const node = ev.target.closest('.node');
     if (!node) { deselect(); return; }
     const id = node.dataset.id;
-    if (ev.metaKey || ev.ctrlKey) { toggleFilterPick(id); return; }
+    if (ev.metaKey || ev.ctrlKey) return; // al afgehandeld op mousedown hierboven
     if (selectedId === id) { deselect(); } else { selectNode(id); }
   });
 
