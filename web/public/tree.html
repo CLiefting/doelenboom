@@ -46,6 +46,14 @@
   }
   .chip-filter:hover { background: #f0f1f3; border-color: #bbb; }
   .chip-filter.chip-filter-active { background: #ffd166; border-color: #d9a520; color: #3a2c00; font-weight: 700; }
+  /* Filters-knop krijgt dezelfde amber-kleur als een actieve chip zodra er
+     minstens één tag/organisatieonderdeel-filter aanstaat (activeTagFilters,
+     zie applyTagFilter) — zo valt op de balk meteen op dat er gefilterd
+     wordt, ook als de Filters-dropdown zelf dicht is. */
+  #filters-btn.filters-active {
+    background: #ffd166; border-color: #d9a520; color: #3a2c00; font-weight: 700;
+  }
+  #filters-btn.filters-active:hover { background: #ffc94d; }
   .page-header { position: relative; }
 
   .topbar {
@@ -1372,6 +1380,7 @@ function runApp(data) {
   const searchClearBtn = document.getElementById('search-clear-btn');
   const searchCountEl = document.getElementById('search-count');
   const filterFromSearchBtn = document.getElementById('filter-from-search-btn');
+  const filtersBtn = document.getElementById('filters-btn');
   const filterStatusEl = document.getElementById('filter-status');
   const filterStatusTextEl = document.getElementById('filter-status-text');
   const filterApplyBtn = document.getElementById('filter-apply-btn');
@@ -1536,6 +1545,7 @@ function runApp(data) {
   function applyTagFilter() {
     document.querySelectorAll('.node').forEach(n => n.classList.remove('tag-active', 'tag-dimmed'));
     document.querySelectorAll('.chip-filter').forEach(el => el.classList.remove('chip-filter-active'));
+    filtersBtn.classList.toggle('filters-active', activeTagFilters.size > 0);
     if (activeTagFilters.size === 0) return;
 
     // Unie (OF) van de elementen die bij minstens één geselecteerde chip horen.
