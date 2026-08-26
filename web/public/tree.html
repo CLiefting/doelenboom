@@ -565,7 +565,39 @@
   .activity-row-track { position: relative; height: 14px; background: #eef0f3; border-radius: 4px; }
   .activity-bar { position: absolute; top: 0; bottom: 0; background: var(--navy); border-radius: 4px; min-width: 6px; }
   .activity-row-actions { display: flex; gap: 4px; flex-shrink: 0; }
-  .activity-add-row { margin-top: 8px; }
+  .activity-add-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+
+  /* Importeren van taken uit MS Project (XML-export) — zie parseMppProjectXml/
+     openMppImportModal. Een bredere variant van .element-modal, want de
+     aanvink-lijst met taken heeft meer ruimte nodig dan de gewone velden-
+     formulieren. */
+  .element-modal.wide { max-width: 640px; }
+  .mpp-import-filename { font-size: 12px; color: #666; margin-left: 8px; }
+  .mpp-import-list-actions {
+    display: flex; align-items: center; justify-content: space-between;
+    margin: 14px 0 6px; font-size: 12px; color: #555; font-weight: 600;
+  }
+  .mpp-import-select-all { display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
+  .mpp-import-count { color: #999; font-weight: 400; }
+  .mpp-import-list {
+    max-height: 320px; overflow-y: auto; border: 1px solid #e2e4e8; border-radius: 8px;
+    padding: 4px 0; margin-bottom: 6px;
+  }
+  .mpp-import-row {
+    display: flex; align-items: flex-start; gap: 8px; padding: 6px 10px 6px 0;
+    border-bottom: 1px solid #f0f1f3; font-size: 12.5px; cursor: pointer;
+  }
+  .mpp-import-row:last-child { border-bottom: none; }
+  .mpp-import-row input[type=checkbox] { margin-top: 2px; flex-shrink: 0; }
+  .mpp-import-row-main { flex: 1; min-width: 0; }
+  .mpp-import-row-name { color: #333; font-weight: 600; }
+  .mpp-import-row-meta { color: #999; font-size: 11px; margin-top: 1px; }
+  .mpp-import-badge {
+    display: inline-block; font-size: 9px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.02em; padding: 1px 5px; border-radius: 3px; margin-left: 6px; vertical-align: 1px;
+  }
+  .mpp-import-badge.milestone { background: #fdecea; color: #c0392b; }
+  .mpp-import-badge.summary { background: #eef1f6; color: #5a6472; }
 
   /* Overzicht "alle project-tijdlijnen" (#timelines-view) — een losse lijst
      van kaarten, één per project, elk met dezelfde tijdbalk als in de
@@ -1136,6 +1168,41 @@
           <button type="submit" class="btn" id="activity-modal-save">Opslaan</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- Importeren van taken uit MS Project (XML-export, zie parseMppProjectXml
+       in runApp) — bewust géén <form>, want dit gaat niet in één keer submitten
+       maar in twee stappen: bestand kiezen (parse gebeurt volledig client-side
+       met DOMParser, geen serveraanroep) en dan de aangevinkte taken één voor
+       één via de bestaande POST .../activities aanmaken. -->
+  <div class="element-modal-backdrop" id="mpp-import-modal-backdrop">
+    <div class="element-modal wide">
+      <h3>Importeren uit MS Project</h3>
+      <p class="element-modal-hint">
+        Kies een MS Project XML-bestand (in MS Project: Bestand &gt; Opslaan als &gt; Bestandstype "XML").
+        Taken dieper dan WBS-niveau 3 worden niet getoond; resources en voorgangers/afhankelijkheden
+        worden niet overgenomen &mdash; Doelenboom kent daar geen velden voor.
+      </p>
+      <input type="file" id="mpp-import-file-input" accept=".xml,text/xml" style="display:none">
+      <div>
+        <button type="button" class="btn ghost" id="mpp-import-choose-btn">Bestand kiezen&hellip;</button>
+        <span id="mpp-import-filename" class="mpp-import-filename"></span>
+      </div>
+      <div id="mpp-import-list-wrap" style="display:none">
+        <div class="mpp-import-list-actions">
+          <label class="mpp-import-select-all">
+            <input type="checkbox" id="mpp-import-select-all-cb" checked> Alles (de)selecteren
+          </label>
+          <span id="mpp-import-count" class="mpp-import-count"></span>
+        </div>
+        <div id="mpp-import-list" class="mpp-import-list"></div>
+      </div>
+      <p class="element-modal-status" id="mpp-import-status"></p>
+      <div class="element-modal-actions">
+        <button type="button" class="btn ghost" id="mpp-import-cancel">Annuleren</button>
+        <button type="button" class="btn" id="mpp-import-confirm-btn" disabled>Importeer geselecteerde</button>
+      </div>
     </div>
   </div>
 
@@ -2510,9 +2577,11 @@ function runApp(data) {
       : activityGanttHtml(id, activities, projectBounds);
     // "+ Activiteit" staat bewust ONDER de lijst (i.p.v. in de titelbalk erboven,
     // zoals bij Producten) — bij meerdere activiteiten is dat de plek waar de
-    // blik na het lezen van de laatste rij toch al staat.
+    // blik na het lezen van de laatste rij toch al staat. "Importeren uit MS
+    // Project" staat ernaast — zie openMppImportModal hieronder.
     html += '<div class="activity-add-row crud-only">' +
       '<button type="button" class="btn ghost btn-xs activity-add-btn" data-code="' + escapeHtml(id) + '">+ Activiteit</button>' +
+      '<button type="button" class="btn ghost btn-xs mpp-import-btn" data-code="' + escapeHtml(id) + '">Importeren uit MS Project&hellip;</button>' +
     '</div>';
     html += '</div>';
     return html;
@@ -4205,6 +4274,218 @@ function runApp(data) {
     }
   }
 
+  // ---- Importeren van taken uit MS Project (XML-export) ----
+  // Leest een door de gebruiker geëxporteerde "MS Project XML"-export (MS
+  // Project: Bestand > Opslaan als > Bestandstype "XML") volledig in de
+  // browser uit met DOMParser — er is dus geen serveraanroep nodig om te
+  // parsen, en geen extra backend-afhankelijkheid (zoals Java/MPXJ, nodig om
+  // het binaire .mpp-formaat zelf te lezen). Toont alle taken t/m WBS-/
+  // outline-niveau 3 in een aanvink-lijst; bij bevestigen wordt voor elke
+  // aangevinkte taak gewoon de bestaande POST .../activities aangeroepen —
+  // elke MS Project-taak (incl. mijlpalen en fasekoppen) wordt zo een gewone
+  // Doelenboom-activiteit. Mijlpalen krijgen start = eind (eendaagse balk).
+  // Resources en voorgangers/afhankelijkheden uit MS Project worden bewust
+  // niet overgenomen: Doelenboom kent daar geen velden voor.
+  const mppImportModalBackdrop = document.getElementById('mpp-import-modal-backdrop');
+  const mppImportFileInput = document.getElementById('mpp-import-file-input');
+  const mppImportChooseBtn = document.getElementById('mpp-import-choose-btn');
+  const mppImportFilename = document.getElementById('mpp-import-filename');
+  const mppImportListWrap = document.getElementById('mpp-import-list-wrap');
+  const mppImportListEl = document.getElementById('mpp-import-list');
+  const mppImportCountEl = document.getElementById('mpp-import-count');
+  const mppImportSelectAllCb = document.getElementById('mpp-import-select-all-cb');
+  const mppImportStatusEl = document.getElementById('mpp-import-status');
+  const mppImportCancelBtn = document.getElementById('mpp-import-cancel');
+  const mppImportConfirmBtn = document.getElementById('mpp-import-confirm-btn');
+
+  let mppImportProjectCode = null;
+  let mppImportTasks = []; // [{ wbs, name, startDate, endDate, outlineLevel, milestone, summary }]
+
+  function setMppImportStatus(text, kind) {
+    if (!mppImportStatusEl) return;
+    mppImportStatusEl.textContent = text || '';
+    mppImportStatusEl.style.color = kind === 'ok' ? '#2E7D5B' : kind === 'busy' ? '#777' : '#DC3545';
+  }
+
+  function openMppImportModal(projectCode) {
+    mppImportProjectCode = projectCode;
+    mppImportTasks = [];
+    if (mppImportFileInput) mppImportFileInput.value = '';
+    if (mppImportFilename) mppImportFilename.textContent = '';
+    if (mppImportListWrap) mppImportListWrap.style.display = 'none';
+    if (mppImportListEl) mppImportListEl.innerHTML = '';
+    if (mppImportConfirmBtn) mppImportConfirmBtn.disabled = true;
+    if (mppImportChooseBtn) mppImportChooseBtn.disabled = false;
+    setMppImportStatus('');
+    mppImportModalBackdrop.classList.add('visible');
+  }
+
+  function closeMppImportModal() {
+    mppImportModalBackdrop.classList.remove('visible');
+  }
+
+  if (mppImportCancelBtn) mppImportCancelBtn.addEventListener('click', closeMppImportModal);
+  if (mppImportModalBackdrop) mppImportModalBackdrop.addEventListener('click', (ev) => {
+    if (ev.target === mppImportModalBackdrop) closeMppImportModal();
+  });
+  if (mppImportChooseBtn) mppImportChooseBtn.addEventListener('click', () => mppImportFileInput.click());
+
+  // "2026-08-03T08:00:00" -> "2026-08-03" (lokale kalenderdag, zonder tijd —
+  // net als de start-/einddatum-velden elders in de app).
+  function mppXmlDateToIso(value) {
+    if (!value) return null;
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value.trim());
+    return m ? (m[1] + '-' + m[2] + '-' + m[3]) : null;
+  }
+
+  function mppXmlTextField(taskEl, tag) {
+    const el = taskEl.getElementsByTagName(tag)[0];
+    return el && el.textContent != null ? el.textContent.trim() : '';
+  }
+
+  // Parseert een MS Project XML-export tot een platte lijst taken t/m WBS-/
+  // outline-niveau 3. De "projectsamenvattingstaak" (outline-niveau 0, alleen
+  // aanwezig als "Weergave projectsamenvattingstaak" aanstond bij export) en
+  // lege placeholder-taken (IsNull) worden overgeslagen.
+  function parseMppProjectXml(xmlText) {
+    const doc = new DOMParser().parseFromString(xmlText, 'text/xml');
+    if (doc.getElementsByTagName('parsererror').length) {
+      throw new Error('Kon het bestand niet lezen als XML. Is dit een MS Project XML-export (Bestand > Opslaan als > XML)?');
+    }
+    const taskEls = doc.getElementsByTagName('Task');
+    if (!taskEls.length) {
+      throw new Error('Geen taken gevonden — is dit een MS Project XML-export?');
+    }
+    const result = [];
+    for (let i = 0; i < taskEls.length; i++) {
+      const t = taskEls[i];
+      if (mppXmlTextField(t, 'IsNull') === '1') continue;
+      const outlineLevel = parseInt(mppXmlTextField(t, 'OutlineLevel') || '0', 10);
+      if (!outlineLevel || outlineLevel < 1 || outlineLevel > 3) continue;
+      const name = mppXmlTextField(t, 'Name');
+      if (!name) continue;
+      const startDate = mppXmlDateToIso(mppXmlTextField(t, 'Start'));
+      let endDate = mppXmlDateToIso(mppXmlTextField(t, 'Finish'));
+      if (!startDate || !endDate) continue;
+      if (endDate < startDate) endDate = startDate;
+      result.push({
+        wbs: mppXmlTextField(t, 'WBS'),
+        name: name,
+        startDate: startDate,
+        endDate: endDate,
+        outlineLevel: outlineLevel,
+        milestone: mppXmlTextField(t, 'Milestone') === '1',
+        summary: mppXmlTextField(t, 'Summary') === '1',
+      });
+    }
+    result.sort((a, b) => (a.wbs || '').localeCompare(b.wbs || '', undefined, { numeric: true }));
+    return result;
+  }
+
+  function mppImportRowHtml(task, index) {
+    const badges =
+      (task.milestone ? '<span class="mpp-import-badge milestone">mijlpaal</span>' : '') +
+      (task.summary ? '<span class="mpp-import-badge summary">fase</span>' : '');
+    const indent = 14 * (task.outlineLevel - 1);
+    return '<label class="mpp-import-row" style="padding-left:' + (10 + indent) + 'px">' +
+      '<input type="checkbox" class="mpp-import-row-cb" data-index="' + index + '" checked>' +
+      '<span class="mpp-import-row-main">' +
+        '<span class="mpp-import-row-name">' + escapeHtml(task.name) + badges + '</span>' +
+        '<div class="mpp-import-row-meta">' + escapeHtml(task.wbs || '') + ' &middot; ' +
+          formatDateNL(task.startDate) + ' t/m ' + formatDateNL(task.endDate) + '</div>' +
+      '</span>' +
+    '</label>';
+  }
+
+  function updateMppImportCount() {
+    const boxes = mppImportListEl.querySelectorAll('.mpp-import-row-cb');
+    const checked = mppImportListEl.querySelectorAll('.mpp-import-row-cb:checked').length;
+    mppImportCountEl.textContent = checked + ' van ' + boxes.length + ' geselecteerd';
+    mppImportConfirmBtn.disabled = checked === 0;
+    mppImportSelectAllCb.checked = checked === boxes.length && boxes.length > 0;
+  }
+
+  function renderMppImportList() {
+    mppImportListEl.innerHTML = mppImportTasks.map((t, i) => mppImportRowHtml(t, i)).join('');
+    updateMppImportCount();
+  }
+
+  if (mppImportListEl) mppImportListEl.addEventListener('change', (ev) => {
+    if (ev.target.classList.contains('mpp-import-row-cb')) updateMppImportCount();
+  });
+  if (mppImportSelectAllCb) mppImportSelectAllCb.addEventListener('change', () => {
+    const boxes = mppImportListEl.querySelectorAll('.mpp-import-row-cb');
+    boxes.forEach((cb) => { cb.checked = mppImportSelectAllCb.checked; });
+    updateMppImportCount();
+  });
+
+  if (mppImportFileInput) mppImportFileInput.addEventListener('change', () => {
+    const file = mppImportFileInput.files && mppImportFileInput.files[0];
+    if (!file) return;
+    mppImportFilename.textContent = file.name;
+    setMppImportStatus('Bezig met inlezen…', 'busy');
+    mppImportListWrap.style.display = 'none';
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        mppImportTasks = parseMppProjectXml(String(reader.result));
+        if (!mppImportTasks.length) {
+          setMppImportStatus('Geen taken t/m WBS-niveau 3 gevonden in dit bestand.');
+          return;
+        }
+        renderMppImportList();
+        mppImportListWrap.style.display = '';
+        setMppImportStatus('');
+      } catch (err) {
+        setMppImportStatus(err && err.message ? err.message : 'Kon het bestand niet lezen.');
+      }
+    };
+    reader.onerror = () => setMppImportStatus('Kon het bestand niet lezen.');
+    reader.readAsText(file);
+  });
+
+  if (mppImportConfirmBtn) mppImportConfirmBtn.addEventListener('click', async () => {
+    const boxes = Array.from(mppImportListEl.querySelectorAll('.mpp-import-row-cb:checked'));
+    if (!boxes.length) return;
+    mppImportConfirmBtn.disabled = true;
+    mppImportChooseBtn.disabled = true;
+    mppImportSelectAllCb.disabled = true;
+    let ok = 0, failed = 0;
+    const total = boxes.length;
+    for (const cb of boxes) {
+      const task = mppImportTasks[parseInt(cb.dataset.index, 10)];
+      setMppImportStatus('Bezig met importeren… (' + (ok + failed + 1) + '/' + total + ')', 'busy');
+      try {
+        const res = await fetch(
+          apiUrl + '/api/doelenbomen/' + doelenboomId + '/elements/' + encodeURIComponent(mppImportProjectCode) + '/activities',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + authToken },
+            body: JSON.stringify({
+              name: task.name,
+              startDate: task.startDate,
+              endDate: task.endDate,
+              omschrijving: 'Geïmporteerd uit MS Project' + (task.wbs ? ' (WBS ' + task.wbs + ')' : ''),
+            }),
+          }
+        );
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        ok++;
+      } catch (err) {
+        failed++;
+      }
+    }
+    mppImportSelectAllCb.disabled = false;
+    if (failed) {
+      mppImportChooseBtn.disabled = false;
+      mppImportConfirmBtn.disabled = false;
+      setMppImportStatus(ok + ' geïmporteerd, ' + failed + ' mislukt.', ok ? 'ok' : 'error');
+    } else {
+      setMppImportStatus(ok + ' activiteiten geïmporteerd. Boom wordt herladen…', 'ok');
+    }
+    if (ok > 0) reloadTreeKeepingFocus(700);
+  });
+
   // ---- Projectstatus bewerken (upsert, zie api/src/routes/projectStatus.ts) ----
   const projectStatusModalBackdrop = document.getElementById('project-status-modal-backdrop');
   const projectStatusModalStatus = document.getElementById('project-status-modal-status');
@@ -4306,6 +4587,8 @@ function runApp(data) {
     if (activityEditBtn) { openActivityModal('edit', activityEditBtn.dataset.code, activityEditBtn.dataset.id); return; }
     const activityDeleteBtn = ev.target.closest('.activity-delete-btn');
     if (activityDeleteBtn) { deleteActivity(activityDeleteBtn.dataset.code, activityDeleteBtn.dataset.id); return; }
+    const mppImportBtn = ev.target.closest('.mpp-import-btn');
+    if (mppImportBtn) { openMppImportModal(mppImportBtn.dataset.code); return; }
     const editBtn = ev.target.closest('.dp-edit-btn');
     if (editBtn) { openElementModal('edit', editBtn.dataset.code); return; }
     const delBtn = ev.target.closest('.dp-delete-btn');

@@ -8,6 +8,15 @@ import { requireWritableDoelenboom, requireModule } from '../rbac.js';
 // einddatum, zie db/init.sql bij activities) i.p.v. één los moment. Getoond
 // als inklapbare Gantt-achtige sectie onder de tijdlijn in het projectpaneel
 // (tree.html, activitiesSectionHtml/activityGanttHtml).
+//
+// Bulk-importeren (bv. vanuit MS Project) gaat bewust NIET via een eigen
+// server-endpoint: tree.html leest een MS Project XML-export (Bestand >
+// Opslaan als > XML) volledig client-side in met DOMParser
+// (parseMppProjectXml) en roept voor elke door de gebruiker aangevinkte taak
+// gewoon de POST hieronder aan, één voor één. Dat voorkomt een extra
+// bestandsformaat-afhankelijkheid op de server (voor het binaire .mpp-formaat
+// zelf zou Java/MPXJ nodig zijn) en houdt de "welke taken wel/niet"-keuze waar
+// die hoort: bij de gebruiker, per taak.
 export const activitiesRouter = Router();
 activitiesRouter.use(requireAuth);
 // Per route meegeven (niet via router.use()) — zie toelichting in elements.ts.
