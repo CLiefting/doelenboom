@@ -12,6 +12,15 @@ export class ApiError extends Error {
 // dat een React-hook is en dit een gewone module-level functie, geen component.
 const SESSION_STORAGE_KEY = 'doelenboom.session';
 
+// sessionStorage (niet localStorage: mag niet blijven hangen na deze ene
+// reload/tab) — zet App.tsx hiermee een uitlogreden klaar vóór de
+// pagina-herlaad hieronder, zodat LoginPage.tsx na de reload kan tonen WAAROM
+// iemand terug op het inlogscherm staat i.p.v. stilzwijgend uit te loggen.
+// Alleen voor de twee redenen die de gebruiker daadwerkelijk iets uitleggen
+// (idle_timeout/session_ended) — 'not_logged_in'/'invalid_token' zijn de
+// normale "je bent gewoon niet ingelogd"-gevallen, geen melding nodig.
+const AUTH_NOTICE_KEY = 'doelenboom.authNotice';
+
 async function request<T>(path: string, options: RequestInit = {}, token?: string | null): Promise<T> {
   const headers: Record<string, string> = { ...(options.headers as Record<string, string> | undefined) };
   if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -22,20 +31,29 @@ async function request<T>(path: string, options: RequestInit = {}, token?: strin
   const res = await fetch(`${API_URL}${path}`, { ...options, headers });
   if (!res.ok) {
     let message = res.statusText;
+    let reason: string | undefined;
     try {
       const body = await res.json();
       message = body.error ?? body.detail ?? message;
+      reason = body.reason;
     } catch {
       // response had geen JSON-body
     }
     // Alleen bij een 401 op een call die zelf al een token meestuurde (dus niet
     // /auth/login zelf, waar 401 gewoon "onjuist wachtwoord" betekent): de JWT
-    // is verlopen of ongeldig geworden. Zonder dit bleef de gebruiker vast
-    // hangen op een scherm met alleen deze foutmelding in rode tekst, zonder
-    // duidelijk herstelpad terug naar het inlogscherm (zelfs "Uitloggen" werkt
-    // dan niet, want dat vereist zelf ook weer een geldige sessie). Lokale
-    // sessie wissen + herladen brengt de gebruiker direct terug bij LoginPage.
+    // is verlopen of ongeldig geworden — bv. door de 15-minuten-inactiviteit-
+    // beveiliging (reason 'idle_timeout', zie api/src/auth.ts requireAuth) of
+    // een sessie die elders al is beëindigd ('session_ended'). Zonder dit bleef
+    // de gebruiker vast hangen op een scherm met alleen deze foutmelding in
+    // rode tekst, zonder duidelijk herstelpad terug naar het inlogscherm (zelfs
+    // "Uitloggen" werkt dan niet, want dat vereist zelf ook weer een geldige
+    // sessie). Lokale sessie wissen + herladen brengt de gebruiker direct terug
+    // bij LoginPage — de reason wordt eerst kort bewaard (sessionStorage, dus
+    // per tab, niet blijvend) zodat LoginPage na de reload kan tonen waarom.
     if (res.status === 401 && token) {
+      if (reason === 'idle_timeout' || reason === 'session_ended') {
+        sessionStorage.setItem(AUTH_NOTICE_KEY, reason);
+      }
       localStorage.removeItem(SESSION_STORAGE_KEY);
       window.location.reload();
     }
@@ -120,6 +138,11 @@ export const api = {
     }, token),
 
   heartbeat: (token: string) => request<void>('/api/auth/heartbeat', { method: 'POST' }, token),
+
+  // Échte-activiteit-ping (i.t.t. heartbeat hierboven, dat een blinde "tab
+  // staat open"-timer is) — basis van de 15-minuten-inactiviteit-uitlog-
+  // beveiliging (api/src/auth.ts requireAuth). Zie useActivityPing.ts.
+  recordActivity: (token: string) => request<void>('/api/auth/activity', { method: 'POST' }, token),
 
   changePassword: (token: string, currentPassword: string, newPassword: string) =>
     request<{ user: import('./types').User }>('/api/auth/change-password', {
@@ -267,6 +290,16 @@ export const api = {
 
   // --- Login-overzicht (sysadmin-only, /sessions): wie is (recent) ingelogd, wanneer ---
   sessions: (token: string) => request<import('./types').SessionInfo[]>('/api/sessions', {}, token),
+
+  // --- Systeemmelding (bv. onderhoudsaankondiging) — zie api/src/routes/announcement.ts ---
+  // GET is bewust ongeauthenticeerd (ook zichtbaar vóór inloggen), dus geen token-param.
+  announcement: () => request<import('./types').SystemAnnouncement>('/api/announcement', {}),
+
+  updateAnnouncement: (token: string, body: { message: string; active: boolean }) =>
+    request<import('./types').SystemAnnouncement>('/api/announcement', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }, token),
 
   // Bouwversie (git-hash + datum, via Docker build-arg — zie api/Dockerfile en
   // docker-compose.yml) voor de versie-footer (App.tsx). Geen token nodig:

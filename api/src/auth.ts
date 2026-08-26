@@ -5,27 +5,63 @@ import { previewOrCommitWipe } from './tenantWipe.js';
 
 const JWT_SECRET = process.env.JWT_SECRET ?? 'dev-secret-change-me';
 
+// Beveiliging: na dit aantal minuten zonder échte gebruikersactiviteit
+// (muis/toetsenbord/scroll/touch — zie POST /activity hieronder en
+// last_activity_at bij de sessions-tabel in db/init.sql) wordt een sessie
+// hard afgekeurd door requireAuth, ongeacht de resterende geldigheid van de
+// JWT zelf (die blijft los 12u geldig, zie /login). Bewust een vast, systeem-
+// breed getal (niet per tenant instelbaar, in tegenstelling tot
+// tenants.session_timeout_minutes — dat is een ANDER concept, zie de
+// toelichting bij de sessions-tabel in db/init.sql).
+const IDLE_TIMEOUT_MINUTES = 15;
+
 export type AuthedRequest = Request & {
   user?: { id: number; email: string; isSysadmin: boolean; sessionId: string };
 };
 
-export function requireAuth(req: AuthedRequest, res: Response, next: NextFunction) {
+// Async (i.p.v. de eerdere pure JWT-check): naast de JWT-handtekening/
+// -geldigheid wordt nu ook, met één lichte query op de sessions-tabel (op
+// primary key, dus goedkoop), gecontroleerd of de sessie niet expliciet is
+// beëindigd (ended_at) én niet langer dan IDLE_TIMEOUT_MINUTES geleden nog
+// échte activiteit had (last_activity_at) — dit is de daadwerkelijke
+// serverside handhaving van de 15-minuten-inactiviteit-beveiliging: zelfs een
+// hergebruikte/gekopieerde JWT stopt na 15 minuten inactiviteit te werken,
+// niet alleen de frontend-UI. reason in de foutrespons laat de frontend een
+// gerichte melding tonen (zie web/src/api.ts) i.p.v. een generieke fout.
+export async function requireAuth(req: AuthedRequest, res: Response, next: NextFunction) {
   const header = req.headers.authorization;
   if (!header?.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Niet ingelogd' });
+    return res.status(401).json({ error: 'Niet ingelogd', reason: 'not_logged_in' });
   }
+  let payload: { id: number; email: string; isSysadmin: boolean; sid: string };
   try {
-    const payload = jwt.verify(header.slice('Bearer '.length), JWT_SECRET) as {
-      id: number;
-      email: string;
-      isSysadmin: boolean;
-      sid: string;
-    };
-    req.user = { id: payload.id, email: payload.email, isSysadmin: payload.isSysadmin, sessionId: payload.sid };
-    next();
+    payload = jwt.verify(header.slice('Bearer '.length), JWT_SECRET) as typeof payload;
   } catch {
-    return res.status(401).json({ error: 'Ongeldige of verlopen sessie' });
+    return res.status(401).json({ error: 'Ongeldige of verlopen sessie', reason: 'invalid_token' });
   }
+
+  try {
+    const result = await pool.query(
+      `select ended_at, (last_activity_at > now() - make_interval(mins => $2::int)) as fresh
+       from sessions where id = $1`,
+      [payload.sid, IDLE_TIMEOUT_MINUTES]
+    );
+    const row = result.rows[0];
+    if (!row || row.ended_at != null) {
+      return res.status(401).json({ error: 'Deze sessie is beëindigd, log opnieuw in.', reason: 'session_ended' });
+    }
+    if (!row.fresh) {
+      return res.status(401).json({
+        error: `Automatisch uitgelogd wegens ${IDLE_TIMEOUT_MINUTES} minuten inactiviteit.`,
+        reason: 'idle_timeout',
+      });
+    }
+  } catch (err) {
+    return res.status(500).json({ error: 'Sessie kon niet gecontroleerd worden.', detail: (err as Error).message });
+  }
+
+  req.user = { id: payload.id, email: payload.email, isSysadmin: payload.isSysadmin, sessionId: payload.sid };
+  next();
 }
 
 export const authRouter = Router();
@@ -150,6 +186,20 @@ authRouter.post('/change-password', requireAuth, async (req: AuthedRequest, res)
 // last_seen_at), dus dit is vooral defensief.
 authRouter.post('/heartbeat', requireAuth, async (req: AuthedRequest, res) => {
   await pool.query('update sessions set last_seen_at = now() where id = $1', [req.user!.sessionId]);
+  res.status(204).send();
+});
+
+// POST /api/auth/activity — bewust ANDERS dan /heartbeat hierboven: dit wordt
+// alleen aangeroepen door de frontend bij échte gebruikersactiviteit (muis/
+// toetsenbord/scroll/touch, zelf al gethrottled tot max 1x/minuut, zie
+// App.tsx/tree.html), en werkt uitsluitend last_activity_at bij — de basis
+// voor de 15-minuten-inactiviteit-check in requireAuth hierboven. Zou dit
+// hetzelfde veld als /heartbeat bijwerken (dat een blinde timer is, "tab staat
+// open", geen activiteit nodig), dan zou een openstaande maar volledig
+// inactieve tab nooit worden uitgelogd — precies wat deze beveiliging moet
+// voorkomen.
+authRouter.post('/activity', requireAuth, async (req: AuthedRequest, res) => {
+  await pool.query('update sessions set last_activity_at = now() where id = $1', [req.user!.sessionId]);
   res.status(204).send();
 });
 

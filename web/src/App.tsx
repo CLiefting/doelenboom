@@ -10,9 +10,18 @@ import ChangePasswordPage from './pages/ChangePasswordPage';
 import HelpPage from './pages/HelpPage';
 import LogoutFlow from './components/LogoutFlow';
 import VersionFooter from './components/VersionFooter';
+import AnnouncementBanner from './components/AnnouncementBanner';
 import { api } from './api';
 import { useSession } from './useSession';
+import { useActivityPing } from './useActivityPing';
 import type { DoelenboomSummary } from './types';
+
+// Sessionstorage-sleutel waarmee api.ts (request()) een logout-reden aan de
+// volgende pageload doorgeeft — zie AUTH_NOTICE_KEY in api.ts. Alleen gezet
+// voor 'idle_timeout'/'session_ended', zodat LoginPage kan uitleggen waaróm
+// iemand terug is op het inlogscherm i.p.v. dat gewoon stilzwijgend te laten
+// gebeuren.
+const AUTH_NOTICE_KEY = 'doelenboom.authNotice';
 
 type View =
   | { name: 'picker' }
@@ -36,6 +45,18 @@ export default function App() {
   // boomweergave (tree.html, via postMessage) dezelfde flow starten, ongeacht
   // welk scherm er op dat moment getoond wordt.
   const [loggingOut, setLoggingOut] = useState(false);
+  // Eénmalig (bij eerste render) uitgelezen én meteen gewist — een sessionStorage-
+  // "boodschap voor de volgende load", niet iets dat blijvend in state hoort te
+  // hangen (anders zou 'ie bij een latere, ongerelateerde 401 blijven staan).
+  const [authNotice] = useState<string | null>(() => {
+    const notice = sessionStorage.getItem(AUTH_NOTICE_KEY);
+    if (notice) sessionStorage.removeItem(AUTH_NOTICE_KEY);
+    return notice;
+  });
+
+  // 15-minuten-inactiviteitsbeveiliging (zie useActivityPing.ts) — dekt de
+  // React-schermen zelf; tree.html (iframe) heeft z'n eigen, identieke logica.
+  useActivityPing(session?.token ?? null);
 
   // Zolang de tab open is (ongeacht welk scherm) laten we elke minuut weten dat
   // deze sessie nog leeft — zie db/init.sql (sessions) en tenantWipe.ts. Sluit je
@@ -54,7 +75,8 @@ export default function App() {
   if (!session) {
     return (
       <>
-        <LoginPage onLoggedIn={(token, user) => setSession({ token, user })} />
+        <AnnouncementBanner />
+        <LoginPage notice={authNotice} onLoggedIn={(token, user) => setSession({ token, user })} />
         <VersionFooter />
       </>
     );
@@ -66,11 +88,14 @@ export default function App() {
   // resetten van dit account).
   if (session.user.mustChangePassword) {
     return (
-      <ChangePasswordPage
-        token={session.token}
-        forced
-        onDone={(user) => setSession({ ...session, user })}
-      />
+      <>
+        <AnnouncementBanner />
+        <ChangePasswordPage
+          token={session.token}
+          forced
+          onDone={(user) => setSession({ ...session, user })}
+        />
+      </>
     );
   }
 
@@ -153,6 +178,7 @@ export default function App() {
 
   return (
     <>
+      <AnnouncementBanner />
       {content}
       {loggingOut && (
         <LogoutFlow token={session.token} onDone={finishLogout} onCancel={() => setLoggingOut(false)} />

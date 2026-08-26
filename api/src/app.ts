@@ -17,6 +17,7 @@ import { columnConfigRouter } from './routes/columnConfig.js';
 import { licensesRouter } from './routes/licenses.js';
 import { dbstatRouter } from './routes/dbstat.js';
 import { sessionsRouter } from './routes/sessions.js';
+import { announcementRouter } from './routes/announcement.js';
 import { pool } from './db.js';
 
 // Bouwt de Express-app zonder 'm te starten (geen app.listen, geen idle-sweep-
@@ -51,6 +52,17 @@ export function createApp() {
   app.get('/api/version', (_req, res) => {
     res.json({ version: process.env.BUILD_VERSION || 'dev' });
   });
+
+  // announcementRouter vóór alle hieronder op de kale prefix '/api' gemounte
+  // routers (doelenbomenRouter, importsRouter, ...): die roepen zelf
+  // onvoorwaardelijk requireAuth aan (router.use(requireAuth), geen eigen
+  // pad-restrictie), en Express matcht zo'n kaal-'/api'-gemounte router voor
+  // ELK pad dat met '/api' begint — dus óók '/api/announcement' — vóórdat er
+  // ook maar gekeken is of die router zelf een passende route heeft. Stond
+  // announcementRouter ná die routers, dan zou de eerste van hen de
+  // ongeauthenticeerde GET al met 401 afkappen, en announcementRouter's eigen
+  // (bewust publieke) GET nooit bereikt worden.
+  app.use('/api/announcement', announcementRouter);
 
   app.use('/api/auth', authRouter);
   app.use('/api/tenants', tenantsRouter);

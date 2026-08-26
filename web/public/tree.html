@@ -4928,6 +4928,35 @@ if (helpBtn) helpBtn.addEventListener('click', () => {
   window.parent.postMessage({ type: 'doelenboom-navigate', target: 'help' }, PARENT_ORIGIN);
 });
 
+// 15-minuten-inactiviteitsbeveiliging (zie api/src/auth.ts IDLE_TIMEOUT_MINUTES,
+// POST /api/auth/activity, en web/src/useActivityPing.ts voor de React-versie
+// hiervan). Het grootste deel van de daadwerkelijke interactie met de app
+// gebeurt hier ín de tree.html-iframe — muis-/toetsenbord-/scrollevents
+// bubbelen niet door naar het parent-window, dus deze iframe heeft zijn eigen,
+// onafhankelijke ping-logica nodig i.p.v. te vertrouwen op de React-hook.
+// Throttled tot max. 1x per minuut. Gebruikt apiUrl/authToken rechtstreeks
+// (al in scope, hierboven) i.p.v. een aparte handshake — die zijn tegen de
+// tijd dat hier daadwerkelijk activiteit is (boom al geladen) altijd gezet.
+// Geen apiUrl/authToken (bv. standalone/statische export, __STATIC_TREE__) ->
+// gewoon niets doen, er is dan toch geen ingelogde sessie om te verversen.
+(function initActivityPing() {
+  const THROTTLE_MS = 60000;
+  let lastPing = 0;
+  function pingActivity() {
+    if (!apiUrl || !authToken) return;
+    const now = Date.now();
+    if (now - lastPing < THROTTLE_MS) return;
+    lastPing = now;
+    fetch(apiUrl + '/api/auth/activity', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + authToken },
+    }).catch(() => {});
+  }
+  ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart', 'wheel'].forEach((evt) => {
+    window.addEventListener(evt, pingActivity, { passive: true });
+  });
+})();
+
 // Losstaand geëxporteerd HTML-bestand (zie exportStaticHtml()): een klein
 // <script>-blokje vóór dit script zet window.__STATIC_TREE__ met de volledige
 // boomdata erin (dezelfde vorm als het antwoord van GET .../tree). Is dat

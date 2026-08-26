@@ -33,11 +33,29 @@ const FEATURES: { icon: JSX.Element; title: string; description: string }[] = [
   },
 ];
 
-export default function LoginPage({ onLoggedIn }: { onLoggedIn: (token: string, user: User) => void }) {
+// notice: reden waarom iemand (mogelijk) automatisch teruggezet is op dit
+// scherm — 'idle_timeout' (15-minuten-inactiviteitsbeveiliging, zie
+// useActivityPing.ts/api.ts) of 'session_ended' (elders uitgelogd, of de
+// sessie is serverside beëindigd). null/undefined = gewoon een normale
+// bezoek aan het inlogscherm, geen melding nodig.
+export default function LoginPage({
+  onLoggedIn,
+  notice,
+}: {
+  onLoggedIn: (token: string, user: User) => void;
+  notice?: string | null;
+}) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const noticeText =
+    notice === 'idle_timeout'
+      ? 'Je bent automatisch uitgelogd wegens 15 minuten inactiviteit (beveiliging).'
+      : notice === 'session_ended'
+      ? 'Je sessie is beëindigd. Log opnieuw in om verder te gaan.'
+      : null;
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -114,6 +132,7 @@ export default function LoginPage({ onLoggedIn }: { onLoggedIn: (token: string, 
         <form onSubmit={handleSubmit} style={styles.card}>
           <h1 style={styles.title}>Doelenboom</h1>
           <p style={styles.subtitle}>Log in om verder te gaan.</p>
+          {noticeText && <p style={styles.notice}>{noticeText}</p>}
           <label style={styles.label}>
             E-mail
             <input
@@ -317,4 +336,8 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
   },
   error: { color: '#DC3545', fontSize: 13, margin: 0 },
+  notice: {
+    color: '#664d03', background: '#FFF3CD', border: '1px solid #FFE69C',
+    borderRadius: 6, padding: '0.5rem 0.65rem', fontSize: 13, margin: 0,
+  },
 };

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import LoginPage from './LoginPage';
 import { api, ApiError } from '../api';
 import { useSession } from '../useSession';
-import type { SessionInfo } from '../types';
+import type { SessionInfo, SystemAnnouncement } from '../types';
 
 // Losse route (/sessions, zie main.tsx) i.p.v. een view binnen App.tsx —
 // zelfde opzet als DbStatPage: eigen login via useSession (geen dubbele login
@@ -97,7 +97,6 @@ function SessionsContent({ token }: { token: string }) {
           <h1 style={styles.title}>Login-overzicht</h1>
           <p style={{ color: '#6c6f76', fontSize: 13.5, margin: '4px 0 0' }}>
             Wie is ingelogd (geweest) en wanneer — alle sessies, nieuwste eerst.
-            {sessions && <> <strong>{sessions.length}</strong> totaal, <strong>{activeCount}</strong> nu actief.</>}
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -105,6 +104,21 @@ function SessionsContent({ token }: { token: string }) {
           <a href="/" style={{ ...styles.ghostButton, textDecoration: 'none', display: 'inline-block' }}>← Terug</a>
         </div>
       </header>
+
+      {sessions && (
+        <div style={styles.statRow}>
+          <div style={styles.statCardActive}>
+            <div style={styles.statValue}>{activeCount}</div>
+            <div style={styles.statLabel}>nu actief</div>
+          </div>
+          <div style={styles.statCard}>
+            <div style={styles.statValueMuted}>{sessions.length}</div>
+            <div style={styles.statLabel}>sessies totaal</div>
+          </div>
+        </div>
+      )}
+
+      <AnnouncementSection token={token} />
 
       {sessions && sessions.length > 0 && (
         <div style={styles.toggleGroup}>
@@ -202,6 +216,86 @@ function SessionsContent({ token }: { token: string }) {
   );
 }
 
+// Sysadmin-only beheer van de systeembrede mededeling (bv. onderhoud) — zie
+// api/src/routes/announcement.ts. Los onderdeel op deze pagina i.p.v. een
+// eigen route: dit scherm is toch al sysadmin-only en gaat toch al over
+// "wat gebruikers nu meemaken", dus hoort de mededeling-toggle er logisch bij.
+function AnnouncementSection({ token }: { token: string }) {
+  const [announcement, setAnnouncement] = useState<SystemAnnouncement | null>(null);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  function load() {
+    api.announcement().then((a) => {
+      setAnnouncement(a);
+      setMessage(a.message);
+    }).catch((err) => {
+      setError(err instanceof ApiError ? err.message : 'Kon mededeling niet laden.');
+    });
+  }
+
+  useEffect(load, []);
+
+  async function save(active: boolean) {
+    setError(null);
+    setSaved(false);
+    setBusy(true);
+    try {
+      const updated = await api.updateAnnouncement(token, { message, active });
+      setAnnouncement(updated);
+      setMessage(updated.message);
+      setSaved(true);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Opslaan mislukt.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!announcement) return null;
+
+  return (
+    <section style={styles.announceCard}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
+        <h2 style={styles.announceTitle}>Systeemmelding</h2>
+        {announcement.active ? (
+          <span style={styles.activeBadge}>actief — zichtbaar voor iedereen</span>
+        ) : (
+          <span style={styles.inactiveBadge}>uit</span>
+        )}
+      </div>
+      <p style={{ color: '#6c6f76', fontSize: 13, margin: '2px 0 10px' }}>
+        Deze tekst wordt bovenaan getoond bij alle gebruikers (ook op het inlogscherm), bv. voor een
+        onderhoudsaankondiging. Bijvoorbeeld: "Onderhoud is gepland op 1 september 20:00. Iedereen wordt verzocht
+        voor die tijd uit te loggen."
+      </p>
+      <textarea
+        value={message}
+        onChange={(e) => { setMessage(e.target.value); setSaved(false); }}
+        placeholder="Onderhoud is gepland op ... Iedereen wordt verzocht voor die tijd uit te loggen."
+        rows={3}
+        style={styles.announceTextarea}
+      />
+      {error && <p style={{ color: '#DC3545', fontSize: 13, margin: '6px 0 0' }}>{error}</p>}
+      {saved && !error && <p style={{ color: '#2e7d32', fontSize: 13, margin: '6px 0 0' }}>Opgeslagen.</p>}
+      <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+        {announcement.active ? (
+          <button onClick={() => save(false)} disabled={busy} style={styles.ghostButton}>Melding uitzetten</button>
+        ) : (
+          <button onClick={() => save(true)} disabled={busy || !message.trim()} style={styles.primaryButton}>
+            Melding aanzetten
+          </button>
+        )}
+        <button onClick={() => save(announcement.active)} disabled={busy || message === announcement.message} style={styles.ghostButton}>
+          Tekst opslaan
+        </button>
+      </div>
+    </section>
+  );
+}
+
 const styles: Record<string, React.CSSProperties> = {
   main: {
     display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh',
@@ -247,5 +341,30 @@ const styles: Record<string, React.CSSProperties> = {
   toggleBtnActive: {
     borderRadius: 8, padding: '6px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
     border: 'none', background: 'white', color: '#203864', boxShadow: '0 1px 2px rgba(0,0,0,0.08)',
+  },
+  statRow: { display: 'flex', gap: 12, marginBottom: '1.25rem', flexWrap: 'wrap' },
+  statCard: {
+    background: 'white', border: '1px solid #e4e6ea', borderRadius: 10,
+    padding: '10px 18px', minWidth: 120,
+  },
+  statCardActive: {
+    background: '#E8F5E9', border: '1px solid #C8E6C9', borderRadius: 10,
+    padding: '10px 18px', minWidth: 120,
+  },
+  statValue: { fontSize: 26, fontWeight: 800, color: '#2e7d32', lineHeight: 1.1 },
+  statValueMuted: { fontSize: 26, fontWeight: 800, color: '#203864', lineHeight: 1.1 },
+  statLabel: { fontSize: 12.5, color: '#6c6f76', marginTop: 2 },
+  announceCard: {
+    background: 'white', border: '1px solid #e4e6ea', borderRadius: 10,
+    padding: '1rem 1.25rem', marginBottom: '1.5rem',
+  },
+  announceTitle: { margin: 0, fontSize: 16, color: '#203864' },
+  announceTextarea: {
+    width: '100%', boxSizing: 'border-box', padding: '0.5rem 0.6rem', borderRadius: 6,
+    border: '1px solid #d0d4da', fontSize: 14, fontFamily: 'system-ui, sans-serif', resize: 'vertical',
+  },
+  primaryButton: {
+    borderRadius: 8, padding: '7px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+    border: 'none', background: '#2F5597', color: 'white',
   },
 };

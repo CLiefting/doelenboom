@@ -253,6 +253,16 @@ export type ImportDetail = ImportSummary & {
   report_json: ImportReport;
 };
 
+// Systeembrede mededeling (bv. onderhoudsaankondiging) — zie
+// api/src/routes/announcement.ts en db/init.sql system_announcements. Er is
+// altijd precies één rij; GET is ongeauthenticeerd (ook zichtbaar op de
+// inlogpagina), PUT is sysadmin-only.
+export type SystemAnnouncement = {
+  message: string;
+  active: boolean;
+  updatedAt: string | null;
+};
+
 // Eén kolom in een kolomconfiguratie (tenant-default óf één specifieke
 // doelenboom, zie docs/kolommen-configuratie-ontwerp.md) — zelfde vorm als
 // ColumnDef in api/src/columnConfig.ts. `id` ontbreekt bij een nog niet

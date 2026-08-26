@@ -30,11 +30,21 @@ create table if not exists users (
 -- zolang de tab open is; ended_at wordt gezet bij een expliciete logout. Gebruikt
 -- door de "tenant leegmaken bij vertrek laatste gebruiker"-functionaliteit
 -- (api/src/tenantWipe.ts) — zie ook tenants.wipe_on_empty/session_timeout_minutes.
+--
+-- last_activity_at is bewust een APART veld van last_seen_at: last_seen_at
+-- wordt door een blinde timer bijgewerkt (elke minuut, zolang de tab maar open
+-- staat — ook zonder dat er iemand iets doet) en blijft dat ook, want de
+-- wipe-functionaliteit hierboven moet "tab staat open" blijven betekenen.
+-- last_activity_at wordt alleen bijgewerkt door échte gebruikersactiviteit
+-- (muis/toetsenbord/scroll/touch, zie POST /api/auth/activity, gethrottled tot
+-- max 1x/minuut vanuit de frontend) en is de basis voor de 15-minuten-
+-- inactiviteit-uitlog-beveiliging (requireAuth in api/src/auth.ts).
 create table if not exists sessions (
   id uuid primary key default gen_random_uuid(),
   user_id bigint not null references users(id) on delete cascade,
   created_at timestamptz not null default now(),
   last_seen_at timestamptz not null default now(),
+  last_activity_at timestamptz not null default now(),
   ended_at timestamptz
 );
 create index if not exists idx_sessions_active on sessions(user_id) where ended_at is null;
@@ -341,3 +351,19 @@ insert into modules (key, name, description) values
     'deze module — alleen deze verdiepende laag zit erachter.'
   )
 on conflict (key) do nothing;
+
+-- Eén systeembrede mededeling (bv. een onderhoudsaankondiging), door een
+-- sysadmin aan/uit te zetten met een eigen tekst — zie routes/announcement.ts.
+-- Singleton-tabel (id altijd true, zie de check hieronder): er is precies één
+-- rij, die steeds overschreven wordt in plaats van nieuwe rijen toe te voegen.
+-- GET is bewust ongeauthenticeerd (ook zichtbaar vóór inloggen — juist dan wil
+-- je bv. "gepland onderhoud, log op tijd uit" kunnen tonen), PUT is
+-- sysadmin-only.
+create table if not exists system_announcements (
+  id boolean primary key default true check (id),
+  message text not null default '',
+  active boolean not null default false,
+  updated_at timestamptz not null default now(),
+  updated_by bigint references users(id) on delete set null
+);
+insert into system_announcements (id) values (true) on conflict (id) do nothing;
