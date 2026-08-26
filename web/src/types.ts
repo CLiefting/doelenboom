@@ -151,6 +151,21 @@ export type Product = {
   opmerking: string;
 };
 
+// Activiteiten-planning binnen een project: anders dan Product hierboven (één
+// los moment — verwachte/werkelijke datum) beslaat een activiteit een PERIODE
+// (start t/m eind) — zie api/src/routes/activities.ts en tree.html
+// (activitiesSectionHtml/activityGanttHtml, inklapbare Gantt-achtige sectie
+// onder de tijdlijn). Puur informatief hier in de React-app zelf (er wordt
+// niets van dit type in web/src/pages/*.tsx bewerkt — dat gebeurt allemaal
+// binnen tree.html/de iframe), maar hoort bij TreeResponse hieronder.
+export type Activity = {
+  id: number;
+  name: string;
+  startDate: string;
+  endDate: string;
+  omschrijving: string;
+};
+
 export type Tag = { code: string; name: string; categorie: string; omschrijving: string };
 export type OrgUnit = { code: string; name: string; omschrijving: string };
 export type ObOrgRelation = { org: string; relatietype: string; toelichting: string; status: string };
@@ -172,8 +187,8 @@ export type TreeResponse = {
     // instellingen, Excel-import, tag-/org-catalogus) — alleen admin/sysadmin.
     canWrite: boolean;
     // canWriteContent: mag de "losse boom-inhoud" wijzigen (elementen,
-    // relaties, tags/org-koppelingen op een element, projectstatus/producten)
-    // — admin/sysadmin én de rol 'gebruiker'. Zie api/src/routes/tree.ts.
+    // relaties, tags/org-koppelingen op een element, projectstatus/producten/
+    // activiteiten) — admin/sysadmin én de rol 'gebruiker'. Zie api/src/routes/tree.ts.
     canWriteContent: boolean;
     tenant: { id: number; slug: string; name: string };
   };
@@ -181,6 +196,7 @@ export type TreeResponse = {
   edges: Edge[];
   projectStatus: Record<string, ProjectStatus>;
   products: Record<string, Product[]>;
+  activities: Record<string, Activity[]>;
   tags: Tag[];
   elementTags: Record<string, string[]>;
   orgUnits: OrgUnit[];

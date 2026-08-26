@@ -243,6 +243,20 @@ create table if not exists products (
 );
 create index if not exists idx_products_element on products(element_id);
 
+-- Activiteiten-planning per project: anders dan products/mijlpalen hierboven
+-- (één los moment — verwachte/werkelijke datum) beslaat een activiteit een
+-- PERIODE (start t/m eind), getoond als inklapbare Gantt-achtige sectie onder
+-- de tijdlijn in het projectpaneel (tree.html) — zie api/src/routes/activities.ts.
+create table if not exists activities (
+  id bigserial primary key,
+  element_id bigint not null references elements(id) on delete cascade,
+  name text not null,
+  start_date date not null,
+  end_date date not null,
+  omschrijving text not null default ''
+);
+create index if not exists idx_activities_element on activities(element_id);
+
 create table if not exists tags (
   id bigserial primary key,
   doelenboom_id bigint not null references doelenbomen(id) on delete cascade,

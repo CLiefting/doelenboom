@@ -12,6 +12,7 @@ import { tagsRouter } from './routes/tags.js';
 import { orgUnitsRouter } from './routes/orgUnits.js';
 import { edgesRouter } from './routes/edges.js';
 import { productsRouter } from './routes/products.js';
+import { activitiesRouter } from './routes/activities.js';
 import { projectStatusRouter } from './routes/projectStatus.js';
 import { columnConfigRouter } from './routes/columnConfig.js';
 import { licensesRouter } from './routes/licenses.js';
@@ -78,6 +79,7 @@ export function createApp() {
   app.use('/api', orgUnitsRouter);
   app.use('/api', edgesRouter);
   app.use('/api', productsRouter);
+  app.use('/api', activitiesRouter);
   app.use('/api', projectStatusRouter);
   app.use('/api', columnConfigRouter);
   // Definieert zelf zowel '/tiers'/'/modules' als '/tenants/:tenantId/license/...'

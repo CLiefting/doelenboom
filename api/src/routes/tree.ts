@@ -9,8 +9,8 @@ export const treeRouter = Router();
 treeRouter.use(requireAuth);
 
 // Bouwt de complete boom in een vorm die dicht bij de datastructuren van de
-// oorspronkelijke doelenboom.html ligt (DETAILS/EDGES/PROJECT_STATUS/PRODUCTS/TAGS/
-// ELEMENT_TAGS/ORGS/OB_ORG), maar dan dynamisch uit de database. Wordt zowel door
+// oorspronkelijke doelenboom.html ligt (DETAILS/EDGES/PROJECT_STATUS/PRODUCTS/
+// ACTIVITIES/TAGS/ELEMENT_TAGS/ORGS/OB_ORG), maar dan dynamisch uit de database. Wordt zowel door
 // GET /:id/tree (boomweergave) als door de Excel-export (routes/exports.ts) gebruikt,
 // zodat beide altijd exact dezelfde data tonen/exporteren.
 export async function fetchTree(doelenboomId: string) {
@@ -52,6 +52,14 @@ export async function fetchTree(doelenboomId: string) {
      from products p join elements el on el.id = p.element_id
      where el.doelenboom_id = $1
      order by p.id`,
+    [doelenboomId]
+  );
+
+  const activitiesResult = await pool.query(
+    `select el.code as element_code, a.id, a.name, a.start_date, a.end_date, a.omschrijving
+     from activities a join elements el on el.id = a.element_id
+     where el.doelenboom_id = $1
+     order by a.start_date, a.id`,
     [doelenboomId]
   );
 
@@ -106,6 +114,17 @@ export async function fetchTree(doelenboomId: string) {
       verwachteDatum: row.verwachte_datum,
       werkelijkeDatum: row.werkelijke_datum,
       opmerking: row.opmerking,
+    });
+  }
+
+  const activities: Record<string, unknown[]> = {};
+  for (const row of activitiesResult.rows) {
+    (activities[row.element_code] ??= []).push({
+      id: row.id,
+      name: row.name,
+      startDate: row.start_date,
+      endDate: row.end_date,
+      omschrijving: row.omschrijving,
     });
   }
 
@@ -166,6 +185,7 @@ export async function fetchTree(doelenboomId: string) {
     })),
     projectStatus: projectenActive ? projectStatus : {},
     products: projectenActive ? products : {},
+    activities: projectenActive ? activities : {},
     tags: tagsResult.rows,
     elementTags,
     orgUnits: orgUnitsResult.rows,

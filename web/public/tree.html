@@ -531,6 +531,33 @@
   .product-timeline-legend svg { width: 10px; height: 10px; }
   .product-timeline-legend svg { vertical-align: -2px; margin-right: 3px; }
 
+  /* Activiteiten (start-/einddatum, zie api/src/routes/activities.ts) — een
+     inklapbare sectie onder de tijdlijn met een lichte Gantt-achtige weergave
+     (één rij per activiteit, balk van start- t/m einddatum) i.p.v. de losse
+     punt-markers van productTimelineHtml hierboven, want een activiteit is
+     een periode, geen los moment. Hergebruikt dezelfde .timeline-band-tick/
+     .timeline-band-label/.timeline-today-tick-klassen voor de maand-/
+     kwartaalas als de projecttijdlijn, voor een consistente look. */
+  .dp-activities-title {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;
+    color: #999; margin: 18px 0 10px;
+  }
+  .activities-toggle-label { display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
+  .activities-chevron { display: inline-block; font-size: 9px; color: #aab0b8; transition: transform 0.15s; }
+  .dp-activities-body { margin-bottom: 4px; }
+  .activity-gantt-wrap { margin: 4px 0 4px; }
+  .activity-gantt-grid { display: grid; grid-template-columns: minmax(90px, 150px) 1fr 74px; gap: 8px; }
+  .activity-gantt-axis-track { position: relative; height: 34px; grid-column: 2; }
+  .activity-gantt-row { display: contents; }
+  .activity-row-label {
+    font-size: 12px; color: #333; font-weight: 600; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; align-self: center; padding: 3px 0;
+  }
+  .activity-row-track { position: relative; height: 14px; background: #eef0f3; border-radius: 4px; align-self: center; }
+  .activity-bar { position: absolute; top: 0; bottom: 0; background: var(--navy); border-radius: 4px; min-width: 6px; }
+  .activity-row-actions { display: flex; gap: 4px; justify-content: flex-end; align-self: center; }
+
   /* Overzicht "alle project-tijdlijnen" (#timelines-view) — een losse lijst
      van kaarten, één per project, elk met dezelfde tijdbalk als in de
      projectkaart (productTimelineHtml). Verborgen/getoond via de
@@ -1077,6 +1104,32 @@
     </div>
   </div>
 
+  <div class="element-modal-backdrop" id="activity-modal-backdrop">
+    <div class="element-modal">
+      <h3 id="activity-modal-title">Nieuwe activiteit</h3>
+      <p class="element-modal-hint">Velden met <span class="req-mark">*</span> zijn verplicht.</p>
+      <form id="activity-form">
+        <label>Naam <span class="req-mark">*</span>
+          <input type="text" id="activity-field-name" autocomplete="off" required>
+        </label>
+        <label>Startdatum <span class="req-mark">*</span>
+          <input type="date" id="activity-field-start" required>
+        </label>
+        <label>Einddatum <span class="req-mark">*</span>
+          <input type="date" id="activity-field-end" required>
+        </label>
+        <label>Omschrijving
+          <textarea id="activity-field-omschrijving" rows="2"></textarea>
+        </label>
+        <p class="element-modal-status" id="activity-modal-status"></p>
+        <div class="element-modal-actions">
+          <button type="button" class="btn ghost" id="activity-modal-cancel">Annuleren</button>
+          <button type="submit" class="btn" id="activity-modal-save">Opslaan</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <div class="element-modal-backdrop" id="project-status-modal-backdrop">
     <div class="element-modal">
       <h3>Projectstatus bewerken</h3>
@@ -1324,7 +1377,7 @@ function flipExpandAnchor() {
 }
 
 function runApp(data) {
-  const { DETAILS, EDGES, TOELICHTING, PROJECT_STATUS, PRODUCTS, TAGS, ELEMENT_TAGS, ORGS, OB_ORG, COLUMNS, ACTIVE_MODULES } = data;
+  const { DETAILS, EDGES, TOELICHTING, PROJECT_STATUS, PRODUCTS, ACTIVITIES, TAGS, ELEMENT_TAGS, ORGS, OB_ORG, COLUMNS, ACTIVE_MODULES } = data;
   // Licentiemodel (zie doelenboom_licentiemodel.md §3/§6, api/src/license.ts):
   // welke modules de licentie van deze tenant actief heeft. PROJECT_STATUS/
   // PRODUCTS zijn al server-side leeggemaakt als 'projecten' ontbreekt
@@ -2316,6 +2369,96 @@ function runApp(data) {
     '</div>';
   }
 
+  // ---- Activiteiten: inklapbare planning met start-/einddatum per project ----
+  // Anders dan producten/mijlpalen (één los moment) beslaat een activiteit een
+  // periode, dus een lichte Gantt-achtige balk per activiteit i.p.v. een punt-
+  // marker. Hergebruikt timelineBandBoundaries/timelineBandLabel hierboven
+  // voor dezelfde maand-/kwartaalas als de projecttijdlijn.
+  function activityGanttHtml(id, activities) {
+    let minT = Infinity, maxT = -Infinity;
+    activities.forEach((a) => {
+      const s = parseDateFlexible(a.startDate);
+      const e = parseDateFlexible(a.endDate);
+      if (!isNaN(s)) minT = Math.min(minT, s);
+      if (!isNaN(e)) maxT = Math.max(maxT, e);
+    });
+    if (!isFinite(minT) || !isFinite(maxT)) return '<div class="dp-empty-note">Geen geldige data bij de activiteiten.</div>';
+
+    const { bounds, quarterly } = timelineBandBoundaries(
+      minT === maxT ? minT - 86400000 : minT,
+      minT === maxT ? maxT + 86400000 : maxT
+    );
+    const axisMinT = bounds[0];
+    const axisMaxT = bounds[bounds.length - 1];
+    const pctFor = (t) => ((t - axisMinT) / (axisMaxT - axisMinT)) * 100;
+
+    let ticksHtml = '';
+    let labelsHtml = '';
+    for (let i = 0; i < bounds.length - 1; i++) {
+      const left = pctFor(bounds[i]);
+      const width = pctFor(bounds[i + 1]) - left;
+      ticksHtml += '<div class="timeline-band-tick" style="left:' + left + '%"></div>';
+      if (width >= 6) {
+        labelsHtml += '<div class="timeline-band-label" style="left:' + left + '%;width:' + width + '%">' +
+          timelineBandLabel(bounds[i], quarterly) + '</div>';
+      }
+    }
+    let todayHtml = '';
+    const now = Date.now();
+    if (now >= axisMinT && now <= axisMaxT) {
+      todayHtml = '<div class="timeline-today-tick" style="left:' + pctFor(now) + '%">' +
+        '<span class="timeline-today-label">vandaag</span></div>';
+    }
+
+    const rowsHtml = activities.map((a) => {
+      const s = parseDateFlexible(a.startDate);
+      const e = parseDateFlexible(a.endDate);
+      if (isNaN(s) || isNaN(e)) return '';
+      const left = pctFor(s);
+      const width = Math.max(pctFor(e) - left, 1.5);
+      const title = escapeHtml(a.name) + ' — ' + formatDateNL(a.startDate) + ' t/m ' + formatDateNL(a.endDate) +
+        (a.omschrijving ? ' — ' + escapeHtml(a.omschrijving) : '');
+      return '<div class="activity-gantt-row">' +
+        '<div class="activity-row-label" title="' + escapeHtml(a.name) + '">' + escapeHtml(a.name) + '</div>' +
+        '<div class="activity-row-track">' +
+          '<div class="activity-bar" style="left:' + left + '%;width:' + width + '%" title="' + title + '"></div>' +
+        '</div>' +
+        '<div class="activity-row-actions crud-only">' +
+          '<button type="button" class="btn ghost btn-xs activity-edit-btn" data-code="' + escapeHtml(id) + '" data-id="' + escapeHtml(String(a.dbId)) + '" title="Bewerken">&#9998;</button>' +
+          '<button type="button" class="btn ghost btn-xs activity-delete-btn" data-code="' + escapeHtml(id) + '" data-id="' + escapeHtml(String(a.dbId)) + '" title="Verwijderen">&times;</button>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+
+    return '<div class="activity-gantt-wrap">' +
+      '<div class="activity-gantt-grid">' +
+        '<div class="activity-gantt-axis-track">' + ticksHtml + labelsHtml + todayHtml + '</div>' +
+        rowsHtml +
+      '</div>' +
+    '</div>';
+  }
+
+  // Titel + inklapbare body ("Activiteiten") onder de tijdlijn van een project
+  // — standaard dichtgeklapt (zie de click-handler bij .activities-toggle-label
+  // in onDetailAreaClick), zodat een project zonder activiteiten geen extra
+  // ruimte inneemt en een project mét activiteiten niet altijd meteen de hele
+  // Gantt-balk toont.
+  function activitiesSectionHtml(id) {
+    if (!projectenActive) return '';
+    const activities = ACTIVITIES[id] || [];
+    let html = '<div class="dp-activities-title">' +
+      '<span class="activities-toggle-label"><span class="activities-chevron">&#9656;</span> Activiteiten' +
+        (activities.length ? ' (' + activities.length + ')' : '') + '</span>' +
+      '<button type="button" class="btn ghost btn-xs activity-add-btn crud-only" data-code="' + escapeHtml(id) + '">+ Activiteit</button>' +
+    '</div>';
+    html += '<div class="dp-activities-body" style="display:none">';
+    html += activities.length === 0
+      ? '<div class="dp-empty-note">Nog geen activiteiten gepland voor dit project.</div>'
+      : activityGanttHtml(id, activities);
+    html += '</div>';
+    return html;
+  }
+
   // ---- Overzicht "alle project-tijdlijnen" (#timelines-view) ----
   // Eén gedeelde tijdas (i.p.v. een losse kaart met eigen as per project, wat
   // met veel projecten al snel erg druk/rommelig oogt — vooral omdat de
@@ -2618,6 +2761,11 @@ function runApp(data) {
     if (timelineHtml) {
       html += '<div class="dp-project-title"><span>Tijdlijn</span></div>' + timelineHtml;
     }
+
+    // Activiteiten-planning (start-/einddatum, kunnen er meerdere zijn) staat
+    // bewust ónder de tijdlijn, als eigen inklapbare sectie — zie
+    // activitiesSectionHtml hierboven.
+    html += activitiesSectionHtml(id);
 
     html += '<div class="dp-products-title"><span>Producten / deliverables' + (products.length ? ' (' + products.length + ')' : '') + '</span>' +
       '<button type="button" class="btn ghost btn-xs product-add-btn crud-only" data-code="' + escapeHtml(id) + '">+ Product</button>' +
@@ -3889,6 +4037,112 @@ function runApp(data) {
     }
   }
 
+  // ---- Activiteiten CRUD binnen een project (start-/einddatum, zie
+  // api/src/routes/activities.ts) — zelfde opzet als producten hierboven,
+  // maar met een datumbereik i.p.v. een enkele verwachte/werkelijke datum. ----
+  const activityModalBackdrop = document.getElementById('activity-modal-backdrop');
+  const activityModalTitle = document.getElementById('activity-modal-title');
+  const activityModalStatus = document.getElementById('activity-modal-status');
+  const activityForm = document.getElementById('activity-form');
+  const activityFieldName = document.getElementById('activity-field-name');
+  const activityFieldStart = document.getElementById('activity-field-start');
+  const activityFieldEnd = document.getElementById('activity-field-end');
+  const activityFieldOmschrijving = document.getElementById('activity-field-omschrijving');
+  const activityModalCancelBtn = document.getElementById('activity-modal-cancel');
+
+  let activityModalMode = 'create';
+  let activityModalProjectCode = null;
+  let activityModalActivityId = null;
+
+  function setActivityModalStatus(text, kind) {
+    activityModalStatus.textContent = text || '';
+    activityModalStatus.style.color = kind === 'ok' ? '#2E7D5B' : kind === 'busy' ? '#777' : '#DC3545';
+  }
+
+  function openActivityModal(mode, projectCode, activityId) {
+    activityModalMode = mode;
+    activityModalProjectCode = projectCode;
+    activityModalActivityId = activityId || null;
+    setActivityModalStatus('');
+    const existing = mode === 'edit' && activityId
+      ? (ACTIVITIES[projectCode] || []).find((x) => String(x.dbId) === String(activityId))
+      : null;
+    if (mode === 'edit' && existing) {
+      activityModalTitle.textContent = 'Activiteit bewerken';
+      activityFieldName.value = existing.name || '';
+      activityFieldStart.value = toDateInputValue(existing.startDate);
+      activityFieldEnd.value = toDateInputValue(existing.endDate);
+      activityFieldOmschrijving.value = existing.omschrijving || '';
+    } else {
+      activityModalTitle.textContent = 'Nieuwe activiteit';
+      activityForm.reset();
+    }
+    activityModalBackdrop.classList.add('visible');
+    activityFieldName.focus();
+  }
+
+  function closeActivityModal() {
+    activityModalBackdrop.classList.remove('visible');
+  }
+
+  if (activityModalCancelBtn) activityModalCancelBtn.addEventListener('click', closeActivityModal);
+  if (activityModalBackdrop) activityModalBackdrop.addEventListener('click', (ev) => {
+    if (ev.target === activityModalBackdrop) closeActivityModal();
+  });
+
+  if (activityForm) activityForm.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const payload = {
+      name: activityFieldName.value.trim(),
+      startDate: activityFieldStart.value || null,
+      endDate: activityFieldEnd.value || null,
+      omschrijving: activityFieldOmschrijving.value.trim(),
+    };
+    if (!payload.name) { setActivityModalStatus('Naam is verplicht.'); return; }
+    if (!payload.startDate || !payload.endDate) { setActivityModalStatus('Start- en einddatum zijn verplicht.'); return; }
+    if (payload.endDate < payload.startDate) { setActivityModalStatus('Einddatum mag niet vóór de startdatum liggen.'); return; }
+    setActivityModalStatus('Bezig met opslaan…', 'busy');
+    try {
+      const isEdit = activityModalMode === 'edit';
+      const base = apiUrl + '/api/doelenbomen/' + doelenboomId + '/elements/' +
+        encodeURIComponent(activityModalProjectCode) + '/activities';
+      const url = isEdit ? base + '/' + encodeURIComponent(activityModalActivityId) : base;
+      const res = await fetch(url, {
+        method: isEdit ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + authToken },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || ('Opslaan mislukt (HTTP ' + res.status + ')'));
+      }
+      setActivityModalStatus('Opgeslagen, boom wordt herladen…', 'ok');
+      reloadTreeKeepingFocus(400);
+    } catch (err) {
+      setActivityModalStatus(err && err.message ? err.message : 'Onbekende fout bij opslaan.');
+    }
+  });
+
+  async function deleteActivity(projectCode, activityId) {
+    if (!activityId) return;
+    const ok = await showConfirm('Deze activiteit verwijderen?');
+    if (!ok) return;
+    try {
+      const res = await fetch(
+        apiUrl + '/api/doelenbomen/' + doelenboomId + '/elements/' + encodeURIComponent(projectCode) +
+          '/activities/' + encodeURIComponent(activityId),
+        { method: 'DELETE', headers: { Authorization: 'Bearer ' + authToken } }
+      );
+      if (!res.ok && res.status !== 204) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || ('Verwijderen mislukt (HTTP ' + res.status + ')'));
+      }
+      reloadTreeKeepingFocus();
+    } catch (err) {
+      showToast(err && err.message ? err.message : 'Onbekende fout bij verwijderen.', 'error');
+    }
+  }
+
   // ---- Projectstatus bewerken (upsert, zie api/src/routes/projectStatus.ts) ----
   const projectStatusModalBackdrop = document.getElementById('project-status-modal-backdrop');
   const projectStatusModalStatus = document.getElementById('project-status-modal-status');
@@ -3970,6 +4224,26 @@ function runApp(data) {
     if (productEditBtn) { openProductModal('edit', productEditBtn.dataset.code, productEditBtn.dataset.id); return; }
     const productDeleteBtn = ev.target.closest('.product-delete-btn');
     if (productDeleteBtn) { deleteProduct(productDeleteBtn.dataset.code, productDeleteBtn.dataset.id); return; }
+    // Activiteiten-sectie: het toggle-label opent/sluit de body (geen re-render
+    // nodig, gewoon de al aanwezige DOM tonen/verbergen — vandaar hier direct
+    // afgehandeld i.p.v. via een aparte open/close-functie zoals de modals).
+    const activitiesToggle = ev.target.closest('.activities-toggle-label');
+    if (activitiesToggle) {
+      const body = activitiesToggle.closest('.dp-activities-title').nextElementSibling;
+      const chevron = activitiesToggle.querySelector('.activities-chevron');
+      if (body && body.classList.contains('dp-activities-body')) {
+        const isOpen = body.style.display !== 'none';
+        body.style.display = isOpen ? 'none' : '';
+        if (chevron) chevron.innerHTML = isOpen ? '&#9656;' : '&#9662;';
+      }
+      return;
+    }
+    const activityAddBtn = ev.target.closest('.activity-add-btn');
+    if (activityAddBtn) { openActivityModal('create', activityAddBtn.dataset.code); return; }
+    const activityEditBtn = ev.target.closest('.activity-edit-btn');
+    if (activityEditBtn) { openActivityModal('edit', activityEditBtn.dataset.code, activityEditBtn.dataset.id); return; }
+    const activityDeleteBtn = ev.target.closest('.activity-delete-btn');
+    if (activityDeleteBtn) { deleteActivity(activityDeleteBtn.dataset.code, activityDeleteBtn.dataset.id); return; }
     const editBtn = ev.target.closest('.dp-edit-btn');
     if (editBtn) { openElementModal('edit', editBtn.dataset.code); return; }
     const delBtn = ev.target.closest('.dp-delete-btn');
@@ -4756,7 +5030,7 @@ function buildTagOrgFilterHtml(tags, orgs) {
 
 // Zet de TreeResponse van de API (zie api/src/routes/tree.ts) om naar exact de
 // datavorm die runApp() verwacht (dezelfde vorm als voorheen de hardcoded
-// DETAILS/EDGES/TOELICHTING/PROJECT_STATUS/PRODUCTS/TAGS/ELEMENT_TAGS/ORGS/OB_ORG
+// DETAILS/EDGES/TOELICHTING/PROJECT_STATUS/PRODUCTS/ACTIVITIES/TAGS/ELEMENT_TAGS/ORGS/OB_ORG
 // const's in doelenboom.html). `code` fungeert nu als dataid (geen aparte
 // CODE_TO_DATAID-mapping meer nodig, in tegenstelling tot de oude hand-onderhouden HTML).
 function adaptTreeResponse(tree) {
@@ -4794,6 +5068,13 @@ function adaptTreeResponse(tree) {
     }));
   });
 
+  const ACTIVITIES = {};
+  Object.keys(tree.activities || {}).forEach((id) => {
+    ACTIVITIES[id] = (tree.activities[id] || []).map((a) => ({
+      dbId: a.id, name: a.name, startDate: a.startDate, endDate: a.endDate, omschrijving: a.omschrijving,
+    }));
+  });
+
   const TAGS = {};
   (tree.tags || []).forEach((t) => { TAGS[t.code] = { name: t.name, categorie: t.categorie, desc: t.omschrijving }; });
 
@@ -4813,7 +5094,7 @@ function adaptTreeResponse(tree) {
   // Projecten-specifieke UI te verbergen i.p.v. te tonen-maar-te-laten-falen.
   const ACTIVE_MODULES = tree.activeModules || [];
 
-  return { DETAILS, EDGES, TOELICHTING, PROJECT_STATUS, PRODUCTS, TAGS, ELEMENT_TAGS, ORGS, OB_ORG, COLUMNS, ACTIVE_MODULES };
+  return { DETAILS, EDGES, TOELICHTING, PROJECT_STATUS, PRODUCTS, ACTIVITIES, TAGS, ELEMENT_TAGS, ORGS, OB_ORG, COLUMNS, ACTIVE_MODULES };
 }
 
 function renderError(message) {
