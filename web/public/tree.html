@@ -3366,10 +3366,6 @@ function runApp(data) {
   const exportHtmlBtn = document.getElementById('export-html-btn');
   if (exportHtmlBtn) exportHtmlBtn.addEventListener('click', exportStaticHtml);
 
-  const navPickerBtn = document.getElementById('nav-picker-btn');
-  if (navPickerBtn) navPickerBtn.addEventListener('click', () => {
-    window.parent.postMessage({ type: 'doelenboom-navigate', target: 'picker' }, PARENT_ORIGIN);
-  });
   // ---- Dropdown-knoppen in de topbar ("Bestand" en het account-menu delen
   // dezelfde open/sluit-mechaniek: klik op de knop toggelt, klik op een item
   // sluit 'm weer, en een klik ergens anders op de pagina sluit alle open
@@ -3400,14 +3396,6 @@ function runApp(data) {
   const navImportBtn = document.getElementById('nav-import-btn');
   if (navImportBtn) navImportBtn.addEventListener('click', () => {
     window.parent.postMessage({ type: 'doelenboom-navigate', target: 'import' }, PARENT_ORIGIN);
-  });
-  const logoutBtn = document.getElementById('logout-btn');
-  if (logoutBtn) logoutBtn.addEventListener('click', () => {
-    window.parent.postMessage({ type: 'doelenboom-navigate', target: 'logout' }, PARENT_ORIGIN);
-  });
-  const helpBtn = document.getElementById('help-btn');
-  if (helpBtn) helpBtn.addEventListener('click', () => {
-    window.parent.postMessage({ type: 'doelenboom-navigate', target: 'help' }, PARENT_ORIGIN);
   });
 
   // ---- Excel-export: eerst formaat (oud/nieuw) kiezen, dan template/data ----
@@ -4920,6 +4908,25 @@ function fetchAndBoot() {
     return res.json();
   }).then(boot).catch((err) => renderError(err && err.message ? err.message : 'Onbekende fout bij laden van de boom.'));
 }
+
+// Navigatieknoppen die altijd in de statische HTML staan (niet pas door
+// runApp() opgebouwd) bewust HIER gewired, buiten runApp() — anders werken ze
+// niet wanneer het laden van de boom mislukt (bv. 403 zonder koppeling, zie
+// renderError hierboven): runApp() wordt dan nooit aangeroepen, dus zou "Terug
+// naar overzicht"/"Uitloggen"/"Help" onbruikbaar blijven precies op het moment
+// dat iemand ze het hardst nodig heeft om weg te komen van de foutmelding.
+const navPickerBtn = document.getElementById('nav-picker-btn');
+if (navPickerBtn) navPickerBtn.addEventListener('click', () => {
+  window.parent.postMessage({ type: 'doelenboom-navigate', target: 'picker' }, PARENT_ORIGIN);
+});
+const logoutBtn = document.getElementById('logout-btn');
+if (logoutBtn) logoutBtn.addEventListener('click', () => {
+  window.parent.postMessage({ type: 'doelenboom-navigate', target: 'logout' }, PARENT_ORIGIN);
+});
+const helpBtn = document.getElementById('help-btn');
+if (helpBtn) helpBtn.addEventListener('click', () => {
+  window.parent.postMessage({ type: 'doelenboom-navigate', target: 'help' }, PARENT_ORIGIN);
+});
 
 // Losstaand geëxporteerd HTML-bestand (zie exportStaticHtml()): een klein
 // <script>-blokje vóór dit script zet window.__STATIC_TREE__ met de volledige
