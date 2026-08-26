@@ -180,6 +180,155 @@ activitiesRouter.delete('/doelenbomen/:id/elements/:code/activities', requireEdi
   res.json({ deletedCount: result.rowCount });
 });
 
+// ---- Afhankelijkheden tussen activiteiten (dependencies) ----
+// Denk aan MS Project: de opvolger (successorId) hangt af van de voorganger
+// (predecessorId) volgens 'type' — FS (Finish-Start, de default: opvolger
+// start pas ná afloop van de voorganger) is verreweg het gebruikelijkste,
+// SS/FF/SF bestaan voor volledigheid. Puur informatief/visueel (zie
+// tree.html: activityGanttHtml tekent de pijl, computeDependencyLayout
+// bepaalt de rij-posities) — er is geen scheduling-engine die datums
+// automatisch herberekent op basis van een afhankelijkheid.
+//
+// Beide activiteiten moeten bij hetzelfde project-element (:code) horen —
+// afgedwongen hieronder vóór het inserten, niet in het databaseschema (dat
+// zou een extra join in een check-constraint vereisen, wat Postgres niet
+// simpel ondersteunt). Bij verwijderen van een activiteit (los, of via
+// "Alles wissen" hierboven) verdwijnen bijbehorende afhankelijkheden vanzelf
+// (on delete cascade, zie db/init.sql).
+const DEPENDENCY_TYPES = ['FS', 'SS', 'FF', 'SF'];
+const DEPENDENCY_SELECT_FIELDS =
+  'id, predecessor_id as "predecessorId", successor_id as "successorId", type, lag_days as "lagDays"';
+
+function isUniqueViolation(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { code?: string }).code === '23505';
+}
+
+type DependencyInput = {
+  errors: string[];
+  predecessorId: number;
+  successorId: number;
+  type: string;
+  lagDays: number;
+};
+
+function readDependencyBody(body: unknown): DependencyInput {
+  const b = (body ?? {}) as Record<string, unknown>;
+  const errors: string[] = [];
+  const predecessorId = Number(b.predecessorId);
+  const successorId = Number(b.successorId);
+  if (!Number.isInteger(predecessorId) || predecessorId <= 0) errors.push('Voorganger is verplicht.');
+  if (!Number.isInteger(successorId) || successorId <= 0) errors.push('Opvolger is verplicht.');
+  if (Number.isInteger(predecessorId) && Number.isInteger(successorId) && predecessorId === successorId) {
+    errors.push('Een activiteit kan niet van zichzelf afhangen.');
+  }
+  const rawType = typeof b.type === 'string' ? b.type.trim().toUpperCase() : 'FS';
+  const type = DEPENDENCY_TYPES.includes(rawType) ? rawType : '';
+  if (!type) errors.push('Ongeldig afhankelijkheidstype.');
+
+  let lagDays = 0;
+  if (b.lagDays !== undefined && b.lagDays !== null && b.lagDays !== '') {
+    const n = Number(b.lagDays);
+    if (!Number.isFinite(n) || !Number.isInteger(n)) errors.push('Vertraging moet een geheel getal zijn (dagen).');
+    else lagDays = n;
+  }
+
+  return { errors, predecessorId, successorId, type: type || 'FS', lagDays };
+}
+
+// POST .../activities/dependencies — { predecessorId, successorId, type, lagDays }
+activitiesRouter.post(
+  '/doelenbomen/:id/elements/:code/activities/dependencies',
+  requireEditor,
+  requireProjectenModule,
+  async (req, res) => {
+    const input = readDependencyBody(req.body);
+    if (input.errors.length) return res.status(400).json({ error: input.errors.join(' ') });
+
+    const elementId = await findElementId(req.params.id, req.params.code);
+    if (!elementId) return res.status(404).json({ error: `Element "${req.params.code}" niet gevonden.` });
+
+    // Allebei moeten bij dit project-element horen — anders zou een
+    // afhankelijkheid dwars door twee verschillende projecten heen kunnen
+    // lopen, wat de Gantt (per project getekend) niet kan tonen.
+    const activityRows = await pool.query('select id from activities where element_id = $1 and id = any($2::bigint[])', [
+      elementId,
+      [input.predecessorId, input.successorId],
+    ]);
+    const foundIds = new Set(activityRows.rows.map((r) => Number(r.id)));
+    if (!foundIds.has(input.predecessorId) || !foundIds.has(input.successorId)) {
+      return res.status(404).json({ error: 'Voorganger en/of opvolger niet gevonden bij dit project.' });
+    }
+
+    try {
+      const result = await pool.query(
+        `insert into activity_dependencies (predecessor_id, successor_id, type, lag_days)
+         values ($1,$2,$3,$4)
+         returning ${DEPENDENCY_SELECT_FIELDS}`,
+        [input.predecessorId, input.successorId, input.type, input.lagDays]
+      );
+      res.status(201).json(result.rows[0]);
+    } catch (err) {
+      if (isUniqueViolation(err)) return res.status(409).json({ error: 'Deze afhankelijkheid bestaat al.' });
+      throw err;
+    }
+  }
+);
+
+// PUT .../activities/dependencies/:dependencyId — alleen type/lagDays (zoals
+// edges.ts: bron/opvolger wijzigen is niet ondersteund, dat is feitelijk een
+// nieuwe afhankelijkheid — verwijderen + opnieuw aanmaken).
+activitiesRouter.put(
+  '/doelenbomen/:id/elements/:code/activities/dependencies/:dependencyId',
+  requireEditor,
+  requireProjectenModule,
+  async (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const rawType = typeof b.type === 'string' ? b.type.trim().toUpperCase() : '';
+    const type = DEPENDENCY_TYPES.includes(rawType) ? rawType : '';
+    if (!type) return res.status(400).json({ error: 'Ongeldig afhankelijkheidstype.' });
+    let lagDays = 0;
+    if (b.lagDays !== undefined && b.lagDays !== null && b.lagDays !== '') {
+      const n = Number(b.lagDays);
+      if (!Number.isFinite(n) || !Number.isInteger(n)) {
+        return res.status(400).json({ error: 'Vertraging moet een geheel getal zijn (dagen).' });
+      }
+      lagDays = n;
+    }
+
+    const elementId = await findElementId(req.params.id, req.params.code);
+    if (!elementId) return res.status(404).json({ error: `Element "${req.params.code}" niet gevonden.` });
+
+    const result = await pool.query(
+      `update activity_dependencies set type = $1, lag_days = $2
+       where id = $3 and predecessor_id in (select id from activities where element_id = $4)
+       returning ${DEPENDENCY_SELECT_FIELDS}`,
+      [type, lagDays, req.params.dependencyId, elementId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Afhankelijkheid niet gevonden.' });
+    res.json(result.rows[0]);
+  }
+);
+
+// DELETE .../activities/dependencies/:dependencyId
+activitiesRouter.delete(
+  '/doelenbomen/:id/elements/:code/activities/dependencies/:dependencyId',
+  requireEditor,
+  requireProjectenModule,
+  async (req, res) => {
+    const elementId = await findElementId(req.params.id, req.params.code);
+    if (!elementId) return res.status(404).json({ error: `Element "${req.params.code}" niet gevonden.` });
+
+    const result = await pool.query(
+      `delete from activity_dependencies
+       where id = $1 and predecessor_id in (select id from activities where element_id = $2)
+       returning id`,
+      [req.params.dependencyId, elementId]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Afhankelijkheid niet gevonden.' });
+    res.status(204).send();
+  }
+);
+
 // ---- .mpp-import: omzetten naar MS Project XML via excel-service ----
 // Het binaire .mpp-formaat zelf kan niet in de browser gelezen worden (geen
 // bruikbare JS-library) en op de Node-API zou dat een JVM + MPXJ vereisen —

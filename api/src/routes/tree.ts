@@ -64,6 +64,21 @@ export async function fetchTree(doelenboomId: string) {
     [doelenboomId]
   );
 
+  // Afhankelijkheden tussen activiteiten — gescoped per project via het
+  // element-van-de-voorganger (beide activiteiten horen sowieso bij hetzelfde
+  // project, afgedwongen bij het aanmaken, zie routes/activities.ts), zodat
+  // de frontend ze net als activities.ts hierboven direct per projectcode
+  // ontvangt (tree.html: DEPENDENCIES[code]).
+  const dependenciesResult = await pool.query(
+    `select el.code as element_code, d.id, d.predecessor_id, d.successor_id, d.type, d.lag_days
+     from activity_dependencies d
+     join activities pa on pa.id = d.predecessor_id
+     join elements el on el.id = pa.element_id
+     where el.doelenboom_id = $1
+     order by d.id`,
+    [doelenboomId]
+  );
+
   const tagsResult = await pool.query(
     'select code, name, categorie, omschrijving from tags where doelenboom_id = $1 order by code',
     [doelenboomId]
@@ -135,6 +150,17 @@ export async function fetchTree(doelenboomId: string) {
     });
   }
 
+  const dependencies: Record<string, unknown[]> = {};
+  for (const row of dependenciesResult.rows) {
+    (dependencies[row.element_code] ??= []).push({
+      id: row.id,
+      predecessorId: row.predecessor_id,
+      successorId: row.successor_id,
+      type: row.type,
+      lagDays: row.lag_days,
+    });
+  }
+
   const elementTags: Record<string, string[]> = {};
   for (const row of elementTagsResult.rows) {
     (elementTags[row.element_code] ??= []).push(row.tag_code);
@@ -193,6 +219,7 @@ export async function fetchTree(doelenboomId: string) {
     projectStatus: projectenActive ? projectStatus : {},
     products: projectenActive ? products : {},
     activities: projectenActive ? activities : {},
+    dependencies: projectenActive ? dependencies : {},
     tags: tagsResult.rows,
     elementTags,
     orgUnits: orgUnitsResult.rows,

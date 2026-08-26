@@ -557,8 +557,16 @@
      daarom op een eigen regel BOVEN de balk i.p.v. ernaast.
   */
   .activity-gantt-axis-track { position: relative; height: 34px; }
-  .activity-gantt-rows { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
-  .activity-row-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 3px; }
+  /* position:relative + de vaste hoogtes hieronder (row-head/track + de gap
+     hierboven) maken de Y-positie van elke rij deterministisch berekenbaar in
+     JS (zie ROW_STRIDE/ROW_TRACK_MID_Y bij renderDependencyArrows) — nodig om
+     de afhankelijkheid-pijlen (.activity-dependency-overlay) exact op de
+     balkjes te laten aansluiten zonder DOM-metingen. */
+  .activity-gantt-rows { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; position: relative; }
+  .activity-row-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    height: 24px; margin-bottom: 3px;
+  }
   .activity-row-label {
     font-size: 12px; color: #333; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
@@ -586,6 +594,31 @@
   /* WBS-nummer tussen haakjes vóór de taaknaam — kleiner en lichter dan de
      naam zelf. */
   .activity-row-wbs { font-size: 10.5px; font-weight: 400; color: #999; }
+  /* Afhankelijkheid-pijlen tussen activiteiten (dependencyArrowsHtml) — een
+     los overlay-laag bovenop .activity-gantt-rows (pointer-events:none, dus
+     klikbaarheid van de balkjes/knoppen eronder blijft intact), opgebouwd uit
+     simpele divs (twee horizontale + één verticale segment, "elleboog"-vorm)
+     i.p.v. SVG: X-posities blijven zo gewoon dezelfde %-waarden als de
+     balkjes zelf (pctFor), alleen de Y-posities zijn vaste pixelwaarden
+     (ACTIVITY_ROW_STRIDE/ACTIVITY_ROW_TRACK_MID_Y). */
+  .activity-dependency-overlay { position: absolute; inset: 0; pointer-events: none; }
+  .activity-dep-seg { position: absolute; background: #8a93a6; }
+  .activity-dep-seg.h { height: 2px; }
+  .activity-dep-seg.v { width: 2px; }
+  .activity-dep-arrowhead {
+    position: absolute; width: 0; height: 0; border-top: 4px solid transparent; border-bottom: 4px solid transparent;
+  }
+  .activity-dep-arrowhead.right { border-left: 6px solid #8a93a6; }
+  .activity-dep-arrowhead.left { border-right: 6px solid #8a93a6; }
+  /* Afhankelijkheden-sectie in het activiteiten-formulier (niet in de Gantt-
+     rij zelf, zie het commentaar bij ACTIVITY_ROW_STRIDE hierboven) —
+     voorganger-chips ("Volgt op: <naam> (FS)"), hergebruikt .dp-chip/
+     .dp-chip-remove (zelfde stijl als tag-/org-chips elders in het
+     projectpaneel) i.p.v. eigen chip-CSS. */
+  .activity-deps-section { margin: 10px 0; padding-top: 10px; border-top: 1px solid #eee; }
+  .activity-deps-heading { font-size: 12.5px; font-weight: 600; color: #444; margin-bottom: 6px; }
+  .activity-row-deps { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+  .activity-dep-chip-type { opacity: 0.7; }
   .activity-row-actions { display: flex; gap: 4px; flex-shrink: 0; }
   .activity-add-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
   .activity-field-checkbox-label {
@@ -1182,7 +1215,7 @@
   </div>
 
   <div class="element-modal-backdrop" id="activity-modal-backdrop">
-    <div class="element-modal">
+    <div class="element-modal wide">
       <h3 id="activity-modal-title">Nieuwe activiteit</h3>
       <p class="element-modal-hint">Velden met <span class="req-mark">*</span> zijn verplicht.</p>
       <form id="activity-form">
@@ -1208,6 +1241,48 @@
         <div class="element-modal-actions">
           <button type="button" class="btn ghost" id="activity-modal-cancel">Annuleren</button>
           <button type="submit" class="btn" id="activity-modal-save">Opslaan</button>
+        </div>
+      </form>
+      <!-- Alleen zichtbaar bij bewerken (er moet al een activiteit-id zijn om
+           een afhankelijkheid aan te koppelen) — bewust BUITEN <form> hierboven:
+           toevoegen/verwijderen zijn eigen, losse verzoeken (net als tag-/org-
+           koppelingen elders), geen onderdeel van het Opslaan-formulier. Zie
+           renderActivityDepsSection/openDepLinkModal/deleteDependency. -->
+      <div class="activity-deps-section" id="activity-deps-section" style="display:none">
+        <div class="activity-deps-heading">Afhankelijkheden (voorgangers — denk aan MS Project: deze activiteit start pas ná de voorwaarde van het type)</div>
+        <div class="activity-row-deps" id="activity-deps-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Voorganger toevoegen aan de activiteit die in het activiteiten-formulier
+       hierboven wordt bewerkt (depLinkSuccessorId/depLinkProjectCode) — zelfde
+       opzet als tag-link-modal-backdrop: één los, klein modal dat na opslaan de
+       boom herlaadt (reloadTreeKeepingFocus), i.p.v. dit in het activiteiten-
+       formulier zelf te proppen. -->
+  <div class="element-modal-backdrop" id="dep-link-modal-backdrop">
+    <div class="element-modal">
+      <h3>Voorganger toevoegen</h3>
+      <p class="element-modal-hint"><span id="dep-link-successor-name"></span> start pas volgens het gekozen type t.o.v. de voorganger.</p>
+      <form id="dep-link-form">
+        <label>Voorganger <span class="req-mark">*</span>
+          <select id="dep-link-field-predecessor"></select>
+        </label>
+        <label>Type
+          <select id="dep-link-field-type">
+            <option value="FS">Finish-Start (FS) — start pas ná afloop van de voorganger</option>
+            <option value="SS">Start-Start (SS) — start pas ná start van de voorganger</option>
+            <option value="FF">Finish-Finish (FF) — eindigt pas ná afloop van de voorganger</option>
+            <option value="SF">Start-Finish (SF) — eindigt pas ná start van de voorganger</option>
+          </select>
+        </label>
+        <label>Vertraging (dagen, negatief mag)
+          <input type="number" id="dep-link-field-lag" value="0" step="1">
+        </label>
+        <p class="element-modal-status" id="dep-link-modal-status"></p>
+        <div class="element-modal-actions">
+          <button type="button" class="btn ghost" id="dep-link-modal-cancel">Annuleren</button>
+          <button type="submit" class="btn" id="dep-link-modal-save">Toevoegen</button>
         </div>
       </form>
     </div>
@@ -2534,7 +2609,15 @@ function runApp(data) {
   // gedeeltelijk buiten vallen worden geclipt, zie pctFor hieronder). Alleen
   // als het project geen enkele gedateerde product/mijlpaal heeft (dus geen
   // projectas bestaat) valt dit terug op het eigen bereik van de activiteiten.
-  function activityGanttHtml(id, activities, projectBounds) {
+  // Vaste pixel-metingen die 1-op-1 overeenkomen met de CSS van een Gantt-rij
+  // (.activity-row-head hoogte 24px + margin-bottom 3px, .activity-row-track
+  // hoogte 14px, .activity-gantt-rows gap 10px) — hierdoor is de verticale
+  // positie van elke rij (en dus van de afhankelijkheid-pijlen erin, zie
+  // hieronder) puur uit de rij-index te berekenen, zonder DOM-metingen.
+  const ACTIVITY_ROW_STRIDE = 24 + 3 + 14 + 10;
+  const ACTIVITY_ROW_TRACK_MID_Y = 24 + 3 + 14 / 2;
+
+  function activityGanttHtml(id, activities, projectBounds, dependencies) {
     let boundsInfo = projectBounds || null;
     if (!boundsInfo) {
       let minT = Infinity, maxT = -Infinity;
@@ -2578,10 +2661,25 @@ function runApp(data) {
         '<span class="timeline-today-label">vandaag</span></div>';
     }
 
-    const rowsHtml = activities.map((a) => {
+    // Alleen activiteiten met geldige data krijgen een rij (net als voorheen)
+    // — maar hier vooraf gefilterd tot een eigen array, zodat de rij-INDEX
+    // (gebruikt voor de vaste Y-positie van zowel de rij zelf als een
+    // eventuele afhankelijkheid-pijl erop/eraf) altijd overeenkomt met de
+    // daadwerkelijk gerenderde volgorde — een activiteit die stilzwijgend
+    // wordt overgeslagen (ongeldige datum) zou anders de rij-index van alle
+    // ERNA gerenderde activiteiten laten verschuiven t.o.v. hun werkelijke
+    // positie in de flex-kolom.
+    const renderable = activities.filter((a) => !isNaN(parseDateFlexible(a.startDate)) && !isNaN(parseDateFlexible(a.endDate)));
+    // dbId -> layout-info, voor de afhankelijkheid-pijlen hieronder (per
+    // afhankelijkheidstype het juiste ankerpunt: FS/FF vanaf het einde van de
+    // voorganger, SS/SF vanaf het begin; FS/SS naar het begin van de
+    // opvolger, FF/SF naar het einde — zie readDependencyBody-commentaar in
+    // activities.ts voor de typebetekenis).
+    const layoutByDbId = new Map();
+
+    const rowsHtml = renderable.map((a, rowIndex) => {
       const s = parseDateFlexible(a.startDate);
       const e = parseDateFlexible(a.endDate);
-      if (isNaN(s) || isNaN(e)) return '';
       // Geclipt binnen [0,100]%: bij een gedeelde, project-leidende as (zie
       // hierboven) kan een activiteit er (deels) buiten vallen — dan een
       // balkje tegen de rand i.p.v. de gedeelde as op te rekken (dat zou 'm
@@ -2590,6 +2688,7 @@ function runApp(data) {
       const left = Math.min(Math.max(pctFor(s), 0), 100);
       const right = Math.min(Math.max(pctFor(e), 0), 100);
       const width = Math.max(right - left, 1.5);
+      layoutByDbId.set(String(a.dbId), { rowIndex: rowIndex, left: left, right: right });
       const dateLabel = a.isMilestone ? formatDateNL(a.startDate) : formatDateNL(a.startDate) + ' t/m ' + formatDateNL(a.endDate);
       const kindLabel = a.isMilestone ? 'mijlpaal ' : a.isSummary ? 'fase ' : '';
       const title = escapeHtml(a.name) + ' — ' + kindLabel + dateLabel +
@@ -2613,6 +2712,13 @@ function runApp(data) {
       // WBS-nummer (indien aanwezig, dus via MS Project geïmporteerd) tussen
       // haakjes in kleiner lettertype vóór de taaknaam.
       const wbsLabel = a.wbs ? '<span class="activity-row-wbs">(' + escapeHtml(a.wbs) + ')</span> ' : '';
+      // Geen chips/knoppen voor afhankelijkheden IN de rij zelf — dat zou de
+      // rij een variabele hoogte geven (chips kunnen wrappen) en daarmee de
+      // vaste-hoogte-aanname breken waarop de pijl-overlay hierboven leunt
+      // (ACTIVITY_ROW_STRIDE). Beheren van afhankelijkheden (toevoegen/
+      // verwijderen) gebeurt daarom in het activiteiten-formulier zelf (zie
+      // de "Afhankelijkheden"-sectie in openActivityModal) — de pijl in de
+      // Gantt is hier puur het passieve visuele resultaat daarvan.
       return '<div class="activity-gantt-row">' +
         '<div class="activity-row-head">' +
           '<span class="activity-row-label" title="' + escapeHtml(a.name) + '">' +
@@ -2628,10 +2734,57 @@ function runApp(data) {
       '</div>';
     }).join('');
 
+    const depsHtml = dependencyArrowsHtml(dependencies, layoutByDbId);
+
     return '<div class="activity-gantt-wrap">' +
       '<div class="activity-gantt-axis-track">' + ticksHtml + labelsHtml + todayHtml + '</div>' +
-      '<div class="activity-gantt-rows">' + rowsHtml + '</div>' +
+      '<div class="activity-gantt-rows">' + rowsHtml +
+        '<div class="activity-dependency-overlay">' + depsHtml + '</div>' +
+      '</div>' +
     '</div>';
+  }
+
+  // Tekent elke afhankelijkheid als een "elleboog"-pijl (twee horizontale
+  // segmenten + één verticale, plus een pijlpuntje) van het ankerpunt van de
+  // voorganger naar dat van de opvolger — X-posities blijven %-waarden
+  // (dezelfde as als de balkjes), Y-posities zijn vaste pixels uit de rij-
+  // index (ACTIVITY_ROW_STRIDE/ACTIVITY_ROW_TRACK_MID_Y hierboven). Een
+  // afhankelijkheid waarvan de voorganger en/of opvolger niet in deze
+  // (gefilterde) rijenlijst voorkomt (ongeldige datum, of — zou niet moeten
+  // voorkomen — een andere activiteit) wordt stilzwijgend overgeslagen.
+  function dependencyArrowsHtml(dependencies, layoutByDbId) {
+    if (!dependencies || !dependencies.length) return '';
+    const STUB_PCT = 1.5;
+    return dependencies.map((dep) => {
+      const pred = layoutByDbId.get(String(dep.predecessorId));
+      const succ = layoutByDbId.get(String(dep.successorId));
+      if (!pred || !succ) return '';
+      const type = dep.type || 'FS';
+      const predX = (type === 'SS' || type === 'SF') ? pred.left : pred.right;
+      const succX = (type === 'FF' || type === 'SF') ? succ.right : succ.left;
+      const y1 = pred.rowIndex * ACTIVITY_ROW_STRIDE + ACTIVITY_ROW_TRACK_MID_Y;
+      const y2 = succ.rowIndex * ACTIVITY_ROW_STRIDE + ACTIVITY_ROW_TRACK_MID_Y;
+      const dir = succX >= predX ? 1 : -1;
+      const midX = predX + STUB_PCT * dir;
+      const segA = '<div class="activity-dep-seg h" style="left:' + Math.min(predX, midX) + '%;width:' +
+        Math.abs(midX - predX) + '%;top:' + (y1 - 1) + 'px"></div>';
+      const segV = '<div class="activity-dep-seg v" style="left:' + midX + '%;top:' + Math.min(y1, y2) +
+        'px;height:' + Math.abs(y2 - y1) + 'px"></div>';
+      const segB = '<div class="activity-dep-seg h" style="left:' + Math.min(midX, succX) + '%;width:' +
+        Math.abs(succX - midX) + '%;top:' + (y2 - 1) + 'px"></div>';
+      // Pijlpuntje op succX, wijzend in de richting waaruit segment B nadert
+      // — "right" (border-left-driehoek) heeft z'n tip 6px RECHTS van de
+      // eigen box-positie, dus de box moet 6px vóór succX beginnen (calc());
+      // "left" is het spiegelbeeld (tip 6px LINKS van de box, box dus 6px ná
+      // succX).
+      const arrowDir = succX >= midX ? 'right' : 'left';
+      const arrowLeftCss = arrowDir === 'right'
+        ? 'calc(' + succX + '% - 6px)'
+        : 'calc(' + succX + '% + 6px)';
+      const arrowhead = '<div class="activity-dep-arrowhead ' + arrowDir + '" style="left:' + arrowLeftCss +
+        ';top:' + (y2 - 4) + 'px"></div>';
+      return segA + segV + segB + arrowhead;
+    }).join('');
   }
 
   // Titel + inklapbare body ("Activiteiten") onder de tijdlijn van een project
@@ -2649,7 +2802,7 @@ function runApp(data) {
     html += '<div class="dp-activities-body" style="display:none">';
     html += activities.length === 0
       ? '<div class="dp-empty-note">Nog geen activiteiten gepland voor dit project.</div>'
-      : activityGanttHtml(id, activities, projectBounds);
+      : activityGanttHtml(id, activities, projectBounds, DEPENDENCIES[id] || []);
     // "+ Activiteit" staat bewust ONDER de lijst (i.p.v. in de titelbalk erboven,
     // zoals bij Producten) — bij meerdere activiteiten is dat de plek waar de
     // blik na het lezen van de laatste rij toch al staat. "Importeren uit MS
@@ -4262,10 +4415,40 @@ function runApp(data) {
   const activityFieldMilestone = document.getElementById('activity-field-milestone');
   const activityFieldSummary = document.getElementById('activity-field-summary');
   const activityModalCancelBtn = document.getElementById('activity-modal-cancel');
+  const activityDepsSection = document.getElementById('activity-deps-section');
+  const activityDepsList = document.getElementById('activity-deps-list');
 
   let activityModalMode = 'create';
   let activityModalProjectCode = null;
   let activityModalActivityId = null;
+
+  // Bouwt de voorganger-chips + "+ Voorganger"-knop voor de activiteit die nu
+  // in het formulier open staat (activityModalProjectCode/activityModalActivityId)
+  // — alleen zinvol in edit-mode, zie openActivityModal hieronder. Chips tonen
+  // altijd (ook read-only, net als tag-/org-chips); de ×-knop en "+ Voorganger"
+  // zijn crud-only.
+  function renderActivityDepsSection() {
+    if (!activityDepsList) return;
+    const deps = (DEPENDENCIES[activityModalProjectCode] || [])
+      .filter((d) => String(d.successorId) === String(activityModalActivityId));
+    const nameByDbId = new Map((ACTIVITIES[activityModalProjectCode] || []).map((a) => [String(a.dbId), a.name]));
+    activityDepsList.innerHTML = deps.map((d) => {
+      const predName = nameByDbId.get(String(d.predecessorId)) || '?';
+      const lagSuffix = d.lagDays ? (d.lagDays > 0 ? ' +' + d.lagDays + 'd' : ' ' + d.lagDays + 'd') : '';
+      return '<span class="dp-chip">Volgt op: <b>' + escapeHtml(predName) + '</b>' +
+        ' <span class="activity-dep-chip-type">(' + escapeHtml(d.type) + lagSuffix + ')</span>' +
+        '<button type="button" class="dp-chip-remove crud-only activity-dep-remove-btn" data-code="' + escapeHtml(activityModalProjectCode) +
+          '" data-dep-id="' + escapeHtml(String(d.dbId)) + '" title="Afhankelijkheid verwijderen">&times;</button></span>';
+    }).join('') +
+      '<button type="button" class="btn ghost btn-xs crud-only activity-dep-add-btn" data-code="' + escapeHtml(activityModalProjectCode) +
+        '" data-id="' + escapeHtml(String(activityModalActivityId)) + '" title="Voorganger toevoegen">+ Voorganger</button>';
+  }
+  if (activityDepsList) activityDepsList.addEventListener('click', (ev) => {
+    const addBtn = ev.target.closest('.activity-dep-add-btn');
+    if (addBtn) { closeActivityModal(); openDepLinkModal(addBtn.dataset.code, addBtn.dataset.id); return; }
+    const removeBtn = ev.target.closest('.activity-dep-remove-btn');
+    if (removeBtn) { deleteDependency(removeBtn.dataset.code, removeBtn.dataset.depId); return; }
+  });
 
   function setActivityModalStatus(text, kind) {
     activityModalStatus.textContent = text || '';
@@ -4288,9 +4471,16 @@ function runApp(data) {
       activityFieldOmschrijving.value = existing.omschrijving || '';
       activityFieldMilestone.checked = !!existing.isMilestone;
       activityFieldSummary.checked = !!existing.isSummary;
+      if (activityDepsSection) {
+        activityDepsSection.style.display = '';
+        renderActivityDepsSection();
+      }
     } else {
       activityModalTitle.textContent = 'Nieuwe activiteit';
       activityForm.reset();
+      // Afhankelijkheden koppelen kan pas nadat de activiteit bestaat (heeft
+      // een id nodig) — dus verborgen bij aanmaken, net als bij mppUid.
+      if (activityDepsSection) activityDepsSection.style.display = 'none';
     }
     activityModalBackdrop.classList.add('visible');
     activityFieldName.focus();
@@ -4381,6 +4571,112 @@ function runApp(data) {
         { method: 'DELETE', headers: { Authorization: 'Bearer ' + authToken } }
       );
       if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || ('Verwijderen mislukt (HTTP ' + res.status + ')'));
+      }
+      reloadTreeKeepingFocus();
+    } catch (err) {
+      showToast(err && err.message ? err.message : 'Onbekende fout bij verwijderen.', 'error');
+    }
+  }
+
+  // ---- Afhankelijkheden tussen activiteiten (dependencies) ----
+  // Denk aan MS Project: FS (Finish-Start, default) betekent dat de opvolger
+  // pas start ná afloop van de voorganger. Beheer gebeurt via de "Afhankelijk-
+  // heden"-sectie in het activiteiten-formulier hierboven (renderActivityDepsSection) —
+  // dit hier is alleen het losse "voorganger toevoegen"-modal (zelfde opzet
+  // als tag-link-modal-backdrop) en de verwijder-actie. De pijl in de Gantt
+  // zelf (dependencyArrowsHtml) is puur het passieve resultaat hiervan.
+  const depLinkModalBackdrop = document.getElementById('dep-link-modal-backdrop');
+  const depLinkForm = document.getElementById('dep-link-form');
+  const depLinkFieldPredecessor = document.getElementById('dep-link-field-predecessor');
+  const depLinkFieldType = document.getElementById('dep-link-field-type');
+  const depLinkFieldLag = document.getElementById('dep-link-field-lag');
+  const depLinkModalStatus = document.getElementById('dep-link-modal-status');
+  const depLinkModalCancelBtn = document.getElementById('dep-link-modal-cancel');
+  const depLinkSuccessorNameEl = document.getElementById('dep-link-successor-name');
+  let depLinkProjectCode = null;
+  let depLinkSuccessorId = null;
+
+  function setDepLinkModalStatus(text, kind) {
+    depLinkModalStatus.textContent = text || '';
+    depLinkModalStatus.style.color = kind === 'ok' ? '#2E7D5B' : kind === 'busy' ? '#777' : '#DC3545';
+  }
+
+  function openDepLinkModal(projectCode, successorId) {
+    depLinkProjectCode = projectCode;
+    depLinkSuccessorId = successorId;
+    const activities = ACTIVITIES[projectCode] || [];
+    const successor = activities.find((a) => String(a.dbId) === String(successorId));
+    depLinkSuccessorNameEl.textContent = successor ? successor.name : 'Deze activiteit';
+    // Zichzelf en al gekoppelde voorgangers niet nogmaals aanbieden (de
+    // backend weigert dat toch met 400/409, maar dit voorkomt de foutmelding
+    // meteen al in de keuzelijst).
+    const linkedPredecessorIds = new Set(
+      (DEPENDENCIES[projectCode] || [])
+        .filter((d) => String(d.successorId) === String(successorId))
+        .map((d) => String(d.predecessorId))
+    );
+    const available = activities.filter((a) => String(a.dbId) !== String(successorId) && !linkedPredecessorIds.has(String(a.dbId)));
+    depLinkFieldPredecessor.innerHTML = available.length
+      ? available.map((a) => '<option value="' + escapeHtml(String(a.dbId)) + '">' + escapeHtml(a.name) + '</option>').join('')
+      : '<option value="">(geen andere activiteiten beschikbaar)</option>';
+    depLinkFieldType.value = 'FS';
+    depLinkFieldLag.value = '0';
+    setDepLinkModalStatus('');
+    depLinkModalBackdrop.classList.add('visible');
+  }
+
+  function closeDepLinkModal() {
+    depLinkModalBackdrop.classList.remove('visible');
+  }
+
+  if (depLinkModalCancelBtn) depLinkModalCancelBtn.addEventListener('click', closeDepLinkModal);
+  if (depLinkModalBackdrop) depLinkModalBackdrop.addEventListener('click', (ev) => {
+    if (ev.target === depLinkModalBackdrop) closeDepLinkModal();
+  });
+
+  if (depLinkForm) depLinkForm.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const predecessorId = depLinkFieldPredecessor.value;
+    if (!predecessorId) { setDepLinkModalStatus('Kies een voorganger.'); return; }
+    setDepLinkModalStatus('Bezig met opslaan…', 'busy');
+    try {
+      const res = await fetch(
+        apiUrl + '/api/doelenbomen/' + doelenboomId + '/elements/' + encodeURIComponent(depLinkProjectCode) + '/activities/dependencies',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + authToken },
+          body: JSON.stringify({
+            predecessorId: Number(predecessorId),
+            successorId: Number(depLinkSuccessorId),
+            type: depLinkFieldType.value,
+            lagDays: Number(depLinkFieldLag.value) || 0,
+          }),
+        }
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || ('Opslaan mislukt (HTTP ' + res.status + ')'));
+      }
+      setDepLinkModalStatus('Opgeslagen, boom wordt herladen…', 'ok');
+      reloadTreeKeepingFocus(400);
+    } catch (err) {
+      setDepLinkModalStatus(err && err.message ? err.message : 'Onbekende fout bij opslaan.');
+    }
+  });
+
+  async function deleteDependency(projectCode, dependencyId) {
+    if (!dependencyId) return;
+    const ok = await showConfirm('Deze afhankelijkheid verwijderen?');
+    if (!ok) return;
+    try {
+      const res = await fetch(
+        apiUrl + '/api/doelenbomen/' + doelenboomId + '/elements/' + encodeURIComponent(projectCode) +
+          '/activities/dependencies/' + encodeURIComponent(dependencyId),
+        { method: 'DELETE', headers: { Authorization: 'Bearer ' + authToken } }
+      );
+      if (!res.ok && res.status !== 204) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || ('Verwijderen mislukt (HTTP ' + res.status + ')'));
       }
@@ -5716,6 +6012,19 @@ function adaptTreeResponse(tree) {
       // Bepaalt of activityGanttHtml een dunnere "fase"-balk met
       // eindmarkeringen toont i.p.v. een gewone balk.
       isSummary: !!a.isSummary,
+    }));
+  });
+
+  // Afhankelijkheden tussen activiteiten (denk aan MS Project: Finish-Start
+  // e.d.) — predecessorId/successorId verwijzen naar Activity.dbId hierboven.
+  // Zie computeMppImportPlan-commentaar niet van toepassing hier: dit komt
+  // NIET uit een MS Project-import, alleen handmatig aan te maken (zie de
+  // "Afhankelijkheden"-sectie in het activiteiten-formulier hieronder).
+  const DEPENDENCIES = {};
+  Object.keys(tree.dependencies || {}).forEach((id) => {
+    DEPENDENCIES[id] = (tree.dependencies[id] || []).map((d) => ({
+      dbId: d.id, predecessorId: d.predecessorId, successorId: d.successorId,
+      type: d.type || 'FS', lagDays: d.lagDays || 0,
     }));
   });
 

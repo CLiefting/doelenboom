@@ -306,6 +306,151 @@ describe('activities (activiteiten-planning) CRUD', () => {
     });
   });
 
+  // Afhankelijkheden tussen activiteiten (dependencies) — denk aan MS
+  // Project: successor hangt af van predecessor volgens 'type' (FS = default).
+  // Eigen element (P3) + eigen activiteiten om niet te knoeien met de
+  // P1/P2-activiteiten van andere tests hierboven.
+  describe('activities/dependencies', () => {
+    let taakA: number;
+    let taakB: number;
+    let taakC: number;
+
+    before(async () => {
+      await req('POST', `/api/doelenbomen/${doelenboomId}/elements`, {
+        token: adminToken, body: { code: 'P3', type: 'Project', name: 'Project 3' },
+      });
+      const a = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P3/activities`, {
+        token: adminToken, body: { name: 'Taak A', startDate: '2026-09-01', endDate: '2026-09-05' },
+      });
+      const b = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P3/activities`, {
+        token: adminToken, body: { name: 'Taak B', startDate: '2026-09-06', endDate: '2026-09-10' },
+      });
+      const c = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P3/activities`, {
+        token: adminToken, body: { name: 'Taak C (ander project)', startDate: '2026-09-01', endDate: '2026-09-05' },
+      });
+      taakA = a.body.id;
+      taakB = b.body.id;
+      taakC = c.body.id;
+      await req('POST', `/api/doelenbomen/${doelenboomId}/elements`, {
+        token: adminToken, body: { code: 'P4', type: 'Project', name: 'Project 4' },
+      });
+    });
+
+    it('validatie: predecessorId/successorId verplicht, niet aan elkaar gelijk, ongeldig type geweigerd', async () => {
+      const missing = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P3/activities/dependencies`, {
+        token: adminToken, body: {},
+      });
+      assert.equal(missing.status, 400);
+
+      const zelfde = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P3/activities/dependencies`, {
+        token: adminToken, body: { predecessorId: taakA, successorId: taakA },
+      });
+      assert.equal(zelfde.status, 400);
+
+      const ongeldigType = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P3/activities/dependencies`, {
+        token: adminToken, body: { predecessorId: taakA, successorId: taakB, type: 'XX' },
+      });
+      assert.equal(ongeldigType.status, 400);
+    });
+
+    it('bezoeker mag geen afhankelijkheid aanmaken', async () => {
+      const res = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P3/activities/dependencies`, {
+        token: bezoekerToken, body: { predecessorId: taakA, successorId: taakB },
+      });
+      assert.equal(res.status, 403);
+    });
+
+    it('onbekend element geeft 404', async () => {
+      const res = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/GEENBESTAAND/activities/dependencies`, {
+        token: adminToken, body: { predecessorId: taakA, successorId: taakB },
+      });
+      assert.equal(res.status, 404);
+    });
+
+    it('beide activiteiten moeten bij dit project-element horen (cross-project en onbestaand geweigerd)', async () => {
+      const opP4 = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P4/activities`, {
+        token: adminToken, body: { name: 'Taak op P4', startDate: '2026-09-01', endDate: '2026-09-05' },
+      });
+      // P3-taak als predecessor, een taak van een ANDER project (P4) als
+      // successor — moet geweigerd worden, ook al bestaat die taak wel.
+      const crossProject = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P3/activities/dependencies`, {
+        token: adminToken, body: { predecessorId: taakA, successorId: opP4.body.id },
+      });
+      assert.equal(crossProject.status, 404);
+
+      const onbestaand = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P3/activities/dependencies`, {
+        token: adminToken, body: { predecessorId: taakA, successorId: 999999999 },
+      });
+      assert.equal(onbestaand.status, 404);
+    });
+
+    it('maakt een Finish-Start-afhankelijkheid aan (default type), toont die in GET tree, en weigert een duplicaat', async () => {
+      const created = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P3/activities/dependencies`, {
+        token: adminToken, body: { predecessorId: taakA, successorId: taakB },
+      });
+      assert.equal(created.status, 201);
+      assert.equal(created.body.predecessorId, taakA);
+      assert.equal(created.body.successorId, taakB);
+      assert.equal(created.body.type, 'FS');
+      assert.equal(created.body.lagDays, 0);
+
+      const tree = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: adminToken });
+      assert.ok(tree.body.dependencies['P3'].some((d: any) => d.id === created.body.id));
+
+      const dup = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P3/activities/dependencies`, {
+        token: adminToken, body: { predecessorId: taakA, successorId: taakB },
+      });
+      assert.equal(dup.status, 409);
+    });
+
+    it('PUT wijzigt type/lagDays; DELETE verwijdert', async () => {
+      const created = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P3/activities/dependencies`, {
+        token: adminToken, body: { predecessorId: taakB, successorId: taakC, type: 'SS', lagDays: 2 },
+      });
+      assert.equal(created.body.type, 'SS');
+      assert.equal(created.body.lagDays, 2);
+
+      const updated = await req(
+        'PUT',
+        `/api/doelenbomen/${doelenboomId}/elements/P3/activities/dependencies/${created.body.id}`,
+        { token: adminToken, body: { type: 'FF', lagDays: -1 } }
+      );
+      assert.equal(updated.status, 200);
+      assert.equal(updated.body.type, 'FF');
+      assert.equal(updated.body.lagDays, -1);
+
+      const del = await req(
+        'DELETE',
+        `/api/doelenbomen/${doelenboomId}/elements/P3/activities/dependencies/${created.body.id}`,
+        { token: adminToken }
+      );
+      assert.equal(del.status, 204);
+      const delAgain = await req(
+        'DELETE',
+        `/api/doelenbomen/${doelenboomId}/elements/P3/activities/dependencies/${created.body.id}`,
+        { token: adminToken }
+      );
+      assert.equal(delAgain.status, 404);
+    });
+
+    it('een afhankelijkheid verdwijnt automatisch als een betrokken activiteit verwijderd wordt (cascade)', async () => {
+      const d = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P3/activities`, {
+        token: adminToken, body: { name: 'Taak D', startDate: '2026-09-11', endDate: '2026-09-15' },
+      });
+      const dep = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P3/activities/dependencies`, {
+        token: adminToken, body: { predecessorId: taakA, successorId: d.body.id },
+      });
+      assert.equal(dep.status, 201);
+
+      await req('DELETE', `/api/doelenbomen/${doelenboomId}/elements/P3/activities/${d.body.id}`, {
+        token: adminToken,
+      });
+
+      const tree = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: adminToken });
+      assert.ok(!tree.body.dependencies['P3'].some((x: any) => x.id === dep.body.id));
+    });
+  });
+
   // POST .../activities/import-mpp — zet een geüpload .mpp-bestand om naar MS
   // Project XML via excel-service en geeft die XML terug (schrijft zelf niets
   // naar activities, zie de toelichting bovenaan activities.ts). De permissie-/

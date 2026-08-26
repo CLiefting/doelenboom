@@ -183,6 +183,22 @@ export type Activity = {
   isSummary: boolean;
 };
 
+// Afhankelijkheid tussen twee activiteiten binnen hetzelfde project — denk
+// aan MS Project: successorId hangt af van predecessorId volgens 'type' (FS
+// = Finish-Start, de default en verreweg het gebruikelijkste; SS/FF/SF
+// bestaan voor volledigheid). lagDays: vertraging (positief) of overlap/
+// voorsprong (negatief) in dagen, puur informatief — zie
+// api/src/routes/activities.ts en tree.html (activityGanttHtml tekent de
+// pijl). predecessorId/successorId zijn Activity.id-waarden.
+export type ActivityDependencyType = 'FS' | 'SS' | 'FF' | 'SF';
+export type ActivityDependency = {
+  id: number;
+  predecessorId: number;
+  successorId: number;
+  type: ActivityDependencyType;
+  lagDays: number;
+};
+
 export type Tag = { code: string; name: string; categorie: string; omschrijving: string };
 export type OrgUnit = { code: string; name: string; omschrijving: string };
 export type ObOrgRelation = { org: string; relatietype: string; toelichting: string; status: string };
@@ -214,6 +230,7 @@ export type TreeResponse = {
   projectStatus: Record<string, ProjectStatus>;
   products: Record<string, Product[]>;
   activities: Record<string, Activity[]>;
+  dependencies: Record<string, ActivityDependency[]>;
   tags: Tag[];
   elementTags: Record<string, string[]>;
   orgUnits: OrgUnit[];

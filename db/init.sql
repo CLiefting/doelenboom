@@ -278,6 +278,33 @@ create table if not exists activities (
 create index if not exists idx_activities_element on activities(element_id);
 create index if not exists idx_activities_mpp_uid on activities(element_id, mpp_uid) where mpp_uid is not null;
 
+-- Afhankelijkheden ("dependencies") tussen twee activiteiten binnen hetzelfde
+-- project — denk aan MS Project: de opvolger (successor_id) mag pas van
+-- start als de voorganger (predecessor_id) aan de voorwaarde van 'type'
+-- voldoet. type: FS (Finish-Start, de gebruikelijke — opvolger start pas ná
+-- afloop van de voorganger) is de default; SS/FF/SF bestaan voor
+-- volledigheid maar worden nergens apart afgedwongen (puur informatief/
+-- visueel, net als de rest van de planning in deze app — er is geen
+-- scheduling-engine die datums automatisch herberekent). lag_days: vertraging
+-- (positief) of overlap/voorsprong (negatief) in dagen t.o.v. het
+-- afhankelijkheidspunt, eveneens puur informatief. Beide activiteiten moeten
+-- bij hetzelfde project-element horen — afgedwongen in de API (routes/
+-- activities.ts), niet in dit schema (dat zou een extra join in de check
+-- vereisen). on delete cascade: een afhankelijkheid verdwijnt automatisch
+-- zodra een van de twee betrokken activiteiten verwijderd wordt (los
+-- verwijderen of via "Alles wissen").
+create table if not exists activity_dependencies (
+  id bigserial primary key,
+  predecessor_id bigint not null references activities(id) on delete cascade,
+  successor_id bigint not null references activities(id) on delete cascade,
+  type text not null default 'FS' check (type in ('FS', 'SS', 'FF', 'SF')),
+  lag_days integer not null default 0,
+  check (predecessor_id <> successor_id),
+  unique (predecessor_id, successor_id)
+);
+create index if not exists idx_activity_deps_predecessor on activity_dependencies(predecessor_id);
+create index if not exists idx_activity_deps_successor on activity_dependencies(successor_id);
+
 create table if not exists tags (
   id bigserial primary key,
   doelenboom_id bigint not null references doelenbomen(id) on delete cascade,
