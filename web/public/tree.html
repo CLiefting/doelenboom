@@ -1173,18 +1173,21 @@
 
   <!-- Importeren van taken uit MS Project (XML-export, zie parseMppProjectXml
        in runApp) — bewust géén <form>, want dit gaat niet in één keer submitten
-       maar in twee stappen: bestand kiezen (parse gebeurt volledig client-side
-       met DOMParser, geen serveraanroep) en dan de aangevinkte taken één voor
-       één via de bestaande POST .../activities aanmaken. -->
+       maar in twee stappen: bestand kiezen (een .xml-export wordt volledig
+       client-side geparsed met DOMParser, geen serveraanroep nodig; een
+       binair .mpp-bestand gaat eerst via de server naar excel-service, die
+       'm omzet naar dezelfde XML — zie de listener bij mpp-import-file-input)
+       en dan de aangevinkte taken één voor één via de bestaande
+       POST .../activities aanmaken. -->
   <div class="element-modal-backdrop" id="mpp-import-modal-backdrop">
     <div class="element-modal wide">
       <h3>Importeren uit MS Project</h3>
       <p class="element-modal-hint">
-        Kies een MS Project XML-bestand (in MS Project: Bestand &gt; Opslaan als &gt; Bestandstype "XML").
-        Taken dieper dan WBS-niveau 3 worden niet getoond; resources en voorgangers/afhankelijkheden
-        worden niet overgenomen &mdash; Doelenboom kent daar geen velden voor.
+        Kies een .mpp-bestand, of een MS Project XML-export (in MS Project: Bestand &gt; Opslaan als &gt;
+        Bestandstype "XML"). Taken dieper dan WBS-niveau 3 worden niet getoond; resources en
+        voorgangers/afhankelijkheden worden niet overgenomen &mdash; Doelenboom kent daar geen velden voor.
       </p>
-      <input type="file" id="mpp-import-file-input" accept=".xml,text/xml" style="display:none">
+      <input type="file" id="mpp-import-file-input" accept=".mpp,.xml,text/xml,application/vnd.ms-project" style="display:none">
       <div>
         <button type="button" class="btn ghost" id="mpp-import-choose-btn">Bestand kiezen&hellip;</button>
         <span id="mpp-import-filename" class="mpp-import-filename"></span>
@@ -4274,15 +4277,20 @@ function runApp(data) {
     }
   }
 
-  // ---- Importeren van taken uit MS Project (XML-export) ----
-  // Leest een door de gebruiker geëxporteerde "MS Project XML"-export (MS
-  // Project: Bestand > Opslaan als > Bestandstype "XML") volledig in de
-  // browser uit met DOMParser — er is dus geen serveraanroep nodig om te
-  // parsen, en geen extra backend-afhankelijkheid (zoals Java/MPXJ, nodig om
-  // het binaire .mpp-formaat zelf te lezen). Toont alle taken t/m WBS-/
-  // outline-niveau 3 in een aanvink-lijst; bij bevestigen wordt voor elke
-  // aangevinkte taak gewoon de bestaande POST .../activities aangeroepen —
-  // elke MS Project-taak (incl. mijlpalen en fasekoppen) wordt zo een gewone
+  // ---- Importeren van taken uit MS Project (.mpp of XML-export) ----
+  // Twee aangeleverde bestandstypen, één parser: een "MS Project XML"-export
+  // (MS Project: Bestand > Opslaan als > Bestandstype "XML") wordt volledig
+  // client-side gelezen met DOMParser — geen serveraanroep nodig. Een binair
+  // .mpp-bestand kan niet in de browser gelezen worden (geen bruikbare
+  // JS-library voor dat formaat); dat gaat naar POST .../activities/import-mpp
+  // (activities.ts -> excel-service/app/mpp_converter.py, Java/MPXJ), die het
+  // omzet naar diezelfde MS Project XML en teruggeeft. Vanaf dat punt is de
+  // afhandeling identiek (parseMppProjectXml + finishMppImportParse) — de
+  // WBS-niveau-/mijlpaal-/fase-logica bestaat dus maar op één plek, ongeacht
+  // welk bestandstype is gekozen. Toont alle taken t/m WBS-/outline-niveau 3
+  // in een aanvink-lijst; bij bevestigen wordt voor elke aangevinkte taak
+  // gewoon de bestaande POST .../activities aangeroepen — elke MS
+  // Project-taak (incl. mijlpalen en fasekoppen) wordt zo een gewone
   // Doelenboom-activiteit. Mijlpalen krijgen start = eind (eendaagse balk).
   // Resources en voorgangers/afhankelijkheden uit MS Project worden bewust
   // niet overgenomen: Doelenboom kent daar geen velden voor.
@@ -4419,23 +4427,63 @@ function runApp(data) {
     updateMppImportCount();
   });
 
+  // Na het parsen (client-side voor .xml, via de server voor .mpp — zie
+  // hieronder) is de afhandeling identiek: lege lijst -> melding, anders de
+  // aanvink-lijst tonen. Eén plek voor die laatste stap voorkomt dat de twee
+  // bestandstype-paden uit de pas gaan lopen.
+  function finishMppImportParse() {
+    if (!mppImportTasks.length) {
+      setMppImportStatus('Geen taken t/m WBS-niveau 3 gevonden in dit bestand.');
+      return;
+    }
+    renderMppImportList();
+    mppImportListWrap.style.display = '';
+    setMppImportStatus('');
+  }
+
   if (mppImportFileInput) mppImportFileInput.addEventListener('change', () => {
     const file = mppImportFileInput.files && mppImportFileInput.files[0];
     if (!file) return;
     mppImportFilename.textContent = file.name;
-    setMppImportStatus('Bezig met inlezen…', 'busy');
     mppImportListWrap.style.display = 'none';
+
+    // .mpp is het binaire MS Project-formaat — dat kan niet in de browser
+    // gelezen worden, dus dat bestand gaat naar de server (activities.ts ->
+    // excel-service, zie de toelichting daar), die 'm omzet naar dezelfde MS
+    // Project XML als een rechtstreekse export en teruggeeft. .xml (en alles
+    // wat niet als .mpp herkend wordt) wordt gewoon lokaal gelezen, zoals
+    // altijd al het geval was.
+    if (/\.mpp$/i.test(file.name)) {
+      setMppImportStatus('Bezig met omzetten op de server…', 'busy');
+      const form = new FormData();
+      form.append('file', file, file.name);
+      fetch(
+        apiUrl + '/api/doelenbomen/' + doelenboomId + '/elements/' + encodeURIComponent(mppImportProjectCode) + '/activities/import-mpp',
+        { method: 'POST', headers: { Authorization: 'Bearer ' + authToken }, body: form }
+      )
+        .then(async (res) => {
+          if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            throw new Error(body.error || ('Omzetten mislukt (HTTP ' + res.status + ')'));
+          }
+          return res.text();
+        })
+        .then((xmlText) => {
+          mppImportTasks = parseMppProjectXml(xmlText);
+          finishMppImportParse();
+        })
+        .catch((err) => {
+          setMppImportStatus(err && err.message ? err.message : 'Kon het .mpp-bestand niet verwerken.');
+        });
+      return;
+    }
+
+    setMppImportStatus('Bezig met inlezen…', 'busy');
     const reader = new FileReader();
     reader.onload = () => {
       try {
         mppImportTasks = parseMppProjectXml(String(reader.result));
-        if (!mppImportTasks.length) {
-          setMppImportStatus('Geen taken t/m WBS-niveau 3 gevonden in dit bestand.');
-          return;
-        }
-        renderMppImportList();
-        mppImportListWrap.style.display = '';
-        setMppImportStatus('');
+        finishMppImportParse();
       } catch (err) {
         setMppImportStatus(err && err.message ? err.message : 'Kon het bestand niet lezen.');
       }

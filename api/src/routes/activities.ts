@@ -1,6 +1,7 @@
 import { Router } from 'express';
+import multer from 'multer';
 import { pool } from '../db.js';
-import { requireAuth } from '../auth.js';
+import { requireAuth, AuthedRequest } from '../auth.js';
 import { requireWritableDoelenboom, requireModule } from '../rbac.js';
 
 // CRUD voor de activiteiten-planning van een project-element — zelfde opzet
@@ -9,14 +10,13 @@ import { requireWritableDoelenboom, requireModule } from '../rbac.js';
 // als inklapbare Gantt-achtige sectie onder de tijdlijn in het projectpaneel
 // (tree.html, activitiesSectionHtml/activityGanttHtml).
 //
-// Bulk-importeren (bv. vanuit MS Project) gaat bewust NIET via een eigen
-// server-endpoint: tree.html leest een MS Project XML-export (Bestand >
-// Opslaan als > XML) volledig client-side in met DOMParser
-// (parseMppProjectXml) en roept voor elke door de gebruiker aangevinkte taak
-// gewoon de POST hieronder aan, één voor één. Dat voorkomt een extra
-// bestandsformaat-afhankelijkheid op de server (voor het binaire .mpp-formaat
-// zelf zou Java/MPXJ nodig zijn) en houdt de "welke taken wel/niet"-keuze waar
-// die hoort: bij de gebruiker, per taak.
+// Bulk-importeren vanuit MS Project (zie /import-mpp onderaan): tree.html
+// parseert een MS Project XML-export (rechtstreeks aangeleverd, of via
+// /import-mpp uit een .mpp-bestand omgezet — zie hieronder) volledig
+// client-side met DOMParser (parseMppProjectXml) en roept voor elke door de
+// gebruiker aangevinkte taak gewoon de POST hieronder aan, één voor één. Zo
+// bestaat de WBS-niveau-/mijlpaal-/fase-filterlogica maar op één plek
+// (JavaScript, in de browser) voor beide bestandstypen.
 export const activitiesRouter = Router();
 activitiesRouter.use(requireAuth);
 // Per route meegeven (niet via router.use()) — zie toelichting in elements.ts.
@@ -123,3 +123,50 @@ activitiesRouter.delete('/doelenbomen/:id/elements/:code/activities/:activityId'
   if (result.rowCount === 0) return res.status(404).json({ error: 'Activiteit niet gevonden.' });
   res.status(204).send();
 });
+
+// ---- .mpp-import: omzetten naar MS Project XML via excel-service ----
+// Het binaire .mpp-formaat zelf kan niet in de browser gelezen worden (geen
+// bruikbare JS-library) en op de Node-API zou dat een JVM + MPXJ vereisen —
+// diezelfde afhankelijkheid heeft excel-service (Python/FastAPI) al nodig voor
+// dit ene doel, dus die conversie hoort daar (zie excel-service/app/
+// mpp_converter.py), niet in deze Node-container. Dit endpoint is dan ook
+// een dunne doorgeefluik: uploaden -> forwarden naar excel-service -> de
+// terugontvangen MS Project XML ongewijzigd teruggeven. Er wordt hier NIETS
+// naar de database geschreven — dat gebeurt pas als de gebruiker in de
+// aanvink-lijst (tree.html) taken selecteert en die alsnog los via de gewone
+// POST hierboven aanmaakt.
+const importUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
+const EXCEL_SERVICE_URL = process.env.EXCEL_SERVICE_URL ?? 'http://excel-service:8000';
+
+activitiesRouter.post(
+  '/doelenbomen/:id/elements/:code/activities/import-mpp',
+  requireEditor,
+  requireProjectenModule,
+  importUpload.single('file'),
+  async (req: AuthedRequest, res) => {
+    if (!req.file) return res.status(400).json({ error: 'Geen bestand meegestuurd (veld "file").' });
+
+    const elementId = await findElementId(req.params.id, req.params.code);
+    if (!elementId) return res.status(404).json({ error: `Element "${req.params.code}" niet gevonden.` });
+
+    const form = new FormData();
+    const arrayBuffer = new ArrayBuffer(req.file.buffer.byteLength);
+    new Uint8Array(arrayBuffer).set(req.file.buffer);
+    form.append('file', new Blob([arrayBuffer]), req.file.originalname);
+
+    try {
+      const upstream = await fetch(`${EXCEL_SERVICE_URL}/parse-mpp`, { method: 'POST', body: form });
+      if (!upstream.ok) {
+        const detail = await upstream.text();
+        return res.status(upstream.status === 400 ? 400 : 502).json({
+          error: 'Kon het .mpp-bestand niet verwerken.',
+          detail,
+        });
+      }
+      const xml = await upstream.text();
+      res.type('application/xml').send(xml);
+    } catch (err) {
+      res.status(502).json({ error: 'MS Project-conversieservice niet bereikbaar.', detail: (err as Error).message });
+    }
+  }
+);

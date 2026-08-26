@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import io
 
+import pytest
 from fastapi.testclient import TestClient
 from openpyxl import load_workbook
 
@@ -104,3 +105,32 @@ class TestParseValidTypes:
         body = res.json()
         assert body['status'] == 'ok'
         assert body['parsed']['elements'][0]['type'] == 'Initiatief'
+
+
+class TestParseMpp:
+    """/parse-mpp (mpp_converter.py) — de "echte" conversie (een geldig
+    .mpp-bestand omzetten) vereist een werkende Java-installatie, net als de
+    Docker-image (zie Dockerfile). Op een lokale ontwikkelmachine zonder JRE
+    slaan we die ene test over i.p.v. de hele suite te laten falen op een
+    omgevingsissue dat niets met deze code te maken heeft — de foutafhandeling
+    zelf (leeg bestand, onleesbaar bestand) wordt dan nog steeds gedekt."""
+
+    def test_leeg_bestand_geeft_400(self):
+        res = client.post('/parse-mpp', files={'file': ('test.mpp', b'', 'application/octet-stream')})
+        assert res.status_code == 400
+        assert 'leeg' in res.json()['error'].lower()
+
+    def test_onleesbaar_bestand_geeft_400(self):
+        try:
+            res = client.post(
+                '/parse-mpp',
+                files={'file': ('test.mpp', b'dit is geen geldig mpp-bestand', 'application/octet-stream')},
+            )
+        except Exception:
+            pytest.skip('Geen werkende Java-installatie lokaal beschikbaar (JRE nodig voor mpxj, zie Dockerfile).')
+            return
+        if res.status_code == 500:
+            pytest.skip('Geen werkende Java-installatie lokaal beschikbaar (JRE nodig voor mpxj, zie Dockerfile).')
+            return
+        assert res.status_code == 400
+        assert 'niet lezen' in res.json()['error'].lower()

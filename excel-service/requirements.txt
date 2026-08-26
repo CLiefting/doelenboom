@@ -2,3 +2,8 @@ fastapi==0.115.0
 uvicorn[standard]==0.30.6
 openpyxl==3.1.5
 python-multipart==0.0.9
+# .mpp-import (app/mpp_converter.py) — mpxj bundelt de benodigde Java-.jar's
+# zelf (geen losse download nodig), JPype1 is de Java-brug die mpxj gebruikt.
+# Vereist een JRE in de image, zie Dockerfile.
+mpxj==16.7.0
+JPype1==1.7.1

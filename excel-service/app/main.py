@@ -1,6 +1,7 @@
 """
 Doelenboom excel-service — Python/FastAPI microservice die
-FPBB_doelenboom_referentietabel_*.xlsx-uploads parseert, opschoont en valideert.
+FPBB_doelenboom_referentietabel_*.xlsx-uploads parseert, opschoont en valideert,
+én (zie /parse-mpp) .mpp-bestanden (MS Project) omzet naar MS Project XML.
 
 Schrijft zelf niets naar de database — geeft alleen {status, report, parsed}
 terug. De Node/Express-API (routes/imports.ts) bewaart dit als een "import" met
@@ -15,11 +16,13 @@ from fastapi import Body, FastAPI, File, Query, UploadFile
 from fastapi.responses import JSONResponse, Response
 
 from .exporter import build_data_workbook, build_template_workbook, is_standard_columns
+from .mpp_converter import MppConversionError, mpp_to_mspdi_xml
 from .parser import parse_workbook
 
 app = FastAPI(title='doelenboom-excel-service', version='0.1.0')
 
 XLSX_MEDIA_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+MSPDI_MEDIA_TYPE = 'application/xml'
 
 
 @app.get('/health')
@@ -48,6 +51,27 @@ async def parse(file: UploadFile = File(...), valid_types: list[str] = Query(def
         content, filename=file.filename or '', valid_types=valid_types or None
     )
     return {'status': status, 'report': report, 'parsed': parsed}
+
+
+@app.post('/parse-mpp')
+async def parse_mpp(file: UploadFile = File(...)):
+    """Zet een geüpload .mpp-bestand om naar MS Project XML (zie
+    mpp_converter.py) en geeft die XML-tekst terug — puur een
+    formaat-conversie, geen taken-filtering/-mapping (dat gebeurt in
+    tree.html, met dezelfde parseMppProjectXml() als bij een rechtstreeks
+    aangeleverde XML-export). Aangeroepen door
+    api/src/routes/activities.ts (POST .../activities/import-mpp)."""
+    content = await file.read()
+    if not content:
+        return JSONResponse(status_code=400, content={'error': 'Leeg bestand ontvangen.'})
+    try:
+        xml_text = mpp_to_mspdi_xml(content)
+    except MppConversionError as exc:
+        return JSONResponse(status_code=400, content={
+            'error': 'Kon het .mpp-bestand niet lezen. Is dit een geldig MS Project-bestand?',
+            'detail': str(exc),
+        })
+    return Response(content=xml_text, media_type=MSPDI_MEDIA_TYPE)
 
 
 @app.post('/export')

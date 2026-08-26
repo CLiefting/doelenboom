@@ -2,10 +2,11 @@ import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   startTestServer, stopTestServer, closePool, req, unique, createSysadminUser, login, cleanupByPrefix,
-  setupWritableDoelenboom,
+  setupWritableDoelenboom, getBaseUrl,
 } from './helpers.js';
 
 const PREFIX = unique('activities');
+const EXCEL_SERVICE_URL = process.env.EXCEL_SERVICE_URL ?? 'http://localhost:8000';
 
 // Activiteiten-planning (start-/einddatum, kunnen er meerdere zijn per
 // project) — zie api/src/routes/activities.ts. Anders dan products.test.ts
@@ -113,5 +114,66 @@ describe('activities (activiteiten-planning) CRUD', () => {
     });
     const tree = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: adminToken });
     assert.ok(tree.body.activities['P1'].some((a: any) => a.name === 'In de boom'));
+  });
+
+  // POST .../activities/import-mpp — zet een geüpload .mpp-bestand om naar MS
+  // Project XML via excel-service en geeft die XML terug (schrijft zelf niets
+  // naar activities, zie de toelichting bovenaan activities.ts). De permissie-/
+  // validatiechecks (geen bestand, onbekend element, bezoeker) gebeuren vóórdat
+  // excel-service aangeroepen wordt, dus die zijn onafhankelijk testbaar; de
+  // "echte" conversie heeft een bereikbare excel-service nodig — zelfde
+  // skip-patroon als importsExports.test.ts.
+  describe('.mpp-import (via excel-service)', () => {
+    let excelServiceReachable = false;
+
+    before(async () => {
+      try {
+        const res = await fetch(`${EXCEL_SERVICE_URL}/health`, { signal: AbortSignal.timeout(2000) });
+        excelServiceReachable = res.ok;
+      } catch {
+        excelServiceReachable = false;
+      }
+    });
+
+    it('geen bestand meegestuurd geeft 400', async () => {
+      const res = await fetch(`${getBaseUrl()}/api/doelenbomen/${doelenboomId}/elements/P1/activities/import-mpp`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${adminToken}` },
+      });
+      assert.equal(res.status, 400);
+    });
+
+    it('onbekend element geeft 404', async () => {
+      const form = new FormData();
+      form.append('file', new Blob([new Uint8Array([1, 2, 3])]), 'x.mpp');
+      const res = await fetch(
+        `${getBaseUrl()}/api/doelenbomen/${doelenboomId}/elements/GEENBESTAAND/activities/import-mpp`,
+        { method: 'POST', headers: { Authorization: `Bearer ${adminToken}` }, body: form }
+      );
+      assert.equal(res.status, 404);
+    });
+
+    it('bezoeker mag niet importeren', async () => {
+      const form = new FormData();
+      form.append('file', new Blob([new Uint8Array([1, 2, 3])]), 'x.mpp');
+      const res = await fetch(`${getBaseUrl()}/api/doelenbomen/${doelenboomId}/elements/P1/activities/import-mpp`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${bezoekerToken}` },
+        body: form,
+      });
+      assert.equal(res.status, 403);
+    });
+
+    it('onleesbaar .mpp-bestand geeft 400 (via excel-service doorgegeven)', async (t) => {
+      if (!excelServiceReachable) return t.skip('excel-service niet bereikbaar — zie EXCEL_SERVICE_URL');
+      const form = new FormData();
+      form.append('file', new Blob([new TextEncoder().encode('dit is geen geldig mpp-bestand')]), 'x.mpp');
+      const res = await fetch(`${getBaseUrl()}/api/doelenbomen/${doelenboomId}/elements/P1/activities/import-mpp`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${adminToken}` },
+        body: form,
+      });
+      assert.equal(res.status, 400);
+    });
   });
 });
