@@ -163,6 +163,61 @@ describe('activities (activiteiten-planning) CRUD', () => {
     });
   });
 
+  // DELETE .../activities (zonder :activityId) — wist in één keer ALLE
+  // activiteiten van een project-element, gebruikt door de "Alles wissen"-knop
+  // in tree.html (deleteAllActivities, na bevestiging via showConfirm). Eigen
+  // element (P2) om niet te knoeien met de P1-activiteiten die andere tests
+  // hierboven aanmaken/verwachten.
+  describe('DELETE .../activities (alles wissen)', () => {
+    before(async () => {
+      await req('POST', `/api/doelenbomen/${doelenboomId}/elements`, {
+        token: adminToken, body: { code: 'P2', type: 'Project', name: 'Project 2' },
+      });
+    });
+
+    it('bezoeker mag niet alles wissen', async () => {
+      const res = await req('DELETE', `/api/doelenbomen/${doelenboomId}/elements/P2/activities`, {
+        token: bezoekerToken,
+      });
+      assert.equal(res.status, 403);
+    });
+
+    it('onbekend element geeft 404', async () => {
+      const res = await req('DELETE', `/api/doelenbomen/${doelenboomId}/elements/GEENBESTAAND/activities`, {
+        token: adminToken,
+      });
+      assert.equal(res.status, 404);
+    });
+
+    it('verwijdert alle activiteiten van het element en geeft het aantal terug; andere elementen blijven ongemoeid', async () => {
+      await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P2/activities`, {
+        token: adminToken, body: { name: 'A', startDate: '2026-09-01', endDate: '2026-09-02' },
+      });
+      await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P2/activities`, {
+        token: adminToken, body: { name: 'B', startDate: '2026-09-03', endDate: '2026-09-04' },
+      });
+      const p1Before = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P1/activities`, {
+        token: adminToken, body: { name: 'Blijft staan op P1', startDate: '2026-09-01', endDate: '2026-09-02' },
+      });
+
+      const del = await req('DELETE', `/api/doelenbomen/${doelenboomId}/elements/P2/activities`, {
+        token: adminToken,
+      });
+      assert.equal(del.status, 200);
+      assert.equal(del.body.deletedCount, 2);
+
+      const tree = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: adminToken });
+      assert.equal(tree.body.activities['P2'], undefined);
+      assert.ok(tree.body.activities['P1'].some((a: any) => a.id === p1Before.body.id));
+
+      const delAgain = await req('DELETE', `/api/doelenbomen/${doelenboomId}/elements/P2/activities`, {
+        token: adminToken,
+      });
+      assert.equal(delAgain.status, 200);
+      assert.equal(delAgain.body.deletedCount, 0);
+    });
+  });
+
   // POST .../activities/import-mpp — zet een geüpload .mpp-bestand om naar MS
   // Project XML via excel-service en geeft die XML terug (schrijft zelf niets
   // naar activities, zie de toelichting bovenaan activities.ts). De permissie-/

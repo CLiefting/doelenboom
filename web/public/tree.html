@@ -2598,10 +2598,15 @@ function runApp(data) {
     // "+ Activiteit" staat bewust ONDER de lijst (i.p.v. in de titelbalk erboven,
     // zoals bij Producten) — bij meerdere activiteiten is dat de plek waar de
     // blik na het lezen van de laatste rij toch al staat. "Importeren uit MS
-    // Project" staat ernaast — zie openMppImportModal hieronder.
+    // Project" staat ernaast — zie openMppImportModal hieronder. "Alles wissen"
+    // staat er los van (destructief!) en verschijnt alleen als er iets te
+    // wissen valt — zie deleteAllActivities hieronder.
     html += '<div class="activity-add-row crud-only">' +
       '<button type="button" class="btn ghost btn-xs activity-add-btn" data-code="' + escapeHtml(id) + '">+ Activiteit</button>' +
       '<button type="button" class="btn ghost btn-xs mpp-import-btn" data-code="' + escapeHtml(id) + '">Importeren uit MS Project&hellip;</button>' +
+      (activities.length
+        ? '<button type="button" class="btn ghost btn-xs activity-delete-all-btn" data-code="' + escapeHtml(id) + '">Alles wissen&hellip;</button>'
+        : '') +
     '</div>';
     html += '</div>';
     return html;
@@ -4294,6 +4299,36 @@ function runApp(data) {
     }
   }
 
+  // Wist in één keer ALLE activiteiten van dit project (zowel handmatig
+  // aangemaakte als eerder uit MS Project geïmporteerde) — de bulk-DELETE-route
+  // hierboven op activities.ts, ná bevestiging (showConfirm, dezelfde eigen
+  // confirm-UI als deleteActivity/deleteProduct/deleteElementByCode). De
+  // knop zelf is alleen zichtbaar als er activiteiten zijn (zie
+  // activitiesSectionHtml), maar het aantal wordt hier nogmaals uit ACTIVITIES
+  // gelezen voor een concrete bevestigingstekst i.p.v. een generieke.
+  async function deleteAllActivities(projectCode) {
+    const count = (ACTIVITIES[projectCode] || []).length;
+    if (!count) return;
+    const ok = await showConfirm(
+      'Alle ' + count + ' activiteiten van dit project verwijderen? Dit kan niet ongedaan worden gemaakt.',
+      'Alles wissen'
+    );
+    if (!ok) return;
+    try {
+      const res = await fetch(
+        apiUrl + '/api/doelenbomen/' + doelenboomId + '/elements/' + encodeURIComponent(projectCode) + '/activities',
+        { method: 'DELETE', headers: { Authorization: 'Bearer ' + authToken } }
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || ('Verwijderen mislukt (HTTP ' + res.status + ')'));
+      }
+      reloadTreeKeepingFocus();
+    } catch (err) {
+      showToast(err && err.message ? err.message : 'Onbekende fout bij verwijderen.', 'error');
+    }
+  }
+
   // ---- Importeren van taken uit MS Project (.mpp of XML-export) ----
   // Twee aangeleverde bestandstypen, één parser: een "MS Project XML"-export
   // (MS Project: Bestand > Opslaan als > Bestandstype "XML") wordt volledig
@@ -4769,6 +4804,8 @@ function runApp(data) {
     if (activityEditBtn) { openActivityModal('edit', activityEditBtn.dataset.code, activityEditBtn.dataset.id); return; }
     const activityDeleteBtn = ev.target.closest('.activity-delete-btn');
     if (activityDeleteBtn) { deleteActivity(activityDeleteBtn.dataset.code, activityDeleteBtn.dataset.id); return; }
+    const activityDeleteAllBtn = ev.target.closest('.activity-delete-all-btn');
+    if (activityDeleteAllBtn) { deleteAllActivities(activityDeleteAllBtn.dataset.code); return; }
     const mppImportBtn = ev.target.closest('.mpp-import-btn');
     if (mppImportBtn) { openMppImportModal(mppImportBtn.dataset.code); return; }
     const editBtn = ev.target.closest('.dp-edit-btn');

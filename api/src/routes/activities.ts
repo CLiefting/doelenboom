@@ -142,6 +142,21 @@ activitiesRouter.delete('/doelenbomen/:id/elements/:code/activities/:activityId'
   res.status(204).send();
 });
 
+// DELETE /api/doelenbomen/:id/elements/:code/activities — wist in één keer ALLE
+// activiteiten van dit project-element (zowel handmatig aangemaakte als eerder
+// uit MS Project geïmporteerde, mpp_uid of niet). Eén atomaire query i.p.v. de
+// frontend één voor één te laten verwijderen (tree.html: deleteAllActivities
+// + de "Alles wissen"-knop in activitiesSectionHtml) — geeft ook meteen een
+// betrouwbaar aantal terug voor de bevestigingsmelding, en voorkomt een
+// gedeeltelijk resultaat als één los verzoek zou mislukken.
+activitiesRouter.delete('/doelenbomen/:id/elements/:code/activities', requireEditor, requireProjectenModule, async (req, res) => {
+  const elementId = await findElementId(req.params.id, req.params.code);
+  if (!elementId) return res.status(404).json({ error: `Element "${req.params.code}" niet gevonden.` });
+
+  const result = await pool.query('delete from activities where element_id = $1 returning id', [elementId]);
+  res.json({ deletedCount: result.rowCount });
+});
+
 // ---- .mpp-import: omzetten naar MS Project XML via excel-service ----
 // Het binaire .mpp-formaat zelf kan niet in de browser gelezen worden (geen
 // bruikbare JS-library) en op de Node-API zou dat een JVM + MPXJ vereisen —
