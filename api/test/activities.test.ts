@@ -116,6 +116,53 @@ describe('activities (activiteiten-planning) CRUD', () => {
     assert.ok(tree.body.activities['P1'].some((a: any) => a.name === 'In de boom'));
   });
 
+  // mppUid — zie computeMppImportPlan (tree.html): bij een herimport van
+  // hetzelfde MS Project-plan moeten eerder geïmporteerde activiteiten
+  // herkend (bijgewerkt) worden i.p.v. dubbel aangemaakt, en een gewone
+  // handmatige bewerking mag die koppeling niet stilzwijgend wissen.
+  describe('mppUid (koppeling met een geïmporteerde MS Project-taak)', () => {
+    it('wordt opgeslagen bij aanmaken en verschijnt in GET tree', async () => {
+      const created = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P1/activities`, {
+        token: adminToken,
+        body: { name: 'Uit MS Project', startDate: '2026-09-01', endDate: '2026-09-05', mppUid: 'task-42' },
+      });
+      assert.equal(created.status, 201);
+      assert.equal(created.body.mppUid, 'task-42');
+
+      const tree = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: adminToken });
+      const inTree = tree.body.activities['P1'].find((a: any) => a.id === created.body.id);
+      assert.equal(inTree.mppUid, 'task-42');
+    });
+
+    it('een gewone PUT zonder mppUid in de body laat een bestaand mppUid ongemoeid', async () => {
+      const created = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P1/activities`, {
+        token: adminToken,
+        body: { name: 'Blijft gekoppeld', startDate: '2026-09-01', endDate: '2026-09-05', mppUid: 'task-99' },
+      });
+      // Zoals het bewerk-formulier in tree.html: geen mppUid meegeven.
+      const updated = await req('PUT', `/api/doelenbomen/${doelenboomId}/elements/P1/activities/${created.body.id}`, {
+        token: adminToken,
+        body: { name: 'Blijft gekoppeld (bewerkt)', startDate: '2026-09-02', endDate: '2026-09-06', omschrijving: 'net bewerkt' },
+      });
+      assert.equal(updated.status, 200);
+      assert.equal(updated.body.name, 'Blijft gekoppeld (bewerkt)');
+      assert.equal(updated.body.mppUid, 'task-99');
+    });
+
+    it('een PUT met mppUid zet die waarde (gebruikt door de import-sync bij "wijzigen")', async () => {
+      const created = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P1/activities`, {
+        token: adminToken, body: { name: 'Handmatig', startDate: '2026-09-01', endDate: '2026-09-05' },
+      });
+      assert.equal(created.body.mppUid, null);
+
+      const updated = await req('PUT', `/api/doelenbomen/${doelenboomId}/elements/P1/activities/${created.body.id}`, {
+        token: adminToken,
+        body: { name: 'Handmatig', startDate: '2026-09-01', endDate: '2026-09-05', mppUid: 'task-7' },
+      });
+      assert.equal(updated.body.mppUid, 'task-7');
+    });
+  });
+
   // POST .../activities/import-mpp — zet een geüpload .mpp-bestand om naar MS
   // Project XML via excel-service en geeft die XML terug (schrijft zelf niets
   // naar activities, zie de toelichting bovenaan activities.ts). De permissie-/

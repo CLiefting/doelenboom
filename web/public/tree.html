@@ -598,6 +598,15 @@
   }
   .mpp-import-badge.milestone { background: #fdecea; color: #c0392b; }
   .mpp-import-badge.summary { background: #eef1f6; color: #5a6472; }
+  /* Actie-badges (create/update/unchanged/delete) — zie computeMppImportPlan
+     en mppPlanRowHtml (tree.html): kleurt het synchronisatieplan zodat direct
+     zichtbaar is wat een herimport gaat toevoegen/wijzigen/verwijderen. */
+  .mpp-import-badge.action-create { background: #e6f4ea; color: #2E7D5B; }
+  .mpp-import-badge.action-update { background: #fff4e0; color: #a06400; }
+  .mpp-import-badge.action-unchanged { background: #f0f1f3; color: #999; }
+  .mpp-import-badge.action-delete { background: #fdecea; color: #c0392b; }
+  .mpp-import-row.action-delete { background: #fef8f7; }
+  .mpp-import-row.action-delete .mpp-import-row-name { text-decoration: line-through; color: #a33; }
 
   /* Overzicht "alle project-tijdlijnen" (#timelines-view) — een losse lijst
      van kaarten, één per project, elk met dezelfde tijdbalk als in de
@@ -1171,14 +1180,16 @@
     </div>
   </div>
 
-  <!-- Importeren van taken uit MS Project (XML-export, zie parseMppProjectXml
-       in runApp) — bewust géén <form>, want dit gaat niet in één keer submitten
-       maar in twee stappen: bestand kiezen (een .xml-export wordt volledig
-       client-side geparsed met DOMParser, geen serveraanroep nodig; een
-       binair .mpp-bestand gaat eerst via de server naar excel-service, die
-       'm omzet naar dezelfde XML — zie de listener bij mpp-import-file-input)
-       en dan de aangevinkte taken één voor één via de bestaande
-       POST .../activities aanmaken. -->
+  <!-- Importeren/synchroniseren van taken uit MS Project (XML-export, zie
+       parseMppProjectXml/computeMppImportPlan in runApp) — bewust géén <form>,
+       want dit gaat niet in één keer submitten maar in twee stappen: bestand
+       kiezen (een .xml-export wordt volledig client-side geparsed met
+       DOMParser, geen serveraanroep nodig; een binair .mpp-bestand gaat eerst
+       via de server naar excel-service, die 'm omzet naar dezelfde XML — zie
+       de listener bij mpp-import-file-input) en dan de aangevinkte regels
+       verwerken: nieuwe taken worden aangemaakt, eerder geïmporteerde taken
+       die gewijzigd zijn worden bijgewerkt, en eerder geïmporteerde taken die
+       niet meer in het bestand voorkomen worden aangeboden om te verwijderen. -->
   <div class="element-modal-backdrop" id="mpp-import-modal-backdrop">
     <div class="element-modal wide">
       <h3>Importeren uit MS Project</h3>
@@ -1186,6 +1197,12 @@
         Kies een .mpp-bestand, of een MS Project XML-export (in MS Project: Bestand &gt; Opslaan als &gt;
         Bestandstype "XML"). Taken dieper dan WBS-niveau 3 worden niet getoond; resources en
         voorgangers/afhankelijkheden worden niet overgenomen &mdash; Doelenboom kent daar geen velden voor.
+        Bij een herimport wordt het bestand vergeleken met eerder geïmporteerde activiteiten: nieuwe taken
+        worden toegevoegd (<span class="mpp-import-badge action-create">nieuw</span>), gewijzigde taken
+        bijgewerkt (<span class="mpp-import-badge action-update">wijzigen</span>) en taken die niet meer in
+        het plan voorkomen aangeboden om te verwijderen (<span class="mpp-import-badge action-delete">verwijderen</span>)
+        &mdash; controleer de lijst dus goed voordat u bevestigt. Handmatig aangemaakte activiteiten worden
+        nooit door een import aangeraakt.
       </p>
       <input type="file" id="mpp-import-file-input" accept=".mpp,.xml,text/xml,application/vnd.ms-project" style="display:none">
       <div>
@@ -4307,7 +4324,11 @@ function runApp(data) {
   const mppImportConfirmBtn = document.getElementById('mpp-import-confirm-btn');
 
   let mppImportProjectCode = null;
-  let mppImportTasks = []; // [{ wbs, name, startDate, endDate, outlineLevel, milestone, summary }]
+  // Het synchronisatieplan (computeMppImportPlan) i.p.v. een platte takenlijst
+  // — elk item is { action: 'create'|'update'|'unchanged'|'delete', task,
+  // existingId, existingOmschrijving } (delete-items hebben geen 'task', zie
+  // computeMppImportPlan/mppPlanRowHtml hieronder).
+  let mppImportPlan = [];
 
   function setMppImportStatus(text, kind) {
     if (!mppImportStatusEl) return;
@@ -4317,7 +4338,7 @@ function runApp(data) {
 
   function openMppImportModal(projectCode) {
     mppImportProjectCode = projectCode;
-    mppImportTasks = [];
+    mppImportPlan = [];
     if (mppImportFileInput) mppImportFileInput.value = '';
     if (mppImportFilename) mppImportFilename.textContent = '';
     if (mppImportListWrap) mppImportListWrap.style.display = 'none';
@@ -4376,7 +4397,15 @@ function runApp(data) {
       let endDate = mppXmlDateToIso(mppXmlTextField(t, 'Finish'));
       if (!startDate || !endDate) continue;
       if (endDate < startDate) endDate = startDate;
+      // UID: de stabiele Task-ID uit MS Project (blijft gelijk over
+      // opeenvolgende opslagen van hetzelfde plan, anders dan WBS, dat
+      // verandert zodra taken verplaatst/heringedeeld worden) — de sleutel
+      // waarop computeMppImportPlan hieronder eerder geïmporteerde
+      // activiteiten herkent bij een herimport.
+      const uid = mppXmlTextField(t, 'UID');
+      if (!uid) continue;
       result.push({
+        uid: uid,
         wbs: mppXmlTextField(t, 'WBS'),
         name: name,
         startDate: startDate,
@@ -4390,17 +4419,76 @@ function runApp(data) {
     return result;
   }
 
-  function mppImportRowHtml(task, index) {
-    const badges =
-      (task.milestone ? '<span class="mpp-import-badge milestone">mijlpaal</span>' : '') +
-      (task.summary ? '<span class="mpp-import-badge summary">fase</span>' : '');
-    const indent = 14 * (task.outlineLevel - 1);
-    return '<label class="mpp-import-row" style="padding-left:' + (10 + indent) + 'px">' +
-      '<input type="checkbox" class="mpp-import-row-cb" data-index="' + index + '" checked>' +
+  // Bouwt het synchronisatieplan: vergelijkt de nieuw geparste taken (met hun
+  // stabiele MS Project-UID) met de al bestaande, eerder geïmporteerde
+  // activiteiten van dit project (herkenbaar aan een gezet mppUid — zie
+  // ACTIVITIES hierboven/tree.ts). Drie soorten regels:
+  // - 'create': taak zonder match -> nieuwe activiteit.
+  // - 'update'/'unchanged': taak met match op mppUid -> bestaande activiteit;
+  //   'unchanged' alleen als naam/start/eind exact gelijk zijn (dan is een PUT
+  //   feitelijk een no-op, dus standaard uitgevinkt in de lijst).
+  // - 'delete': een bestaande, eerder geïmporteerde activiteit (mppUid gezet)
+  //   waarvan de UID niet meer voorkomt in de nieuw aangeleverde takenlijst —
+  //   die taak is dus uit het MS Project-plan verwijderd of buiten WBS-niveau
+  //   3 komen te vallen. Activiteiten ZONDER mppUid (handmatig aangemaakt)
+  //   komen hier nooit in voor: die worden door een import nooit aangeraakt.
+  function computeMppImportPlan(tasks, existingActivities) {
+    const byUid = new Map();
+    (existingActivities || []).forEach((a) => { if (a.mppUid) byUid.set(a.mppUid, a); });
+    const seenUids = new Set();
+    const plan = [];
+    tasks.forEach((task) => {
+      const existing = byUid.get(task.uid);
+      if (!existing) {
+        plan.push({ action: 'create', task: task });
+        return;
+      }
+      seenUids.add(task.uid);
+      const changed = existing.name !== task.name || existing.startDate !== task.startDate || existing.endDate !== task.endDate;
+      plan.push({
+        action: changed ? 'update' : 'unchanged',
+        task: task,
+        existingId: existing.dbId,
+        existingOmschrijving: existing.omschrijving,
+      });
+    });
+    (existingActivities || []).forEach((a) => {
+      if (a.mppUid && !seenUids.has(a.mppUid)) {
+        plan.push({
+          action: 'delete',
+          existingId: a.dbId,
+          existingName: a.name,
+          existingStartDate: a.startDate,
+          existingEndDate: a.endDate,
+        });
+      }
+    });
+    return plan;
+  }
+
+  const MPP_ACTION_LABELS = { create: 'nieuw', update: 'wijzigen', unchanged: 'ongewijzigd', delete: 'verwijderen' };
+
+  function mppPlanRowHtml(item, index) {
+    const isDelete = item.action === 'delete';
+    const name = isDelete ? item.existingName : item.task.name;
+    const startDate = isDelete ? item.existingStartDate : item.task.startDate;
+    const endDate = isDelete ? item.existingEndDate : item.task.endDate;
+    const wbs = isDelete ? '' : (item.task.wbs || '');
+    const typeBadges = isDelete ? '' :
+      ((item.task.milestone ? '<span class="mpp-import-badge milestone">mijlpaal</span>' : '') +
+       (item.task.summary ? '<span class="mpp-import-badge summary">fase</span>' : ''));
+    const actionBadge = '<span class="mpp-import-badge action-' + item.action + '">' + MPP_ACTION_LABELS[item.action] + '</span>';
+    const indent = isDelete ? 0 : 14 * (item.task.outlineLevel - 1);
+    // Standaard uitgevinkt voor 'unchanged' (een PUT zou toch niets wijzigen)
+    // — 'create'/'update'/'delete' staan standaard aan, zodat "Importeer
+    // geselecteerde" zonder verder te klikken het plan volledig synchroniseert.
+    const checked = item.action !== 'unchanged';
+    return '<label class="mpp-import-row action-' + item.action + '" style="padding-left:' + (10 + indent) + 'px">' +
+      '<input type="checkbox" class="mpp-import-row-cb" data-index="' + index + '"' + (checked ? ' checked' : '') + '>' +
       '<span class="mpp-import-row-main">' +
-        '<span class="mpp-import-row-name">' + escapeHtml(task.name) + badges + '</span>' +
-        '<div class="mpp-import-row-meta">' + escapeHtml(task.wbs || '') + ' &middot; ' +
-          formatDateNL(task.startDate) + ' t/m ' + formatDateNL(task.endDate) + '</div>' +
+        '<span class="mpp-import-row-name">' + escapeHtml(name) + actionBadge + typeBadges + '</span>' +
+        '<div class="mpp-import-row-meta">' + (wbs ? escapeHtml(wbs) + ' &middot; ' : '') +
+          formatDateNL(startDate) + ' t/m ' + formatDateNL(endDate) + '</div>' +
       '</span>' +
     '</label>';
   }
@@ -4408,13 +4496,18 @@ function runApp(data) {
   function updateMppImportCount() {
     const boxes = mppImportListEl.querySelectorAll('.mpp-import-row-cb');
     const checked = mppImportListEl.querySelectorAll('.mpp-import-row-cb:checked').length;
-    mppImportCountEl.textContent = checked + ' van ' + boxes.length + ' geselecteerd';
+    const counts = { create: 0, update: 0, unchanged: 0, delete: 0 };
+    mppImportPlan.forEach((item) => { counts[item.action] = (counts[item.action] || 0) + 1; });
+    let summary = checked + ' van ' + boxes.length + ' geselecteerd — nieuw: ' + counts.create +
+      ', wijzigen: ' + counts.update + ', verwijderen: ' + counts.delete;
+    if (counts.unchanged) summary += ', ongewijzigd: ' + counts.unchanged;
+    mppImportCountEl.textContent = summary;
     mppImportConfirmBtn.disabled = checked === 0;
     mppImportSelectAllCb.checked = checked === boxes.length && boxes.length > 0;
   }
 
   function renderMppImportList() {
-    mppImportListEl.innerHTML = mppImportTasks.map((t, i) => mppImportRowHtml(t, i)).join('');
+    mppImportListEl.innerHTML = mppImportPlan.map((item, i) => mppPlanRowHtml(item, i)).join('');
     updateMppImportCount();
   }
 
@@ -4428,12 +4521,18 @@ function runApp(data) {
   });
 
   // Na het parsen (client-side voor .xml, via de server voor .mpp — zie
-  // hieronder) is de afhandeling identiek: lege lijst -> melding, anders de
-  // aanvink-lijst tonen. Eén plek voor die laatste stap voorkomt dat de twee
-  // bestandstype-paden uit de pas gaan lopen.
-  function finishMppImportParse() {
-    if (!mppImportTasks.length) {
+  // hieronder) is de afhandeling identiek: geparste taken -> synchronisatieplan
+  // (computeMppImportPlan, vergeleken met de al bestaande activiteiten van dit
+  // project) -> aanvink-lijst tonen. Eén plek voor die laatste stap voorkomt
+  // dat de twee bestandstype-paden uit de pas gaan lopen.
+  function finishMppImportParse(tasks) {
+    if (!tasks.length) {
       setMppImportStatus('Geen taken t/m WBS-niveau 3 gevonden in dit bestand.');
+      return;
+    }
+    mppImportPlan = computeMppImportPlan(tasks, ACTIVITIES[mppImportProjectCode] || []);
+    if (!mppImportPlan.length) {
+      setMppImportStatus('Alle taken uit dit bestand zijn al eerder geïmporteerd en ongewijzigd.');
       return;
     }
     renderMppImportList();
@@ -4469,8 +4568,7 @@ function runApp(data) {
           return res.text();
         })
         .then((xmlText) => {
-          mppImportTasks = parseMppProjectXml(xmlText);
-          finishMppImportParse();
+          finishMppImportParse(parseMppProjectXml(xmlText));
         })
         .catch((err) => {
           setMppImportStatus(err && err.message ? err.message : 'Kon het .mpp-bestand niet verwerken.');
@@ -4482,8 +4580,7 @@ function runApp(data) {
     const reader = new FileReader();
     reader.onload = () => {
       try {
-        mppImportTasks = parseMppProjectXml(String(reader.result));
-        finishMppImportParse();
+        finishMppImportParse(parseMppProjectXml(String(reader.result)));
       } catch (err) {
         setMppImportStatus(err && err.message ? err.message : 'Kon het bestand niet lezen.');
       }
@@ -4492,46 +4589,83 @@ function runApp(data) {
     reader.readAsText(file);
   });
 
+  // Dispatcht elk aangevinkte plan-item naar de bijpassende bestaande
+  // activities-route, per 'action' (zie computeMppImportPlan hierboven):
+  // 'create' -> POST (nieuwe activiteit, mppUid meegeven zodat een volgende
+  // herimport 'm herkent); 'update'/'unchanged' -> PUT op existingId (de
+  // bestaande omschrijving blijft behouden — die is niet uit MS Project
+  // afkomstig en mag niet overschreven worden); 'delete' -> DELETE op
+  // existingId (de taak is niet meer in het bronplan aanwezig).
   if (mppImportConfirmBtn) mppImportConfirmBtn.addEventListener('click', async () => {
     const boxes = Array.from(mppImportListEl.querySelectorAll('.mpp-import-row-cb:checked'));
     if (!boxes.length) return;
     mppImportConfirmBtn.disabled = true;
     mppImportChooseBtn.disabled = true;
     mppImportSelectAllCb.disabled = true;
-    let ok = 0, failed = 0;
+    let created = 0, updated = 0, deleted = 0, failed = 0;
     const total = boxes.length;
+    let done = 0;
     for (const cb of boxes) {
-      const task = mppImportTasks[parseInt(cb.dataset.index, 10)];
-      setMppImportStatus('Bezig met importeren… (' + (ok + failed + 1) + '/' + total + ')', 'busy');
+      const item = mppImportPlan[parseInt(cb.dataset.index, 10)];
+      setMppImportStatus('Bezig met synchroniseren… (' + (done + 1) + '/' + total + ')', 'busy');
+      done++;
       try {
-        const res = await fetch(
-          apiUrl + '/api/doelenbomen/' + doelenboomId + '/elements/' + encodeURIComponent(mppImportProjectCode) + '/activities',
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + authToken },
-            body: JSON.stringify({
-              name: task.name,
-              startDate: task.startDate,
-              endDate: task.endDate,
-              omschrijving: 'Geïmporteerd uit MS Project' + (task.wbs ? ' (WBS ' + task.wbs + ')' : ''),
-            }),
-          }
-        );
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        ok++;
+        if (item.action === 'create') {
+          const res = await fetch(
+            apiUrl + '/api/doelenbomen/' + doelenboomId + '/elements/' + encodeURIComponent(mppImportProjectCode) + '/activities',
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + authToken },
+              body: JSON.stringify({
+                name: item.task.name,
+                startDate: item.task.startDate,
+                endDate: item.task.endDate,
+                omschrijving: 'Geïmporteerd uit MS Project' + (item.task.wbs ? ' (WBS ' + item.task.wbs + ')' : ''),
+                mppUid: item.task.uid,
+              }),
+            }
+          );
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          created++;
+        } else if (item.action === 'update' || item.action === 'unchanged') {
+          const res = await fetch(
+            apiUrl + '/api/doelenbomen/' + doelenboomId + '/elements/' + encodeURIComponent(mppImportProjectCode) + '/activities/' + item.existingId,
+            {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + authToken },
+              body: JSON.stringify({
+                name: item.task.name,
+                startDate: item.task.startDate,
+                endDate: item.task.endDate,
+                omschrijving: item.existingOmschrijving,
+                mppUid: item.task.uid,
+              }),
+            }
+          );
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          updated++;
+        } else if (item.action === 'delete') {
+          const res = await fetch(
+            apiUrl + '/api/doelenbomen/' + doelenboomId + '/elements/' + encodeURIComponent(mppImportProjectCode) + '/activities/' + item.existingId,
+            { method: 'DELETE', headers: { Authorization: 'Bearer ' + authToken } }
+          );
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          deleted++;
+        }
       } catch (err) {
         failed++;
       }
     }
     mppImportSelectAllCb.disabled = false;
+    const summary = 'nieuw: ' + created + ', bijgewerkt: ' + updated + ', verwijderd: ' + deleted;
     if (failed) {
       mppImportChooseBtn.disabled = false;
       mppImportConfirmBtn.disabled = false;
-      setMppImportStatus(ok + ' geïmporteerd, ' + failed + ' mislukt.', ok ? 'ok' : 'error');
+      setMppImportStatus(summary + ', mislukt: ' + failed + '.', (created || updated || deleted) ? 'ok' : 'error');
     } else {
-      setMppImportStatus(ok + ' activiteiten geïmporteerd. Boom wordt herladen…', 'ok');
+      setMppImportStatus(summary + '. Boom wordt herladen…', 'ok');
     }
-    if (ok > 0) reloadTreeKeepingFocus(700);
+    if (created + updated + deleted > 0) reloadTreeKeepingFocus(700);
   });
 
   // ---- Projectstatus bewerken (upsert, zie api/src/routes/projectStatus.ts) ----
@@ -5465,6 +5599,9 @@ function adaptTreeResponse(tree) {
   Object.keys(tree.activities || {}).forEach((id) => {
     ACTIVITIES[id] = (tree.activities[id] || []).map((a) => ({
       dbId: a.id, name: a.name, startDate: a.startDate, endDate: a.endDate, omschrijving: a.omschrijving,
+      // Alleen gezet voor via MS Project geïmporteerde activiteiten — zie
+      // computeMppImportPlan hierboven.
+      mppUid: a.mppUid || null,
     }));
   });
 

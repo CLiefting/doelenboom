@@ -164,6 +164,11 @@ export type Activity = {
   startDate: string;
   endDate: string;
   omschrijving: string;
+  // Alleen gezet voor via MS Project geïmporteerde activiteiten — de stabiele
+  // Task-UID uit het bronbestand, gebruikt om een herimport te laten
+  // bijwerken/verwijderen i.p.v. dubbele rijen aan te maken (tree.html:
+  // computeMppImportPlan). null voor handmatig aangemaakte activiteiten.
+  mppUid: string | null;
 };
 
 export type Tag = { code: string; name: string; categorie: string; omschrijving: string };

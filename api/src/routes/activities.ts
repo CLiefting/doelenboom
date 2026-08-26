@@ -13,10 +13,16 @@ import { requireWritableDoelenboom, requireModule } from '../rbac.js';
 // Bulk-importeren vanuit MS Project (zie /import-mpp onderaan): tree.html
 // parseert een MS Project XML-export (rechtstreeks aangeleverd, of via
 // /import-mpp uit een .mpp-bestand omgezet — zie hieronder) volledig
-// client-side met DOMParser (parseMppProjectXml) en roept voor elke door de
-// gebruiker aangevinkte taak gewoon de POST hieronder aan, één voor één. Zo
-// bestaat de WBS-niveau-/mijlpaal-/fase-filterlogica maar op één plek
-// (JavaScript, in de browser) voor beide bestandstypen.
+// client-side met DOMParser (parseMppProjectXml) en bouwt daaruit een
+// synchronisatieplan (computeMppImportPlan): nieuwe taken -> POST hieronder,
+// eerder geïmporteerde taken die gewijzigd zijn -> PUT, eerder geïmporteerde
+// taken die niet meer in het plan voorkomen -> DELETE. Matching gebeurt op
+// mpp_uid (de stabiele Task-UID uit MS Project, zie het kolomcommentaar in
+// db/init.sql) — zo hoeft een herimport van hetzelfde (bijgewerkte) plan niet
+// telkens dubbele activiteiten aan te maken. Handmatig aangemaakte activiteiten
+// (mpp_uid = null) worden door een import nooit aangeraakt. Zo bestaat de
+// WBS-niveau-/mijlpaal-/fase-/diff-logica maar op één plek (JavaScript, in de
+// browser) voor beide bestandstypen.
 export const activitiesRouter = Router();
 activitiesRouter.use(requireAuth);
 // Per route meegeven (niet via router.use()) — zie toelichting in elements.ts.
@@ -32,7 +38,7 @@ const requireProjectenModule = requireModule('projecten', 'id');
 // SQL-aliassen zodat de kolomnamen 1-op-1 matchen met wat tree.ts/de frontend
 // al verwacht (camelCase), zonder dat de aanroeper zelf hoeft te mappen.
 const ACTIVITY_SELECT_FIELDS =
-  'id, name, start_date as "startDate", end_date as "endDate", omschrijving';
+  'id, name, start_date as "startDate", end_date as "endDate", omschrijving, mpp_uid as "mppUid"';
 
 type ActivityInput = {
   errors: string[];
@@ -40,6 +46,7 @@ type ActivityInput = {
   startDate: string | null;
   endDate: string | null;
   omschrijving: string;
+  mppUid: string | null;
 };
 
 // "YYYY-MM-DD" — zelfde eenvoudige check als elders in de codebase voor
@@ -67,6 +74,10 @@ function readActivityBody(body: unknown): ActivityInput {
     startDate,
     endDate,
     omschrijving: typeof b.omschrijving === 'string' ? b.omschrijving : '',
+    // Alleen gezet door de MS Project-import (computeMppImportPlan in
+    // tree.html) — bij een gewone create/edit via het formulier ontbreekt dit
+    // veld, en blijft de activiteit dus terecht "handmatig" (mpp_uid = null).
+    mppUid: typeof b.mppUid === 'string' && b.mppUid ? b.mppUid : null,
   };
 }
 
@@ -84,10 +95,10 @@ activitiesRouter.post('/doelenbomen/:id/elements/:code/activities', requireEdito
   if (!elementId) return res.status(404).json({ error: `Element "${req.params.code}" niet gevonden.` });
 
   const result = await pool.query(
-    `insert into activities (element_id, name, start_date, end_date, omschrijving)
-     values ($1,$2,$3,$4,$5)
+    `insert into activities (element_id, name, start_date, end_date, omschrijving, mpp_uid)
+     values ($1,$2,$3,$4,$5,$6)
      returning ${ACTIVITY_SELECT_FIELDS}`,
-    [elementId, input.name, input.startDate, input.endDate, input.omschrijving]
+    [elementId, input.name, input.startDate, input.endDate, input.omschrijving, input.mppUid]
   );
   res.status(201).json(result.rows[0]);
 });
@@ -100,12 +111,19 @@ activitiesRouter.put('/doelenbomen/:id/elements/:code/activities/:activityId', r
   const elementId = await findElementId(req.params.id, req.params.code);
   if (!elementId) return res.status(404).json({ error: `Element "${req.params.code}" niet gevonden.` });
 
+  // coalesce: een gewone edit via het formulier (tree.html: openActivityModal)
+  // stuurt geen mppUid mee — dat mag het bestaande mpp_uid (indien aanwezig,
+  // dus door MS Project geïmporteerd) niet wissen, anders verliest een
+  // handmatig bewerkte, ooit geïmporteerde activiteit haar koppeling en zou
+  // een volgende herimport 'm ten onrechte als "niet meer in het plan"
+  // (dus te verwijderen) aanmerken. Alleen de import-flow zelf stuurt hier
+  // bewust een waarde voor mee.
   const result = await pool.query(
     `update activities
-     set name = $1, start_date = $2, end_date = $3, omschrijving = $4
-     where id = $5 and element_id = $6
+     set name = $1, start_date = $2, end_date = $3, omschrijving = $4, mpp_uid = coalesce($5, mpp_uid)
+     where id = $6 and element_id = $7
      returning ${ACTIVITY_SELECT_FIELDS}`,
-    [input.name, input.startDate, input.endDate, input.omschrijving, req.params.activityId, elementId]
+    [input.name, input.startDate, input.endDate, input.omschrijving, input.mppUid, req.params.activityId, elementId]
   );
   if (result.rows.length === 0) return res.status(404).json({ error: 'Activiteit niet gevonden.' });
   res.json(result.rows[0]);
