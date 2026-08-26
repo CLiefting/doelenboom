@@ -568,13 +568,31 @@
      — zie activityGanttHtml (timelineLegendIcon('mijlpaal', true)). */
   .activity-milestone-marker { position: absolute; top: 50%; transform: translate(-50%, -50%); line-height: 0; }
   .activity-row-milestone-badge { color: #c9660a; font-size: 10px; vertical-align: 1px; }
+  /* Fase ("summary task")-activiteit: dunnere balk dan .activity-bar, met
+     verticale eindmarkeringen (::before/::after) — zelfde soort weergave als
+     MS Project zelf voor een samenvattende taak, in een eigen kleur (grijsblauw,
+     zelfde tint als de "fase"-badge in de import-lijst) i.p.v. het navy van een
+     gewone activiteit-balk. */
+  .activity-summary-bar {
+    position: absolute; top: 50%; height: 3px; min-width: 6px;
+    background: #5a6472; border-radius: 1px; transform: translateY(-50%);
+  }
+  .activity-summary-bar::before, .activity-summary-bar::after {
+    content: ''; position: absolute; top: -4px; width: 3px; height: 11px;
+    background: #5a6472; border-radius: 1px;
+  }
+  .activity-summary-bar::before { left: 0; }
+  .activity-summary-bar::after { right: 0; }
+  /* WBS-nummer tussen haakjes vóór de taaknaam — kleiner en lichter dan de
+     naam zelf. */
+  .activity-row-wbs { font-size: 10.5px; font-weight: 400; color: #999; }
   .activity-row-actions { display: flex; gap: 4px; flex-shrink: 0; }
   .activity-add-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
-  .activity-field-milestone-label {
+  .activity-field-checkbox-label {
     display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: #444;
     font-weight: 400; margin-top: 2px;
   }
-  .activity-field-milestone-label input { display: inline-block; width: auto; margin: 0; }
+  .activity-field-checkbox-label input { display: inline-block; width: auto; margin: 0; }
 
   /* Importeren van taken uit MS Project (XML-export) — zie parseMppProjectXml/
      openMppImportModal. Een bredere variant van .element-modal, want de
@@ -1180,8 +1198,11 @@
         <label>Omschrijving
           <textarea id="activity-field-omschrijving" rows="2"></textarea>
         </label>
-        <label class="activity-field-milestone-label">
+        <label class="activity-field-checkbox-label">
           <input type="checkbox" id="activity-field-milestone"> Mijlpaal (toont een ruit-icoon op de startdatum i.p.v. een balkje)
+        </label>
+        <label class="activity-field-checkbox-label">
+          <input type="checkbox" id="activity-field-summary"> Fase / samenvattende taak (toont een dunnere balk met eindmarkeringen)
         </label>
         <p class="element-modal-status" id="activity-modal-status"></p>
         <div class="element-modal-actions">
@@ -2570,21 +2591,33 @@ function runApp(data) {
       const right = Math.min(Math.max(pctFor(e), 0), 100);
       const width = Math.max(right - left, 1.5);
       const dateLabel = a.isMilestone ? formatDateNL(a.startDate) : formatDateNL(a.startDate) + ' t/m ' + formatDateNL(a.endDate);
-      const title = escapeHtml(a.name) + ' — ' + (a.isMilestone ? 'mijlpaal ' : '') + dateLabel +
+      const kindLabel = a.isMilestone ? 'mijlpaal ' : a.isSummary ? 'fase ' : '';
+      const title = escapeHtml(a.name) + ' — ' + kindLabel + dateLabel +
         (a.omschrijving ? ' — ' + escapeHtml(a.omschrijving) : '');
-      // Mijlpaal: ruit-icoon op de (start)datum i.p.v. een balkje — zelfde
-      // visuele taal als de ruit in de projecttijdlijn hierboven
-      // (timelineLegendIcon), gevuld zodat 'm goed opvalt tussen de balkjes.
+      // Drie varianten voor de track, in volgorde van voorrang (een taak is
+      // in de praktijk maar één van de drie): mijlpaal -> ruit-icoon op de
+      // (start)datum i.p.v. een balkje, zelfde visuele taal als de ruit in de
+      // projecttijdlijn hierboven (timelineLegendIcon), gevuld zodat 'm goed
+      // opvalt tussen de balkjes. Fase ("summary task") -> een dunnere balk
+      // met verticale eindmarkeringen in een eigen kleur (activity-summary-bar,
+      // CSS), zelfde soort weergave als MS Project zelf voor een
+      // samenvattende taak gebruikt — duidelijk anders dan een gewone
+      // activiteit-balk, ook al beslaat een fase net als die wél een periode.
       const track = a.isMilestone
         ? '<span class="activity-milestone-marker" style="left:' + left + '%" title="' + title + '">' +
             timelineLegendIcon('mijlpaal', true) +
           '</span>'
+        : a.isSummary
+        ? '<div class="activity-summary-bar" style="left:' + left + '%;width:' + width + '%" title="' + title + '"></div>'
         : '<div class="activity-bar" style="left:' + left + '%;width:' + width + '%" title="' + title + '"></div>';
+      // WBS-nummer (indien aanwezig, dus via MS Project geïmporteerd) tussen
+      // haakjes in kleiner lettertype vóór de taaknaam.
+      const wbsLabel = a.wbs ? '<span class="activity-row-wbs">(' + escapeHtml(a.wbs) + ')</span> ' : '';
       return '<div class="activity-gantt-row">' +
         '<div class="activity-row-head">' +
           '<span class="activity-row-label" title="' + escapeHtml(a.name) + '">' +
             (a.isMilestone ? '<span class="activity-row-milestone-badge" title="Mijlpaal">&#9670;</span> ' : '') +
-            escapeHtml(a.name) +
+            wbsLabel + escapeHtml(a.name) +
           '</span>' +
           '<span class="activity-row-actions crud-only">' +
             '<button type="button" class="btn ghost btn-xs activity-edit-btn" data-code="' + escapeHtml(id) + '" data-id="' + escapeHtml(String(a.dbId)) + '" title="Bewerken">&#9998;</button>' +
@@ -4227,6 +4260,7 @@ function runApp(data) {
   const activityFieldEnd = document.getElementById('activity-field-end');
   const activityFieldOmschrijving = document.getElementById('activity-field-omschrijving');
   const activityFieldMilestone = document.getElementById('activity-field-milestone');
+  const activityFieldSummary = document.getElementById('activity-field-summary');
   const activityModalCancelBtn = document.getElementById('activity-modal-cancel');
 
   let activityModalMode = 'create';
@@ -4253,6 +4287,7 @@ function runApp(data) {
       activityFieldEnd.value = toDateInputValue(existing.endDate);
       activityFieldOmschrijving.value = existing.omschrijving || '';
       activityFieldMilestone.checked = !!existing.isMilestone;
+      activityFieldSummary.checked = !!existing.isSummary;
     } else {
       activityModalTitle.textContent = 'Nieuwe activiteit';
       activityForm.reset();
@@ -4278,6 +4313,7 @@ function runApp(data) {
       endDate: activityFieldEnd.value || null,
       omschrijving: activityFieldOmschrijving.value.trim(),
       isMilestone: activityFieldMilestone.checked,
+      isSummary: activityFieldSummary.checked,
     };
     if (!payload.name) { setActivityModalStatus('Naam is verplicht.'); return; }
     if (!payload.startDate || !payload.endDate) { setActivityModalStatus('Start- en einddatum zijn verplicht.'); return; }
@@ -4505,7 +4541,8 @@ function runApp(data) {
       }
       seenUids.add(task.uid);
       const changed = existing.name !== task.name || existing.startDate !== task.startDate ||
-        existing.endDate !== task.endDate || !!existing.isMilestone !== !!task.milestone;
+        existing.endDate !== task.endDate || !!existing.isMilestone !== !!task.milestone ||
+        !!existing.isSummary !== !!task.summary || (existing.wbs || '') !== (task.wbs || '');
       plan.push({
         action: changed ? 'update' : 'unchanged',
         task: task,
@@ -4684,6 +4721,8 @@ function runApp(data) {
                 omschrijving: 'Geïmporteerd uit MS Project' + (item.task.wbs ? ' (WBS ' + item.task.wbs + ')' : ''),
                 mppUid: item.task.uid,
                 isMilestone: item.task.milestone,
+                wbs: item.task.wbs || null,
+                isSummary: item.task.summary,
               }),
             }
           );
@@ -4702,6 +4741,8 @@ function runApp(data) {
                 omschrijving: item.existingOmschrijving,
                 mppUid: item.task.uid,
                 isMilestone: item.task.milestone,
+                wbs: item.task.wbs || null,
+                isSummary: item.task.summary,
               }),
             }
           );
@@ -5669,6 +5710,12 @@ function adaptTreeResponse(tree) {
       mppUid: a.mppUid || null,
       // Bepaalt of activityGanttHtml een ruit-icoon toont i.p.v. een balkje.
       isMilestone: !!a.isMilestone,
+      // WBS-nummer (bv. "2.1"), puur informatief — getoond tussen haakjes
+      // vóór de taaknaam. null voor handmatig aangemaakte activiteiten.
+      wbs: a.wbs || null,
+      // Bepaalt of activityGanttHtml een dunnere "fase"-balk met
+      // eindmarkeringen toont i.p.v. een gewone balk.
+      isSummary: !!a.isSummary,
     }));
   });
 

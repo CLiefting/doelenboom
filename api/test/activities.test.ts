@@ -200,6 +200,57 @@ describe('activities (activiteiten-planning) CRUD', () => {
     });
   });
 
+  // wbs (coalesce, zoals mppUid) en isSummary (altijd meegestuurd, zoals
+  // isMilestone) — zie activityGanttHtml (tree.html): fase-taken tonen een
+  // dunnere balk met eindmarkeringen, en het WBS-nummer verschijnt tussen
+  // haakjes vóór de taaknaam.
+  describe('wbs / isSummary ("fase"-taken uit MS Project)', () => {
+    it('wbs en isSummary worden opgeslagen bij aanmaken en verschijnen in GET tree', async () => {
+      const created = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P1/activities`, {
+        token: adminToken,
+        body: {
+          name: 'Fase 2', startDate: '2026-09-01', endDate: '2026-09-30',
+          wbs: '2', isSummary: true, mppUid: 'task-fase-2',
+        },
+      });
+      assert.equal(created.status, 201);
+      assert.equal(created.body.wbs, '2');
+      assert.equal(created.body.isSummary, true);
+
+      const tree = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: adminToken });
+      const inTree = tree.body.activities['P1'].find((a: any) => a.id === created.body.id);
+      assert.equal(inTree.wbs, '2');
+      assert.equal(inTree.isSummary, true);
+    });
+
+    it('een PUT zonder wbs laat een bestaand wbs ongemoeid (coalesce, zoals mppUid)', async () => {
+      const created = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P1/activities`, {
+        token: adminToken,
+        body: { name: 'Blijft WBS houden', startDate: '2026-09-01', endDate: '2026-09-05', wbs: '3.1' },
+      });
+      const updated = await req('PUT', `/api/doelenbomen/${doelenboomId}/elements/P1/activities/${created.body.id}`, {
+        token: adminToken,
+        body: { name: 'Blijft WBS houden (bewerkt)', startDate: '2026-09-02', endDate: '2026-09-06' },
+      });
+      assert.equal(updated.status, 200);
+      assert.equal(updated.body.wbs, '3.1');
+    });
+
+    it('een PUT zonder isSummary in de body zet het terug op false (geen coalesce, zoals isMilestone)', async () => {
+      const created = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P1/activities`, {
+        token: adminToken,
+        body: { name: 'Was fase', startDate: '2026-09-01', endDate: '2026-09-10', isSummary: true },
+      });
+      assert.equal(created.body.isSummary, true);
+
+      const updated = await req('PUT', `/api/doelenbomen/${doelenboomId}/elements/P1/activities/${created.body.id}`, {
+        token: adminToken,
+        body: { name: 'Was fase', startDate: '2026-09-01', endDate: '2026-09-10' },
+      });
+      assert.equal(updated.body.isSummary, false);
+    });
+  });
+
   // DELETE .../activities (zonder :activityId) — wist in één keer ALLE
   // activiteiten van een project-element, gebruikt door de "Alles wissen"-knop
   // in tree.html (deleteAllActivities, na bevestiging via showConfirm). Eigen

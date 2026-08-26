@@ -173,6 +173,14 @@ export type Activity = {
   // handmatig te zetten) — bepaalt of de Gantt-balk (tree.html:
   // activityGanttHtml) een ruit-icoon toont i.p.v. een balkje van één dag.
   isMilestone: boolean;
+  // Het WBS-nummer uit MS Project (bv. "2.1"), puur informatief — getoond
+  // tussen haakjes vóór de taaknaam. null voor handmatig aangemaakte
+  // activiteiten.
+  wbs: string | null;
+  // Bij MS Project-import overgenomen van de taak z'n Summary-vlag
+  // ("fase"/samenvattende taak, ook handmatig te zetten) — toont in de Gantt
+  // een dunnere balk met eindmarkeringen i.p.v. een gewone balk.
+  isSummary: boolean;
 };
 
 export type Tag = { code: string; name: string; categorie: string; omschrijving: string };

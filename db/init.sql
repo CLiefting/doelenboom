@@ -256,6 +256,13 @@ create index if not exists idx_products_element on products(element_id);
 -- Milestone-vlag (start = eind bij een mijlpaal); ook handmatig te zetten via
 -- het activiteiten-formulier. Bepaalt of de Gantt-balk (activityGanttHtml)
 -- een ruit-icoon toont i.p.v. een balkje van één dag.
+-- wbs: het WBS-nummer uit MS Project (bv. "2.1"), puur informatief — getoond
+-- tussen haakjes vóór de taaknaam in de Gantt-rij. Net als mpp_uid alleen
+-- gezet door de import en met coalesce bewaard bij een handmatige bewerking
+-- (zie routes/activities.ts) — NULL voor handmatig aangemaakte activiteiten.
+-- is_summary: bij MS Project-import 1-op-1 overgenomen van de taak z'n
+-- Summary-vlag ("fase"/samenvattende taak); ook handmatig te zetten. Toont in
+-- de Gantt een dunnere balk met eindmarkeringen i.p.v. een gewone balk.
 create table if not exists activities (
   id bigserial primary key,
   element_id bigint not null references elements(id) on delete cascade,
@@ -264,7 +271,9 @@ create table if not exists activities (
   end_date date not null,
   omschrijving text not null default '',
   mpp_uid text,
-  is_milestone boolean not null default false
+  is_milestone boolean not null default false,
+  wbs text,
+  is_summary boolean not null default false
 );
 create index if not exists idx_activities_element on activities(element_id);
 create index if not exists idx_activities_mpp_uid on activities(element_id, mpp_uid) where mpp_uid is not null;
