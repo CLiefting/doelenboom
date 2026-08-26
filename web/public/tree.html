@@ -2312,11 +2312,15 @@ function runApp(data) {
   // de activiteiten-datums te berekenen (zie activitiesSectionHtml/
   // projectSectionHtml). null als het project geen enkele gedateerde
   // product/mijlpaal heeft — dan is er geen projectas om op aan te sluiten.
+  // "Vandaag" wordt altijd meegeteld in het bereik (ook als de hele project-
+  // periode in het verleden of de toekomst ligt), anders valt de vandaag-lijn
+  // buiten de getoonde spanne en verdwijnt hij gewoon — zie productTimelineHtml.
   function computeProjectTimelineBounds(products) {
     const markers = buildTimelineMarkers(products);
     if (!markers.length) return null;
-    const rawMinT = markers[0].t;
-    const rawMaxT = markers[markers.length - 1].t;
+    const now = Date.now();
+    const rawMinT = Math.min(markers[0].t, now);
+    const rawMaxT = Math.max(markers[markers.length - 1].t, now);
     return timelineBandBoundaries(
       rawMinT === rawMaxT ? rawMinT - 86400000 : rawMinT,
       rawMinT === rawMaxT ? rawMaxT + 86400000 : rawMaxT
@@ -2333,8 +2337,12 @@ function runApp(data) {
     const markers = buildTimelineMarkers(products);
     if (!markers.length) return '';
 
-    const rawMinT = markers[0].t;
-    const rawMaxT = markers[markers.length - 1].t;
+    // "Vandaag" telt mee in het bereik (zie computeProjectTimelineBounds) zodat
+    // de vandaag-lijn zichtbaar blijft, ook als het hele project vóór of ná
+    // vandaag ligt.
+    const now = Date.now();
+    const rawMinT = Math.min(markers[0].t, now);
+    const rawMaxT = Math.max(markers[markers.length - 1].t, now);
     const { bounds, quarterly } = timelineBandBoundaries(
       rawMinT === rawMaxT ? rawMinT - 86400000 : rawMinT,
       rawMinT === rawMaxT ? rawMaxT + 86400000 : rawMaxT
@@ -2358,9 +2366,9 @@ function runApp(data) {
       }
     }
 
-    // "Vandaag"-lijn — alleen als de huidige datum binnen de getoonde spanne valt.
+    // "Vandaag"-lijn — het bereik bevat "now" altijd (zie hierboven), dus deze
+    // check is puur een safety-net (bv. afrondingsverschil op de exacte rand).
     let todayHtml = '';
-    const now = Date.now();
     if (now >= minT && now <= maxT) {
       todayHtml = '<div class="timeline-today-tick" style="left:' + pctFor(now) + '%">' +
         '<span class="timeline-today-label">vandaag</span></div>';
@@ -2417,6 +2425,11 @@ function runApp(data) {
         if (!isNaN(e)) maxT = Math.max(maxT, e);
       });
       if (!isFinite(minT) || !isFinite(maxT)) return '<div class="dp-empty-note">Geen geldige data bij de activiteiten.</div>';
+      // "Vandaag" telt mee in het bereik (zie computeProjectTimelineBounds
+      // hierboven) zodat de vandaag-lijn ook hier zichtbaar blijft.
+      const nowFallback = Date.now();
+      minT = Math.min(minT, nowFallback);
+      maxT = Math.max(maxT, nowFallback);
       boundsInfo = timelineBandBoundaries(
         minT === maxT ? minT - 86400000 : minT,
         minT === maxT ? maxT + 86400000 : maxT
