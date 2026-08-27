@@ -282,6 +282,11 @@
      API is de echte autorisatiegrens (rbac.ts) — dit is puur UI. */
   body.read-only .crud-only { display: none !important; }
   body:not(.role-admin) .admin-only { display: none !important; }
+  /* "Project exporteren/importeren als Excel" in het Bestand-menu — alleen
+     zinvol met een geopend project (Producten/Activiteiten/status bestaan
+     alleen dán), zie renderProjectPanel die deze klasse zet/wist op basis van
+     currentProjectCode + projectenActive. */
+  body:not(.project-selected) .project-selected-only { display: none !important; }
 
   /* Watermerk "Licentie verlopen voor {tenant}" — zie renderLicenseExpiredWatermark()
      verderop, aangeroepen vanuit boot() op basis van tree.licenseExpired
@@ -474,6 +479,10 @@
   }
   .pp-header-divider { width: 1px; align-self: stretch; background: #e5e7eb; min-height: 22px; }
   .pp-header-note { font-size: 12.5px; color: #555; line-height: 1.45; margin: 0 0 16px; }
+  /* Excel-export/import-knop rechtsboven in de projectkaart — margin-left:
+     auto duwt 'm binnen de flex-rij (.pp-header) naar het eind, ook als er
+     minder Org./Tags-groepen zijn (bv. read-only, geen crud-knoppen). */
+  .pp-header-excel-btn { margin-left: auto; }
   .dp-project-title {
     display: flex; align-items: center; justify-content: space-between; gap: 8px;
     font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;
@@ -766,6 +775,26 @@
   .mpp-import-badge.action-delete { background: #fdecea; color: #c0392b; }
   .mpp-import-row.action-delete { background: #fef8f7; }
   .mpp-import-row.action-delete .mpp-import-row-name { text-decoration: line-through; color: #a33; }
+  /* Product-type-badges in het Project-Excel-wijzigingsoverzicht (project-excel-
+     modal-backdrop) — eigen kleuren i.p.v. milestone/summary hierboven
+     hergebruiken (die zijn voor activiteiten), zelfde kleuren als
+     .product-type-deliverable/.product-type-mijlpaal op de tiles zelf. */
+  .mpp-import-badge.product-deliverable { background: #e7ecf5; color: #2F5597; }
+  .mpp-import-badge.product-mijlpaal { background: #fdeee0; color: #c9660a; }
+
+  /* Project-Excel-modal (project-excel-modal-backdrop) — export-knop bovenaan,
+     los van de import-sectie eronder (die alleen crud mag zien). Hergebruikt
+     verder de .mpp-import-*-klassen hierboven voor de producten-/
+     activiteitenlijst (computeProjectImportPlan/renderProjectExcelPlan). */
+  .project-excel-export-row { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+  .project-excel-import-section { border-top: 1px solid #eee; padding-top: 4px; }
+  .project-excel-plan-project {
+    font-size: 12.5px; color: #444; background: #f7f8fa; border-radius: 8px;
+    padding: 10px 12px; margin: 10px 0 4px; line-height: 1.5;
+  }
+  .project-excel-plan-project label { display: flex; align-items: flex-start; gap: 8px; font-weight: 600; margin: 0; }
+  .project-excel-plan-project ul { margin: 6px 0 0 22px; padding: 0; font-weight: 400; color: #666; }
+  .project-excel-plan-project li { margin: 2px 0; }
 
   /* Overzicht "alle project-tijdlijnen" (#timelines-view) — een losse lijst
      van kaarten, één per project, elk met dezelfde tijdbalk als in de
@@ -1143,6 +1172,13 @@
             <div class="file-menu-separator admin-only"></div>
             <button type="button" class="file-menu-item" id="export-xlsx-btn">Exporteer als Excel</button>
             <button type="button" class="file-menu-item" id="export-html-btn">Exporteer als HTML-bestand</button>
+            <!-- Alleen zichtbaar met een geselecteerd project (zie .project-
+                 selected-only-CSS-regel + renderProjectPanel die de body-klasse
+                 zet) — dezelfde actie als de "Excel"-knop rechtsboven in de
+                 projectkaart zelf (project-excel-open-btn), hier via
+                 currentProjectCode i.p.v. een data-code-attribuut. -->
+            <div class="file-menu-separator project-selected-only"></div>
+            <button type="button" class="file-menu-item project-selected-only" id="nav-project-excel-btn">Project exporteren/importeren als Excel</button>
           </div>
         </div>
       </div>
@@ -1483,6 +1519,72 @@
     </div>
   </div>
 
+  <!-- Export/import van ALLE gegevens van één project (producten, activiteiten,
+       projectstatus, tags, organisatieonderdelen) als Excel-bestand — zie
+       excel-service/app/project_workbook.py voor het tabbladformaat en
+       computeProjectImportPlan/openProjectExcelModal hieronder voor de
+       wijzigingsoverzicht-aanpak (zelfde principe als het MS Project-import-
+       modal hierboven: eerst een overzicht, pas na bevestigen toepassen).
+       Bewust een los modal i.p.v. in mpp-import-modal-backdrop hierboven
+       geplakt: dat gaat alleen over activiteiten uit MS Project, dit hier over
+       de volledige projectgegevens in Doelenboom's eigen Excel-formaat. -->
+  <div class="element-modal-backdrop" id="project-excel-modal-backdrop">
+    <div class="element-modal wide">
+      <h3>Project-gegevens: Excel</h3>
+      <p class="element-modal-hint">
+        Exporteer alle gegevens van dit project (producten, activiteiten, projectstatus, tags en
+        organisatieonderdelen) als Excel-bestand, of importeer een eerder geëxporteerd (en eventueel
+        bewerkt) bestand terug. Een import toont eerst een wijzigingsoverzicht — er wordt niets toegepast
+        vóór bevestiging. Producten/activiteiten worden gematcht op hun ID-kolom: een lege ID wordt een
+        nieuw item, en een bestaand item waarvan de ID niet meer in het bestand voorkomt wordt aangeboden
+        om te verwijderen.
+      </p>
+      <div class="project-excel-export-row">
+        <button type="button" class="btn ghost" id="project-excel-export-btn">Exporteren als Excel</button>
+        <span class="element-modal-status" id="project-excel-export-status"></span>
+      </div>
+
+      <div class="project-excel-import-section crud-only">
+        <div class="dp-products-title"><span>Importeren</span></div>
+        <input type="file" id="project-excel-import-file-input" accept=".xlsx" style="display:none">
+        <div>
+          <button type="button" class="btn ghost" id="project-excel-import-choose-btn">Bestand kiezen&hellip;</button>
+          <span id="project-excel-import-filename" class="mpp-import-filename"></span>
+        </div>
+        <p class="element-modal-status" id="project-excel-import-status"></p>
+
+        <div id="project-excel-plan-wrap" style="display:none">
+          <div id="project-excel-plan-project" class="project-excel-plan-project"></div>
+
+          <div class="dp-products-title"><span>Producten (<span id="project-excel-products-count">0</span>)</span></div>
+          <div id="project-excel-products-wrap">
+            <div class="mpp-import-list-actions">
+              <label class="mpp-import-select-all">
+                <input type="checkbox" id="project-excel-products-select-all" checked> Alles (de)selecteren
+              </label>
+            </div>
+            <div id="project-excel-products-list" class="mpp-import-list"></div>
+          </div>
+
+          <div class="dp-products-title"><span>Activiteiten (<span id="project-excel-activities-count">0</span>)</span></div>
+          <div id="project-excel-activities-wrap">
+            <div class="mpp-import-list-actions">
+              <label class="mpp-import-select-all">
+                <input type="checkbox" id="project-excel-activities-select-all" checked> Alles (de)selecteren
+              </label>
+            </div>
+            <div id="project-excel-activities-list" class="mpp-import-list"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="element-modal-actions">
+        <button type="button" class="btn ghost" id="project-excel-modal-cancel">Sluiten</button>
+        <button type="button" class="btn crud-only" id="project-excel-import-confirm-btn" style="display:none" disabled>Importeer geselecteerde</button>
+      </div>
+    </div>
+  </div>
+
   <div class="element-modal-backdrop" id="project-status-modal-backdrop">
     <div class="element-modal">
       <h3>Projectstatus bewerken</h3>
@@ -1780,6 +1882,12 @@ function runApp(data) {
   const backBtn = document.getElementById('back-btn');
   const detailPanel = document.getElementById('detail-panel');
   const projectPanelEl = document.getElementById('project-panel');
+  // Projectcode van de op dit moment getoonde projectkaart (project-panel),
+  // null als er geen project open staat — bijgehouden door renderProjectPanel.
+  // Gebruikt door nav-project-excel-btn (Bestand-menu) om te weten welk
+  // project geëxporteerd/geïmporteerd moet worden; de "Excel"-knop in de
+  // projectkaart zelf heeft dat al via data-code en heeft dit niet nodig.
+  let currentProjectCode = null;
   const timelinesViewEl = document.getElementById('timelines-view');
   const tooltipEl = document.getElementById('hover-tooltip');
   const searchInput = document.getElementById('search-input');
@@ -3367,6 +3475,16 @@ function runApp(data) {
         (orgHtml || '<span class="dp-empty-note-inline">geen</span>') +
         '<button type="button" class="btn ghost btn-xs dp-add-org-btn crud-only" data-code="' + escapeHtml(id) + '" title="Organisatieonderdeel koppelen">+ OE</button>' +
       '</div>' +
+      // Rechtsboven in de projectkaart (margin-left: auto duwt 'm naar het
+      // eind van de flex-rij, zie .pp-header-excel-btn) — export/import van
+      // alle projectgegevens als Excel (zie project-excel-modal-backdrop),
+      // alleen relevant met de Projecten-module actief (producten/
+      // activiteiten/status bestaan anders niet). Zelfde knop staat ook in
+      // het Bestand-menu, zie wireProjectExcelFileMenuItem.
+      (projectenActive
+        ? '<button type="button" class="btn ghost btn-xs pp-header-excel-btn project-excel-open-btn" data-code="' +
+            escapeHtml(id) + '" title="Project-gegevens exporteren/importeren als Excel">&#8646; Excel</button>'
+        : '') +
     '</div>';
 
     if (ps.toelichting || ps.datum) {
@@ -3493,10 +3611,17 @@ function runApp(data) {
     if (!d || d.type !== PROJECT_ROLE_TYPE) {
       projectPanelEl.classList.remove('visible');
       projectPanelEl.innerHTML = '';
+      // Geen project (meer) open — "Project exporteren/importeren als Excel"
+      // in het Bestand-menu verdwijnt weer (zie .project-selected-only-CSS-
+      // regel en currentProjectCode, gebruikt door nav-project-excel-btn).
+      currentProjectCode = null;
+      document.body.classList.remove('project-selected');
       return;
     }
     projectPanelEl.innerHTML = projectHeaderHtml(id, color) + projectSectionHtml(id);
     projectPanelEl.classList.add('visible');
+    currentProjectCode = id;
+    document.body.classList.toggle('project-selected', projectenActive);
   }
 
   function ragBadgeHtml(id) {
@@ -4214,6 +4339,16 @@ function runApp(data) {
   const navImportBtn = document.getElementById('nav-import-btn');
   if (navImportBtn) navImportBtn.addEventListener('click', () => {
     window.parent.postMessage({ type: 'doelenboom-navigate', target: 'import' }, PARENT_ORIGIN);
+  });
+
+  // "Project exporteren/importeren als Excel" in het Bestand-menu — alleen
+  // zichtbaar met een geopend project (zie .project-selected-only-CSS-regel),
+  // gebruikt currentProjectCode omdat dit een topbar-knop is, geen data-code
+  // (in tegenstelling tot dezelfde actie via project-excel-open-btn in de
+  // projectkaart zelf, zie onDetailAreaClick).
+  const navProjectExcelBtn = document.getElementById('nav-project-excel-btn');
+  if (navProjectExcelBtn) navProjectExcelBtn.addEventListener('click', () => {
+    if (currentProjectCode) openProjectExcelModal(currentProjectCode);
   });
 
   // ---- Excel-export: eerst formaat (oud/nieuw) kiezen, dan template/data ----
@@ -5523,6 +5658,636 @@ function runApp(data) {
     if (created + updated + deleted > 0) reloadTreeKeepingFocus(700);
   });
 
+  // ---- Export/import van ALLE gegevens van één project als Excel (zie
+  // excel-service/app/project_workbook.py voor het tabbladformaat en
+  // api/src/routes/projectExcel.ts voor de twee routes hieronder) — een ander,
+  // veel kleiner formaat dan het hele-doelenboom Excel-export/import verderop
+  // (nav-import-btn/export-xlsx-btn): dit gaat over precies één project
+  // (producten, activiteiten, projectstatus, tags, organisatieonderdelen),
+  // niet over de hele boom, en werkt puur additief tegen de al geladen
+  // PRODUCTS/ACTIVITIES/PROJECT_STATUS/ELEMENT_TAGS/OB_ORG van dit project.
+  // Zelfde "eerst een wijzigingsoverzicht, pas na bevestigen toepassen"-opzet
+  // als de MS Project-import hierboven, maar met de eigen database-ID
+  // (kolom 'ID' in het bestand) als matching-sleutel i.p.v. mppUid — want dit
+  // bestand komt (bij een re-import) altijd uit onze eigen export terug. ----
+  const projectExcelModalBackdrop = document.getElementById('project-excel-modal-backdrop');
+  const projectExcelExportBtn = document.getElementById('project-excel-export-btn');
+  const projectExcelExportStatus = document.getElementById('project-excel-export-status');
+  const projectExcelImportFileInput = document.getElementById('project-excel-import-file-input');
+  const projectExcelImportChooseBtn = document.getElementById('project-excel-import-choose-btn');
+  const projectExcelImportFilename = document.getElementById('project-excel-import-filename');
+  const projectExcelImportStatusEl = document.getElementById('project-excel-import-status');
+  const projectExcelPlanWrap = document.getElementById('project-excel-plan-wrap');
+  const projectExcelPlanProjectEl = document.getElementById('project-excel-plan-project');
+  const projectExcelProductsListEl = document.getElementById('project-excel-products-list');
+  const projectExcelProductsCountEl = document.getElementById('project-excel-products-count');
+  const projectExcelProductsSelectAllCb = document.getElementById('project-excel-products-select-all');
+  const projectExcelActivitiesListEl = document.getElementById('project-excel-activities-list');
+  const projectExcelActivitiesCountEl = document.getElementById('project-excel-activities-count');
+  const projectExcelActivitiesSelectAllCb = document.getElementById('project-excel-activities-select-all');
+  const projectExcelImportConfirmBtn = document.getElementById('project-excel-import-confirm-btn');
+  const projectExcelModalCancelBtn = document.getElementById('project-excel-modal-cancel');
+
+  let projectExcelModalCode = null;
+  // { statusChanged, tagsChanged, orgsChanged, projectChanged, wanted,
+  //   currentTagNames, wantedTagNames, currentOrgs, wantedOrgs,
+  //   productPlan, activityPlan } — zie computeProjectImportPlan hieronder.
+  let projectExcelPlan = null;
+
+  function setProjectExcelExportStatus(text, kind) {
+    projectExcelExportStatus.textContent = text || '';
+    projectExcelExportStatus.style.color = kind === 'ok' ? '#2E7D5B' : kind === 'busy' ? '#777' : '#DC3545';
+  }
+  function setProjectExcelImportStatus(text, kind) {
+    projectExcelImportStatusEl.textContent = text || '';
+    projectExcelImportStatusEl.style.color = kind === 'ok' ? '#2E7D5B' : kind === 'busy' ? '#777' : '#DC3545';
+  }
+
+  function openProjectExcelModal(code) {
+    projectExcelModalCode = code;
+    projectExcelPlan = null;
+    setProjectExcelExportStatus('');
+    setProjectExcelImportStatus('');
+    if (projectExcelImportFileInput) projectExcelImportFileInput.value = '';
+    if (projectExcelImportFilename) projectExcelImportFilename.textContent = '';
+    if (projectExcelPlanWrap) projectExcelPlanWrap.style.display = 'none';
+    if (projectExcelImportConfirmBtn) { projectExcelImportConfirmBtn.style.display = 'none'; projectExcelImportConfirmBtn.disabled = true; }
+    projectExcelModalBackdrop.classList.add('visible');
+  }
+  function closeProjectExcelModal() {
+    projectExcelModalBackdrop.classList.remove('visible');
+  }
+  if (projectExcelModalCancelBtn) projectExcelModalCancelBtn.addEventListener('click', closeProjectExcelModal);
+  if (projectExcelModalBackdrop) projectExcelModalBackdrop.addEventListener('click', (ev) => {
+    if (ev.target === projectExcelModalBackdrop) closeProjectExcelModal();
+  });
+
+  // ---- Exporteren — zelfde download-mechaniek als downloadExport hierboven
+  // (fetch -> blob -> tijdelijke <a download>), want een gewone <a href> kan
+  // geen Authorization-header meesturen. ----
+  if (projectExcelExportBtn) projectExcelExportBtn.addEventListener('click', async () => {
+    setProjectExcelExportStatus('Bezig met genereren…', 'busy');
+    try {
+      const res = await fetch(
+        apiUrl + '/api/doelenbomen/' + doelenboomId + '/elements/' + encodeURIComponent(projectExcelModalCode) + '/project-export',
+        { headers: { Authorization: 'Bearer ' + authToken } }
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || ('Export mislukt (HTTP ' + res.status + ')'));
+      }
+      const blob = await res.blob();
+      const disposition = res.headers.get('Content-Disposition') || '';
+      const match = disposition.match(/filename="([^"]+)"/);
+      const filename = match ? match[1] : ('Project_' + projectExcelModalCode + '.xlsx');
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      setProjectExcelExportStatus('Gedownload.', 'ok');
+    } catch (err) {
+      setProjectExcelExportStatus(err && err.message ? err.message : 'Onbekende fout bij exporteren.');
+    }
+  });
+
+  // ---- Importeren, stap 1: uploaden -> laten parsen door excel-service ->
+  // wijzigingsoverzicht berekenen en tonen. Nog niets wordt hier toegepast. ----
+  if (projectExcelImportChooseBtn) projectExcelImportChooseBtn.addEventListener('click', () => {
+    if (projectExcelImportFileInput) projectExcelImportFileInput.click();
+  });
+
+  if (projectExcelImportFileInput) projectExcelImportFileInput.addEventListener('change', async () => {
+    const file = projectExcelImportFileInput.files && projectExcelImportFileInput.files[0];
+    if (!file) return;
+    projectExcelImportFilename.textContent = file.name;
+    if (projectExcelPlanWrap) projectExcelPlanWrap.style.display = 'none';
+    if (projectExcelImportConfirmBtn) { projectExcelImportConfirmBtn.style.display = 'none'; projectExcelImportConfirmBtn.disabled = true; }
+    setProjectExcelImportStatus('Bezig met inlezen…', 'busy');
+    try {
+      const form = new FormData();
+      form.append('file', file, file.name);
+      const res = await fetch(
+        apiUrl + '/api/doelenbomen/' + doelenboomId + '/elements/' + encodeURIComponent(projectExcelModalCode) + '/project-import-parse',
+        { method: 'POST', headers: { Authorization: 'Bearer ' + authToken }, body: form }
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || ('Inlezen mislukt (HTTP ' + res.status + ')'));
+      }
+      const result = await res.json();
+      if (result.status === 'failed' || !result.parsed) {
+        const firstError = result.report && result.report.errors && result.report.errors[0];
+        throw new Error(firstError || 'Kon het bestand niet lezen. Is dit een export uit dit scherm?');
+      }
+      projectExcelPlan = computeProjectImportPlan(result.parsed, projectExcelModalCode);
+      renderProjectExcelPlan();
+      if (projectExcelPlanWrap) projectExcelPlanWrap.style.display = '';
+      if (projectExcelImportConfirmBtn) projectExcelImportConfirmBtn.style.display = '';
+      const warningsList = (result.report && result.report.warnings) || [];
+      if (warningsList.length) {
+        setProjectExcelImportStatus(
+          warningsList.length + ' waarschuwing(en) bij het inlezen: ' + warningsList.slice(0, 3).join(' — ') +
+            (warningsList.length > 3 ? ' …' : '')
+        );
+      } else {
+        setProjectExcelImportStatus('Bestand ingelezen — controleer het overzicht hieronder.', 'ok');
+      }
+    } catch (err) {
+      setProjectExcelImportStatus(err && err.message ? err.message : 'Kon het bestand niet verwerken.');
+    }
+  });
+
+  // Vergelijkt de geparste rijen tegen de al geladen PRODUCTS/ACTIVITIES/
+  // PROJECT_STATUS/ELEMENT_TAGS/OB_ORG van dit project — zelfde matching-
+  // principe als computeMppImportPlan hierboven, maar op de eigen database-ID
+  // i.p.v. mppUid (zie de toelichting bij de sectie-header hierboven).
+  function computeProjectImportPlan(parsed, projectCode) {
+    const wanted = parsed.project || {};
+    const ps = PROJECT_STATUS[projectCode] || { projectstatus: '', rag: '', toelichting: '', datum: '', clusterPpt: '' };
+    const statusChanged =
+      (ps.projectstatus || '').toLowerCase() !== (wanted.projectstatus || '') ||
+      (ps.rag || '').toLowerCase() !== (wanted.rag || '') ||
+      (ps.toelichting || '') !== (wanted.toelichting || '') ||
+      (ps.datum || '') !== (wanted.gerapporteerdOp || '') ||
+      (ps.clusterPpt || '') !== (wanted.clusterPpt || '');
+
+    const currentTagNames = (ELEMENT_TAGS[projectCode] || [])
+      .map((tc) => (TAGS[tc] ? TAGS[tc].name : tc)).slice().sort();
+    const wantedTagNames = (wanted.tags || []).slice().sort();
+    const tagsChanged = JSON.stringify(currentTagNames) !== JSON.stringify(wantedTagNames);
+
+    const orgKey = (o) => o.name + '|' + o.relatietype;
+    const currentOrgs = (OB_ORG[projectCode] || [])
+      .map((r) => ({ name: ORGS[r.org] ? ORGS[r.org].name : r.org, relatietype: r.relatietype }))
+      .sort((a, b) => orgKey(a).localeCompare(orgKey(b)));
+    const wantedOrgs = (wanted.orgs || []).slice().sort((a, b) => orgKey(a).localeCompare(orgKey(b)));
+    const orgsChanged = JSON.stringify(currentOrgs) !== JSON.stringify(wantedOrgs);
+
+    const existingProducts = PRODUCTS[projectCode] || [];
+    const productById = new Map(existingProducts.map((p) => [String(p.dbId), p]));
+    const seenProductIds = new Set();
+    const productPlan = [];
+    (parsed.products || []).forEach((row) => {
+      const existing = row.id != null ? productById.get(String(row.id)) : null;
+      if (!existing) { productPlan.push({ action: 'create', row: row }); return; }
+      seenProductIds.add(String(row.id));
+      const changed =
+        existing.name !== row.name || existing.type !== row.type ||
+        (existing.omschrijving || '') !== (row.omschrijving || '') ||
+        (existing.pct || 0) !== (row.pctGereed || 0) ||
+        (existing.verwacht || null) !== (row.verwachteDatum || null) ||
+        (existing.werkelijk || null) !== (row.werkelijkeDatum || null) ||
+        (existing.deadline || null) !== (row.deadline || null) ||
+        (existing.duur === undefined ? null : existing.duur) !== (row.duur === undefined ? null : row.duur) ||
+        (existing.duurEenheid || 'd') !== (row.duurEenheid || 'd') ||
+        (existing.businessValue === undefined ? null : existing.businessValue) !== (row.businessValue === undefined ? null : row.businessValue) ||
+        (existing.opmerking || '') !== (row.opmerking || '');
+      productPlan.push({ action: changed ? 'update' : 'unchanged', row: row, existingId: existing.dbId });
+    });
+    existingProducts.forEach((p) => {
+      if (!seenProductIds.has(String(p.dbId))) {
+        productPlan.push({ action: 'delete', existingId: p.dbId, existingName: p.name, existingType: p.type });
+      }
+    });
+
+    const existingActivities = ACTIVITIES[projectCode] || [];
+    const activityById = new Map(existingActivities.map((a) => [String(a.dbId), a]));
+    const seenActivityIds = new Set();
+    const activityPlan = [];
+    (parsed.activities || []).forEach((row) => {
+      const existing = row.id != null ? activityById.get(String(row.id)) : null;
+      if (!existing) { activityPlan.push({ action: 'create', row: row }); return; }
+      seenActivityIds.add(String(row.id));
+      const changed =
+        existing.name !== row.name || existing.startDate !== row.startDate || existing.endDate !== row.endDate ||
+        (existing.omschrijving || '') !== (row.omschrijving || '') ||
+        !!existing.isMilestone !== !!row.isMilestone || !!existing.isSummary !== !!row.isSummary;
+      activityPlan.push({ action: changed ? 'update' : 'unchanged', row: row, existingId: existing.dbId });
+    });
+    existingActivities.forEach((a) => {
+      if (!seenActivityIds.has(String(a.dbId))) {
+        activityPlan.push({
+          action: 'delete', existingId: a.dbId, existingName: a.name,
+          existingStartDate: a.startDate, existingEndDate: a.endDate,
+        });
+      }
+    });
+
+    return {
+      statusChanged: statusChanged, tagsChanged: tagsChanged, orgsChanged: orgsChanged,
+      projectChanged: statusChanged || tagsChanged || orgsChanged,
+      wanted: wanted, currentTagNames: currentTagNames, wantedTagNames: wantedTagNames,
+      currentOrgs: currentOrgs, wantedOrgs: wantedOrgs,
+      productPlan: productPlan, activityPlan: activityPlan,
+    };
+  }
+
+  const PROJECT_EXCEL_ACTION_LABELS = { create: 'nieuw', update: 'wijzigen', unchanged: 'ongewijzigd', delete: 'verwijderen' };
+
+  function projectExcelProductRowHtml(item, index) {
+    const isDelete = item.action === 'delete';
+    const name = isDelete ? item.existingName : item.row.name;
+    const type = isDelete ? item.existingType : item.row.type;
+    const typeBadge = '<span class="mpp-import-badge ' + (type === 'mijlpaal' ? 'product-mijlpaal' : 'product-deliverable') + '">' +
+      (type === 'mijlpaal' ? 'mijlpaal' : 'deliverable') + '</span>';
+    const actionBadge = '<span class="mpp-import-badge action-' + item.action + '">' + PROJECT_EXCEL_ACTION_LABELS[item.action] + '</span>';
+    const metaParts = [];
+    if (!isDelete) {
+      metaParts.push(item.row.verwachteDatum ? 'Verwacht: ' + formatDateNL(item.row.verwachteDatum) : 'Verwachte datum onbekend');
+      if (item.row.dependsOnNames && item.row.dependsOnNames.length) {
+        metaParts.push('hangt af van: ' + item.row.dependsOnNames.map(escapeHtml).join(', '));
+      }
+    }
+    const checked = item.action !== 'unchanged';
+    return '<label class="mpp-import-row action-' + item.action + '">' +
+      '<input type="checkbox" class="project-excel-product-cb" data-index="' + index + '"' + (checked ? ' checked' : '') + '>' +
+      '<span class="mpp-import-row-main">' +
+        '<span class="mpp-import-row-name">' + escapeHtml(name) + actionBadge + typeBadge + '</span>' +
+        (metaParts.length ? '<div class="mpp-import-row-meta">' + metaParts.join(' &middot; ') + '</div>' : '') +
+      '</span>' +
+    '</label>';
+  }
+
+  function projectExcelActivityRowHtml(item, index) {
+    const isDelete = item.action === 'delete';
+    const name = isDelete ? item.existingName : item.row.name;
+    const startDate = isDelete ? item.existingStartDate : item.row.startDate;
+    const endDate = isDelete ? item.existingEndDate : item.row.endDate;
+    const typeBadges = isDelete ? '' :
+      ((item.row.isMilestone ? '<span class="mpp-import-badge milestone">mijlpaal</span>' : '') +
+       (item.row.isSummary ? '<span class="mpp-import-badge summary">fase</span>' : ''));
+    const actionBadge = '<span class="mpp-import-badge action-' + item.action + '">' + PROJECT_EXCEL_ACTION_LABELS[item.action] + '</span>';
+    const preds = !isDelete && item.row.predecessors && item.row.predecessors.length
+      ? item.row.predecessors.map((p) => escapeHtml(p.name)).join(', ') : '';
+    const checked = item.action !== 'unchanged';
+    return '<label class="mpp-import-row action-' + item.action + '">' +
+      '<input type="checkbox" class="project-excel-activity-cb" data-index="' + index + '"' + (checked ? ' checked' : '') + '>' +
+      '<span class="mpp-import-row-main">' +
+        '<span class="mpp-import-row-name">' + escapeHtml(name) + actionBadge + typeBadges + '</span>' +
+        '<div class="mpp-import-row-meta">' + formatDateNL(startDate) + ' t/m ' + formatDateNL(endDate) +
+          (preds ? ' &middot; voorgangers: ' + preds : '') + '</div>' +
+      '</span>' +
+    '</label>';
+  }
+
+  function updateProjectExcelConfirmState() {
+    if (!projectExcelImportConfirmBtn || !projectExcelPlan) return;
+    const projectCb = document.getElementById('project-excel-plan-apply-cb');
+    const anyProject = !!(projectCb && projectCb.checked);
+    const anyProduct = projectExcelProductsListEl.querySelectorAll('.project-excel-product-cb:checked').length > 0;
+    const anyActivity = projectExcelActivitiesListEl.querySelectorAll('.project-excel-activity-cb:checked').length > 0;
+    projectExcelImportConfirmBtn.disabled = !(anyProject || anyProduct || anyActivity);
+  }
+
+  function updateProjectExcelProductsCount() {
+    const boxes = projectExcelProductsListEl.querySelectorAll('.project-excel-product-cb');
+    const checked = projectExcelProductsListEl.querySelectorAll('.project-excel-product-cb:checked').length;
+    if (projectExcelProductsSelectAllCb) projectExcelProductsSelectAllCb.checked = checked === boxes.length && boxes.length > 0;
+    updateProjectExcelConfirmState();
+  }
+  function updateProjectExcelActivitiesCount() {
+    const boxes = projectExcelActivitiesListEl.querySelectorAll('.project-excel-activity-cb');
+    const checked = projectExcelActivitiesListEl.querySelectorAll('.project-excel-activity-cb:checked').length;
+    if (projectExcelActivitiesSelectAllCb) projectExcelActivitiesSelectAllCb.checked = checked === boxes.length && boxes.length > 0;
+    updateProjectExcelConfirmState();
+  }
+
+  // Bouwt het hele wijzigingsoverzicht op uit projectExcelPlan: één checkbox
+  // voor projectstatus/tags/organisatieonderdelen samen (het is één
+  // samenhangend geheel, niet los per rij te selecteren zoals producten/
+  // activiteiten hieronder — die krijgen elk hun eigen rij+checkbox, zelfde
+  // opzet als mppPlanRowHtml/computeMppImportPlan hierboven).
+  function renderProjectExcelPlan() {
+    const plan = projectExcelPlan;
+    if (!plan) return;
+
+    if (!plan.projectChanged) {
+      projectExcelPlanProjectEl.innerHTML = '<div>Geen wijzigingen in projectstatus, tags of organisatieonderdelen.</div>';
+    } else {
+      const diffLines = [];
+      if (plan.statusChanged) diffLines.push('Status/RAG/toelichting/datum/cluster PPT bijwerken volgens het bestand.');
+      if (plan.tagsChanged) diffLines.push('Tags worden: ' + (plan.wantedTagNames.length ? plan.wantedTagNames.join(', ') : '(geen)'));
+      if (plan.orgsChanged) {
+        diffLines.push('Organisatieonderdelen worden: ' + (plan.wantedOrgs.length
+          ? plan.wantedOrgs.map((o) => o.name + ' (' + o.relatietype + ')').join(', ') : '(geen)'));
+      }
+      projectExcelPlanProjectEl.innerHTML =
+        '<label><input type="checkbox" id="project-excel-plan-apply-cb" checked> Projectstatus/tags/organisatieonderdelen bijwerken</label>' +
+        '<ul>' + diffLines.map((l) => '<li>' + escapeHtml(l) + '</li>').join('') + '</ul>';
+      const applyCb = document.getElementById('project-excel-plan-apply-cb');
+      if (applyCb) applyCb.addEventListener('change', updateProjectExcelConfirmState);
+    }
+
+    projectExcelProductsCountEl.textContent = String(plan.productPlan.length);
+    projectExcelActivitiesCountEl.textContent = String(plan.activityPlan.length);
+    projectExcelProductsListEl.innerHTML = plan.productPlan.length
+      ? plan.productPlan.map((item, i) => projectExcelProductRowHtml(item, i)).join('')
+      : '<div class="dp-empty-note" style="padding:10px">Geen producten in dit bestand.</div>';
+    projectExcelActivitiesListEl.innerHTML = plan.activityPlan.length
+      ? plan.activityPlan.map((item, i) => projectExcelActivityRowHtml(item, i)).join('')
+      : '<div class="dp-empty-note" style="padding:10px">Geen activiteiten in dit bestand.</div>';
+    updateProjectExcelProductsCount();
+    updateProjectExcelActivitiesCount();
+  }
+
+  if (projectExcelProductsListEl) projectExcelProductsListEl.addEventListener('change', (ev) => {
+    if (ev.target.classList.contains('project-excel-product-cb')) updateProjectExcelProductsCount();
+  });
+  if (projectExcelActivitiesListEl) projectExcelActivitiesListEl.addEventListener('change', (ev) => {
+    if (ev.target.classList.contains('project-excel-activity-cb')) updateProjectExcelActivitiesCount();
+  });
+  if (projectExcelProductsSelectAllCb) projectExcelProductsSelectAllCb.addEventListener('change', () => {
+    projectExcelProductsListEl.querySelectorAll('.project-excel-product-cb').forEach((cb) => { cb.checked = projectExcelProductsSelectAllCb.checked; });
+    updateProjectExcelProductsCount();
+  });
+  if (projectExcelActivitiesSelectAllCb) projectExcelActivitiesSelectAllCb.addEventListener('change', () => {
+    projectExcelActivitiesListEl.querySelectorAll('.project-excel-activity-cb').forEach((cb) => { cb.checked = projectExcelActivitiesSelectAllCb.checked; });
+    updateProjectExcelActivitiesCount();
+  });
+
+  function projectExcelProductPayload(row) {
+    return {
+      name: row.name,
+      type: row.type === 'mijlpaal' ? 'mijlpaal' : 'deliverable',
+      omschrijving: row.omschrijving || '',
+      pctGereed: row.pctGereed || 0,
+      verwachteDatum: row.verwachteDatum || null,
+      werkelijkeDatum: row.werkelijkeDatum || null,
+      deadline: row.deadline || null,
+      duur: row.duur === undefined ? null : row.duur,
+      duurEenheid: row.duurEenheid || 'd',
+      businessValue: row.businessValue === undefined ? null : row.businessValue,
+      opmerking: row.opmerking || '',
+    };
+  }
+  function projectExcelActivityPayload(row) {
+    return {
+      name: row.name,
+      startDate: row.startDate,
+      endDate: row.endDate,
+      omschrijving: row.omschrijving || '',
+      isMilestone: !!row.isMilestone,
+      isSummary: !!row.isSummary,
+    };
+  }
+
+  // ---- Importeren, stap 2: het bevestigde plan daadwerkelijk toepassen —
+  // rij voor rij via de al bestaande, losse CRUD-routes (products.ts/
+  // activities.ts/projectStatus.ts/tags.ts/orgUnits.ts), exact zoals de MS
+  // Project-import hierboven dat al doet. Volgorde is belangrijk:
+  // 1) projectstatus/tags/organisatieonderdelen, 2) producten (create/update/
+  // delete — bouwt een naam->id-kaart op), 3) product-afhankelijkheden (pas
+  // hierna zinvol: nieuwe producten hebben dan pas een id), 4) activiteiten,
+  // 5) activiteit-afhankelijkheden (analoog aan 3, met type/vertraging). ----
+  if (projectExcelImportConfirmBtn) projectExcelImportConfirmBtn.addEventListener('click', async () => {
+    const plan = projectExcelPlan;
+    if (!plan) return;
+    const code = projectExcelModalCode;
+    const base = apiUrl + '/api/doelenbomen/' + doelenboomId + '/elements/' + encodeURIComponent(code);
+    const jsonHeaders = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + authToken };
+    const authHeader = { Authorization: 'Bearer ' + authToken };
+
+    projectExcelImportConfirmBtn.disabled = true;
+    projectExcelImportChooseBtn.disabled = true;
+    const warnings = [];
+    const reportProgress = (text) => setProjectExcelImportStatus(text, 'busy');
+
+    try {
+      // 1. Projectstatus/tags/organisatieonderdelen
+      const projectCb = document.getElementById('project-excel-plan-apply-cb');
+      if (projectCb && projectCb.checked) {
+        reportProgress('Projectstatus/tags/organisatieonderdelen bijwerken…');
+        if (plan.statusChanged) {
+          try {
+            const res = await fetch(base + '/project-status', {
+              method: 'PUT', headers: jsonHeaders,
+              body: JSON.stringify({
+                projectstatus: plan.wanted.projectstatus ? titleCase(plan.wanted.projectstatus) : '',
+                rag: plan.wanted.rag ? titleCase(plan.wanted.rag) : '',
+                toelichting: plan.wanted.toelichting || '',
+                gerapporteerdOp: plan.wanted.gerapporteerdOp || null,
+                clusterPpt: plan.wanted.clusterPpt || '',
+              }),
+            });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+          } catch (err) { warnings.push('Projectstatus bijwerken mislukt.'); }
+        }
+        if (plan.tagsChanged) {
+          const currentSet = new Set(plan.currentTagNames);
+          const wantedSet = new Set(plan.wantedTagNames);
+          const nameToCode = new Map(Object.keys(TAGS).map((tc) => [TAGS[tc].name, tc]));
+          for (const name of plan.wantedTagNames) {
+            if (currentSet.has(name)) continue;
+            const tagCode = nameToCode.get(name);
+            if (!tagCode) { warnings.push('Tag "' + name + '" bestaat niet in dit doelenboom — overgeslagen.'); continue; }
+            try {
+              const res = await fetch(base + '/tags', { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ tagCode: tagCode }) });
+              if (!res.ok && res.status !== 409) throw new Error('HTTP ' + res.status);
+            } catch (err) { warnings.push('Tag "' + name + '" koppelen mislukt.'); }
+          }
+          for (const name of plan.currentTagNames) {
+            if (wantedSet.has(name)) continue;
+            const tagCode = nameToCode.get(name);
+            if (!tagCode) continue;
+            try {
+              const res = await fetch(base + '/tags/' + encodeURIComponent(tagCode), { method: 'DELETE', headers: authHeader });
+              if (!res.ok && res.status !== 404) throw new Error('HTTP ' + res.status);
+            } catch (err) { warnings.push('Tag "' + name + '" ontkoppelen mislukt.'); }
+          }
+        }
+        if (plan.orgsChanged) {
+          const orgKey = (o) => o.name + '|' + o.relatietype;
+          const currentSet = new Set(plan.currentOrgs.map(orgKey));
+          const wantedSet = new Set(plan.wantedOrgs.map(orgKey));
+          const nameToCode = new Map(Object.keys(ORGS).map((oc) => [ORGS[oc].name, oc]));
+          for (const o of plan.wantedOrgs) {
+            if (currentSet.has(orgKey(o))) continue;
+            const orgCode = nameToCode.get(o.name);
+            if (!orgCode) { warnings.push('Organisatieonderdeel "' + o.name + '" bestaat niet in dit doelenboom — overgeslagen.'); continue; }
+            try {
+              const res = await fetch(base + '/org-units', {
+                method: 'POST', headers: jsonHeaders, body: JSON.stringify({ orgCode: orgCode, relatietype: o.relatietype }),
+              });
+              if (!res.ok && res.status !== 409) throw new Error('HTTP ' + res.status);
+            } catch (err) { warnings.push('Organisatieonderdeel "' + o.name + '" koppelen mislukt.'); }
+          }
+          for (const o of plan.currentOrgs) {
+            if (wantedSet.has(orgKey(o))) continue;
+            const orgCode = nameToCode.get(o.name);
+            if (!orgCode) continue;
+            try {
+              const res = await fetch(base + '/org-units/' + encodeURIComponent(orgCode), { method: 'DELETE', headers: authHeader });
+              if (!res.ok && res.status !== 404) throw new Error('HTTP ' + res.status);
+            } catch (err) { warnings.push('Organisatieonderdeel "' + o.name + '" ontkoppelen mislukt.'); }
+          }
+        }
+      }
+
+      // 2. Producten — bouwt tegelijk een naam->id-kaart op voor stap 3.
+      const productIdByName = new Map((PRODUCTS[code] || []).map((p) => [p.name, p.dbId]));
+      const checkedProductIdx = new Set(
+        Array.from(projectExcelProductsListEl.querySelectorAll('.project-excel-product-cb:checked')).map((cb) => parseInt(cb.dataset.index, 10))
+      );
+      let productsCreated = 0, productsUpdated = 0, productsDeleted = 0;
+      for (let i = 0; i < plan.productPlan.length; i++) {
+        if (!checkedProductIdx.has(i)) continue;
+        const item = plan.productPlan[i];
+        reportProgress('Producten bijwerken… (' + (i + 1) + '/' + plan.productPlan.length + ')');
+        try {
+          if (item.action === 'create') {
+            const res = await fetch(base + '/products', { method: 'POST', headers: jsonHeaders, body: JSON.stringify(projectExcelProductPayload(item.row)) });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const body = await res.json();
+            productIdByName.set(item.row.name, body.id);
+            productsCreated++;
+          } else if (item.action === 'update' || item.action === 'unchanged') {
+            const res = await fetch(base + '/products/' + item.existingId, { method: 'PUT', headers: jsonHeaders, body: JSON.stringify(projectExcelProductPayload(item.row)) });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            productIdByName.set(item.row.name, item.existingId);
+            if (item.action === 'update') productsUpdated++;
+          } else if (item.action === 'delete') {
+            const res = await fetch(base + '/products/' + item.existingId, { method: 'DELETE', headers: authHeader });
+            if (!res.ok && res.status !== 204) throw new Error('HTTP ' + res.status);
+            productIdByName.delete(item.existingName);
+            productsDeleted++;
+          }
+        } catch (err) { warnings.push('Product "' + (item.row ? item.row.name : item.existingName) + '" (' + item.action + ') mislukt.'); }
+      }
+
+      // 3. Afhankelijkheden tussen producten — pas hierna zinvol (nieuwe items
+      // hebben dan pas een id). Alleen voor aangevinkte, niet-verwijderde
+      // rijen; een verwijderd product neemt zijn afhankelijkheden vanzelf mee
+      // (on delete cascade, zie db/init.sql).
+      for (let i = 0; i < plan.productPlan.length; i++) {
+        if (!checkedProductIdx.has(i)) continue;
+        const item = plan.productPlan[i];
+        if (item.action === 'delete') continue;
+        const productId = productIdByName.get(item.row.name);
+        if (!productId) continue;
+        const desiredIds = new Set();
+        (item.row.dependsOnNames || []).forEach((predName) => {
+          const pid = productIdByName.get(predName);
+          if (pid) desiredIds.add(String(pid));
+          else warnings.push('Kan afhankelijkheid niet leggen voor "' + item.row.name + '": "' + predName + '" niet gevonden.');
+        });
+        const currentDeps = (PRODUCT_DEPENDENCIES[code] || []).filter((d) => String(d.successorId) === String(productId));
+        const currentIds = new Set(currentDeps.map((d) => String(d.predecessorId)));
+        for (const pid of desiredIds) {
+          if (currentIds.has(pid)) continue;
+          try {
+            const res = await fetch(base + '/products/dependencies', {
+              method: 'POST', headers: jsonHeaders, body: JSON.stringify({ predecessorId: Number(pid), successorId: Number(productId) }),
+            });
+            if (!res.ok && res.status !== 409) throw new Error('HTTP ' + res.status);
+          } catch (err) { warnings.push('Afhankelijkheid toevoegen mislukt voor "' + item.row.name + '".'); }
+        }
+        for (const d of currentDeps) {
+          if (desiredIds.has(String(d.predecessorId))) continue;
+          try {
+            const res = await fetch(base + '/products/dependencies/' + d.dbId, { method: 'DELETE', headers: authHeader });
+            if (!res.ok && res.status !== 404) throw new Error('HTTP ' + res.status);
+          } catch (err) { warnings.push('Afhankelijkheid verwijderen mislukt voor "' + item.row.name + '".'); }
+        }
+      }
+
+      // 4. Activiteiten — zelfde opzet als producten hierboven.
+      const activityIdByName = new Map((ACTIVITIES[code] || []).map((a) => [a.name, a.dbId]));
+      const checkedActivityIdx = new Set(
+        Array.from(projectExcelActivitiesListEl.querySelectorAll('.project-excel-activity-cb:checked')).map((cb) => parseInt(cb.dataset.index, 10))
+      );
+      let activitiesCreated = 0, activitiesUpdated = 0, activitiesDeleted = 0;
+      for (let i = 0; i < plan.activityPlan.length; i++) {
+        if (!checkedActivityIdx.has(i)) continue;
+        const item = plan.activityPlan[i];
+        reportProgress('Activiteiten bijwerken… (' + (i + 1) + '/' + plan.activityPlan.length + ')');
+        try {
+          if (item.action === 'create') {
+            const res = await fetch(base + '/activities', { method: 'POST', headers: jsonHeaders, body: JSON.stringify(projectExcelActivityPayload(item.row)) });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const body = await res.json();
+            activityIdByName.set(item.row.name, body.id);
+            activitiesCreated++;
+          } else if (item.action === 'update' || item.action === 'unchanged') {
+            const res = await fetch(base + '/activities/' + item.existingId, { method: 'PUT', headers: jsonHeaders, body: JSON.stringify(projectExcelActivityPayload(item.row)) });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            activityIdByName.set(item.row.name, item.existingId);
+            if (item.action === 'update') activitiesUpdated++;
+          } else if (item.action === 'delete') {
+            const res = await fetch(base + '/activities/' + item.existingId, { method: 'DELETE', headers: authHeader });
+            if (!res.ok && res.status !== 204) throw new Error('HTTP ' + res.status);
+            activityIdByName.delete(item.existingName);
+            activitiesDeleted++;
+          }
+        } catch (err) { warnings.push('Activiteit "' + (item.row ? item.row.name : item.existingName) + '" (' + item.action + ') mislukt.'); }
+      }
+
+      // 5. Afhankelijkheden tussen activiteiten — analoog aan stap 3, maar met
+      // type/vertraging: een gewijzigd type/vertraging op een al bestaande
+      // voorganger vervangt 'm (verwijderen + opnieuw aanmaken, er is geen
+      // aparte PUT-route voor alleen type/lagDays).
+      for (let i = 0; i < plan.activityPlan.length; i++) {
+        if (!checkedActivityIdx.has(i)) continue;
+        const item = plan.activityPlan[i];
+        if (item.action === 'delete') continue;
+        const activityId = activityIdByName.get(item.row.name);
+        if (!activityId) continue;
+        const desired = new Map();
+        (item.row.predecessors || []).forEach((pred) => {
+          const pid = activityIdByName.get(pred.name);
+          if (pid) desired.set(String(pid), { type: pred.type || 'FS', lagDays: pred.lagDays || 0 });
+          else warnings.push('Kan voorganger niet leggen voor "' + item.row.name + '": "' + pred.name + '" niet gevonden.');
+        });
+        const currentDeps = (DEPENDENCIES[code] || []).filter((d) => String(d.successorId) === String(activityId));
+        const currentByPred = new Map(currentDeps.map((d) => [String(d.predecessorId), d]));
+        for (const [pid, wantedDep] of desired) {
+          const existingDep = currentByPred.get(pid);
+          if (existingDep && existingDep.type === wantedDep.type && (existingDep.lagDays || 0) === wantedDep.lagDays) continue;
+          if (existingDep) {
+            try {
+              const res = await fetch(base + '/activities/dependencies/' + existingDep.dbId, { method: 'DELETE', headers: authHeader });
+              if (!res.ok && res.status !== 404) throw new Error('HTTP ' + res.status);
+            } catch (err) { /* val terug op gewoon opnieuw toevoegen hieronder */ }
+          }
+          try {
+            const res = await fetch(base + '/activities/dependencies', {
+              method: 'POST', headers: jsonHeaders,
+              body: JSON.stringify({ predecessorId: Number(pid), successorId: Number(activityId), type: wantedDep.type, lagDays: wantedDep.lagDays }),
+            });
+            if (!res.ok && res.status !== 409) throw new Error('HTTP ' + res.status);
+          } catch (err) { warnings.push('Voorganger toevoegen mislukt voor "' + item.row.name + '".'); }
+        }
+        for (const d of currentDeps) {
+          if (desired.has(String(d.predecessorId))) continue;
+          try {
+            const res = await fetch(base + '/activities/dependencies/' + d.dbId, { method: 'DELETE', headers: authHeader });
+            if (!res.ok && res.status !== 404) throw new Error('HTTP ' + res.status);
+          } catch (err) { warnings.push('Voorganger verwijderen mislukt voor "' + item.row.name + '".'); }
+        }
+      }
+
+      const summary = 'Producten — nieuw: ' + productsCreated + ', gewijzigd: ' + productsUpdated + ', verwijderd: ' + productsDeleted +
+        '. Activiteiten — nieuw: ' + activitiesCreated + ', gewijzigd: ' + activitiesUpdated + ', verwijderd: ' + activitiesDeleted + '.';
+      if (warnings.length) {
+        projectExcelImportChooseBtn.disabled = false;
+        projectExcelImportConfirmBtn.disabled = false;
+        setProjectExcelImportStatus(
+          summary + ' ' + warnings.length + ' waarschuwing(en): ' + warnings.slice(0, 3).join(' — ') + (warnings.length > 3 ? ' …' : '')
+        );
+      } else {
+        setProjectExcelImportStatus(summary + ' Boom wordt herladen…', 'ok');
+      }
+      reloadTreeKeepingFocus(700);
+    } catch (err) {
+      projectExcelImportChooseBtn.disabled = false;
+      projectExcelImportConfirmBtn.disabled = false;
+      setProjectExcelImportStatus(err && err.message ? err.message : 'Onbekende fout bij importeren.');
+    }
+  });
+
   // ---- Projectstatus bewerken (upsert, zie api/src/routes/projectStatus.ts) ----
   const projectStatusModalBackdrop = document.getElementById('project-status-modal-backdrop');
   const projectStatusModalStatus = document.getElementById('project-status-modal-status');
@@ -5596,6 +6361,8 @@ function runApp(data) {
   // toont, zie projectSectionHtml) — anders werken de +Tag/+Organisatieonderdeel-
   // knoppen daar niet, want die staan in een los DOM-element (project-panel).
   function onDetailAreaClick(ev) {
+    const projectExcelOpenBtn = ev.target.closest('.project-excel-open-btn');
+    if (projectExcelOpenBtn) { openProjectExcelModal(projectExcelOpenBtn.dataset.code); return; }
     const projectStatusEditBtn = ev.target.closest('.project-status-edit-btn');
     if (projectStatusEditBtn) { openProjectStatusModal(projectStatusEditBtn.dataset.code); return; }
     const productAddBtn = ev.target.closest('.product-add-btn');

@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse, Response
 from .exporter import build_data_workbook, build_template_workbook, is_standard_columns
 from .mpp_converter import MppConversionError, mpp_to_mspdi_xml
 from .parser import parse_workbook
+from .project_workbook import build_project_workbook, parse_project_workbook
 
 app = FastAPI(title='doelenboom-excel-service', version='0.1.0')
 
@@ -110,3 +111,43 @@ async def export(
         media_type=XLSX_MEDIA_TYPE,
         headers={'Content-Disposition': f'attachment; filename="{filename}"'},
     )
+
+
+@app.post('/project-export')
+async def project_export(body: dict[str, Any] = Body(...)):
+    """Bouwt het Project/Producten/Activiteiten-Excel-bestand voor één project
+    (zie project_workbook.py) — aangeroepen door
+    api/src/routes/projectExcel.ts (GET .../elements/:code/project-export),
+    dat de data van dat ene project (uit fetchTree) hier als JSON aanlevert."""
+    data = body.get('data') or {}
+    meta = body.get('meta') or {}
+    content = build_project_workbook(data, meta)
+    project_code = (data.get('project') or {}).get('code') or 'project'
+    filename = f'Project_{project_code}.xlsx'
+    return Response(
+        content=content,
+        media_type=XLSX_MEDIA_TYPE,
+        headers={'Content-Disposition': f'attachment; filename="{filename}"'},
+    )
+
+
+@app.post('/project-parse')
+async def project_parse(file: UploadFile = File(...)):
+    """Leest een geüpload Project-Excel-bestand (export van /project-export,
+    eventueel bewerkt) en geeft de rauwe, geparste rijen terug — geen
+    create/update/delete-logica hier, dat gebeurt client-side
+    (computeProjectImportPlan in tree.html) tegen de al geladen PRODUCTS/
+    ACTIVITIES/PROJECT_STATUS van dit project. Aangeroepen door
+    api/src/routes/projectExcel.ts (POST .../elements/:code/project-import-parse)."""
+    content = await file.read()
+    if not content:
+        return JSONResponse(status_code=400, content={
+            'status': 'failed',
+            'report': {
+                'errors': ['Leeg bestand ontvangen.'], 'warnings': [],
+                'counts': {}, 'sheetsFound': [], 'sheetsMissing': [],
+            },
+            'parsed': None,
+        })
+    status, report, parsed = parse_project_workbook(content)
+    return {'status': status, 'report': report, 'parsed': parsed}
