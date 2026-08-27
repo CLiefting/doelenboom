@@ -592,6 +592,30 @@
   }
   .activity-summary-bar::before { left: 0; }
   .activity-summary-bar::after { right: 0; }
+  /* Statuskleuring t.o.v. vandaag (activityStatusClass in activityGanttHtml):
+     "afgerond" (einddatum vóór vandaag) valer/grijzer, "actief" (vandaag valt
+     binnen de periode) juist prominenter — extra accent-gloed, net als de
+     focus-ring elders in de app (zie regel 851/854 hierboven) — en "toekomst"
+     (nog niet begonnen) ook gedempt, maar in een koelere/blauwere tint dan
+     "afgerond" zodat de twee gedempte statussen toch uit elkaar te houden
+     blijven. Geen eigen regel nodig voor de standaardkleur: die staat al
+     hierboven bij .activity-bar/.activity-summary-bar zelf. */
+  .activity-bar.status-done { background: #a6adb8; }
+  .activity-bar.status-active { background: var(--navy); box-shadow: 0 0 0 2px rgba(255,90,31,0.45); }
+  .activity-bar.status-future { background: #b7c6e6; }
+  .activity-summary-bar.status-done,
+  .activity-summary-bar.status-done::before,
+  .activity-summary-bar.status-done::after { background: #b3b9c2; }
+  .activity-summary-bar.status-active,
+  .activity-summary-bar.status-active::before,
+  .activity-summary-bar.status-active::after { background: #5a6472; }
+  .activity-summary-bar.status-active { box-shadow: 0 0 0 2px rgba(255,90,31,0.4); }
+  .activity-summary-bar.status-future,
+  .activity-summary-bar.status-future::before,
+  .activity-summary-bar.status-future::after { background: #c3cee3; }
+  .activity-milestone-marker.status-done svg polygon { fill: #cdd2da; stroke: #9aa3b2; }
+  .activity-milestone-marker.status-active svg { filter: drop-shadow(0 0 2.5px rgba(255,90,31,0.7)); }
+  .activity-milestone-marker.status-future svg polygon { fill: #e4ebf7; stroke: #a9bde0; }
   /* WBS-nummer tussen haakjes vóór de taaknaam — kleiner en lichter dan de
      naam zelf. */
   .activity-row-wbs { font-size: 10.5px; font-weight: 400; color: #999; }
@@ -606,6 +630,15 @@
     display: inline-block; width: 11px; font-size: 9px; color: #aab0b8; cursor: pointer;
     user-select: none; transition: transform 0.15s; text-align: center; flex-shrink: 0;
   }
+  /* Verlengstuk van de "vandaag"-streep (.timeline-today-tick, in de as
+     erboven) dóór alle activiteitenrijen heen — zelfde stippellijn, zodat in
+     één oogopslag te zien is welke balkjes al voorbij vandaag liggen (zie ook
+     de status-kleuring hierboven). top:0;bottom:0 vult de hoogte van
+     .activity-gantt-rows automatisch op (position:relative, hoogte volgt uit
+     de flex-inhoud), net als .activity-dependency-overlay hieronder.
+     pointer-events:none zodat 'm nooit het klikken op rijen/knoppen eronder
+     blokkeert. */
+  .activity-today-line { position: absolute; top: 0; bottom: 0; border-left: 1px dashed #c0392b; opacity: 0.6; pointer-events: none; }
   /* Afhankelijkheid-pijlen tussen activiteiten (dependencyArrowsHtml) — een
      los overlay-laag bovenop .activity-gantt-rows (pointer-events:none, dus
      klikbaarheid van de balkjes/knoppen eronder blijft intact), opgebouwd uit
@@ -2666,11 +2699,37 @@ function runApp(data) {
           timelineBandLabel(bounds[i], quarterly) + '</div>';
       }
     }
+    // "Vandaag"-streep: in de as (todayHtml, zoals voorheen) én — nieuw — als
+    // doorlopende stippellijn over de hele rijenlijst (todayLineHtml,
+    // .activity-today-line hierboven), zelfde X-positie (pctFor(now)), zodat
+    // in één oogopslag te zien is welke balkjes al voorbij vandaag liggen.
     let todayHtml = '';
+    let todayLineHtml = '';
     const now = Date.now();
     if (now >= axisMinT && now <= axisMaxT) {
-      todayHtml = '<div class="timeline-today-tick" style="left:' + pctFor(now) + '%">' +
+      const todayLeft = pctFor(now);
+      todayHtml = '<div class="timeline-today-tick" style="left:' + todayLeft + '%">' +
         '<span class="timeline-today-label">vandaag</span></div>';
+      todayLineHtml = '<div class="activity-today-line" style="left:' + todayLeft + '%"></div>';
+    }
+
+    // Status van een activiteit t.o.v. vandaag, voor de kleuring hieronder
+    // (status-done/status-active/status-future, zie CSS) — generiek voor alle
+    // drie tracktypes (gewone balk/fase/mijlpaal): een mijlpaal heeft
+    // start===eind, dus valt vanzelf onder "actief" op de dag zelf. Vergeleken
+    // op DAG-grens (todayStart/todayEnd), niet met het exacte 'now'-tijdstip
+    // hierboven (dat is puur voor de X-positie van de streep) — anders zou een
+    // taak die vandaag eindigt of vandaag begint al vóór het einde van de dag
+    // als "afgerond" resp. nog als "toekomst" gelden. Zelfde patroon als
+    // isProductOverdue hierboven (startOfToday).
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayStartMs = todayStart.getTime();
+    const todayEndMs = todayStartMs + 86400000 - 1;
+    function activityStatusClass(s, e) {
+      if (e < todayStartMs) return 'status-done';
+      if (s > todayEndMs) return 'status-future';
+      return 'status-active';
     }
 
     // In-/uitklappen van fases (summary tasks) o.b.v. hun WBS-nummer: een
@@ -2740,13 +2799,16 @@ function runApp(data) {
       // CSS), zelfde soort weergave als MS Project zelf voor een
       // samenvattende taak gebruikt — duidelijk anders dan een gewone
       // activiteit-balk, ook al beslaat een fase net als die wél een periode.
+      // Elke variant krijgt bovendien de status-class (activityStatusClass
+      // hierboven) mee, voor de kleuring t.o.v. vandaag.
+      const statusClass = activityStatusClass(s, e);
       const track = a.isMilestone
-        ? '<span class="activity-milestone-marker" style="left:' + left + '%" title="' + title + '">' +
+        ? '<span class="activity-milestone-marker ' + statusClass + '" style="left:' + left + '%" title="' + title + '">' +
             timelineLegendIcon('mijlpaal', true) +
           '</span>'
         : a.isSummary
-        ? '<div class="activity-summary-bar" style="left:' + left + '%;width:' + width + '%" title="' + title + '"></div>'
-        : '<div class="activity-bar" style="left:' + left + '%;width:' + width + '%" title="' + title + '"></div>';
+        ? '<div class="activity-summary-bar ' + statusClass + '" style="left:' + left + '%;width:' + width + '%" title="' + title + '"></div>'
+        : '<div class="activity-bar ' + statusClass + '" style="left:' + left + '%;width:' + width + '%" title="' + title + '"></div>';
       // WBS-nummer (indien aanwezig, dus via MS Project geïmporteerd) tussen
       // haakjes in kleiner lettertype vóór de taaknaam.
       const wbsLabel = a.wbs ? '<span class="activity-row-wbs">(' + escapeHtml(a.wbs) + ')</span> ' : '';
@@ -2791,7 +2853,7 @@ function runApp(data) {
 
     return '<div class="activity-gantt-wrap">' +
       '<div class="activity-gantt-axis-track">' + ticksHtml + labelsHtml + todayHtml + '</div>' +
-      '<div class="activity-gantt-rows">' + rowsHtml +
+      '<div class="activity-gantt-rows">' + rowsHtml + todayLineHtml +
         '<div class="activity-dependency-overlay">' + depsHtml + '</div>' +
       '</div>' +
     '</div>';
