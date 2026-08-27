@@ -110,7 +110,7 @@ describe('project-export/project-import-parse (Excel voor één project)', () =>
     assert.equal(res.status, 200);
     assert.equal(res.headers.get('content-type'), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     const disposition = res.headers.get('content-disposition') ?? '';
-    assert.match(disposition, /filename="Project_P1_\d{6}\.xlsx"/);
+    assert.match(disposition, /filename="Project_P1_Project_1_\d{4}-\d{2}-\d{2}\.xlsx"/);
     const buf = await res.arrayBuffer();
     assert.ok(buf.byteLength > 0);
   });

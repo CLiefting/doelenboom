@@ -115,11 +115,16 @@ projectExcelRouter.get(
     }
 
     const arrayBuffer = await upstream.arrayBuffer();
-    const jjmmdd =
-      String(exportedAt.getFullYear() % 100).padStart(2, '0') +
-      String(exportedAt.getMonth() + 1).padStart(2, '0') +
+    // Bestandsnaam: code + titel (projectnaam) + datum, bv.
+    // "Project_NP37_Sweepen_2026-08-27.xlsx" — leesbaar in Downloads/e-mail,
+    // in tegenstelling tot de eerdere kale "Project_NP37_260827.xlsx".
+    const isoDate =
+      String(exportedAt.getFullYear()) + '-' +
+      String(exportedAt.getMonth() + 1).padStart(2, '0') + '-' +
       String(exportedAt.getDate()).padStart(2, '0');
-    const filename = `Project_${sanitizeForFilename(req.params.code)}_${jjmmdd}.xlsx`;
+    const titlePart = sanitizeForFilename(String(data.project.name || ''));
+    const filename = `Project_${sanitizeForFilename(req.params.code)}` +
+      (titlePart ? `_${titlePart}` : '') + `_${isoDate}.xlsx`;
     res.setHeader('Content-Type', XLSX_MEDIA_TYPE);
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.send(Buffer.from(arrayBuffer));
