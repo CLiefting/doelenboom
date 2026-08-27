@@ -477,6 +477,13 @@
     font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;
     color: #999; margin: 18px 0 10px;
   }
+  /* Totale BV-regel direct onder de "Producten / deliverables"-titel — zie
+     productsBvSummaryHtml. Trekt de margin-top van .dp-products-title
+     samen zodat de twee als één blok ogen; verdere marge naar de
+     productenlijst staat op deze regel zelf. */
+  .products-bv-summary { font-size: 12.5px; color: #444; margin: -6px 0 12px; }
+  .products-bv-summary b { color: #1f7a4d; }
+  .products-bv-summary-pct { color: #777; }
   .products-grid {
     display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px;
   }
@@ -507,6 +514,16 @@
   }
   .product-type-deliverable { background: #e7ecf5; color: #2F5597; }
   .product-type-mijlpaal { background: #fdeee0; color: #c9660a; }
+  /* Rij boven de producttitel: type-/te-laat-badge links, BV-badge rechts
+     (zie productCardHtml) — BV krijgt hier bewust een eigen, opvallende
+     badge i.p.v. verstopt in de grijze extra-regel, want dit is "wat het
+     ons aan waarde oplevert". */
+  .product-badges-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 6px; }
+  .product-bv-badge {
+    display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: 0.02em;
+    padding: 2px 7px; border-radius: 999px; margin-bottom: 5px; white-space: nowrap;
+    background: #e3f3ea; color: #1f7a4d;
+  }
   .product-name { font-size: 13px; font-weight: 700; color: #222; margin-bottom: 2px; }
   .product-desc { font-size: 12px; color: #555; margin-bottom: 6px; line-height: 1.4; }
   .product-progress-wrap { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
@@ -2532,6 +2549,14 @@ function runApp(data) {
     return new Date(t).toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit', year: 'numeric' });
   }
 
+  // Business value-getallen met NL-duizendtalnotatie (punt i.p.v. komma) —
+  // gebruikt op de tile-badge (productCardHtml) en in de BV-totaalregel
+  // bovenaan "Producten / deliverables" (productsBvSummaryHtml).
+  function formatNumberNL(n) {
+    if (n === null || n === undefined || isNaN(n)) return '';
+    return Number(n).toLocaleString('nl-NL', { maximumFractionDigits: 2 });
+  }
+
   // <input type="date"> accepteert als .value ALLEEN het kale "YYYY-MM-DD"
   // formaat (exact 10 tekens) — bij een volledige ISO-datetime ("2027-04-
   // 01T00:00:00.000Z", zie parseDateFlexible hierboven) negeert de browser de
@@ -2641,6 +2666,27 @@ function runApp(data) {
       rawMinT === rawMaxT ? rawMinT - 86400000 : rawMinT,
       rawMinT === rawMaxT ? rawMaxT + 86400000 : rawMaxT
     );
+  }
+
+  // Totale business value bovenaan "Producten / deliverables": xx / yy (z%),
+  // waarbij yy de som van BV is over alle producten met een ingevulde BV
+  // (= de waarde als alles 100% gereed zou zijn) en xx diezelfde som maar dan
+  // gewogen naar % gereed per product (= wat er tot nu toe daadwerkelijk aan
+  // waarde is gerealiseerd — hetzelfde % gereed-veld dat ook de voortgangsbalk
+  // op elke tile vult). Producten zonder BV tellen niet mee in yy (geen 0
+  // aannemen voor een onbekende waarde). Geeft '' terug als geen enkel
+  // product een BV heeft — dan is er niets zinnigs te tonen.
+  function productsBvSummaryHtml(products) {
+    const withBv = products.filter((p) => p.businessValue !== null && p.businessValue !== undefined);
+    if (!withBv.length) return '';
+    const totaal = withBv.reduce((sum, p) => sum + Number(p.businessValue), 0);
+    const gerealiseerd = withBv.reduce((sum, p) => {
+      const pct = Math.max(0, Math.min(100, Number(p.pct) || 0));
+      return sum + Number(p.businessValue) * pct / 100;
+    }, 0);
+    const pctTotaal = totaal !== 0 ? Math.round((gerealiseerd / totaal) * 100) : 0;
+    return '<div class="products-bv-summary">Totale business value: <b>' + formatNumberNL(gerealiseerd) +
+      ' / ' + formatNumberNL(totaal) + '</b> <span class="products-bv-summary-pct">(' + pctTotaal + '%)</span></div>';
   }
 
   // Tijdbalk boven de producten/deliverables-lijst van een project: plot zowel de
@@ -3349,6 +3395,7 @@ function runApp(data) {
     html += '<div class="dp-products-title"><span>Producten / deliverables' + (products.length ? ' (' + products.length + ')' : '') + '</span>' +
       '<button type="button" class="btn ghost btn-xs product-add-btn crud-only" data-code="' + escapeHtml(id) + '">+ Product</button>' +
       '</div>';
+    html += productsBvSummaryHtml(products);
     if (products.length === 0) {
       html += '<div class="dp-empty-note">Nog geen producten gekoppeld aan dit project.</div>';
     } else {
@@ -3362,22 +3409,33 @@ function runApp(data) {
         // (isProductOverdue vereist zelf al p.verwacht), dus nooit samen met
         // de rode variant hierboven.
         const noDate = !p.verwacht;
-        // Duur/BV/deadline — compacte extra regel, alleen de velden tonen die
-        // ook echt ingevuld zijn (anders drie keer "onbekend" op elke kaart,
+        // BV krijgt een eigen, opvallende badge rechtsboven op de tile (dit is
+        // "wat het ons aan waarde oplevert") i.p.v. verstopt in de kleine
+        // grijze extra-regel hieronder — daarom hier niet meer in extraParts.
+        const hasBv = p.businessValue !== null && p.businessValue !== undefined;
+        const bvBadgeHtml = hasBv
+          ? '<span class="product-bv-badge" title="Business value">BV ' + formatNumberNL(p.businessValue) + '</span>'
+          : '';
+        // Duur/deadline — compacte extra regel, alleen de velden tonen die
+        // ook echt ingevuld zijn (anders twee keer "onbekend" op elke kaart,
         // wat meer ruis dan info is). Zie ook DUUR_EENHEID_LABELS hieronder.
         const extraParts = [];
         if (p.deadline) extraParts.push('Deadline: ' + formatDateNL(p.deadline));
         if (p.duur !== null && p.duur !== undefined) {
           extraParts.push('Duur: ' + p.duur + ' ' + (DUUR_EENHEID_LABELS[p.duurEenheid] || p.duurEenheid));
         }
-        if (p.businessValue !== null && p.businessValue !== undefined) extraParts.push('BV: ' + p.businessValue);
         const extraMetaHtml = extraParts.length ? '<div class="product-extra-meta">' + extraParts.join(' &middot; ') + '</div>' : '';
         return '<div class="product-item' + (overdue ? ' product-item-overdue' : noDate ? ' product-item-nodate' : '') +
             '" data-code="' + escapeHtml(id) + '" data-id="' + escapeHtml(String(p.dbId)) + '">' +
-          '<span class="product-type-badge ' + (isMijlpaal ? 'product-type-mijlpaal' : 'product-type-deliverable') + '">' +
-            (isMijlpaal ? 'Mijlpaal' : 'Deliverable') +
-          '</span>' +
-          (overdue ? '<span class="product-overdue-badge">Te laat</span>' : '') +
+          '<div class="product-badges-row">' +
+            '<span>' +
+              '<span class="product-type-badge ' + (isMijlpaal ? 'product-type-mijlpaal' : 'product-type-deliverable') + '">' +
+                (isMijlpaal ? 'Mijlpaal' : 'Deliverable') +
+              '</span>' +
+              (overdue ? '<span class="product-overdue-badge">Te laat</span>' : '') +
+            '</span>' +
+            bvBadgeHtml +
+          '</div>' +
           '<div class="product-name">' + escapeHtml(p.name || p.code || '') + '</div>' +
           (p.omschrijving ? '<div class="product-desc">' + escapeHtml(p.omschrijving) + '</div>' : '') +
           '<div class="product-progress-wrap">' +
