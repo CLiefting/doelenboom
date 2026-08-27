@@ -30,7 +30,17 @@ import { pool } from './db.js';
 // draaiende service opstart.
 export function createApp() {
   const app = express();
-  app.use(cors());
+  // exposedHeaders: 'Content-Disposition' — zonder dit mag JS in de browser
+  // (fetch/XHR) een cross-origin response-header wel ONTVANGEN, maar niet
+  // via res.headers.get(...) UITLEZEN, tenzij de server 'm expliciet vrijgeeft
+  // (CORS-safelisted headers zijn standaard alleen Cache-Control/Content-
+  // Language/Content-Type/Expires/Last-Modified/Pragma). tree.html draait op
+  // een ander poort/origin dan deze API (bv. localhost:5173 vs localhost:4000)
+  // en leest Content-Disposition uit om de downloadnaam te bepalen (zowel de
+  // hele-doelenboom-export in exports.ts als de project-Excel-export in
+  // projectExcel.ts) — zonder deze regel valt dat altijd terug op de kale
+  // fallbacknaam, ook al stuurt de server de juiste header wél mee.
+  app.use(cors({ exposedHeaders: ['Content-Disposition'] }));
   app.use(express.json());
 
   app.get('/api/hello', (_req, res) => {

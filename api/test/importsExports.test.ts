@@ -136,6 +136,15 @@ describe('imports/exports (Excel round-trip via excel-service)', () => {
         const match = disposition.match(/filename="([^"]+)"/);
         assert.ok(match, `verwacht een filename in Content-Disposition, kreeg: ${disposition}`);
         assert.match(match![1], /^Doelenboom_.+_Testboom_\d{6}\.xlsx$/);
+        // Regressietest voor de CORS-exposedHeaders-fix in app.ts: zonder die
+        // regel kan een browser (tree.html draait op een andere origin dan de
+        // API) deze header wel ontvangen maar niet via JS uitlezen, en valt de
+        // downloadnaam altijd terug op de kale fallback — Node's fetch (hier
+        // in de test) is daar niet gevoelig voor, vandaar deze expliciete check.
+        assert.match(
+          res.headers.get('access-control-expose-headers') ?? '',
+          /Content-Disposition/i
+        );
       });
     }
   }
