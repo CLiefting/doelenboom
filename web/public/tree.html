@@ -212,6 +212,16 @@
   .element-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
   .element-modal-status { font-size: 12px; color: #DC3545; min-height: 16px; margin: 4px 0 10px; }
   .element-modal-hint { font-size: 11.5px; color: #888; margin: 0 0 14px; }
+  /* Kleine, niet-vetgedrukte toelichting ná een label-tekst (bv. "Deadline
+     (uiterste opleverdatum, los van...)") — i.p.v. een aparte .element-modal-
+     hint-regel per veld, wat bij een korter formulier al snel overdreven
+     ruimte inneemt. */
+  .product-field-hint { font-weight: 400; color: #999; font-size: 11px; }
+  /* Duur + eenheid naast elkaar op één regel (product-modal) i.p.v. onder
+     elkaar — twee korte velden die inhoudelijk bij elkaar horen. */
+  .product-field-row { display: flex; gap: 10px; }
+  .product-field-row > label { flex: 1 1 auto; min-width: 0; }
+  .product-field-row > label.product-field-eenheid { flex: 0 0 110px; }
   .req-mark { color: var(--accent); font-weight: 700; }
   .field-note { font-weight: 400; color: #999; text-transform: none; letter-spacing: normal; font-size: 11px; }
   .field-with-picker { position: relative; display: flex; gap: 6px; align-items: center; margin-top: 4px; }
@@ -504,6 +514,11 @@
   .product-progress-fill { height: 100%; background: var(--navy); border-radius: 999px; }
   .product-pct { font-size: 11.5px; font-weight: 700; color: #444; min-width: 34px; text-align: right; }
   .product-dates { font-size: 11px; color: #777; }
+  /* Duur/BV/deadline — compacte extra regel onder .product-dates, alleen
+     getoond als er minstens één van de drie is ingevuld (zie
+     productCardHtml). Zelfde stijl als .product-dates, met een klein
+     margin-top zodat de twee regels niet aan elkaar plakken. */
+  .product-extra-meta { font-size: 11px; color: #777; margin-top: 2px; }
   .product-remark { font-size: 11.5px; color: #666; font-style: italic; margin-top: 4px; }
   .product-item-actions { display: flex; gap: 6px; margin-top: 8px; }
 
@@ -1229,7 +1244,7 @@
   </div>
 
   <div class="element-modal-backdrop" id="product-modal-backdrop">
-    <div class="element-modal">
+    <div class="element-modal wide">
       <h3 id="product-modal-title">Nieuw product</h3>
       <p class="element-modal-hint">Velden met <span class="req-mark">*</span> zijn verplicht.</p>
       <form id="product-form">
@@ -1254,6 +1269,25 @@
         <label>Werkelijke opleverdatum
           <input type="date" id="product-field-werkelijk">
         </label>
+        <label>Deadline <span class="product-field-hint">(uiterste opleverdatum, los van de verwachte datum hierboven)</span>
+          <input type="date" id="product-field-deadline">
+        </label>
+        <div class="product-field-row">
+          <label>Duur <span class="product-field-hint">(hoe lang duurt het om dit te maken)</span>
+            <input type="number" id="product-field-duur" min="0" step="1">
+          </label>
+          <label class="product-field-eenheid">Eenheid
+            <select id="product-field-duur-eenheid">
+              <option value="d">Dagen</option>
+              <option value="w">Weken</option>
+              <option value="m">Maanden</option>
+              <option value="y">Jaar</option>
+            </select>
+          </label>
+        </div>
+        <label>BV (business value) <span class="product-field-hint">(wat levert dit de business op — vrij getal)</span>
+          <input type="number" id="product-field-bv" step="any">
+        </label>
         <label>Opmerking
           <input type="text" id="product-field-opmerking" autocomplete="off">
         </label>
@@ -1261,6 +1295,37 @@
         <div class="element-modal-actions">
           <button type="button" class="btn ghost" id="product-modal-cancel">Annuleren</button>
           <button type="submit" class="btn" id="product-modal-save">Opslaan</button>
+        </div>
+      </form>
+      <!-- Alleen zichtbaar bij bewerken (er moet al een product-id zijn om een
+           afhankelijkheid aan te koppelen) — bewust BUITEN <form> hierboven:
+           toevoegen/verwijderen zijn eigen, losse verzoeken (net als bij de
+           activiteiten-afhankelijkheden hierboven). Zie
+           renderProductDepsSection/openProductDepLinkModal/deleteProductDependency. -->
+      <div class="activity-deps-section" id="product-deps-section" style="display:none">
+        <div class="activity-deps-heading">Afhankelijkheden (hangt af van — andere deliverables/mijlpalen die eerst klaar moeten zijn)</div>
+        <div class="activity-row-deps" id="product-deps-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Voorganger toevoegen aan het product dat in het product-formulier
+       hierboven wordt bewerkt (productDepLinkSuccessorId/productDepLinkProjectCode)
+       — zelfde opzet als dep-link-modal-backdrop (activiteiten), maar zonder
+       type/vertraging: een planning item heeft geen startdatum, dus is dat
+       hier niet van toepassing (zie product_dependencies in db/init.sql). -->
+  <div class="element-modal-backdrop" id="product-dep-link-modal-backdrop">
+    <div class="element-modal">
+      <h3>Afhankelijkheid toevoegen</h3>
+      <p class="element-modal-hint"><span id="product-dep-link-successor-name"></span> hangt af van het gekozen planning item.</p>
+      <form id="product-dep-link-form">
+        <label>Hangt af van <span class="req-mark">*</span>
+          <select id="product-dep-link-field-predecessor"></select>
+        </label>
+        <p class="element-modal-status" id="product-dep-link-modal-status"></p>
+        <div class="element-modal-actions">
+          <button type="button" class="btn ghost" id="product-dep-link-modal-cancel">Annuleren</button>
+          <button type="submit" class="btn" id="product-dep-link-modal-save">Toevoegen</button>
         </div>
       </form>
     </div>
@@ -1633,7 +1698,7 @@ function flipExpandAnchor() {
 }
 
 function runApp(data) {
-  const { DETAILS, EDGES, TOELICHTING, PROJECT_STATUS, PRODUCTS, ACTIVITIES, DEPENDENCIES, TAGS, ELEMENT_TAGS, ORGS, OB_ORG, COLUMNS, ACTIVE_MODULES } = data;
+  const { DETAILS, EDGES, TOELICHTING, PROJECT_STATUS, PRODUCTS, PRODUCT_DEPENDENCIES, ACTIVITIES, DEPENDENCIES, TAGS, ELEMENT_TAGS, ORGS, OB_ORG, COLUMNS, ACTIVE_MODULES } = data;
   // Licentiemodel (zie doelenboom_licentiemodel.md §3/§6, api/src/license.ts):
   // welke modules de licentie van deze tenant actief heeft. PROJECT_STATUS/
   // PRODUCTS zijn al server-side leeggemaakt als 'projecten' ontbreekt
@@ -2437,6 +2502,10 @@ function runApp(data) {
   }
 
   const RAG_COLORS = { 'rood': '#DC3545', 'oranje': '#FD7E14', 'groen': '#28A745' };
+  // Duur-eenheid van een product/deliverable (zie api/src/routes/products.ts)
+  // — 'y' i.p.v. het Nederlandse 'j' voor jaar, zelfde letter als in het
+  // formulier (product-field-duur-eenheid) en de API.
+  const DUUR_EENHEID_LABELS = { d: 'dagen', w: 'weken', m: 'maanden', y: 'jaar' };
   const STATUS_COLORS = {
     'backlog': '#9AA5B1', 'actief': '#2F5597', 'on-hold': '#D9822B',
     'gereed': '#2E7D5B', 'vervallen': '#6c6f76'
@@ -3293,7 +3362,18 @@ function runApp(data) {
         // (isProductOverdue vereist zelf al p.verwacht), dus nooit samen met
         // de rode variant hierboven.
         const noDate = !p.verwacht;
-        return '<div class="product-item' + (overdue ? ' product-item-overdue' : noDate ? ' product-item-nodate' : '') + '">' +
+        // Duur/BV/deadline — compacte extra regel, alleen de velden tonen die
+        // ook echt ingevuld zijn (anders drie keer "onbekend" op elke kaart,
+        // wat meer ruis dan info is). Zie ook DUUR_EENHEID_LABELS hieronder.
+        const extraParts = [];
+        if (p.deadline) extraParts.push('Deadline: ' + formatDateNL(p.deadline));
+        if (p.duur !== null && p.duur !== undefined) {
+          extraParts.push('Duur: ' + p.duur + ' ' + (DUUR_EENHEID_LABELS[p.duurEenheid] || p.duurEenheid));
+        }
+        if (p.businessValue !== null && p.businessValue !== undefined) extraParts.push('BV: ' + p.businessValue);
+        const extraMetaHtml = extraParts.length ? '<div class="product-extra-meta">' + extraParts.join(' &middot; ') + '</div>' : '';
+        return '<div class="product-item' + (overdue ? ' product-item-overdue' : noDate ? ' product-item-nodate' : '') +
+            '" data-code="' + escapeHtml(id) + '" data-id="' + escapeHtml(String(p.dbId)) + '">' +
           '<span class="product-type-badge ' + (isMijlpaal ? 'product-type-mijlpaal' : 'product-type-deliverable') + '">' +
             (isMijlpaal ? 'Mijlpaal' : 'Deliverable') +
           '</span>' +
@@ -3308,6 +3388,7 @@ function runApp(data) {
             (p.verwacht ? 'Verwacht: ' + formatDateNL(p.verwacht) : '<span class="product-dates-unknown">Verwachte opleverdatum onbekend</span>') +
             (p.werkelijk ? ' &middot; Opgeleverd: ' + formatDateNL(p.werkelijk) : '') +
           '</div>' +
+          extraMetaHtml +
           (p.opmerking ? '<div class="product-remark">' + escapeHtml(p.opmerking) + '</div>' : '') +
           '<div class="product-item-actions crud-only">' +
             '<button type="button" class="btn ghost btn-xs product-edit-btn" data-code="' + escapeHtml(id) + '" data-id="' + escapeHtml(String(p.dbId)) + '">Bewerken</button>' +
@@ -4449,7 +4530,13 @@ function runApp(data) {
   const productFieldVerwacht = document.getElementById('product-field-verwacht');
   const productFieldWerkelijk = document.getElementById('product-field-werkelijk');
   const productFieldOpmerking = document.getElementById('product-field-opmerking');
+  const productFieldDeadline = document.getElementById('product-field-deadline');
+  const productFieldDuur = document.getElementById('product-field-duur');
+  const productFieldDuurEenheid = document.getElementById('product-field-duur-eenheid');
+  const productFieldBv = document.getElementById('product-field-bv');
   const productModalCancelBtn = document.getElementById('product-modal-cancel');
+  const productDepsSection = document.getElementById('product-deps-section');
+  const productDepsList = document.getElementById('product-deps-list');
 
   let productModalMode = 'create';
   let productModalProjectCode = null;
@@ -4459,6 +4546,32 @@ function runApp(data) {
     productModalStatus.textContent = text || '';
     productModalStatus.style.color = kind === 'ok' ? '#2E7D5B' : kind === 'busy' ? '#777' : '#DC3545';
   }
+
+  // Bouwt de "hangt af van"-chips + "+ Afhankelijkheid"-knop voor het product
+  // dat nu in het formulier open staat (productModalProjectCode/productModalProductId)
+  // — zelfde opzet als renderActivityDepsSection, maar zonder type/vertraging
+  // (zie product_dependencies in db/init.sql: een planning item heeft alleen
+  // een enkel datumpunt, geen start-/einddatum).
+  function renderProductDepsSection() {
+    if (!productDepsList) return;
+    const deps = (PRODUCT_DEPENDENCIES[productModalProjectCode] || [])
+      .filter((d) => String(d.successorId) === String(productModalProductId));
+    const nameByDbId = new Map((PRODUCTS[productModalProjectCode] || []).map((p) => [String(p.dbId), p.name]));
+    productDepsList.innerHTML = deps.map((d) => {
+      const predName = nameByDbId.get(String(d.predecessorId)) || '?';
+      return '<span class="dp-chip">Hangt af van: <b>' + escapeHtml(predName) + '</b>' +
+        '<button type="button" class="dp-chip-remove crud-only product-dep-remove-btn" data-code="' + escapeHtml(productModalProjectCode) +
+          '" data-dep-id="' + escapeHtml(String(d.dbId)) + '" title="Afhankelijkheid verwijderen">&times;</button></span>';
+    }).join('') +
+      '<button type="button" class="btn ghost btn-xs crud-only product-dep-add-btn" data-code="' + escapeHtml(productModalProjectCode) +
+        '" data-id="' + escapeHtml(String(productModalProductId)) + '" title="Afhankelijkheid toevoegen">+ Afhankelijkheid</button>';
+  }
+  if (productDepsList) productDepsList.addEventListener('click', (ev) => {
+    const addBtn = ev.target.closest('.product-dep-add-btn');
+    if (addBtn) { closeProductModal(); openProductDepLinkModal(addBtn.dataset.code, addBtn.dataset.id); return; }
+    const removeBtn = ev.target.closest('.product-dep-remove-btn');
+    if (removeBtn) { deleteProductDependency(removeBtn.dataset.code, removeBtn.dataset.depId); return; }
+  });
 
   function openProductModal(mode, projectCode, productId) {
     productModalMode = mode;
@@ -4476,12 +4589,24 @@ function runApp(data) {
       productFieldPct.value = existing.pct || 0;
       productFieldVerwacht.value = toDateInputValue(existing.verwacht);
       productFieldWerkelijk.value = toDateInputValue(existing.werkelijk);
+      productFieldDeadline.value = toDateInputValue(existing.deadline);
+      productFieldDuur.value = existing.duur !== null && existing.duur !== undefined ? existing.duur : '';
+      productFieldDuurEenheid.value = existing.duurEenheid || 'd';
+      productFieldBv.value = existing.businessValue !== null && existing.businessValue !== undefined ? existing.businessValue : '';
       productFieldOpmerking.value = existing.opmerking || '';
+      // Afhankelijkheden koppelen kan pas nadat het product bestaat (heeft
+      // een id nodig) — dus alleen tonen bij bewerken, net als bij activiteiten.
+      if (productDepsSection) {
+        productDepsSection.style.display = '';
+        renderProductDepsSection();
+      }
     } else {
       productModalTitle.textContent = 'Nieuw product';
       productForm.reset();
       productFieldType.value = 'deliverable';
       productFieldPct.value = 0;
+      productFieldDuurEenheid.value = 'd';
+      if (productDepsSection) productDepsSection.style.display = 'none';
     }
     productModalBackdrop.classList.add('visible');
     productFieldName.focus();
@@ -4505,6 +4630,10 @@ function runApp(data) {
       pctGereed: Number(productFieldPct.value) || 0,
       verwachteDatum: productFieldVerwacht.value || null,
       werkelijkeDatum: productFieldWerkelijk.value || null,
+      deadline: productFieldDeadline.value || null,
+      duur: productFieldDuur.value === '' ? null : Number(productFieldDuur.value),
+      duurEenheid: productFieldDuurEenheid.value || 'd',
+      businessValue: productFieldBv.value === '' ? null : Number(productFieldBv.value),
       opmerking: productFieldOpmerking.value.trim(),
     };
     if (!payload.name) {
@@ -4541,6 +4670,107 @@ function runApp(data) {
       const res = await fetch(
         apiUrl + '/api/doelenbomen/' + doelenboomId + '/elements/' + encodeURIComponent(projectCode) +
           '/products/' + encodeURIComponent(productId),
+        { method: 'DELETE', headers: { Authorization: 'Bearer ' + authToken } }
+      );
+      if (!res.ok && res.status !== 204) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || ('Verwijderen mislukt (HTTP ' + res.status + ')'));
+      }
+      reloadTreeKeepingFocus();
+    } catch (err) {
+      showToast(err && err.message ? err.message : 'Onbekende fout bij verwijderen.', 'error');
+    }
+  }
+
+  // ---- Afhankelijkheden tussen producten/planning items (product_dependencies) ----
+  // Simpeler dan activiteit-afhankelijkheden hierboven: alleen "hangt af van",
+  // geen type (FS/SS/FF/SF) en geen vertraging — een planning item heeft maar
+  // één datumpunt (verwachte/werkelijke datum), geen start-/einddatum om zo'n
+  // relatie tegen af te zetten. Beheer gebeurt via de "Afhankelijkheden"-sectie
+  // in het productformulier hierboven (renderProductDepsSection); dit hier is
+  // het losse "afhankelijkheid toevoegen"-modal (zelfde opzet als
+  // dep-link-modal-backdrop) en de verwijder-actie.
+  const productDepLinkModalBackdrop = document.getElementById('product-dep-link-modal-backdrop');
+  const productDepLinkForm = document.getElementById('product-dep-link-form');
+  const productDepLinkFieldPredecessor = document.getElementById('product-dep-link-field-predecessor');
+  const productDepLinkModalStatus = document.getElementById('product-dep-link-modal-status');
+  const productDepLinkModalCancelBtn = document.getElementById('product-dep-link-modal-cancel');
+  const productDepLinkSuccessorNameEl = document.getElementById('product-dep-link-successor-name');
+  let productDepLinkProjectCode = null;
+  let productDepLinkSuccessorId = null;
+
+  function setProductDepLinkModalStatus(text, kind) {
+    productDepLinkModalStatus.textContent = text || '';
+    productDepLinkModalStatus.style.color = kind === 'ok' ? '#2E7D5B' : kind === 'busy' ? '#777' : '#DC3545';
+  }
+
+  function openProductDepLinkModal(projectCode, successorId) {
+    productDepLinkProjectCode = projectCode;
+    productDepLinkSuccessorId = successorId;
+    const products = PRODUCTS[projectCode] || [];
+    const successor = products.find((p) => String(p.dbId) === String(successorId));
+    productDepLinkSuccessorNameEl.textContent = successor ? successor.name : 'Dit planning item';
+    // Zichzelf en al gekoppelde voorgangers niet nogmaals aanbieden (de
+    // backend weigert dat toch met 400/409, maar dit voorkomt de foutmelding
+    // meteen al in de keuzelijst).
+    const linkedPredecessorIds = new Set(
+      (PRODUCT_DEPENDENCIES[projectCode] || [])
+        .filter((d) => String(d.successorId) === String(successorId))
+        .map((d) => String(d.predecessorId))
+    );
+    const available = products.filter((p) => String(p.dbId) !== String(successorId) && !linkedPredecessorIds.has(String(p.dbId)));
+    productDepLinkFieldPredecessor.innerHTML = available.length
+      ? available.map((p) => '<option value="' + escapeHtml(String(p.dbId)) + '">' + escapeHtml(p.name) + '</option>').join('')
+      : '<option value="">(geen andere planning items beschikbaar)</option>';
+    setProductDepLinkModalStatus('');
+    productDepLinkModalBackdrop.classList.add('visible');
+  }
+
+  function closeProductDepLinkModal() {
+    productDepLinkModalBackdrop.classList.remove('visible');
+  }
+
+  if (productDepLinkModalCancelBtn) productDepLinkModalCancelBtn.addEventListener('click', closeProductDepLinkModal);
+  if (productDepLinkModalBackdrop) productDepLinkModalBackdrop.addEventListener('click', (ev) => {
+    if (ev.target === productDepLinkModalBackdrop) closeProductDepLinkModal();
+  });
+
+  if (productDepLinkForm) productDepLinkForm.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const predecessorId = productDepLinkFieldPredecessor.value;
+    if (!predecessorId) { setProductDepLinkModalStatus('Kies een planning item.'); return; }
+    setProductDepLinkModalStatus('Bezig met opslaan…', 'busy');
+    try {
+      const res = await fetch(
+        apiUrl + '/api/doelenbomen/' + doelenboomId + '/elements/' + encodeURIComponent(productDepLinkProjectCode) + '/products/dependencies',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + authToken },
+          body: JSON.stringify({
+            predecessorId: Number(predecessorId),
+            successorId: Number(productDepLinkSuccessorId),
+          }),
+        }
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || ('Opslaan mislukt (HTTP ' + res.status + ')'));
+      }
+      setProductDepLinkModalStatus('Opgeslagen, boom wordt herladen…', 'ok');
+      reloadTreeKeepingFocus(400);
+    } catch (err) {
+      setProductDepLinkModalStatus(err && err.message ? err.message : 'Onbekende fout bij opslaan.');
+    }
+  });
+
+  async function deleteProductDependency(projectCode, dependencyId) {
+    if (!dependencyId) return;
+    const ok = await showConfirm('Deze afhankelijkheid verwijderen?');
+    if (!ok) return;
+    try {
+      const res = await fetch(
+        apiUrl + '/api/doelenbomen/' + doelenboomId + '/elements/' + encodeURIComponent(projectCode) +
+          '/products/dependencies/' + encodeURIComponent(dependencyId),
         { method: 'DELETE', headers: { Authorization: 'Bearer ' + authToken } }
       );
       if (!res.ok && res.status !== 204) {
@@ -5359,6 +5589,18 @@ function runApp(data) {
   detailPanel.addEventListener('click', onDetailAreaClick);
   projectPanelEl.addEventListener('click', onDetailAreaClick);
 
+  // Dubbelklik op een deliverable-/mijlpaal-tile opent meteen het
+  // bewerk-formulier (zelfde modal als de "Bewerken"-knop hierboven,
+  // productEditBtn) — alleen voor gebruikers met wijzigrechten, net als de
+  // organisatie-chip-shortcut verderop in onDetailAreaClick.
+  function onProductTileDblClick(ev) {
+    if (document.body.classList.contains('read-only')) return;
+    const productItem = ev.target.closest('.product-item');
+    if (productItem) { openProductModal('edit', productItem.dataset.code, productItem.dataset.id); return; }
+  }
+  detailPanel.addEventListener('dblclick', onProductTileDblClick);
+  projectPanelEl.addEventListener('dblclick', onProductTileDblClick);
+
   // ---- Fase 2: CRUD voor tags en organisatieonderdelen (de stamlijsten; koppelen
   // aan een element is een relatie en hoort bij fase 3). Eén herbruikbare factory
   // voor beide, want de vorm is identiek op de "categorie"-kolom na (alleen tags
@@ -6154,6 +6396,22 @@ function adaptTreeResponse(tree) {
       dbId: p.id, code: p.code, name: p.name, type: p.type === 'mijlpaal' ? 'mijlpaal' : 'deliverable',
       omschrijving: p.omschrijving,
       pct: p.pctGereed, verwacht: p.verwachteDatum, werkelijk: p.werkelijkeDatum, opmerking: p.opmerking,
+      // Doorlooptijd/business value/deadline — zie api/src/routes/products.ts.
+      // duur/businessValue mogen null zijn (nog niet ingevuld); duurEenheid
+      // heeft altijd een waarde ('d' als default) maar is dan irrelevant.
+      duur: p.duur, duurEenheid: p.duurEenheid || 'd', businessValue: p.businessValue, deadline: p.deadline,
+    }));
+  });
+
+  // Afhankelijkheden tussen planning items (denk aan "hangt af van") —
+  // predecessorId/successorId verwijzen naar Product.dbId hierboven. Simpeler
+  // dan DEPENDENCIES (activiteiten) hieronder: geen type/lagDays, want een
+  // planning item heeft geen startdatum. Zie api/src/routes/products.ts en de
+  // "Afhankelijkheden"-sectie in het product-formulier (renderProductDepsSection).
+  const PRODUCT_DEPENDENCIES = {};
+  Object.keys(tree.productDependencies || {}).forEach((id) => {
+    PRODUCT_DEPENDENCIES[id] = (tree.productDependencies[id] || []).map((d) => ({
+      dbId: d.id, predecessorId: d.predecessorId, successorId: d.successorId,
     }));
   });
 
@@ -6207,7 +6465,7 @@ function adaptTreeResponse(tree) {
   // Projecten-specifieke UI te verbergen i.p.v. te tonen-maar-te-laten-falen.
   const ACTIVE_MODULES = tree.activeModules || [];
 
-  return { DETAILS, EDGES, TOELICHTING, PROJECT_STATUS, PRODUCTS, ACTIVITIES, DEPENDENCIES, TAGS, ELEMENT_TAGS, ORGS, OB_ORG, COLUMNS, ACTIVE_MODULES };
+  return { DETAILS, EDGES, TOELICHTING, PROJECT_STATUS, PRODUCTS, PRODUCT_DEPENDENCIES, ACTIVITIES, DEPENDENCIES, TAGS, ELEMENT_TAGS, ORGS, OB_ORG, COLUMNS, ACTIVE_MODULES };
 }
 
 function renderError(message) {

@@ -48,10 +48,26 @@ export async function fetchTree(doelenboomId: string) {
 
   const productsResult = await pool.query(
     `select el.code as element_code, p.id, p.code, p.name, p.type, p.omschrijving, p.pct_gereed,
-            p.verwachte_datum, p.werkelijke_datum, p.opmerking
+            p.verwachte_datum, p.werkelijke_datum, p.opmerking,
+            p.duur, p.duur_eenheid, p.business_value, p.deadline
      from products p join elements el on el.id = p.element_id
      where el.doelenboom_id = $1
      order by p.id`,
+    [doelenboomId]
+  );
+
+  // Afhankelijkheden tussen planning items — gescoped per project via het
+  // element-van-de-voorganger (beide items horen sowieso bij hetzelfde
+  // project, afgedwongen bij het aanmaken, zie routes/products.ts), zodat de
+  // frontend ze net als products hierboven direct per projectcode ontvangt
+  // (tree.html: PRODUCT_DEPENDENCIES[code]).
+  const productDependenciesResult = await pool.query(
+    `select el.code as element_code, d.id, d.predecessor_id, d.successor_id
+     from product_dependencies d
+     join products pp on pp.id = d.predecessor_id
+     join elements el on el.id = pp.element_id
+     where el.doelenboom_id = $1
+     order by d.id`,
     [doelenboomId]
   );
 
@@ -130,6 +146,19 @@ export async function fetchTree(doelenboomId: string) {
       verwachteDatum: row.verwachte_datum,
       werkelijkeDatum: row.werkelijke_datum,
       opmerking: row.opmerking,
+      duur: row.duur,
+      duurEenheid: row.duur_eenheid,
+      businessValue: row.business_value,
+      deadline: row.deadline,
+    });
+  }
+
+  const productDependencies: Record<string, unknown[]> = {};
+  for (const row of productDependenciesResult.rows) {
+    (productDependencies[row.element_code] ??= []).push({
+      id: row.id,
+      predecessorId: row.predecessor_id,
+      successorId: row.successor_id,
     });
   }
 
@@ -218,6 +247,7 @@ export async function fetchTree(doelenboomId: string) {
     })),
     projectStatus: projectenActive ? projectStatus : {},
     products: projectenActive ? products : {},
+    productDependencies: projectenActive ? productDependencies : {},
     activities: projectenActive ? activities : {},
     dependencies: projectenActive ? dependencies : {},
     tags: tagsResult.rows,

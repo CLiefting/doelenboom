@@ -239,9 +239,43 @@ create table if not exists products (
   pct_gereed int not null default 0 check (pct_gereed between 0 and 100),
   verwachte_datum date,
   werkelijke_datum date,
-  opmerking text not null default ''
+  opmerking text not null default '',
+  -- Doorlooptijd om dit planning item te realiseren — puur informatief (geen
+  -- scheduling-engine die hier iets mee herberekent, net als de rest van de
+  -- planning in deze app). duur mag ontbreken (NULL, nog niet ingeschat);
+  -- duur_eenheid heeft altijd een waarde maar is dan irrelevant.
+  duur integer,
+  duur_eenheid text not null default 'd' check (duur_eenheid in ('d', 'w', 'm', 'y')),
+  -- Business value: vrije numerieke inschatting van de waarde die dit
+  -- planning item oplevert (bv. story points of een score) — bewust zonder
+  -- vaste eenheid/valuta, de gebruiker geeft er zelf betekenis aan.
+  business_value numeric,
+  -- Uiterste opleverdatum — los van verwachte_datum hierboven (dat is de
+  -- PLANNING; dit is de harde grens waarbinnen het alsnog moet gebeuren).
+  -- Puur informatief, geen eigen "te laat"-markering (isProductOverdue in
+  -- tree.html blijft uitsluitend op verwachte_datum werken).
+  deadline date
 );
 create index if not exists idx_products_element on products(element_id);
+
+-- Afhankelijkheden tussen planning items (deliverables/mijlpalen) binnen
+-- hetzelfde project — simpeler dan activity_dependencies hieronder: een
+-- planning item heeft geen startdatum (alleen een verwachte/werkelijke
+-- opleverdatum, één moment in de tijd), dus een FS/SS/FF/SF-type zoals bij
+-- activiteiten heeft hier geen betekenis — puur "successor hangt af van
+-- predecessor", zonder type of vertraging. Puur informatief (geen
+-- scheduling-engine). Beide planning items moeten bij hetzelfde
+-- project-element horen — afgedwongen in de API (routes/products.ts), niet
+-- in dit schema (zou een extra join in de check vereisen).
+create table if not exists product_dependencies (
+  id bigserial primary key,
+  predecessor_id bigint not null references products(id) on delete cascade,
+  successor_id bigint not null references products(id) on delete cascade,
+  check (predecessor_id <> successor_id),
+  unique (predecessor_id, successor_id)
+);
+create index if not exists idx_product_deps_predecessor on product_dependencies(predecessor_id);
+create index if not exists idx_product_deps_successor on product_dependencies(successor_id);
 
 -- Activiteiten-planning per project: anders dan products/mijlpalen hierboven
 -- (één los moment — verwachte/werkelijke datum) beslaat een activiteit een

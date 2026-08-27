@@ -138,6 +138,7 @@ export type ProjectStatus = {
 };
 
 export type ProductType = 'deliverable' | 'mijlpaal';
+export type DuurEenheid = 'd' | 'w' | 'm' | 'y';
 
 export type Product = {
   id: number;
@@ -149,6 +150,28 @@ export type Product = {
   verwachteDatum: string | null;
   werkelijkeDatum: string | null;
   opmerking: string;
+  // Doorlooptijd om dit planning item te realiseren, puur informatief — null
+  // als (nog) niet ingeschat. duurEenheid heeft altijd een waarde maar is dan
+  // irrelevant. Zie api/src/routes/products.ts.
+  duur: number | null;
+  duurEenheid: DuurEenheid;
+  // Vrije numerieke inschatting van de waarde die dit oplevert (bv. story
+  // points of een score), bewust zonder vaste eenheid/valuta.
+  businessValue: number | null;
+  // Uiterste opleverdatum, los van verwachteDatum hierboven (dat is de
+  // PLANNING; dit is de harde grens). Puur informatief.
+  deadline: string | null;
+};
+
+// Afhankelijkheid tussen twee planning items (deliverables/mijlpalen) binnen
+// hetzelfde project — simpeler dan ActivityDependency hieronder: een
+// planning item heeft geen startdatum (alleen een verwachte/werkelijke
+// opleverdatum, één moment), dus geen type/lagDays. predecessorId/
+// successorId zijn Product.id-waarden. Zie api/src/routes/products.ts.
+export type ProductDependency = {
+  id: number;
+  predecessorId: number;
+  successorId: number;
 };
 
 // Activiteiten-planning binnen een project: anders dan Product hierboven (één
@@ -229,6 +252,7 @@ export type TreeResponse = {
   edges: Edge[];
   projectStatus: Record<string, ProjectStatus>;
   products: Record<string, Product[]>;
+  productDependencies: Record<string, ProductDependency[]>;
   activities: Record<string, Activity[]>;
   dependencies: Record<string, ActivityDependency[]>;
   tags: Tag[];
