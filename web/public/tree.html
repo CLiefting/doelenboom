@@ -476,6 +476,13 @@
     display: inline-block; font-size: 10px; font-weight: 700; color: #DC3545;
     margin-left: 6px; vertical-align: middle;
   }
+  /* Geen verwachte opleverdatum ingevuld — geen fout (zoals te laat, hierboven
+     in rood), maar wel iets om aan te vullen: oranje (var(--accent), zelfde
+     attentiekleur als elders in de app) i.p.v. rood. Sluit elkaar uit met
+     .product-item-overdue (isProductOverdue geeft altijd false zonder
+     verwachte datum, zie productCardHtml), dus nooit allebei tegelijk. */
+  .product-item-nodate { border-color: var(--accent); }
+  .product-dates-unknown { color: var(--accent); font-weight: 600; }
   .products-separator {
     grid-column: 1 / -1; display: flex; align-items: center; gap: 10px;
     font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;
@@ -3280,7 +3287,13 @@ function runApp(data) {
         const pct = Math.max(0, Math.min(100, Number(p.pct) || 0));
         const isMijlpaal = p.type === 'mijlpaal';
         const overdue = isProductOverdue(p);
-        return '<div class="product-item' + (overdue ? ' product-item-overdue' : '') + '">' +
+        // Geen verwachte datum ingevuld — geen "fout" zoals te laat (overdue,
+        // rood), maar wel iets om aan te vullen: oranje randje + oranje tekst
+        // i.p.v. het gebruikelijke grijs. Sluit overdue altijd uit
+        // (isProductOverdue vereist zelf al p.verwacht), dus nooit samen met
+        // de rode variant hierboven.
+        const noDate = !p.verwacht;
+        return '<div class="product-item' + (overdue ? ' product-item-overdue' : noDate ? ' product-item-nodate' : '') + '">' +
           '<span class="product-type-badge ' + (isMijlpaal ? 'product-type-mijlpaal' : 'product-type-deliverable') + '">' +
             (isMijlpaal ? 'Mijlpaal' : 'Deliverable') +
           '</span>' +
@@ -3292,7 +3305,7 @@ function runApp(data) {
             '<span class="product-pct">' + pct + '%</span>' +
           '</div>' +
           '<div class="product-dates">' +
-            (p.verwacht ? 'Verwacht: ' + formatDateNL(p.verwacht) : 'Verwachte opleverdatum onbekend') +
+            (p.verwacht ? 'Verwacht: ' + formatDateNL(p.verwacht) : '<span class="product-dates-unknown">Verwachte opleverdatum onbekend</span>') +
             (p.werkelijk ? ' &middot; Opgeleverd: ' + formatDateNL(p.werkelijk) : '') +
           '</div>' +
           (p.opmerking ? '<div class="product-remark">' + escapeHtml(p.opmerking) + '</div>' : '') +
