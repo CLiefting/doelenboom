@@ -259,14 +259,14 @@ Eenmalig instellen op de VPS (na de eerstvolgende deploy die dit script
 bevat — zie "Updates uitrollen" hieronder):
 
 ```bash
-chmod +x ~/doelenboom/deploy/export-all-doelenbomen.sh
-crontab -e
+chmod +x ~/doelenboom/deploy/export-all-doelenbomen.sh ~/doelenboom/deploy/install-cron-export-all.sh
+~/doelenboom/deploy/install-cron-export-all.sh
 ```
 
-Voeg toe:
-```
-0 1 * * * /home/charles/doelenboom/deploy/export-all-doelenbomen.sh >> /home/charles/doelenboom-excel-backup.log 2>&1
-```
+`install-cron-export-all.sh` zet de cronregel niet-interactief neer (geen
+`crontab -e`-editor nodig) en is idempotent — bestaande regels (zoals de
+demo-reset hierboven) blijven staan, en opnieuw draaien voegt de regel niet
+nog een keer toe. Controleren: `crontab -l`.
 
 Handmatig testen (mag altijd):
 ```bash
