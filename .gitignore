@@ -10,3 +10,8 @@ __pycache__
 *.tar.gz
 .venv
 .pytest_cache
+
+# Nachtelijke Excel-backups (deploy/export-all-doelenbomen.sh) — data, geen
+# code, en alleen relevant op de VPS zelf (bind mount, zie
+# docker-compose.prod.yml).
+/backups/

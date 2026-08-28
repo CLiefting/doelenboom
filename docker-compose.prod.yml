@@ -61,6 +61,15 @@ services:
     networks:
       - default
       - code072-net
+    # Bind mount (relatief aan de compose-project-map, dus ~/doelenboom/backups
+    # op de VPS) i.p.v. een named volume: zo staan de nachtelijke Excel-
+    # backups (deploy/export-all-doelenbomen.sh, gepland via cron — zie
+    # deploy/README.md) gewoon als losse .xlsx-bestanden op de VPS-schijf,
+    # buiten Docker om inspecteerbaar/te kopiëren, en overleven ze een
+    # `docker compose down`/image-vervanging. backups/ staat in .gitignore —
+    # dit is data, geen code.
+    volumes:
+      - ./backups:/backups
 
   web:
     build:

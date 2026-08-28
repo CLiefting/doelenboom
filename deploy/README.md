@@ -234,6 +234,47 @@ Wijzig je later de demo-inhoud in `db/seed.sql`, werk dan ook
 `deploy/reset-demo.sql` bij (zelfde INSERT-blokken) — zie de toelichting
 bovenaan dat bestand.
 
+## Nachtelijke Excel-backup
+
+Elke nacht om 01:00 exporteert `api/src/scripts/exportAllDoelenbomen.ts`
+(gecompileerd naar `dist/scripts/exportAllDoelenbomen.js`, draait in de
+al-lopende `api`-container — geen aparte cronjob binnen Docker, geen extra
+auth nodig) **elke doelenboom van elke tenant** als `.xlsx`, met exact
+dezelfde inhoud als een handmatige export via de app (`GET /:id/export`,
+zelfde `format=oud|nieuw`-keuze op basis van de kolomconfiguratie).
+
+**Locatie:** `~/doelenboom/backups/<tenant-slug>/<doelenboom-slug>/` op de
+VPS zelf (bind mount naar `/backups` in de container, zie
+`docker-compose.prod.yml`) — bewust **niet** in Docker-volumes en **niet**
+offsite; dat laatste staat nog open, zie "Backups" onderaan dit document.
+Bestandsnaam: `<doelenboom-slug>_<JJJJ-MM-DD>.xlsx`.
+
+**Bewaartermijn** (toegepast per doelenboom, elke nacht opnieuw op wat er dan
+op schijf staat):
+- jonger dan 30 dagen: elke nacht een bestand
+- 30 dagen tot 1 jaar oud: alleen zondagen
+- 1 jaar of ouder: alleen de eerste zondag van de maand, voor altijd
+
+Eenmalig instellen op de VPS (na de eerstvolgende deploy die dit script
+bevat — zie "Updates uitrollen" hieronder):
+
+```bash
+chmod +x ~/doelenboom/deploy/export-all-doelenbomen.sh
+crontab -e
+```
+
+Voeg toe:
+```
+0 1 * * * /home/charles/doelenboom/deploy/export-all-doelenbomen.sh >> /home/charles/doelenboom-excel-backup.log 2>&1
+```
+
+Handmatig testen (mag altijd):
+```bash
+~/doelenboom/deploy/export-all-doelenbomen.sh
+tail -40 ~/doelenboom-excel-backup.log
+ls -R ~/doelenboom/backups | head -50
+```
+
 ## Updates uitrollen
 
 Zelfde principe als de eerste deploy (stap 5): bouw de nieuwe images op je
@@ -275,8 +316,15 @@ handmatig met `docker compose exec db psql ...` doorvoeren, nooit
 
 ## Backups
 
-Nog niet ingericht (zelfde aandachtspunt als bij WWspeur, zie
-`SERVER-BEHEER.md`). Aanbevolen vóór veel productiegebruik:
+Een echte databasebackup is nog niet ingericht (zelfde aandachtspunt als bij
+WWspeur, zie `SERVER-BEHEER.md`) — de nachtelijke Excel-export hierboven
+("Nachtelijke Excel-backup") is een aanvulling daarop, geen vervanging: het
+is een dump van de zichtbare boom-inhoud per doelenboom, geen volledige
+databasebackup (geen gebruikers/accounts/sessies/licenties), en staat alleen
+lokaal op de VPS — bij verlies van de VPS zelf ben je ook deze kwijt. Voor nu
+bewust geaccepteerd risico; aanbevolen vóór veel productiegebruik: dezelfde
+soort offsite-kopie als hieronder voor de databasebackup, ook toepassen op
+`~/doelenboom/backups/`.
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.prod.yml exec db \
