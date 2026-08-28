@@ -53,7 +53,16 @@ cd "$REPO_DIR"
 case "$ACTION" in
   restart)
     echo "==> Lokale stack herbouwen (gewijzigde services) en herstarten"
-    docker compose up -d --build
+    # BUILD_VERSION expliciet op 'dev' voor de lokale stack (footer toont dan
+    # "vdev"), ONGEACHT een eventueel in deze shell geëxporteerde
+    # BUILD_VERSION — bv. van scripts/build-version.sh, meestal geëxporteerd
+    # vlak vóór een productie-build (zie deploy/README.md) in diezelfde
+    # terminal-sessie. Zonder deze override zou zo'n export blijven hangen en
+    # per ongeluk een productie-versienummer in de lokale footer laten zien,
+    # ook al is dit gewoon een lokale dev-build. Een echte productie-build
+    # blijft altijd BUILD_VERSION expliciet zetten (deploy/README.md, "Images
+    # bouwen"), dus die is hier niet van afhankelijk.
+    BUILD_VERSION=dev docker compose up -d --build
     echo
     docker compose ps
     ;;
