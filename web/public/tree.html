@@ -2742,6 +2742,17 @@ function runApp(data) {
     return '<svg width="12" height="12" viewBox="0 0 14 14"><circle cx="7" cy="7" r="5.5" fill="' + fill + '" stroke="' + stroke + '" stroke-width="1.6"></circle></svg>';
   }
 
+  // Los, opvallend teken (rood vlaggetje) voor een deadline — bewust anders dan
+  // de blauwe cirkel/ruit van verwacht/werkelijk hierboven, zodat een deadline
+  // in één oogopslag te onderscheiden is van een gewone planningsdatum: het is
+  // geen moment dat je "haalt of niet haalt" zoals een mijlpaal, maar een harde
+  // uiterste datum die los van de eigen planning van het item kan liggen (en
+  // die dus ook het bereik van de tijdas mee bepaalt, zie buildTimelineMarkers).
+  function timelineDeadlineIcon() {
+    const color = '#B42318';
+    return '<svg width="12" height="12" viewBox="0 0 14 14"><path d="M3 1v12" stroke="' + color + '" stroke-width="1.6" stroke-linecap="round"></path><path d="M3 2h8l-2.5 3L11 8H3z" fill="' + color + '"></path></svg>';
+  }
+
   // Grenzen van de maand-/kwartaalvlakken onder de tijdbalk: bij een spanne van
   // meer dan ~15 maanden gebruiken we kwartalen (anders wordt het te druk),
   // anders maanden. bounds[0]/bounds[laatste] liggen op een ronde maand-/
@@ -2787,6 +2798,16 @@ function runApp(data) {
       if (p.werkelijk) {
         const t = parseDateFlexible(p.werkelijk);
         if (!isNaN(t)) markers.push({ t, type, filled: true, label, dateLabel: formatDateNL(p.werkelijk), kind: 'Opgeleverd' });
+      }
+      // Deadline (uiterste opleverdatum) telt ook mee in het bereik van de as —
+      // anders loopt de tijdlijn (en de activiteiten-Gantt, die dit bereik
+      // overneemt als "leidende" as, zie computeProjectTimelineBounds) niet
+      // door tot een deadline die verder in de toekomst ligt dan de verwachte/
+      // werkelijke datum van alle items, en lijkt de as afgekapt terwijl er
+      // verderop nog een harde datum staat waar het project aan moet voldoen.
+      if (p.deadline) {
+        const t = parseDateFlexible(p.deadline);
+        if (!isNaN(t)) markers.push({ t, type, isDeadline: true, label, dateLabel: formatDateNL(p.deadline), kind: 'Deadline' });
       }
     });
     markers.sort((a, b) => a.t - b.t);
@@ -2894,8 +2915,9 @@ function runApp(data) {
       bucketCounts[bucket] = stack + 1;
       const topOffset = 11 - (stack % 3) * 9;
       const title = escapeHtml(m.label) + ' — ' + m.kind + ': ' + m.dateLabel;
-      return '<span class="timeline-marker" style="left:' + left + '%;top:' + topOffset + 'px" title="' + title + '">' +
-        timelineLegendIcon(m.type, m.filled) + '</span>';
+      const icon = m.isDeadline ? timelineDeadlineIcon() : timelineLegendIcon(m.type, m.filled);
+      return '<span class="timeline-marker' + (m.isDeadline ? ' timeline-marker-deadline' : '') + '" style="left:' + left + '%;top:' + topOffset + 'px" title="' + title + '">' +
+        icon + '</span>';
     }).join('');
 
     return '<div class="product-timeline-wrap">' +
@@ -2909,6 +2931,7 @@ function runApp(data) {
         '<span>' + timelineLegendIcon('deliverable', true) + 'Deliverable · opgeleverd</span>' +
         '<span>' + timelineLegendIcon('mijlpaal', false) + 'Mijlpaal · verwacht</span>' +
         '<span>' + timelineLegendIcon('mijlpaal', true) + 'Mijlpaal · gehaald</span>' +
+        '<span>' + timelineDeadlineIcon() + 'Deadline</span>' +
       '</div>' +
     '</div>';
   }
@@ -2939,14 +2962,17 @@ function runApp(data) {
     // het balkje-eind.
     const verwachtT = p.verwacht ? parseDateFlexible(p.verwacht) : NaN;
     const werkelijkT = p.werkelijk ? parseDateFlexible(p.werkelijk) : NaN;
+    const deadlineT = p.deadline ? parseDateFlexible(p.deadline) : NaN;
     return {
       startT: endT - days * 86400000,
       endT: endT,
       type: p.type === 'mijlpaal' ? 'mijlpaal' : 'deliverable',
       verwachtT: isNaN(verwachtT) ? null : verwachtT,
       werkelijkT: isNaN(werkelijkT) ? null : werkelijkT,
+      deadlineT: isNaN(deadlineT) ? null : deadlineT,
       verwachtLabel: p.verwacht ? formatDateNL(p.verwacht) : null,
       werkelijkLabel: p.werkelijk ? formatDateNL(p.werkelijk) : null,
+      deadlineLabel: p.deadline ? formatDateNL(p.deadline) : null,
       durationLabel: p.duur + ' ' + (DUUR_EENHEID_LABELS[p.duurEenheid] || p.duurEenheid),
     };
   }
@@ -3178,7 +3204,8 @@ function runApp(data) {
       const kindLabel = info.type === 'mijlpaal' ? 'mijlpaal' : 'deliverable';
       const title = escapeHtml(p.name) + ' — ' + kindLabel + ', duur ' + info.durationLabel +
         (info.verwachtLabel ? ' — verwacht: ' + info.verwachtLabel : '') +
-        (info.werkelijkLabel ? ' — opgeleverd: ' + info.werkelijkLabel : '');
+        (info.werkelijkLabel ? ' — opgeleverd: ' + info.werkelijkLabel : '') +
+        (info.deadlineLabel ? ' — deadline: ' + info.deadlineLabel : '');
       // Twee markers, exact zoals de projecttijdlijn hierboven (buildTimeline-
       // Markers): een open marker op de verwachte opleverdatum én — indien
       // ingevuld — een gevulde marker op de werkelijke opleverdatum, elk op
@@ -3197,6 +3224,17 @@ function runApp(data) {
         markersHtml += '<span class="activity-deliverable-end-marker" style="left:' + wLeft + '%" title="' +
           escapeHtml(p.name) + ' — opgeleverd: ' + info.werkelijkLabel + '">' +
           timelineLegendIcon(info.type, true) + '</span>';
+      }
+      // Deadline — apart, opvallend teken (zie timelineDeadlineIcon), los van
+      // verwacht/werkelijk: dit is de as die ook al mee is gaan tellen in het
+      // bereik van de hele Gantt (buildTimelineMarkers/computeProjectTimeline-
+      // Bounds), dus als hij verder in de toekomst ligt is hij hier ook echt
+      // zichtbaar i.p.v. dat de as stilzwijgend doorloopt naar lege ruimte.
+      if (info.deadlineT !== null) {
+        const dLeft = Math.min(Math.max(pctFor(info.deadlineT), 0), 100);
+        markersHtml += '<span class="activity-deliverable-end-marker" style="left:' + dLeft + '%" title="' +
+          escapeHtml(p.name) + ' — deadline: ' + info.deadlineLabel + '">' +
+          timelineDeadlineIcon() + '</span>';
       }
       const track = '<div class="activity-deliverable-bar ' + statusClass + '" style="left:' + left + '%;width:' + width + '%" title="' + title + '"></div>' +
         markersHtml;
@@ -3418,8 +3456,9 @@ function runApp(data) {
         bucketCounts[bucket] = stack + 1;
         const topOffset = 11 - (stack % 3) * 9;
         const title = escapeHtml(m.label) + ' — ' + m.kind + ': ' + m.dateLabel;
-        return '<span class="timeline-marker" style="left:' + left + '%;top:' + topOffset + 'px" title="' + title + '">' +
-          timelineLegendIcon(m.type, m.filled) + '</span>';
+        const icon = m.isDeadline ? timelineDeadlineIcon() : timelineLegendIcon(m.type, m.filled);
+        return '<span class="timeline-marker' + (m.isDeadline ? ' timeline-marker-deadline' : '') + '" style="left:' + left + '%;top:' + topOffset + 'px" title="' + title + '">' +
+          icon + '</span>';
       }).join('');
     }
 
