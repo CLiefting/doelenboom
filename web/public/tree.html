@@ -679,6 +679,25 @@
   .activity-milestone-marker.status-done svg polygon { fill: #cdd2da; stroke: #9aa3b2; }
   .activity-milestone-marker.status-active svg { filter: drop-shadow(0 0 2.5px rgba(255,90,31,0.7)); }
   .activity-milestone-marker.status-future svg polygon { fill: #e4ebf7; stroke: #a9bde0; }
+  /* Doorlooptijd-balkje van een deliverable/mijlpaal mét een ingevulde duur
+     (productDeliverableBarInfo/activityGanttHtml) — bewust NIET het effen
+     navy van .activity-bar (dat is voor echte activiteiten), maar een
+     gestreept blokje in hetzelfde blauw als de cirkel/ruit-markers op de
+     projecttijdlijn erboven (timelineLegendIcon), zodat meteen duidelijk is
+     dat dit een afgeleide van een product is, geen eigen activiteit. De
+     marker (.activity-deliverable-end-marker) staat los ernaast, uitsluitend
+     op de rechterrand (de opleverdatum) — er is bewust geen marker aan het
+     begin, dat is geen betekenisvol moment, alleen een afgeleide startpunt
+     uit de duur. */
+  .activity-deliverable-row-label { color: #2F5597; font-weight: 500; }
+  .activity-deliverable-row-label svg { vertical-align: -2px; margin-right: 2px; }
+  .activity-deliverable-bar {
+    position: absolute; top: 2px; bottom: 2px; min-width: 6px; border-radius: 4px;
+    background: repeating-linear-gradient(45deg, rgba(47,85,151,0.55), rgba(47,85,151,0.55) 4px, rgba(47,85,151,0.28) 4px, rgba(47,85,151,0.28) 8px);
+  }
+  .activity-deliverable-bar.status-done { opacity: 0.55; }
+  .activity-deliverable-bar.status-active { box-shadow: 0 0 0 2px rgba(255,90,31,0.45); }
+  .activity-deliverable-end-marker { position: absolute; top: 50%; transform: translate(-50%, -50%); line-height: 0; }
   /* WBS-nummer tussen haakjes vóór de taaknaam — kleiner en lichter dan de
      naam zelf. */
   .activity-row-wbs { font-size: 10.5px; font-weight: 400; color: #999; }
@@ -2646,6 +2665,11 @@ function runApp(data) {
   // — 'y' i.p.v. het Nederlandse 'j' voor jaar, zelfde letter als in het
   // formulier (product-field-duur-eenheid) en de API.
   const DUUR_EENHEID_LABELS = { d: 'dagen', w: 'weken', m: 'maanden', y: 'jaar' };
+  // Grove omrekening naar dagen, puur voor het plotten van een doorlooptijd-
+  // balkje in de activiteiten-Gantt (zie productDeliverableBarInfo hieronder)
+  // — net als duur/businessValue/deadline zelf is dit informatief, geen
+  // scheduling-engine die hier verder iets mee doet.
+  const DUUR_EENHEID_DAYS = { d: 1, w: 7, m: 30, y: 365 };
   const STATUS_COLORS = {
     'backlog': '#9AA5B1', 'actief': '#2F5597', 'on-hold': '#D9822B',
     'gereed': '#2E7D5B', 'vervallen': '#6c6f76'
@@ -2889,6 +2913,36 @@ function runApp(data) {
     '</div>';
   }
 
+  // Bepaalt of/hoe een product (deliverable of mijlpaal) met een ingevulde
+  // duur als doorlooptijd-balkje in de activiteiten-Gantt getoond moet worden
+  // (zie activityGanttHtml hieronder) — null als het product geen duur heeft
+  // of geen bruikbare einddatum (werkelijke opleverdatum als die er is, anders
+  // de verwachte — dezelfde voorrang als de "delivery marker" op de
+  // projecttijdlijn zou tonen als die maar één datum per item liet zien).
+  // Het balkje eindigt op die datum en begint 'duur' eenheden ervoor —
+  // ruwweg, zie DUUR_EENHEID_DAYS hierboven; er is geen scheduling-engine die
+  // dit exacter zou kunnen maken.
+  function productDeliverableBarInfo(p) {
+    if (!p.duur) return null;
+    const endDateStr = p.werkelijk || p.verwacht;
+    if (!endDateStr) return null;
+    const endT = parseDateFlexible(endDateStr);
+    if (isNaN(endT)) return null;
+    const days = Number(p.duur) * (DUUR_EENHEID_DAYS[p.duurEenheid] || 1);
+    if (!(days > 0)) return null;
+    return {
+      startT: endT - days * 86400000,
+      endT: endT,
+      type: p.type === 'mijlpaal' ? 'mijlpaal' : 'deliverable',
+      // filled: dezelfde betekenis als bij buildTimelineMarkers (open =
+      // verwacht, gevuld = daadwerkelijk opgeleverd/gehaald) — bepaalt het
+      // uiterlijk van de marker aan het eind van het balkje.
+      filled: !!p.werkelijk,
+      dateLabel: formatDateNL(endDateStr),
+      durationLabel: p.duur + ' ' + (DUUR_EENHEID_LABELS[p.duurEenheid] || p.duurEenheid),
+    };
+  }
+
   // ---- Activiteiten: inklapbare planning met start-/einddatum per project ----
   // Anders dan producten/mijlpalen (één los moment) beslaat een activiteit een
   // periode, dus een lichte Gantt-achtige balk per activiteit i.p.v. een punt-
@@ -2907,7 +2961,7 @@ function runApp(data) {
   const ACTIVITY_ROW_STRIDE = 24 + 3 + 14 + 10;
   const ACTIVITY_ROW_TRACK_MID_Y = 24 + 3 + 14 / 2;
 
-  function activityGanttHtml(id, activities, projectBounds, dependencies) {
+  function activityGanttHtml(id, activities, projectBounds, dependencies, deliverableProducts) {
     let boundsInfo = projectBounds || null;
     if (!boundsInfo) {
       let minT = Infinity, maxT = -Infinity;
@@ -3094,11 +3148,47 @@ function runApp(data) {
       '</div>';
     }).join('');
 
+    // Deliverables/mijlpalen mét een ingevulde duur, als eigen (niet-
+    // bewerkbare) rijen ná de echte activiteiten — herkenbaar aan het
+    // gestreepte balkje (i.p.v. het effen navy van .activity-bar) en de
+    // marker (cirkel/ruit, zelfde teken als de projecttijdlijn hierboven)
+    // die uitsluitend op het EIND van het balkje staat, niet ook aan het
+    // begin — dat is de opleverdatum (verwacht/werkelijk), het begin is puur
+    // afgeleid uit de duur en heeft geen eigen betekenisvol "moment". Ze
+    // hebben geen bewerk-/verwijderknop (dat blijft het product-formulier)
+    // en tellen niet mee in de rij-index van layoutByDbId hierboven —
+    // ze staan altijd ná alle echte activiteiten, dus de bestaande
+    // afhankelijkheid-pijlen (die alleen tussen activiteiten lopen) blijven
+    // op hun eigen, ongewijzigde rij-index staan.
+    const deliverableRowsHtml = (deliverableProducts || []).map((p) => {
+      const info = productDeliverableBarInfo(p);
+      if (!info) return null;
+      const left = Math.min(Math.max(pctFor(info.startT), 0), 100);
+      const right = Math.min(Math.max(pctFor(info.endT), 0), 100);
+      const width = Math.max(right - left, 1.5);
+      const statusClass = activityStatusClass(info.startT, info.endT);
+      const kindLabel = info.type === 'mijlpaal' ? 'mijlpaal' : 'deliverable';
+      const title = escapeHtml(p.name) + ' — ' + kindLabel + ', duur ' + info.durationLabel +
+        ' t/m ' + info.dateLabel + (info.filled ? ' (opgeleverd)' : ' (verwacht)');
+      const track = '<div class="activity-deliverable-bar ' + statusClass + '" style="left:' + left + '%;width:' + width + '%" title="' + title + '"></div>' +
+        '<span class="activity-deliverable-end-marker" style="left:' + right + '%" title="' + title + '">' +
+          timelineLegendIcon(info.type, info.filled) +
+        '</span>';
+      return '<div class="activity-gantt-row activity-deliverable-row">' +
+        '<div class="activity-row-head">' +
+          '<span class="activity-row-label activity-deliverable-row-label" title="' + escapeHtml(p.name) + '">' +
+            timelineLegendIcon(info.type, info.filled) + ' ' + escapeHtml(p.name) +
+          '</span>' +
+        '</div>' +
+        '<div class="activity-row-track">' + track + '</div>' +
+      '</div>';
+    }).filter(Boolean).join('');
+
     const depsHtml = dependencyArrowsHtml(dependencies, layoutByDbId);
 
     return '<div class="activity-gantt-wrap">' +
       '<div class="activity-gantt-axis-track">' + ticksHtml + labelsHtml + todayHtml + '</div>' +
-      '<div class="activity-gantt-rows">' + rowsHtml + todayLineHtml +
+      '<div class="activity-gantt-rows">' + rowsHtml + deliverableRowsHtml + todayLineHtml +
         '<div class="activity-dependency-overlay">' + depsHtml + '</div>' +
       '</div>' +
     '</div>';
@@ -3167,8 +3257,9 @@ function runApp(data) {
     const wrapEl = projectPanelEl.querySelector('.activity-gantt-wrap');
     if (!wrapEl) return;
     const activities = ACTIVITIES[projectCode] || [];
-    const bounds = computeProjectTimelineBounds(PRODUCTS[projectCode] || []);
-    wrapEl.outerHTML = activityGanttHtml(projectCode, activities, bounds, DEPENDENCIES[projectCode] || []);
+    const products = PRODUCTS[projectCode] || [];
+    const bounds = computeProjectTimelineBounds(products);
+    wrapEl.outerHTML = activityGanttHtml(projectCode, activities, bounds, DEPENDENCIES[projectCode] || [], products);
   }
 
   // Titel + inklapbare body ("Activiteiten") onder de tijdlijn van een project
@@ -3179,14 +3270,20 @@ function runApp(data) {
   function activitiesSectionHtml(id, projectBounds) {
     if (!projectenActive) return '';
     const activities = ACTIVITIES[id] || [];
+    const products = PRODUCTS[id] || [];
+    // Deliverables/mijlpalen met een ingevulde duur tellen mee om te bepalen
+    // of de sectie iets te tonen heeft (zie activityGanttHtml/
+    // productDeliverableBarInfo hierboven) — een project zonder activiteiten
+    // maar mét zulke producten moet de Gantt gewoon tonen, niet de lege-note.
+    const deliverableCount = products.filter((p) => productDeliverableBarInfo(p)).length;
     let html = '<div class="dp-activities-title">' +
       '<span class="activities-toggle-label"><span class="activities-chevron">&#9656;</span> Activiteiten' +
         (activities.length ? ' (' + activities.length + ')' : '') + '</span>' +
     '</div>';
     html += '<div class="dp-activities-body" style="display:none">';
-    html += activities.length === 0
+    html += (activities.length === 0 && deliverableCount === 0)
       ? '<div class="dp-empty-note">Nog geen activiteiten gepland voor dit project.</div>'
-      : activityGanttHtml(id, activities, projectBounds, DEPENDENCIES[id] || []);
+      : activityGanttHtml(id, activities, projectBounds, DEPENDENCIES[id] || [], products);
     // "+ Activiteit" staat bewust ONDER de lijst (i.p.v. in de titelbalk erboven,
     // zoals bij Producten) — bij meerdere activiteiten is dat de plek waar de
     // blik na het lezen van de laatste rij toch al staat. "Importeren uit MS
