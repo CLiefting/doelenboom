@@ -2930,15 +2930,23 @@ function runApp(data) {
     if (isNaN(endT)) return null;
     const days = Number(p.duur) * (DUUR_EENHEID_DAYS[p.duurEenheid] || 1);
     if (!(days > 0)) return null;
+    // Verwachte/werkelijke datum apart bewaard (i.p.v. hier al tot één
+    // eindpunt samen te voegen) zodat de aanroeper allebei als eigen marker
+    // kan tekenen — zelfde open/gevuld-onderscheid en zelfde twee momenten
+    // als buildTimelineMarkers op de projecttijdlijn hierboven. Ze kunnen
+    // best verschillen (te vroeg/te laat opgeleverd t.o.v. de planning) —
+    // dan staan de twee markers ook echt op hun eigen datum, niet allebei op
+    // het balkje-eind.
+    const verwachtT = p.verwacht ? parseDateFlexible(p.verwacht) : NaN;
+    const werkelijkT = p.werkelijk ? parseDateFlexible(p.werkelijk) : NaN;
     return {
       startT: endT - days * 86400000,
       endT: endT,
       type: p.type === 'mijlpaal' ? 'mijlpaal' : 'deliverable',
-      // filled: dezelfde betekenis als bij buildTimelineMarkers (open =
-      // verwacht, gevuld = daadwerkelijk opgeleverd/gehaald) — bepaalt het
-      // uiterlijk van de marker aan het eind van het balkje.
-      filled: !!p.werkelijk,
-      dateLabel: formatDateNL(endDateStr),
+      verwachtT: isNaN(verwachtT) ? null : verwachtT,
+      werkelijkT: isNaN(werkelijkT) ? null : werkelijkT,
+      verwachtLabel: p.verwacht ? formatDateNL(p.verwacht) : null,
+      werkelijkLabel: p.werkelijk ? formatDateNL(p.werkelijk) : null,
       durationLabel: p.duur + ' ' + (DUUR_EENHEID_LABELS[p.duurEenheid] || p.duurEenheid),
     };
   }
@@ -3169,15 +3177,34 @@ function runApp(data) {
       const statusClass = activityStatusClass(info.startT, info.endT);
       const kindLabel = info.type === 'mijlpaal' ? 'mijlpaal' : 'deliverable';
       const title = escapeHtml(p.name) + ' — ' + kindLabel + ', duur ' + info.durationLabel +
-        ' t/m ' + info.dateLabel + (info.filled ? ' (opgeleverd)' : ' (verwacht)');
+        (info.verwachtLabel ? ' — verwacht: ' + info.verwachtLabel : '') +
+        (info.werkelijkLabel ? ' — opgeleverd: ' + info.werkelijkLabel : '');
+      // Twee markers, exact zoals de projecttijdlijn hierboven (buildTimeline-
+      // Markers): een open marker op de verwachte opleverdatum én — indien
+      // ingevuld — een gevulde marker op de werkelijke opleverdatum, elk op
+      // hun EIGEN positie (die best uiteen kunnen liggen: te vroeg/te laat
+      // t.o.v. de planning). Geen marker aan het BEGIN van het balkje — dat
+      // blijft puur een afgeleid punt uit de duur, geen eigen datum.
+      let markersHtml = '';
+      if (info.verwachtT !== null) {
+        const vLeft = Math.min(Math.max(pctFor(info.verwachtT), 0), 100);
+        markersHtml += '<span class="activity-deliverable-end-marker" style="left:' + vLeft + '%" title="' +
+          escapeHtml(p.name) + ' — verwacht: ' + info.verwachtLabel + '">' +
+          timelineLegendIcon(info.type, false) + '</span>';
+      }
+      if (info.werkelijkT !== null) {
+        const wLeft = Math.min(Math.max(pctFor(info.werkelijkT), 0), 100);
+        markersHtml += '<span class="activity-deliverable-end-marker" style="left:' + wLeft + '%" title="' +
+          escapeHtml(p.name) + ' — opgeleverd: ' + info.werkelijkLabel + '">' +
+          timelineLegendIcon(info.type, true) + '</span>';
+      }
       const track = '<div class="activity-deliverable-bar ' + statusClass + '" style="left:' + left + '%;width:' + width + '%" title="' + title + '"></div>' +
-        '<span class="activity-deliverable-end-marker" style="left:' + right + '%" title="' + title + '">' +
-          timelineLegendIcon(info.type, info.filled) +
-        '</span>';
+        markersHtml;
+      const filled = !!info.werkelijkT;
       return '<div class="activity-gantt-row activity-deliverable-row">' +
         '<div class="activity-row-head">' +
           '<span class="activity-row-label activity-deliverable-row-label" title="' + escapeHtml(p.name) + '">' +
-            timelineLegendIcon(info.type, info.filled) + ' ' + escapeHtml(p.name) +
+            timelineLegendIcon(info.type, filled) + ' ' + escapeHtml(p.name) +
           '</span>' +
         '</div>' +
         '<div class="activity-row-track">' + track + '</div>' +
