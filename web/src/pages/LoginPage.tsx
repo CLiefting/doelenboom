@@ -106,19 +106,14 @@ export default function LoginPage({
       <div style={styles.split}>
       <div className="login-features-panel" style={styles.featuresPanel}>
         <div style={styles.featuresPanelInner}>
-          <div>
-            <p style={styles.tagline}>
-              Doelenboom maakt zichtbaar hoe alles wat een organisatie doet, bijdraagt aan wat zij wil bereiken.
-            </p>
-            <p style={styles.tagline}>
-              Door strategie, baten, capabilities, projecten en resultaten met elkaar te verbinden ontstaat één
-              heldere lijn van investering naar impact.
-            </p>
-            <p style={styles.tagline}>
-              Zo zie je niet alleen wat de organisatie doet, maar vooral waarom, waaraan het bijdraagt en of het
-              daadwerkelijk waarde oplevert.
-            </p>
-          </div>
+          {/* Eén compacte alinea i.p.v. de eerdere drie — zo blijft er op een
+              gewone laptophoogte genoeg ruimte over om alle features eronder
+              zonder scrollen te tonen (zie ook de verkleinde marges/lettergrootte
+              in featureList/featureItem hieronder). */}
+          <p style={styles.tagline}>
+            Doelenboom verbindt strategie, baten, capabilities, projecten en resultaten tot één heldere lijn van
+            investering naar aantoonbare impact.
+          </p>
 
           <ul style={styles.featureList}>
             {FEATURES.map((f) => (
@@ -243,19 +238,25 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex', justifyContent: 'center',
     // Kleinere minimumwaarde dan voorheen (was 1.5rem vast): op een smalle
     // telefoon (<400px) telt anders elke geneste padding-laag hieronder op
-    // tot te weinig overblijft voor de inhoud.
-    padding: 'clamp(1rem, 4vw, 2.5rem) clamp(1rem, 4vw, 2.5rem) 0',
+    // tot te weinig overblijft voor de inhoud. Bovenkant ook verkleind (was
+    // clamp(1rem, 4vw, 2.5rem)) om ruimte te geven aan het features-paneel
+    // eronder, dat met 5 kaarten inmiddels meer hoogte nodig heeft.
+    padding: 'clamp(0.75rem, 2.5vw, 1.5rem) clamp(1rem, 4vw, 2.5rem) 0',
   },
   heroTile: {
     width: '100%', maxWidth: 780, textAlign: 'center',
     background: 'linear-gradient(135deg, #203864 0%, #2F5597 100%)',
-    borderRadius: 16, padding: 'clamp(1.25rem, 4vw, 2.25rem) clamp(1rem, 5vw, 3rem)',
+    // Minder verticale padding dan voorheen (was clamp(1.25rem, 4vw, 2.25rem))
+    // — de hero-tile en het features-paneel eronder moeten samen op een
+    // gewone laptophoogte passen, zonder dat er in het features-paneel
+    // gescrold hoeft te worden om de onderste feature-kaart te zien.
+    borderRadius: 16, padding: 'clamp(0.85rem, 2.5vw, 1.5rem) clamp(1rem, 5vw, 3rem)',
     boxShadow: '0 12px 32px rgba(32, 56, 100, 0.25)',
     boxSizing: 'border-box',
   },
   heroHeadline: {
-    color: 'white', fontWeight: 800, fontSize: 'clamp(1.5rem, 3.6vw, 2.2rem)',
-    lineHeight: 1.2, letterSpacing: -0.5, margin: '4px 0 10px',
+    color: 'white', fontWeight: 800, fontSize: 'clamp(1.35rem, 3vw, 1.9rem)',
+    lineHeight: 1.2, letterSpacing: -0.5, margin: '4px 0 8px',
   },
   heroSubline: {
     color: 'rgba(255,255,255,0.88)', fontWeight: 600, fontSize: 14.5,
@@ -271,13 +272,16 @@ const styles: Record<string, React.CSSProperties> = {
     background: 'linear-gradient(160deg, #203864 0%, #2F5597 100%)',
     display: 'flex',
     alignItems: 'center',
-    padding: 'clamp(2rem, 5vw, 4rem)',
+    // Minder padding dan voorheen (was clamp(2rem, 5vw, 4rem)) — samen met de
+    // kleinere gaps/lettergroottes hieronder past de inhoud (inclusief de
+    // 5e feature-kaart "Projecten en voortgang") nu op een gewone laptop-
+    // hoogte in beeld, zonder dat de onderste kaart(en) buiten beeld vallen.
+    padding: 'clamp(1.25rem, 3.5vw, 2.5rem)',
     boxSizing: 'border-box',
     borderRadius: 16,
     boxShadow: '0 8px 24px rgba(32, 56, 100, 0.18)',
-    // Deze kolom heeft nu genoeg tekst om op een laag scherm hoger te worden
-    // dan de beschikbare hoogte — dan liever intern scrollen dan clippen of
-    // de layout breken.
+    // Vangnet voor een écht lage viewport (bv. een klein browservenster) —
+    // dan liever intern scrollen dan clippen of de layout breken.
     overflowY: 'auto',
   },
   featuresPanelInner: {
@@ -286,7 +290,7 @@ const styles: Record<string, React.CSSProperties> = {
     marginRight: 'auto',
     display: 'flex',
     flexDirection: 'column',
-    gap: '2rem',
+    gap: '1.1rem',
   },
   brandRow: { display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center', marginBottom: 4 },
   brandMark: {
@@ -295,15 +299,15 @@ const styles: Record<string, React.CSSProperties> = {
     color: 'white', fontWeight: 700, fontSize: 15,
   },
   brandName: { color: 'white', fontWeight: 700, fontSize: 16, letterSpacing: -0.3 },
-  tagline: { color: 'rgba(255,255,255,0.82)', fontSize: 15, lineHeight: 1.55, margin: '0 0 10px' },
-  featureList: { listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: '1.3rem' },
-  featureItem: { display: 'flex', gap: 14, alignItems: 'flex-start' },
+  tagline: { color: 'rgba(255,255,255,0.82)', fontSize: 14, lineHeight: 1.45, margin: 0 },
+  featureList: { listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: '0.75rem' },
+  featureItem: { display: 'flex', gap: 12, alignItems: 'flex-start' },
   featureIcon: {
     flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-    width: 38, height: 38, borderRadius: 10, background: 'rgba(255,255,255,0.14)',
+    width: 32, height: 32, borderRadius: 9, background: 'rgba(255,255,255,0.14)',
   },
-  featureTitle: { color: 'white', fontWeight: 600, fontSize: 14.5, marginBottom: 3 },
-  featureDescription: { color: 'rgba(255,255,255,0.72)', fontSize: 13.5, lineHeight: 1.5 },
+  featureTitle: { color: 'white', fontWeight: 600, fontSize: 13.5, marginBottom: 2 },
+  featureDescription: { color: 'rgba(255,255,255,0.72)', fontSize: 12.5, lineHeight: 1.4 },
 
   formPanel: {
     flex: '1 1 50%',
