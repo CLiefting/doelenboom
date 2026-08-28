@@ -14,6 +14,12 @@ const FEATURES: { icon: JSX.Element; title: string; description: string }[] = [
       'Zoek, filter op tag of organisatieonderdeel, en volg met één klik het volledige pad van project tot missie.',
   },
   {
+    icon: <ProjectIcon />,
+    title: 'Projecten en voortgang',
+    description:
+      'Volg projectstatus en voortgang, plan producten en activiteiten op een Gantt-tijdlijn met afhankelijkheden, en exporteer of importeer één project apart als Excel.',
+  },
+  {
     icon: <ExcelIcon />,
     title: 'Excel in en uit',
     description:
@@ -177,6 +183,16 @@ function TreeIcon() {
       <circle cx="6" cy="19" r="2.2" />
       <circle cx="18" cy="12" r="2.2" />
       <path d="M8.2 5h3a2 2 0 0 1 2 2v3M8.2 12h5M8.2 19h3a2 2 0 0 0 2-2v-3" />
+    </svg>
+  );
+}
+
+function ProjectIcon() {
+  return (
+    <svg {...iconProps()}>
+      <rect x="3.5" y="5" width="11" height="3" rx="1.5" />
+      <rect x="3.5" y="10.5" width="17" height="3" rx="1.5" />
+      <rect x="3.5" y="16" width="7" height="3" rx="1.5" />
     </svg>
   );
 }
