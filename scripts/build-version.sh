@@ -11,24 +11,19 @@
 # dat het "een dev-build" is. Geen git-repo gevonden (bv. een kale checkout
 # zonder .git)? Dan blijft "dev" gewoon de uitkomst, geen foutmelding.
 #
-# Staat HEAD exact op een release-tag (bv. "v1.0.0") én is de working tree
-# schoon, dan wordt die tag getoond (zonder de "v", want de footer zet er zelf
-# al een "v" voor — zie VersionFooter.tsx) — leesbaarder dan een kale hash op
-# een releasepunt. In alle andere gevallen (tussen releases in, of met
-# niet-gecommite wijzigingen): hash + bouwdatum, zoals voorheen.
+# Formaat: altijd "<laatste-tag> (<hash>[-dirty], <datum uu:mm>)", bv.
+# "1.2.0 (a1b2c3d, 28-08-2026 07:15)" — de footer (VersionFooter.tsx) zet er
+# zelf al een "v" voor. <laatste-tag> is de dichtstbijzijnde bereikbare tag
+# (git describe --tags --abbrev=0), ook als HEAD er niet exact op staat of de
+# working tree niet schoon is — dan zie je bv. "1.2.0 (a1b2c3d-dirty, ...)"
+# en weet je meteen: "gebaseerd op de v1.2.0-release, maar niet exact die
+# build". Geen tags in de repo? Dan alleen hash+datum, zoals voorheen.
 set -euo pipefail
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if ! git rev-parse --short HEAD >/dev/null 2>&1; then
   echo "dev"
   exit 0
-fi
-
-if [ -z "$(git status --porcelain)" ]; then
-  if TAG="$(git describe --tags --exact-match 2>/dev/null)"; then
-    echo "${TAG#v}"
-    exit 0
-  fi
 fi
 
 HASH="$(git rev-parse --short HEAD)"
@@ -40,4 +35,10 @@ DIRTY=""
 if [ -n "$(git status --porcelain)" ]; then
   DIRTY="-dirty"
 fi
-echo "${HASH}${DIRTY} (${STAMP})"
+
+TAG="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+if [ -n "$TAG" ]; then
+  echo "${TAG#v} (${HASH}${DIRTY}, ${STAMP})"
+else
+  echo "${HASH}${DIRTY} (${STAMP})"
+fi
