@@ -426,6 +426,19 @@ alter table tenants add column if not exists lifetime_trees_created integer not 
 -- volledige toelichting) — null = geen einddatum ingesteld/nooit verlopen.
 alter table tenants add column if not exists license_end_date date;
 
+-- Open toegang (zie db/migrations/0013_tenant_open_access.sql): als gezet,
+-- krijgt ELK account met een login — ook zonder een eigen tenant_users-rij —
+-- automatisch minstens deze rol binnen deze tenant (zie getTenantRole in
+-- api/src/rbac.ts). null (default) = huidig gedrag: alleen expliciete
+-- tenant_users-leden hebben toegang. Bedoeld voor bv. de Demo-tenant, zodat
+-- niet elk nieuw account er handmatig aan toegevoegd hoeft te worden. Een
+-- expliciete tenant_users-rol voor een gebruiker wint altijd van deze open-
+-- toegang-rol (zie getTenantRole) — dit kan dus nooit iemands eigen,
+-- specifiek toegekende rol verlagen, alleen een ondergrens bieden voor wie
+-- geen eigen rij heeft.
+alter table tenants add column if not exists open_access_role text
+  check (open_access_role in ('admin', 'gebruiker', 'bezoeker'));
+
 alter table doelenbomen add column if not exists archived_at timestamptz;
 create index if not exists idx_doelenbomen_tenant_active
   on doelenbomen(tenant_id) where archived_at is null;

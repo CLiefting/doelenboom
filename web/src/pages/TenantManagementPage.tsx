@@ -102,6 +102,14 @@ export default function TenantManagementPage({
                 title={licenseBorderTitle(t.license_end_date)}
               >
                 {t.name} <span style={{ opacity: 0.6, fontSize: 12 }}>({t.slug})</span>
+                {t.open_access_role && (
+                  <span
+                    style={{ marginLeft: 6, fontSize: 11, opacity: 0.75 }}
+                    title={`Open toegang: elk account krijgt hier minstens de rol "${t.open_access_role}"`}
+                  >
+                    🔓
+                  </span>
+                )}
               </button>
             );
           })}
@@ -1041,6 +1049,7 @@ function TenantSettingsForm({
 }) {
   const [wipeOnEmpty, setWipeOnEmpty] = useState(tenant.wipe_on_empty);
   const [timeoutMinutes, setTimeoutMinutes] = useState(String(tenant.session_timeout_minutes));
+  const [openAccessRole, setOpenAccessRole] = useState<TenantRoleName | ''>(tenant.open_access_role ?? '');
   const [saved, setSaved] = useState(false);
 
   // Als de gebruiker een andere tenant selecteert moet het formulier de
@@ -1048,6 +1057,7 @@ function TenantSettingsForm({
   useEffect(() => {
     setWipeOnEmpty(tenant.wipe_on_empty);
     setTimeoutMinutes(String(tenant.session_timeout_minutes));
+    setOpenAccessRole(tenant.open_access_role ?? '');
     setSaved(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenant.id]);
@@ -1063,7 +1073,11 @@ function TenantSettingsForm({
     setError(null);
     setSaved(false);
     try {
-      await api.updateTenantSettings(token, tenant.id, { wipeOnEmpty, sessionTimeoutMinutes: minutes });
+      await api.updateTenantSettings(token, tenant.id, {
+        wipeOnEmpty,
+        sessionTimeoutMinutes: minutes,
+        openAccessRole: openAccessRole || null,
+      });
       setSaved(true);
       onSaved();
     } catch (err) {
@@ -1095,6 +1109,25 @@ function TenantSettingsForm({
         />
         minuten inactiviteit (geldt voor de hele tenant)
       </label>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5 }}>
+        Open toegang voor alle accounts:
+        <select
+          style={styles.select}
+          value={openAccessRole}
+          onChange={(e) => setOpenAccessRole(e.target.value as TenantRoleName | '')}
+        >
+          <option value="">Uit — alleen expliciete leden</option>
+          <option value="bezoeker">Aan — iedereen: bezoeker</option>
+          <option value="gebruiker">Aan — iedereen: gebruiker</option>
+          <option value="admin">Aan — iedereen: admin</option>
+        </select>
+      </label>
+      <p style={{ margin: '-4px 0 0 0', fontSize: 12, color: '#9aa0a8' }}>
+        Staat dit aan, dan krijgt elk account met een login — ook zonder dat je 'm hieronder bij "Leden" hoeft
+        toe te voegen — minstens deze rol in deze tenant (bv. handig voor de Demo-tenant). Iemand die je zelf
+        als lid toevoegt met een andere rol houdt gewoon díe rol; dit is alleen de ondergrens voor wie geen
+        eigen lidmaatschap heeft.
+      </p>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <button style={{ ...btnStyle('primary'), alignSelf: 'flex-start' }} type="submit" disabled={busy}>
           Opslaan

@@ -5,63 +5,27 @@ import { previewOrCommitWipe } from './tenantWipe.js';
 
 const JWT_SECRET = process.env.JWT_SECRET ?? 'dev-secret-change-me';
 
-// Beveiliging: na dit aantal minuten zonder échte gebruikersactiviteit
-// (muis/toetsenbord/scroll/touch — zie POST /activity hieronder en
-// last_activity_at bij de sessions-tabel in db/init.sql) wordt een sessie
-// hard afgekeurd door requireAuth, ongeacht de resterende geldigheid van de
-// JWT zelf (die blijft los 12u geldig, zie /login). Bewust een vast, systeem-
-// breed getal (niet per tenant instelbaar, in tegenstelling tot
-// tenants.session_timeout_minutes — dat is een ANDER concept, zie de
-// toelichting bij de sessions-tabel in db/init.sql).
-const IDLE_TIMEOUT_MINUTES = 15;
-
 export type AuthedRequest = Request & {
   user?: { id: number; email: string; isSysadmin: boolean; sessionId: string };
 };
 
-// Async (i.p.v. de eerdere pure JWT-check): naast de JWT-handtekening/
-// -geldigheid wordt nu ook, met één lichte query op de sessions-tabel (op
-// primary key, dus goedkoop), gecontroleerd of de sessie niet expliciet is
-// beëindigd (ended_at) én niet langer dan IDLE_TIMEOUT_MINUTES geleden nog
-// échte activiteit had (last_activity_at) — dit is de daadwerkelijke
-// serverside handhaving van de 15-minuten-inactiviteit-beveiliging: zelfs een
-// hergebruikte/gekopieerde JWT stopt na 15 minuten inactiviteit te werken,
-// niet alleen de frontend-UI. reason in de foutrespons laat de frontend een
-// gerichte melding tonen (zie web/src/api.ts) i.p.v. een generieke fout.
-export async function requireAuth(req: AuthedRequest, res: Response, next: NextFunction) {
+export function requireAuth(req: AuthedRequest, res: Response, next: NextFunction) {
   const header = req.headers.authorization;
   if (!header?.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Niet ingelogd', reason: 'not_logged_in' });
+    return res.status(401).json({ error: 'Niet ingelogd' });
   }
-  let payload: { id: number; email: string; isSysadmin: boolean; sid: string };
   try {
-    payload = jwt.verify(header.slice('Bearer '.length), JWT_SECRET) as typeof payload;
+    const payload = jwt.verify(header.slice('Bearer '.length), JWT_SECRET) as {
+      id: number;
+      email: string;
+      isSysadmin: boolean;
+      sid: string;
+    };
+    req.user = { id: payload.id, email: payload.email, isSysadmin: payload.isSysadmin, sessionId: payload.sid };
+    next();
   } catch {
-    return res.status(401).json({ error: 'Ongeldige of verlopen sessie', reason: 'invalid_token' });
+    return res.status(401).json({ error: 'Ongeldige of verlopen sessie' });
   }
-
-  try {
-    const result = await pool.query(
-      `select ended_at, (last_activity_at > now() - make_interval(mins => $2::int)) as fresh
-       from sessions where id = $1`,
-      [payload.sid, IDLE_TIMEOUT_MINUTES]
-    );
-    const row = result.rows[0];
-    if (!row || row.ended_at != null) {
-      return res.status(401).json({ error: 'Deze sessie is beëindigd, log opnieuw in.', reason: 'session_ended' });
-    }
-    if (!row.fresh) {
-      return res.status(401).json({
-        error: `Automatisch uitgelogd wegens ${IDLE_TIMEOUT_MINUTES} minuten inactiviteit.`,
-        reason: 'idle_timeout',
-      });
-    }
-  } catch (err) {
-    return res.status(500).json({ error: 'Sessie kon niet gecontroleerd worden.', detail: (err as Error).message });
-  }
-
-  req.user = { id: payload.id, email: payload.email, isSysadmin: payload.isSysadmin, sessionId: payload.sid };
-  next();
 }
 
 export const authRouter = Router();
@@ -79,12 +43,6 @@ export const authRouter = Router();
 // naar gebruiker) zonder dat de gebruiker opnieuw hoeft in te loggen. Tenant-
 // rollen worden dus altijd live opgezocht (zie rbac.ts). /me geeft ze wel mee als
 // gemakslijstje voor de frontend-UI (welke tenants zie ik, welke rol heb ik erin).
-//
-// fetchTenantRoles draait voor IEDEREEN, sysadmin incluis: sinds sysadmin geen
-// automatische toegang meer heeft tot boom-inhoud (privacy, zie rbac.ts
-// rolmodel-comment) kan een sysadmin best een eigen tenant_users-rij hebben
-// (bv. zichzelf tijdelijk als admin gekoppeld om een klant te helpen) — de
-// frontend moet die net als bij iedere andere gebruiker kunnen tonen.
 authRouter.post('/login', async (req, res) => {
   const { email, password } = req.body ?? {};
   if (!email || !password) {
@@ -125,11 +83,19 @@ authRouter.post('/login', async (req, res) => {
   });
 });
 
+// Tenants waar deze gebruiker toegang toe heeft: expliciete tenant_users-
+// lidmaatschappen, ÉN tenants met open toegang (tenants.open_access_role,
+// zie rbac.ts getTenantRole) waar deze gebruiker geen eigen rij voor heeft —
+// LEFT JOIN vanuit tenants (i.p.v. vanuit tenant_users) om ook die laatste
+// mee te pakken. coalesce(tu.role, t.open_access_role): een expliciete rol
+// wint altijd, open_access_role is puur de fallback.
 async function fetchTenantRoles(userId: number) {
   const result = await pool.query(
-    `select tu.tenant_id, t.slug as tenant_slug, t.name as tenant_name, tu.role
-     from tenant_users tu join tenants t on t.id = tu.tenant_id
-     where tu.user_id = $1
+    `select t.id as tenant_id, t.slug as tenant_slug, t.name as tenant_name,
+            coalesce(tu.role, t.open_access_role) as role
+     from tenants t
+     left join tenant_users tu on tu.tenant_id = t.id and tu.user_id = $1
+     where tu.user_id is not null or t.open_access_role is not null
      order by t.name`,
     [userId]
   );
@@ -142,7 +108,7 @@ async function fetchTenantRoles(userId: number) {
 }
 
 authRouter.get('/me', requireAuth, async (req: AuthedRequest, res) => {
-  const tenantRoles = await fetchTenantRoles(req.user!.id);
+  const tenantRoles = req.user!.isSysadmin ? [] : await fetchTenantRoles(req.user!.id);
   const mcp = await pool.query('select must_change_password from users where id = $1', [req.user!.id]);
   res.json({ user: { ...req.user, mustChangePassword: mcp.rows[0]?.must_change_password ?? false, tenantRoles } });
 });
@@ -175,7 +141,7 @@ authRouter.post('/change-password', requireAuth, async (req: AuthedRequest, res)
     `update users set password_hash = crypt($1, gen_salt('bf')), must_change_password = false where id = $2`,
     [newPassword, req.user!.id]
   );
-  const tenantRoles = await fetchTenantRoles(req.user!.id);
+  const tenantRoles = req.user!.isSysadmin ? [] : await fetchTenantRoles(req.user!.id);
   res.json({ user: { ...req.user, mustChangePassword: false, tenantRoles } });
 });
 
@@ -186,20 +152,6 @@ authRouter.post('/change-password', requireAuth, async (req: AuthedRequest, res)
 // last_seen_at), dus dit is vooral defensief.
 authRouter.post('/heartbeat', requireAuth, async (req: AuthedRequest, res) => {
   await pool.query('update sessions set last_seen_at = now() where id = $1', [req.user!.sessionId]);
-  res.status(204).send();
-});
-
-// POST /api/auth/activity — bewust ANDERS dan /heartbeat hierboven: dit wordt
-// alleen aangeroepen door de frontend bij échte gebruikersactiviteit (muis/
-// toetsenbord/scroll/touch, zelf al gethrottled tot max 1x/minuut, zie
-// App.tsx/tree.html), en werkt uitsluitend last_activity_at bij — de basis
-// voor de 15-minuten-inactiviteit-check in requireAuth hierboven. Zou dit
-// hetzelfde veld als /heartbeat bijwerken (dat een blinde timer is, "tab staat
-// open", geen activiteit nodig), dan zou een openstaande maar volledig
-// inactieve tab nooit worden uitgelogd — precies wat deze beveiliging moet
-// voorkomen.
-authRouter.post('/activity', requireAuth, async (req: AuthedRequest, res) => {
-  await pool.query('update sessions set last_activity_at = now() where id = $1', [req.user!.sessionId]);
   res.status(204).send();
 });
 

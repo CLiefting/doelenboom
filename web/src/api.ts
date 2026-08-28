@@ -165,7 +165,18 @@ export const api = {
       body: JSON.stringify({ slug, name }),
     }, token),
 
-  updateTenantSettings: (token: string, tenantId: number, patch: { wipeOnEmpty?: boolean; sessionTimeoutMinutes?: number }) =>
+  updateTenantSettings: (
+    token: string,
+    tenantId: number,
+    patch: {
+      wipeOnEmpty?: boolean;
+      sessionTimeoutMinutes?: number;
+      // Alleen meesturen als je 'm ook echt wil wijzigen (undefined = laat
+      // ongemoeid) — null zet open toegang expliciet uit, zie PUT
+      // /api/tenants/:id (routes/tenants.ts) voor de tri-state-uitleg.
+      openAccessRole?: import('./types').TenantRoleName | null;
+    }
+  ) =>
     request<import('./types').TenantSummary>(`/api/tenants/${tenantId}`, {
       method: 'PUT',
       body: JSON.stringify(patch),

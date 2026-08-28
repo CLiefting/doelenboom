@@ -8,7 +8,7 @@ import { assertCanAddAdmin, computeDefaultLicenseEndDate, LicenseLimitError } fr
 export const tenantsRouter = Router();
 tenantsRouter.use(requireAuth);
 
-const TENANT_SELECT_FIELDS = 'id, slug, name, wipe_on_empty, session_timeout_minutes, created_at';
+const TENANT_SELECT_FIELDS = 'id, slug, name, wipe_on_empty, session_timeout_minutes, open_access_role, created_at';
 
 // Licentie-einddatum als losse, expliciet met to_char geformatteerde kolom
 // ("YYYY-MM-DD" of null) — bewust NIET in TENANT_SELECT_FIELDS hierboven,
@@ -73,24 +73,53 @@ tenantsRouter.post('/', requireSysadmin, async (req, res) => {
   }
 });
 
-// PUT /api/tenants/:id — wipeOnEmpty/sessionTimeoutMinutes aanpassen. Toegestaan
-// voor sysadmins en tenant-admins van déze tenant (dat valt onder "wijzigen in
-// tenant"). Slug/naam wijzigen kan hier bewust niet.
+// PUT /api/tenants/:id — wipeOnEmpty/sessionTimeoutMinutes/openAccessRole
+// aanpassen. Toegestaan voor sysadmins en tenant-admins van déze tenant (dat
+// valt onder "wijzigen in tenant"). Slug/naam wijzigen kan hier bewust niet.
+//
+// openAccessRole is nullable (null = open toegang uit), dus coalesce() zoals
+// bij wipeOnEmpty/sessionTimeoutMinutes hierboven volstaat niet — dat zou
+// "expliciet uitzetten" (null meesturen) niet kunnen onderscheiden van "niet
+// meegestuurd" (allebei worden null in JS/SQL). In plaats daarvan: alleen
+// wijzigen als de key 'openAccessRole' ÜBERHAUPT in de request-body zit
+// ('in b'), ongeacht of de waarde zelf null of een rol is.
 tenantsRouter.put('/:id', requireTenantRoleForTenantParam('admin', 'id'), async (req, res) => {
-  const { wipeOnEmpty, sessionTimeoutMinutes } = req.body ?? {};
-  if (typeof wipeOnEmpty !== 'boolean' && sessionTimeoutMinutes === undefined) {
-    return res.status(400).json({ error: 'Geef wipeOnEmpty en/of sessionTimeoutMinutes mee.' });
+  const b = (req.body ?? {}) as Record<string, unknown>;
+  const { wipeOnEmpty, sessionTimeoutMinutes } = b;
+  const hasOpenAccessRole = 'openAccessRole' in b;
+  const openAccessRole = b.openAccessRole;
+  if (typeof wipeOnEmpty !== 'boolean' && sessionTimeoutMinutes === undefined && !hasOpenAccessRole) {
+    return res.status(400).json({ error: 'Geef wipeOnEmpty, sessionTimeoutMinutes en/of openAccessRole mee.' });
   }
-  if (sessionTimeoutMinutes !== undefined && (!Number.isFinite(sessionTimeoutMinutes) || sessionTimeoutMinutes <= 0)) {
+  if (
+    sessionTimeoutMinutes !== undefined &&
+    (typeof sessionTimeoutMinutes !== 'number' || !Number.isFinite(sessionTimeoutMinutes) || sessionTimeoutMinutes <= 0)
+  ) {
     return res.status(400).json({ error: 'sessionTimeoutMinutes moet een positief getal zijn.' });
+  }
+  if (
+    hasOpenAccessRole &&
+    openAccessRole !== null &&
+    openAccessRole !== 'admin' &&
+    openAccessRole !== 'gebruiker' &&
+    openAccessRole !== 'bezoeker'
+  ) {
+    return res.status(400).json({ error: 'openAccessRole moet "admin", "gebruiker", "bezoeker" of null zijn.' });
   }
   const result = await pool.query(
     `update tenants set
        wipe_on_empty = coalesce($1, wipe_on_empty),
-       session_timeout_minutes = coalesce($2, session_timeout_minutes)
-     where id = $3
+       session_timeout_minutes = coalesce($2, session_timeout_minutes),
+       open_access_role = case when $3 then $4 else open_access_role end
+     where id = $5
      returning ${TENANT_SELECT_FIELDS}, ${LICENSE_END_DATE_SELECT}`,
-    [typeof wipeOnEmpty === 'boolean' ? wipeOnEmpty : null, sessionTimeoutMinutes ?? null, req.params.id]
+    [
+      typeof wipeOnEmpty === 'boolean' ? wipeOnEmpty : null,
+      sessionTimeoutMinutes ?? null,
+      hasOpenAccessRole,
+      openAccessRole ?? null,
+      req.params.id,
+    ]
   );
   if (result.rows.length === 0) return res.status(404).json({ error: 'Tenant niet gevonden' });
   res.json(result.rows[0]);

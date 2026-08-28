@@ -37,6 +37,15 @@ import { hasModule, isLicenseExpired } from './license.js';
 //   minRole-param hieronder voor de precieze knip per route).
 // - bezoeker (tenant_users.role = 'bezoeker'): alleen lezen binnen die
 //   tenant — geen enkele schrijfactie.
+//
+// Open toegang (tenants.open_access_role, zie db/init.sql): een tenant kan
+// ingesteld worden om IEDER account met een login minstens een bepaalde rol
+// te geven, ook zonder eigen tenant_users-rij (bedoeld voor bv. de
+// Demo-tenant). getTenantRole hieronder regelt de fallback; een expliciete
+// tenant_users-rol wint altijd. sysadmins tellen hierin gewoon mee als "elk
+// account" — een tenant die dit aanzet kiest daar bewust voor, dat is geen
+// impliciete uitzondering op de privacy-afspraak hierboven (die gaat over
+// tenants die dit NIET hebben aangezet).
 export type TenantRole = 'admin' | 'gebruiker' | 'bezoeker';
 
 // Rangorde voor "minimaal deze rol nodig"-checks hieronder — hoger getal =
@@ -48,12 +57,27 @@ function roleAtLeast(role: TenantRole, minRole: TenantRole): boolean {
   return ROLE_RANK[role] >= ROLE_RANK[minRole];
 }
 
+// Effectieve tenant-rol van een gebruiker: de expliciete tenant_users-rol als
+// die bestaat, anders — als de tenant "open toegang" heeft (tenants.
+// open_access_role, zie db/init.sql) — die open-toegang-rol als ondergrens
+// voor IEDER account, ook zonder eigen tenant_users-rij. Een expliciete rol
+// wint dus altijd; open_access_role is puur een fallback voor wie geen eigen
+// rij heeft (kan iemands eigen rol nooit verlagen). LEFT JOIN i.p.v. een
+// simpele where-clause op tenant_users, zodat deze functie ook een rij
+// teruggeeft (met tu.role = null) wanneer er geen lidmaatschap is maar de
+// tenant wél bestaat — nodig om open_access_role als fallback te kunnen
+// gebruiken.
 export async function getTenantRole(userId: number, tenantId: number | string): Promise<TenantRole | null> {
   const result = await pool.query(
-    'select role from tenant_users where user_id = $1 and tenant_id = $2',
+    `select tu.role, t.open_access_role
+     from tenants t
+     left join tenant_users tu on tu.tenant_id = t.id and tu.user_id = $1
+     where t.id = $2`,
     [userId, tenantId]
   );
-  return (result.rows[0]?.role as TenantRole | undefined) ?? null;
+  if (result.rows.length === 0) return null;
+  const row = result.rows[0] as { role: TenantRole | null; open_access_role: TenantRole | null };
+  return row.role ?? row.open_access_role ?? null;
 }
 
 export async function tenantIdForDoelenboom(doelenboomId: number | string): Promise<number | null> {
@@ -63,11 +87,15 @@ export async function tenantIdForDoelenboom(doelenboomId: number | string): Prom
 
 // Effectieve rol van een gebruiker op één specifieke doelenboom: de rol uit
 // doelenboom_user_roles (indien aanwezig) overrult de tenant-brede rol uit
-// tenant_users — in beide richtingen (kan zowel op- als afschalen). Geen
-// tenant-lidmaatschap betekent geen toegang, ook niet met een override-rij
-// (die kan niet bestaan zonder een geldige user_id, maar checkt hier expliciet
-// nog de tenant-membership zodat een verwijderd tenant-lidmaatschap ook
-// meteen de toegang intrekt, ongeacht een eventuele oude override-rij).
+// getTenantRole hierboven — in beide richtingen (kan zowel op- als
+// afschalen). getTenantRole regelt zelf al de open-toegang-fallback
+// (tenants.open_access_role), dus "geen toegang" hier betekent: geen
+// tenant_users-rij ÉN geen open-toegang voor deze tenant. Een override-rij in
+// doelenboom_user_roles kan overigens sowieso alleen bestaan voor een echte
+// tenant_users-lid (zie PUT /doelenbomen/:id/member-roles/:userId in
+// routes/doelenbomen.ts, die dat expliciet afdwingt) — een open-toegang-
+// gebruiker zonder eigen rij heeft dus altijd precies open_access_role, nooit
+// een eigen override.
 export async function getEffectiveRoleForDoelenboom(
   userId: number,
   doelenboomId: number | string

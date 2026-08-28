@@ -145,4 +145,101 @@ describe('tenants', () => {
     const asSysadmin = await req('DELETE', `/api/tenants/${tenantId}`, { token: sysadminToken });
     assert.equal(asSysadmin.status, 204);
   });
+
+  it('open_access_role: geeft niet-leden toegang, expliciet lidmaatschap wint, uitzetten trekt toegang weer in', async () => {
+    // Tenant T waar we open toegang op gaan testen.
+    const slug = `${PREFIX}-t7`;
+    const created = await req('POST', '/api/tenants', { token: sysadminToken, body: { slug, name: 'Test tenant 7' } });
+    const tenantId = created.body.id;
+    assert.equal(created.body.open_access_role, null); // default: uit
+
+    const adminEmail = `${PREFIX}-t7-admin@test.local`;
+    await req('POST', `/api/tenants/${tenantId}/members`, {
+      token: sysadminToken, body: { email: adminEmail, password: 'wachtwoord123', role: 'admin' },
+    });
+    const adminToken = await login(adminEmail, 'wachtwoord123');
+    const boom = await req('POST', `/api/tenants/${tenantId}/doelenbomen`, {
+      token: adminToken, body: { slug: 'boom', name: 'Testboom T7' },
+    });
+    const doelenboomId = boom.body.id;
+
+    // Volledige buitenstaander: lid van een heel andere tenant (U), geen enkele
+    // relatie tot T — dit is de "elk account met een login"-situatie.
+    const otherSlug = `${PREFIX}-t7-elders`;
+    const otherTenant = await req('POST', '/api/tenants', { token: sysadminToken, body: { slug: otherSlug, name: 'Elders' } });
+    const outsiderEmail = `${PREFIX}-t7-buitenstaander@test.local`;
+    await req('POST', `/api/tenants/${otherTenant.body.id}/members`, {
+      token: sysadminToken, body: { email: outsiderEmail, password: 'wachtwoord123', role: 'bezoeker' },
+    });
+    const outsiderToken = await login(outsiderEmail, 'wachtwoord123');
+
+    // Vóór open toegang: geen toegang tot T.
+    const before = await req('GET', `/api/doelenbomen/${doelenboomId}`, { token: outsiderToken });
+    assert.equal(before.status, 403);
+    const listBefore = await req('GET', '/api/doelenbomen', { token: outsiderToken });
+    assert.ok(!listBefore.body.some((d: any) => d.id === doelenboomId));
+
+    // Validatie: ongeldige waarde -> 400.
+    const invalid = await req('PUT', `/api/tenants/${tenantId}`, {
+      token: sysadminToken, body: { openAccessRole: 'superadmin' },
+    });
+    assert.equal(invalid.status, 400);
+
+    // Open toegang aanzetten op 'bezoeker'.
+    const opened = await req('PUT', `/api/tenants/${tenantId}`, {
+      token: sysadminToken, body: { openAccessRole: 'bezoeker' },
+    });
+    assert.equal(opened.status, 200);
+    assert.equal(opened.body.open_access_role, 'bezoeker');
+
+    const afterRead = await req('GET', `/api/doelenbomen/${doelenboomId}`, { token: outsiderToken });
+    assert.equal(afterRead.status, 200);
+    const listAfter = await req('GET', '/api/doelenbomen', { token: outsiderToken });
+    assert.ok(listAfter.body.some((d: any) => d.id === doelenboomId));
+
+    // 'bezoeker' via open toegang mag niet schrijven.
+    const writeAsBezoeker = await req('POST', `/api/doelenbomen/${doelenboomId}/elements`, {
+      token: outsiderToken, body: { code: 'X1', type: 'Project', name: 'Mag niet' },
+    });
+    assert.equal(writeAsBezoeker.status, 403);
+
+    // Expliciet lidmaatschap wint van open_access_role (kan ook OPHOGEN).
+    await req('POST', `/api/tenants/${tenantId}/members`, {
+      token: sysadminToken, body: { email: outsiderEmail, role: 'gebruiker' },
+    });
+    const writeAsGebruiker = await req('POST', `/api/doelenbomen/${doelenboomId}/elements`, {
+      token: outsiderToken, body: { code: 'X1', type: 'Project', name: 'Mag nu wel' },
+    });
+    assert.equal(writeAsGebruiker.status, 201);
+
+    // Een TWEEDE buitenstaander (nooit ergens expliciet lid van geweest) om
+    // het weer uitzetten van open toegang op te testen — de eerste
+    // buitenstaander heeft inmiddels een eigen lidmaatschap en zou dus sowieso
+    // toegang houden, dat zou het uitzetten zelf niet aantonen.
+    const outsider2Email = `${PREFIX}-t7-buitenstaander2@test.local`;
+    await req('POST', `/api/tenants/${otherTenant.body.id}/members`, {
+      token: sysadminToken, body: { email: outsider2Email, password: 'wachtwoord123', role: 'bezoeker' },
+    });
+    const outsider2Token = await login(outsider2Email, 'wachtwoord123');
+    const beforeClose = await req('GET', `/api/doelenbomen/${doelenboomId}`, { token: outsider2Token });
+    assert.equal(beforeClose.status, 200); // open toegang staat nog aan
+
+    // Open toegang weer uitzetten (null expliciet meesturen, niet weglaten).
+    const closed = await req('PUT', `/api/tenants/${tenantId}`, {
+      token: sysadminToken, body: { openAccessRole: null },
+    });
+    assert.equal(closed.status, 200);
+    assert.equal(closed.body.open_access_role, null);
+    // wipeOnEmpty/sessionTimeoutMinutes blijven intussen ongemoeid (niet
+    // meegestuurd in deze PUT) — regressie voor de tri-state-implementatie.
+    assert.equal(closed.body.session_timeout_minutes, 30);
+
+    const afterClose = await req('GET', `/api/doelenbomen/${doelenboomId}`, { token: outsider2Token });
+    assert.equal(afterClose.status, 403);
+    // De eerste buitenstaander (nu een echt lid met role='gebruiker') houdt
+    // wél gewoon toegang — het uitzetten van open toegang raakt alleen de
+    // fallback, niet expliciete lidmaatschappen.
+    const outsiderStillOk = await req('GET', `/api/doelenbomen/${doelenboomId}`, { token: outsiderToken });
+    assert.equal(outsiderStillOk.status, 200);
+  });
 });

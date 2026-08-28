@@ -24,7 +24,9 @@ doelenbomenRouter.use(requireAuth);
 
 // Alle doelenbomen die deze gebruiker mag zien — sysadmin ziet alles, anders
 // alleen doelenbomen van tenants waar hij/zij lid van is (rol maakt niet uit,
-// gebruiker mag ook lezen). Zonder deze filter zag elke ingelogde gebruiker
+// gebruiker mag ook lezen) ÓF van een tenant met open toegang (tenants.
+// open_access_role, zie rbac.ts getTenantRole) — ook zonder eigen
+// tenant_users-rij. Zonder de tenant-filter zag elke ingelogde gebruiker
 // vroeger alle tenants door elkaar in de picker.
 // archived_at (als "archivedAt"): zie license.ts — een gearchiveerde
 // doelenboom telt niet mee als "actieve" boom voor de tier-limiet (§5,
@@ -45,8 +47,8 @@ doelenbomenRouter.get('/doelenbomen', async (req: AuthedRequest, res) => {
     `select ${DOELENBOOM_FIELDS}, t.id as tenant_id, t.slug as tenant_slug, t.name as tenant_name
      from doelenbomen d
      join tenants t on t.id = d.tenant_id
-     join tenant_users tu on tu.tenant_id = t.id
-     where tu.user_id = $1
+     where t.open_access_role is not null
+        or exists (select 1 from tenant_users tu where tu.tenant_id = t.id and tu.user_id = $1)
      order by t.name, d.name`,
     [req.user!.id]
   );

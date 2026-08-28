@@ -73,6 +73,11 @@ export type TenantSummary = {
   name: string;
   wipe_on_empty: boolean;
   session_timeout_minutes: number;
+  // null = open toegang uit (huidig gedrag: alleen expliciete leden). Gezet
+  // op een rol = elk account met een login krijgt minstens die rol binnen
+  // deze tenant, ook zonder eigen lidmaatschap — zie api/src/rbac.ts
+  // getTenantRole. Bedoeld voor bv. de Demo-tenant.
+  open_access_role: TenantRoleName | null;
   created_at: string;
   my_role?: TenantRoleName; // alleen aanwezig als niet-sysadmin dit ophaalt
   // "YYYY-MM-DD" of null (geen einddatum ingesteld/nooit verlopen) — zie
