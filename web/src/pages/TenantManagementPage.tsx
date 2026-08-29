@@ -563,21 +563,6 @@ function DoelenbomenSection({
 
   useEffect(loadTemplates, [token, tenantId]);
 
-  async function removeTemplate(t: DoelenboomTemplateSummary) {
-    const ok = window.confirm(`Sjabloon "${t.name}" verwijderen? Dit heeft geen effect op al aangemaakte doelenbomen.`);
-    if (!ok) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await api.deleteDoelenboomTemplate(token, t.id);
-      loadTemplates();
-    } catch (err) {
-      setError(errMsg(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function remove(d: DoelenboomSummary) {
     const ok = window.confirm(
       `Doelenboom "${d.name}" volledig verwijderen? Alle elementen, relaties, tags, organisatieonderdelen en ` +
@@ -720,38 +705,6 @@ function DoelenbomenSection({
           );
         })}
       </div>
-
-      {templates && templates.length > 0 && (
-        <div style={{ marginBottom: 16 }}>
-          <p style={{ margin: '0 0 6px', fontSize: 13, fontWeight: 600, color: '#6c6f76' }}>Sjablonen</p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {templates.map((t) => {
-              // Zelfde regels als de server (routes/doelenboomTemplates.ts):
-              // sysadmin mag alles verwijderen, een tenant-admin alleen de
-              // eigen tenant-sjablonen (niet systeembrede).
-              const canDelete = isSysadmin || t.tenantId != null;
-              return (
-                <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
-                  <span style={{ flex: 1 }}>
-                    {t.name}
-                    {t.tenantId == null && (
-                      <span style={{ marginLeft: 6, fontSize: 11, opacity: 0.65 }} title="Systeembreed sjabloon">
-                        🌐
-                      </span>
-                    )}
-                    {t.description && <span style={{ opacity: 0.65 }}> — {t.description}</span>}
-                  </span>
-                  {canDelete && (
-                    <button disabled={busy} onClick={() => removeTemplate(t)} style={btnStyle('danger-text')}>
-                      Verwijderen
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
       <CreateDoelenboomForm
         token={token}

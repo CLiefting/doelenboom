@@ -110,10 +110,15 @@ export type DoelenboomSummary = DoelenboomBase & {
 
 // Eén rij in GET /api/tenants/:tenantId/doelenboom-templates (zie
 // api/src/doelenboomTemplates.ts) — tenantId null = systeembreed sjabloon
-// (bv. "Batenboom"), gevuld = eigen sjabloon van die tenant.
+// (bv. "Batenboom"), gevuld = eigen sjabloon van die tenant. tenantName is
+// alleen gevuld door GET /api/doelenboom-templates (het aggregerende
+// Sjablonenbeheer-scherm, dat sjablonen van meerdere tenants tegelijk
+// toont) — de per-tenant kiezer (.../tenants/:tenantId/doelenboom-templates)
+// laat 'm weg, want daar is de tenant al bekend uit de context.
 export type DoelenboomTemplateSummary = {
   id: number;
   tenantId: number | null;
+  tenantName?: string | null;
   name: string;
   description: string;
   createdAt: string;

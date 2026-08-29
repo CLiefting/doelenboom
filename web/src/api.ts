@@ -95,6 +95,32 @@ export const api = {
   deleteDoelenboomTemplate: (token: string, templateId: number) =>
     request<void>(`/api/doelenboom-templates/${templateId}`, { method: 'DELETE' }, token),
 
+  // Alle sjablonen die deze gebruiker mag beheren, over alle tenants heen —
+  // voor het aparte Sjablonenbeheer-scherm (DoelenboomTemplatesPage.tsx).
+  allDoelenboomTemplates: (token: string) =>
+    request<import('./types').DoelenboomTemplateSummary[]>('/api/doelenboom-templates', {}, token),
+
+  updateDoelenboomTemplateMeta: (token: string, templateId: number, body: { name?: string; description?: string }) =>
+    request<import('./types').DoelenboomTemplateSummary>(`/api/doelenboom-templates/${templateId}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }, token),
+
+  templateColumnConfig: (token: string, templateId: number) =>
+    request<{ columns: import('./types').ColumnDef[] }>(`/api/doelenboom-templates/${templateId}/column-config`, {}, token),
+
+  updateTemplateColumnConfig: (token: string, templateId: number, columns: import('./types').ColumnDef[]) =>
+    request<{ columns: import('./types').ColumnDef[] }>(`/api/doelenboom-templates/${templateId}/column-config`, {
+      method: 'PUT',
+      body: JSON.stringify({ columns }),
+    }, token),
+
+  refreshTemplateFromDoelenboom: (token: string, templateId: number, doelenboomId: number) =>
+    request<{ columns: import('./types').ColumnDef[] }>(`/api/doelenboom-templates/${templateId}/refresh-from-doelenboom`, {
+      method: 'POST',
+      body: JSON.stringify({ doelenboomId }),
+    }, token),
+
   updateDoelenboom: (
     token: string,
     doelenboomId: number,

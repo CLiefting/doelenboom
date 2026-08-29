@@ -4,6 +4,7 @@ import PickerPage from './pages/PickerPage';
 import TreePage from './pages/TreePage';
 import ImportPage from './pages/ImportPage';
 import TenantManagementPage from './pages/TenantManagementPage';
+import DoelenboomTemplatesPage from './pages/DoelenboomTemplatesPage';
 import AccountManagementPage from './pages/AccountManagementPage';
 import LicenseCatalogPage from './pages/LicenseCatalogPage';
 import ChangePasswordPage from './pages/ChangePasswordPage';
@@ -28,6 +29,7 @@ type View =
   | { name: 'tree' }
   | { name: 'import' }
   | { name: 'tenants' }
+  | { name: 'templates' }
   | { name: 'accounts' }
   | { name: 'licenses' }
   | { name: 'password' }
@@ -134,6 +136,8 @@ export default function App() {
   // nodig hebben).
   if (view.name === 'tenants') {
     content = <TenantManagementPage token={session.token} user={session.user} onBack={() => setView({ name: 'picker' })} />;
+  } else if (view.name === 'templates') {
+    content = <DoelenboomTemplatesPage token={session.token} onBack={() => setView({ name: 'picker' })} />;
   } else if (view.name === 'accounts') {
     content = <AccountManagementPage token={session.token} user={session.user} onBack={() => setView({ name: 'picker' })} />;
   } else if (view.name === 'licenses') {
@@ -164,6 +168,7 @@ export default function App() {
         }}
         onLogoutRequest={requestLogout}
         onTenantsRequest={() => setView({ name: 'tenants' })}
+        onTemplatesRequest={() => setView({ name: 'templates' })}
         onAccountsRequest={() => setView({ name: 'accounts' })}
         onLicensesRequest={() => setView({ name: 'licenses' })}
         onHelpRequest={() => setView({ name: 'help', from: 'picker' })}

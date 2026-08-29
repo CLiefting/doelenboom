@@ -244,4 +244,217 @@ describe('doelenboom-templates', () => {
     const notFoundAgain = await req('DELETE', `/api/doelenboom-templates/${eigenSjabloon.body.id}`, { token: adminToken });
     assert.equal(notFoundAgain.status, 404);
   });
+
+  it('GET /doelenboom-templates (over alle tenants): sysadmin ziet alles, tenant-admin alleen eigen + systeembreed', async () => {
+    const slug = `${PREFIX}-t7`;
+    const created = await req('POST', '/api/tenants', { token: sysadminToken, body: { slug, name: 'Test tenant 7' } });
+    const tenantId = created.body.id;
+
+    const adminEmail = `${PREFIX}-t7-admin@test.local`;
+    await req('POST', `/api/tenants/${tenantId}/members`, {
+      token: sysadminToken, body: { email: adminEmail, password: 'wachtwoord123', role: 'admin' },
+    });
+    const adminToken = await login(adminEmail, 'wachtwoord123');
+
+    const gebruikerEmail = `${PREFIX}-t7-gebruiker@test.local`;
+    await req('POST', `/api/tenants/${tenantId}/members`, {
+      token: sysadminToken, body: { email: gebruikerEmail, password: 'wachtwoord123', role: 'gebruiker' },
+    });
+    const gebruikerToken = await login(gebruikerEmail, 'wachtwoord123');
+
+    const boom = await req('POST', `/api/tenants/${tenantId}/doelenbomen`, {
+      token: adminToken, body: { slug: 'bron', name: 'Bronboom' },
+    });
+    const eigenSjabloon = await req('POST', `/api/doelenbomen/${boom.body.id}/save-as-template`, {
+      token: adminToken, body: { name: 'T7-eigen-sjabloon', scope: 'tenant' },
+    });
+    assert.equal(eigenSjabloon.status, 201);
+
+    // Tenant-admin: ziet het systeembrede Batenboom-sjabloon én het eigen
+    // sjabloon, met tenantName meegeleverd voor het eigen sjabloon.
+    const asAdmin = await req('GET', '/api/doelenboom-templates', { token: adminToken });
+    assert.equal(asAdmin.status, 200);
+    assert.ok(asAdmin.body.some((t: any) => t.name === 'Batenboom' && t.tenantId === null));
+    const ownRow = asAdmin.body.find((t: any) => t.id === eigenSjabloon.body.id);
+    assert.ok(ownRow);
+    assert.equal(ownRow.tenantName, 'Test tenant 7');
+
+    // Gewone gebruiker (geen tenant-admin, geen sysadmin): geen enkel
+    // beheerbaar sjabloon zichtbaar via deze aggregerende lijst.
+    const asGebruiker = await req('GET', '/api/doelenboom-templates', { token: gebruikerToken });
+    assert.equal(asGebruiker.status, 200);
+    assert.ok(!asGebruiker.body.some((t: any) => t.id === eigenSjabloon.body.id));
+
+    // Sysadmin: ziet in elk geval ook dit tenant-sjabloon (alles).
+    const asSysadmin = await req('GET', '/api/doelenboom-templates', { token: sysadminToken });
+    assert.ok(asSysadmin.body.some((t: any) => t.id === eigenSjabloon.body.id));
+  });
+
+  it('PUT /doelenboom-templates/:id: naam/omschrijving wijzigen, met dezelfde tenant-admin/sysadmin-grens als verwijderen', async () => {
+    const slug = `${PREFIX}-t8`;
+    const created = await req('POST', '/api/tenants', { token: sysadminToken, body: { slug, name: 'Test tenant 8' } });
+    const tenantId = created.body.id;
+
+    const adminEmail = `${PREFIX}-t8-admin@test.local`;
+    await req('POST', `/api/tenants/${tenantId}/members`, {
+      token: sysadminToken, body: { email: adminEmail, password: 'wachtwoord123', role: 'admin' },
+    });
+    const adminToken = await login(adminEmail, 'wachtwoord123');
+
+    const boom = await req('POST', `/api/tenants/${tenantId}/doelenbomen`, {
+      token: adminToken, body: { slug: 'bron', name: 'Bronboom' },
+    });
+    const sjabloon = await req('POST', `/api/doelenbomen/${boom.body.id}/save-as-template`, {
+      token: adminToken, body: { name: 'Oorspronkelijke naam', description: 'Oude omschrijving', scope: 'tenant' },
+    });
+    const templateId = sjabloon.body.id;
+
+    const renamed = await req('PUT', `/api/doelenboom-templates/${templateId}`, {
+      token: adminToken, body: { name: 'Nieuwe naam' },
+    });
+    assert.equal(renamed.status, 200);
+    assert.equal(renamed.body.name, 'Nieuwe naam');
+    // Omschrijving niet meegestuurd -> blijft ongewijzigd (coalesce).
+    assert.equal(renamed.body.description, 'Oude omschrijving');
+
+    const emptyName = await req('PUT', `/api/doelenboom-templates/${templateId}`, {
+      token: adminToken, body: { name: '' },
+    });
+    assert.equal(emptyName.status, 400);
+
+    // Een tenant-admin mag het systeembrede sjabloon niet hernoemen.
+    const listVoorGlobal = await req('GET', `/api/tenants/${tenantId}/doelenboom-templates`, { token: adminToken });
+    const batenboom = listVoorGlobal.body.find((t: any) => t.name === 'Batenboom');
+    const failGlobal = await req('PUT', `/api/doelenboom-templates/${batenboom.id}`, {
+      token: adminToken, body: { name: 'Poging' },
+    });
+    assert.equal(failGlobal.status, 403);
+
+    // Sysadmin mag het systeembrede sjabloon wel hernoemen — meteen weer
+    // terugzetten zodat andere tests in dit bestand niet geraakt worden.
+    const globalRename = await req('PUT', `/api/doelenboom-templates/${batenboom.id}`, {
+      token: sysadminToken, body: { name: 'Batenboom (tijdelijk)' },
+    });
+    assert.equal(globalRename.status, 200);
+    const globalRenameBack = await req('PUT', `/api/doelenboom-templates/${batenboom.id}`, {
+      token: sysadminToken, body: { name: 'Batenboom' },
+    });
+    assert.equal(globalRenameBack.status, 200);
+  });
+
+  it('kolommen van een sjabloon opvragen/bewerken, incl. blokkade bij verwijderen van een kolomtype dat nog in gebruik is', async () => {
+    const slug = `${PREFIX}-t9`;
+    const created = await req('POST', '/api/tenants', { token: sysadminToken, body: { slug, name: 'Test tenant 9' } });
+    const tenantId = created.body.id;
+
+    const adminEmail = `${PREFIX}-t9-admin@test.local`;
+    await req('POST', `/api/tenants/${tenantId}/members`, {
+      token: sysadminToken, body: { email: adminEmail, password: 'wachtwoord123', role: 'admin' },
+    });
+    const adminToken = await login(adminEmail, 'wachtwoord123');
+    const gebruikerEmail = `${PREFIX}-t9-gebruiker@test.local`;
+    await req('POST', `/api/tenants/${tenantId}/members`, {
+      token: sysadminToken, body: { email: gebruikerEmail, password: 'wachtwoord123', role: 'gebruiker' },
+    });
+    const gebruikerToken = await login(gebruikerEmail, 'wachtwoord123');
+
+    const boom = await req('POST', `/api/tenants/${tenantId}/doelenbomen`, {
+      token: adminToken, body: { slug: 'bron', name: 'Bronboom' },
+    });
+    const sjabloon = await req('POST', `/api/doelenbomen/${boom.body.id}/save-as-template`, {
+      token: adminToken, body: { name: 'T9-sjabloon', scope: 'tenant' },
+    });
+    const templateId = sjabloon.body.id;
+
+    const asGebruiker = await req('GET', `/api/doelenboom-templates/${templateId}/column-config`, { token: gebruikerToken });
+    assert.equal(asGebruiker.status, 403);
+
+    const current = await req('GET', `/api/doelenboom-templates/${templateId}/column-config`, { token: adminToken });
+    assert.equal(current.status, 200);
+    assert.equal(current.body.columns.length, 8);
+
+    // Alle kolomtypes van het Batenboom-sjabloon zijn in de meegekopieerde
+    // voorbeeldelementen in gebruik (zie applyTemplateToNewDoelenboom), dus
+    // de eerste kolom verwijderen moet geblokkeerd worden.
+    const zonderEerste = current.body.columns.slice(1).map((c: any, i: number) => ({ ...c, position: i }));
+    const blocked = await req('PUT', `/api/doelenboom-templates/${templateId}/column-config`, {
+      token: adminToken, body: { columns: zonderEerste },
+    });
+    assert.equal(blocked.status, 409);
+
+    // Een kolom toevoegen (geen elementen in gebruik voor het nieuwe type)
+    // moet wel lukken.
+    const isProjectRoleAlready = current.body.columns.some((c: any) => c.isProjectRole);
+    const metExtra = [
+      ...current.body.columns,
+      {
+        position: current.body.columns.length,
+        typeName: 'Extra-kolom-t9',
+        title: 'Extra kolom',
+        subtitle: '',
+        color: '#cccccc',
+        isNarrow: false,
+        nodeFontSize: null,
+        isProjectRole: !isProjectRoleAlready,
+        relationLabelToNext: null,
+      },
+    ];
+    const ok = await req('PUT', `/api/doelenboom-templates/${templateId}/column-config`, {
+      token: adminToken, body: { columns: metExtra },
+    });
+    assert.equal(ok.status, 200);
+    assert.equal(ok.body.columns.length, 9);
+    assert.ok(ok.body.columns.some((c: any) => c.typeName === 'Extra-kolom-t9'));
+  });
+
+  it('POST /doelenboom-templates/:id/refresh-from-doelenboom: vereist beheerrechten op sjabloon ÉN admin-toegang tot de bronboom', async () => {
+    const slug = `${PREFIX}-t10`;
+    const created = await req('POST', '/api/tenants', { token: sysadminToken, body: { slug, name: 'Test tenant 10' } });
+    const tenantId = created.body.id;
+
+    const adminEmail = `${PREFIX}-t10-admin@test.local`;
+    await req('POST', `/api/tenants/${tenantId}/members`, {
+      token: sysadminToken, body: { email: adminEmail, password: 'wachtwoord123', role: 'admin' },
+    });
+    const adminToken = await login(adminEmail, 'wachtwoord123');
+
+    const bron1 = await req('POST', `/api/tenants/${tenantId}/doelenbomen`, {
+      token: adminToken, body: { slug: 'bron1', name: 'Bron 1' },
+    });
+    const sjabloon = await req('POST', `/api/doelenbomen/${bron1.body.id}/save-as-template`, {
+      token: adminToken, body: { name: 'T10-sjabloon', scope: 'tenant' },
+    });
+    const templateId = sjabloon.body.id;
+
+    // Andere tenant + boom, om de "geen admin-toegang tot de bronboom"-tak te raken.
+    const otherTenant = await req('POST', '/api/tenants', { token: sysadminToken, body: { slug: `${PREFIX}-t10b`, name: 'Andere tenant' } });
+    const otherAdminEmail = `${PREFIX}-t10b-admin@test.local`;
+    await req('POST', `/api/tenants/${otherTenant.body.id}/members`, {
+      token: sysadminToken, body: { email: otherAdminEmail, password: 'wachtwoord123', role: 'admin' },
+    });
+    await login(otherAdminEmail, 'wachtwoord123');
+    const bron2 = await req('POST', `/api/tenants/${otherTenant.body.id}/doelenbomen`, {
+      token: sysadminToken, body: { slug: 'bron2', name: 'Bron 2 (andere tenant)' },
+    });
+
+    // adminToken (tenant 10) heeft geen admin-toegang tot bron2 (tenant 10b).
+    const forbiddenSource = await req('POST', `/api/doelenboom-templates/${templateId}/refresh-from-doelenboom`, {
+      token: adminToken, body: { doelenboomId: bron2.body.id },
+    });
+    assert.equal(forbiddenSource.status, 403);
+
+    const missingId = await req('POST', `/api/doelenboom-templates/${templateId}/refresh-from-doelenboom`, {
+      token: adminToken, body: {},
+    });
+    assert.equal(missingId.status, 400);
+
+    // Eigen boom als bron: mag wel, en overschrijft de snapshot met de
+    // (inmiddels iets andere) structuur van bron1 — zelfde 8 kolommen hier,
+    // dus vooral een succes-pad-check.
+    const ok = await req('POST', `/api/doelenboom-templates/${templateId}/refresh-from-doelenboom`, {
+      token: adminToken, body: { doelenboomId: bron1.body.id },
+    });
+    assert.equal(ok.status, 200);
+    assert.equal(ok.body.columns.length, 8);
+  });
 });

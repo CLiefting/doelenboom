@@ -8,6 +8,7 @@ export default function PickerPage({
   onSelect,
   onLogoutRequest,
   onTenantsRequest,
+  onTemplatesRequest,
   onAccountsRequest,
   onLicensesRequest,
   onHelpRequest,
@@ -18,6 +19,7 @@ export default function PickerPage({
   onSelect: (d: DoelenboomSummary) => void;
   onLogoutRequest: () => void;
   onTenantsRequest: () => void;
+  onTemplatesRequest: () => void;
   onAccountsRequest: () => void;
   onLicensesRequest: () => void;
   onHelpRequest: () => void;
@@ -50,6 +52,11 @@ export default function PickerPage({
             {canManageUsers && (
               <button onClick={onTenantsRequest} style={pillStyle()}>
                 Tenantbeheer
+              </button>
+            )}
+            {canManageUsers && (
+              <button onClick={onTemplatesRequest} style={pillStyle()}>
+                Sjablonen
               </button>
             )}
             <button onClick={onHelpRequest} style={styles.helpButton} title="Help" aria-label="Help">
