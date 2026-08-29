@@ -5,6 +5,7 @@ import TenantLicensePanel from '../components/TenantLicensePanel';
 import type {
   DoelenboomMemberRole,
   DoelenboomSummary,
+  DoelenboomTemplateSummary,
   TenantMember,
   TenantRoleName,
   TenantSummary,
@@ -553,6 +554,29 @@ function DoelenbomenSection({
   const [duplicatingId, setDuplicatingId] = useState<number | null>(null);
   const [rolesEditingId, setRolesEditingId] = useState<number | null>(null);
   const [columnsEditingId, setColumnsEditingId] = useState<number | null>(null);
+  const [templatingId, setTemplatingId] = useState<number | null>(null);
+  const [templates, setTemplates] = useState<DoelenboomTemplateSummary[] | null>(null);
+
+  function loadTemplates() {
+    api.doelenboomTemplates(token, tenantId).then(setTemplates).catch((err) => setError(errMsg(err)));
+  }
+
+  useEffect(loadTemplates, [token, tenantId]);
+
+  async function removeTemplate(t: DoelenboomTemplateSummary) {
+    const ok = window.confirm(`Sjabloon "${t.name}" verwijderen? Dit heeft geen effect op al aangemaakte doelenbomen.`);
+    if (!ok) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.deleteDoelenboomTemplate(token, t.id);
+      loadTemplates();
+    } catch (err) {
+      setError(errMsg(err));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function remove(d: DoelenboomSummary) {
     const ok = window.confirm(
@@ -612,6 +636,24 @@ function DoelenbomenSection({
               />
             );
           }
+          if (templatingId === d.id) {
+            return (
+              <SaveAsTemplateForm
+                key={d.id}
+                token={token}
+                doelenboom={d}
+                isSysadmin={isSysadmin}
+                busy={busy}
+                setBusy={setBusy}
+                setError={setError}
+                onSaved={() => {
+                  setTemplatingId(null);
+                  loadTemplates();
+                }}
+                onCancel={() => setTemplatingId(null)}
+              />
+            );
+          }
           if (rolesEditingId === d.id) {
             return (
               <DoelenboomMemberRolesSection
@@ -664,6 +706,9 @@ function DoelenbomenSection({
                 <button disabled={busy} onClick={() => setColumnsEditingId(d.id)} style={btnStyle('ghost')}>
                   Kolommen
                 </button>
+                <button disabled={busy} onClick={() => setTemplatingId(d.id)} style={btnStyle('ghost')}>
+                  Opslaan als sjabloon
+                </button>
                 <button disabled={busy} onClick={() => setEditingId(d.id)} style={btnStyle('ghost')}>
                   Bewerken
                 </button>
@@ -675,9 +720,43 @@ function DoelenbomenSection({
           );
         })}
       </div>
+
+      {templates && templates.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <p style={{ margin: '0 0 6px', fontSize: 13, fontWeight: 600, color: '#6c6f76' }}>Sjablonen</p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {templates.map((t) => {
+              // Zelfde regels als de server (routes/doelenboomTemplates.ts):
+              // sysadmin mag alles verwijderen, een tenant-admin alleen de
+              // eigen tenant-sjablonen (niet systeembrede).
+              const canDelete = isSysadmin || t.tenantId != null;
+              return (
+                <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                  <span style={{ flex: 1 }}>
+                    {t.name}
+                    {t.tenantId == null && (
+                      <span style={{ marginLeft: 6, fontSize: 11, opacity: 0.65 }} title="Systeembreed sjabloon">
+                        🌐
+                      </span>
+                    )}
+                    {t.description && <span style={{ opacity: 0.65 }}> — {t.description}</span>}
+                  </span>
+                  {canDelete && (
+                    <button disabled={busy} onClick={() => removeTemplate(t)} style={btnStyle('danger-text')}>
+                      Verwijderen
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <CreateDoelenboomForm
         token={token}
         tenantId={tenantId}
+        templates={templates}
         busy={busy}
         setBusy={setBusy}
         setError={setError}
@@ -975,6 +1054,7 @@ function DoelenboomMemberRolesSection({
 function CreateDoelenboomForm({
   token,
   tenantId,
+  templates,
   busy,
   setBusy,
   setError,
@@ -982,6 +1062,7 @@ function CreateDoelenboomForm({
 }: {
   token: string;
   tenantId: number;
+  templates: DoelenboomTemplateSummary[] | null;
   busy: boolean;
   setBusy: (b: boolean) => void;
   setError: (e: string | null) => void;
@@ -989,8 +1070,20 @@ function CreateDoelenboomForm({
 }) {
   const [slug, setSlug] = useState('');
   const [name, setName] = useState('');
+  // Standaard het eerste sjabloon uit de lijst (systeembrede sjablonen staan
+  // vooraan, zie listTemplatesForTenant in api/src/doelenboomTemplates.ts —
+  // dat is meestal "Batenboom"). '' = geen sjabloon meegeven (server valt dan
+  // terug op de oude tenant-default-kolommen, zie routes/doelenbomen.ts).
+  const [templateId, setTemplateId] = useState<number | ''>('');
   const [licenseWarning, setLicenseWarning] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (templates && templates.length > 0 && templateId === '') {
+      setTemplateId(templates[0].id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [templates]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -999,7 +1092,11 @@ function CreateDoelenboomForm({
     setLicenseWarning(null);
     setFormError(null);
     try {
-      await api.createDoelenboom(token, tenantId, { slug, name });
+      await api.createDoelenboom(token, tenantId, {
+        slug,
+        name,
+        ...(templateId !== '' ? { templateId } : {}),
+      });
       setSlug('');
       setName('');
       onCreated();
@@ -1017,6 +1114,20 @@ function CreateDoelenboomForm({
       <form onSubmit={submit} style={styles.inlineForm}>
         <input style={styles.input} placeholder="slug" required value={slug} onChange={(e) => setSlug(e.target.value)} />
         <input style={styles.input} placeholder="naam" required value={name} onChange={(e) => setName(e.target.value)} />
+        <select
+          style={styles.select}
+          value={templateId}
+          onChange={(e) => setTemplateId(e.target.value ? Number(e.target.value) : '')}
+          title="Sjabloon: bepaalt de kolommen en het voorbeeldpad waarmee de nieuwe doelenboom start"
+        >
+          <option value="">(geen sjabloon — tenant-standaardkolommen)</option>
+          {(templates ?? []).map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.tenantId == null ? '🌐 ' : ''}
+              {t.name}
+            </option>
+          ))}
+        </select>
         <button style={btnStyle('primary')} type="submit" disabled={busy}>
           + Doelenboom aanmaken
         </button>
@@ -1024,6 +1135,93 @@ function CreateDoelenboomForm({
       {licenseWarning && <LicenseLimitWarning message={licenseWarning} />}
       {formError && <FormErrorNotice message={formError} />}
     </div>
+  );
+}
+
+// Een bestaande doelenboom opslaan als herbruikbaar sjabloon (kolommen +
+// voorbeeldelementen + relaties, zie api/src/doelenboomTemplates.ts) — geen
+// aparte sjabloon-editor, dit IS de manier om een sjabloon te maken/bijwerken
+// (opnieuw opslaan onder een andere naam). scope='global' (systeembreed,
+// zichtbaar/bruikbaar voor elke tenant) mag alleen een sysadmin kiezen — de
+// server handhaaft dit ook, dit formulier toont die optie alleen als isSysadmin.
+function SaveAsTemplateForm({
+  token,
+  doelenboom,
+  isSysadmin,
+  busy,
+  setBusy,
+  setError,
+  onSaved,
+  onCancel,
+}: {
+  token: string;
+  doelenboom: DoelenboomSummary;
+  isSysadmin: boolean;
+  busy: boolean;
+  setBusy: (b: boolean) => void;
+  setError: (e: string | null) => void;
+  onSaved: () => void;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState(doelenboom.name);
+  const [description, setDescription] = useState('');
+  const [scope, setScope] = useState<'tenant' | 'global'>('tenant');
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await api.saveDoelenboomAsTemplate(token, doelenboom.id, { name, description, scope });
+      onSaved();
+    } catch (err) {
+      setError(errMsg(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} style={styles.doelenboomEditRow}>
+      <p style={{ margin: 0, fontSize: 13.5, color: '#6c6f76' }}>
+        "{doelenboom.name}" opslaan als sjabloon — de huidige kolommen en elementen/relaties worden een
+        momentopname die je later kunt kiezen bij het aanmaken van een nieuwe doelenboom. Wijzigingen hierna
+        aan "{doelenboom.name}" zelf werken niet door in dit sjabloon.
+      </p>
+      <input
+        style={styles.input}
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="naam van het sjabloon"
+        required
+      />
+      <input
+        style={styles.input}
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+        placeholder="korte omschrijving (optioneel)"
+      />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13.5 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <input type="radio" name="template-scope" checked={scope === 'tenant'} onChange={() => setScope('tenant')} />
+          Voor deze organisatie ({doelenboom.tenant_name})
+        </label>
+        {isSysadmin && (
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input type="radio" name="template-scope" checked={scope === 'global'} onChange={() => setScope('global')} />
+            Systeembreed (zichtbaar/bruikbaar voor elke tenant)
+          </label>
+        )}
+      </div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button type="button" onClick={onCancel} style={btnStyle('ghost')} disabled={busy}>
+          Annuleren
+        </button>
+        <button type="submit" style={btnStyle('primary')} disabled={busy}>
+          Opslaan als sjabloon
+        </button>
+      </div>
+    </form>
   );
 }
 

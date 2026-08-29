@@ -108,6 +108,17 @@ export type DoelenboomSummary = DoelenboomBase & {
   tenant_name: string;
 };
 
+// Eén rij in GET /api/tenants/:tenantId/doelenboom-templates (zie
+// api/src/doelenboomTemplates.ts) — tenantId null = systeembreed sjabloon
+// (bv. "Batenboom"), gevuld = eigen sjabloon van die tenant.
+export type DoelenboomTemplateSummary = {
+  id: number;
+  tenantId: number | null;
+  name: string;
+  description: string;
+  createdAt: string;
+};
+
 // Eén rij in GET /api/doelenbomen/:id/member-roles — een tenant-lid met zijn
 // tenant-brede rol, een eventuele override specifiek voor déze doelenboom
 // (null = geen override, "gewoon de tenant-rol"), en de effectieve rol die

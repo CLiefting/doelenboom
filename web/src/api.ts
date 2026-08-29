@@ -72,11 +72,28 @@ export const api = {
 
   doelenbomen: (token: string) => request<import('./types').DoelenboomSummary[]>('/api/doelenbomen', {}, token),
 
-  createDoelenboom: (token: string, tenantId: number, body: { slug: string; name: string }) =>
+  createDoelenboom: (token: string, tenantId: number, body: { slug: string; name: string; templateId?: number }) =>
     request<import('./types').DoelenboomBase>(`/api/tenants/${tenantId}/doelenbomen`, {
       method: 'POST',
       body: JSON.stringify(body),
     }, token),
+
+  // --- Doelenboom-sjablonen (zie api/src/doelenboomTemplates.ts) ---
+  doelenboomTemplates: (token: string, tenantId: number) =>
+    request<import('./types').DoelenboomTemplateSummary[]>(`/api/tenants/${tenantId}/doelenboom-templates`, {}, token),
+
+  saveDoelenboomAsTemplate: (
+    token: string,
+    doelenboomId: number,
+    body: { name: string; description: string; scope: 'tenant' | 'global' }
+  ) =>
+    request<import('./types').DoelenboomTemplateSummary>(`/api/doelenbomen/${doelenboomId}/save-as-template`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }, token),
+
+  deleteDoelenboomTemplate: (token: string, templateId: number) =>
+    request<void>(`/api/doelenboom-templates/${templateId}`, { method: 'DELETE' }, token),
 
   updateDoelenboom: (
     token: string,

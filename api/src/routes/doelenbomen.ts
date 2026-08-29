@@ -10,6 +10,7 @@ import {
 } from '../rbac.js';
 import { createDoelenboomConfigFromTenantDefault, copyDoelenboomConfig } from '../columnConfig.js';
 import { seedExampleTree } from '../exampleTree.js';
+import { applyTemplateToNewDoelenboom } from '../doelenboomTemplates.js';
 import { assertCanCreateBoom, incrementLifetimeTreesCreated, LicenseLimitError } from '../license.js';
 
 function isUniqueViolation(err: unknown): boolean {
@@ -88,15 +89,19 @@ doelenbomenRouter.get(
 // gebruikers. wipe_on_empty wordt geseed vanuit tenants.wipe_on_empty (de
 // "standaardinstelling" van de tenant, zie db/init.sql) zodat je 'm niet elke
 // keer opnieuw hoeft te zetten — na aanmaken is 't gewoon een eigen,
-// onafhankelijk instelbare vlag op déze doelenboom. Na het aanmaken van de
-// kolomconfiguratie wordt de doelenboom ook meteen gevuld met één
-// voorbeeldelement per kolom (zie exampleTree.ts) — zonder dit zou een
-// gloednieuwe doelenboom een volledig leeg scherm tonen.
+// onafhankelijk instelbare vlag op déze doelenboom.
+//
+// templateId (optioneel, zie api/src/doelenboomTemplates.ts): welk sjabloon
+// (kolommen + voorbeeldelementen + relaties) de nieuwe doelenboom meekrijgt.
+// De frontend stuurt 'm altijd mee (default "Batenboom"), maar hij is hier
+// bewust optioneel gebleven — zonder templateId valt dit terug op het oude
+// gedrag (tenant-default kolommen + de generieke 1-per-kolom-seeding), zodat
+// bestaande API-aanroepen die 'm niet meesturen niet stuklopen.
 doelenbomenRouter.post(
   '/tenants/:tenantId/doelenbomen',
   requireTenantRoleForTenantParam('admin', 'tenantId'),
   async (req, res) => {
-    const { slug, name } = req.body ?? {};
+    const { slug, name, templateId } = req.body ?? {};
     if (!slug || !name) {
       return res.status(400).json({ error: 'slug en name zijn verplicht' });
     }
@@ -118,19 +123,34 @@ doelenbomenRouter.post(
          values ($1, $2, $3, $4) returning id, slug, name, read_only, wipe_on_empty, archived_at as "archivedAt", created_at`,
         [req.params.tenantId, slug, name, defaultWipeOnEmpty]
       );
-      // Eigen, onafhankelijke kopie van de tenant-default kolomconfiguratie
-      // (zie columnConfig.ts) — zonder dit zou de boomweergave straks geen
-      // kolommen kunnen renderen.
-      await createDoelenboomConfigFromTenantDefault(
-        client,
-        Number(req.params.tenantId),
-        tenantRow.rows[0]?.name ?? '',
-        result.rows[0].id
-      );
-      // Eén voorbeeldelement per kolom, met elkaar verbonden (zie
-      // exampleTree.ts) — zodat een nieuwe, verder lege doelenboom meteen een
-      // werkend voorbeeldpad toont in plaats van een leeg scherm.
-      await seedExampleTree(client, result.rows[0].id);
+      if (templateId != null) {
+        // Sjabloon toepassen: kolommen + voorbeeldelementen + relaties komen
+        // uit de snapshot (zie doelenboomTemplates.ts). Bestaat het sjabloon
+        // niet (meer) of is het niet zichtbaar voor deze tenant, dan rollen
+        // we de hele aanmaak terug — beter een duidelijke foutmelding dan een
+        // doelenboom zonder kolommen.
+        const applied = await applyTemplateToNewDoelenboom(
+          client,
+          Number(templateId),
+          Number(req.params.tenantId),
+          result.rows[0].id
+        );
+        if (!applied) {
+          await client.query('rollback');
+          return res.status(400).json({ error: 'Sjabloon niet gevonden of niet beschikbaar voor deze tenant.' });
+        }
+      } else {
+        // Geen sjabloon meegestuurd: oud gedrag — eigen, onafhankelijke
+        // kopie van de tenant-default kolomconfiguratie (zie columnConfig.ts)
+        // + de generieke 1-per-kolom-voorbeeldboom (zie exampleTree.ts).
+        await createDoelenboomConfigFromTenantDefault(
+          client,
+          Number(req.params.tenantId),
+          tenantRow.rows[0]?.name ?? '',
+          result.rows[0].id
+        );
+        await seedExampleTree(client, result.rows[0].id);
+      }
       // Telt alleen op, nooit omlaag — zie license.ts incrementLifetimeTreesCreated.
       await incrementLifetimeTreesCreated(client, req.params.tenantId);
       await client.query('commit');

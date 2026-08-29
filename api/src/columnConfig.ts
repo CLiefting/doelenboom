@@ -48,7 +48,11 @@ export function standardColumns(tenantName: string): Omit<ColumnDef, 'id'>[] {
   ];
 }
 
-async function insertColumns(client: PoolClient, columnConfigId: number, columns: Omit<ColumnDef, 'id'>[]) {
+// Geëxporteerd (i.p.v. module-lokaal) zodat doelenboomTemplates.ts 'm ook kan
+// gebruiken bij het toepassen van een sjabloon op een net aangemaakte
+// doelenboom — zelfde insert-logica, alleen de herkomst van de kolommenlijst
+// verschilt (tenant-default versus een sjabloon-snapshot).
+export async function insertColumns(client: PoolClient, columnConfigId: number, columns: Omit<ColumnDef, 'id'>[]) {
   for (const c of columns) {
     await client.query(
       `insert into columns
