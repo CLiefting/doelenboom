@@ -48,6 +48,24 @@ export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBac
     });
   }
 
+  // Bij een tier met allModulesIncluded (bv. Evaluatie) is er niets te kiezen
+  // — vink meteen alle op dat moment bestaande modules aan, zodat de
+  // aanvrager ze aangevinkt ziet staan i.p.v. te moeten afleiden uit een
+  // los tekstregeltje dat ze toch al meegenomen worden (Charles: "vink
+  // direct alle modules meteen aan"). Bij het wisselen NAAR een gewone tier
+  // wordt de selectie weer leeggemaakt, zodat een eerder geforceerde
+  // "alle modules"-selectie niet blijft hangen en de prijsopgave van die
+  // andere tier scheeftrekt.
+  useEffect(() => {
+    if (tierId == null) return;
+    if (selectedTier?.allModulesIncluded && modules) {
+      setSelectedModules(new Set(modules.map((m) => m.key)));
+    } else {
+      setSelectedModules(new Set());
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tierId, modules]);
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
@@ -73,6 +91,54 @@ export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBac
     }
   }
 
+  function renderTierCard(t: PublicTier) {
+    const accent = tierAccent(t.name);
+    const selected = tierId === t.id;
+    return (
+      <button
+        type="button"
+        key={t.id}
+        onClick={() => setTierId(t.id)}
+        style={{
+          ...styles.tierCard,
+          ...(accent ? { borderTopColor: accent.border, background: selected ? styles.tierCardSelected.background : accent.bg } : {}),
+          ...(selected ? styles.tierCardSelected : {}),
+        }}
+      >
+        <div style={{ ...styles.tierName, ...(accent ? { color: accent.text } : {}) }}>{t.name}</div>
+        <div style={styles.tierMeta}>
+          max {t.maxAdmins} admin{t.maxAdmins === 1 ? '' : 's'}, max {t.maxBomen} doelenbomen
+        </div>
+        {(t.trialDays != null || t.allModulesIncluded) && (
+          <div style={styles.tierBadgeRow}>
+            {t.trialDays != null && (
+              <span style={{ ...styles.tierBadge, ...(accent ? { color: accent.text, background: accent.bg, borderColor: accent.border } : {}) }}>
+                {t.trialDays} dagen proef
+              </span>
+            )}
+            {t.allModulesIncluded && (
+              <span style={{ ...styles.tierBadge, ...(accent ? { color: accent.text, background: accent.bg, borderColor: accent.border } : {}) }}>
+                ✓ alle modules
+              </span>
+            )}
+          </div>
+        )}
+        {t.currentPriceEur != null && (
+          Number(t.currentPriceEur) === 0 ? (
+            <div style={{ ...styles.tierPriceFree, ...(accent ? { color: accent.text } : {}) }}>Gratis</div>
+          ) : (
+            <>
+              <div style={styles.tierPrice}>€ {Number(t.currentPriceEur).toLocaleString('nl-NL')} / jaar</div>
+              <div style={styles.tierPriceBtw}>
+                € {(Number(t.currentPriceEur) * 1.21).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} incl. BTW (21%)
+              </div>
+            </>
+          )
+        )}
+      </button>
+    );
+  }
+
   return (
     <div style={styles.page}>
       <div style={styles.card}>
@@ -89,57 +155,29 @@ export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBac
         {!tiers && <p style={styles.muted}>Laden…</p>}
 
         <form onSubmit={handleSubmit} style={styles.form}>
-          {tiers && (
-            <div style={styles.tierGrid}>
-              {tiers.map((t) => {
-                const accent = tierAccent(t.name);
-                const selected = tierId === t.id;
-                return (
-                  <button
-                    type="button"
-                    key={t.id}
-                    onClick={() => setTierId(t.id)}
-                    style={{
-                      ...styles.tierCard,
-                      ...(accent ? { borderTopColor: accent.border, background: selected ? styles.tierCardSelected.background : accent.bg } : {}),
-                      ...(selected ? styles.tierCardSelected : {}),
-                    }}
-                  >
-                    <div style={{ ...styles.tierName, ...(accent ? { color: accent.text } : {}) }}>{t.name}</div>
-                    <div style={styles.tierMeta}>
-                      max {t.maxAdmins} admin{t.maxAdmins === 1 ? '' : 's'}, max {t.maxBomen} doelenbomen
-                    </div>
-                    {(t.trialDays != null || t.allModulesIncluded) && (
-                      <div style={styles.tierBadgeRow}>
-                        {t.trialDays != null && (
-                          <span style={{ ...styles.tierBadge, ...(accent ? { color: accent.text, background: accent.bg, borderColor: accent.border } : {}) }}>
-                            {t.trialDays} dagen proef
-                          </span>
-                        )}
-                        {t.allModulesIncluded && (
-                          <span style={{ ...styles.tierBadge, ...(accent ? { color: accent.text, background: accent.bg, borderColor: accent.border } : {}) }}>
-                            ✓ alle modules
-                          </span>
-                        )}
-                      </div>
-                    )}
-                    {t.currentPriceEur != null && (
-                      Number(t.currentPriceEur) === 0 ? (
-                        <div style={{ ...styles.tierPriceFree, ...(accent ? { color: accent.text } : {}) }}>Gratis</div>
-                      ) : (
-                        <>
-                          <div style={styles.tierPrice}>€ {Number(t.currentPriceEur).toLocaleString('nl-NL')} / jaar</div>
-                          <div style={styles.tierPriceBtw}>
-                            € {(Number(t.currentPriceEur) * 1.21).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} incl. BTW (21%)
-                          </div>
-                        </>
-                      )
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          )}
+          {tiers && (() => {
+            // Verdeeld over twee rijen i.p.v. één rij die organisch wrapt op
+            // schermbreedte (dat liet voorheen willekeurig 1 tegel eenzaam op
+            // een tweede regel vallen): de eerste twee tiers (op sort_order —
+            // op dit moment Evaluatie en Single-Use) samen op de eerste rij,
+            // de rest daaronder. Puur op positie, niet op naam, zodat dit ook
+            // blijft kloppen als een sysadmin de tierset later wijzigt.
+            const firstRow = tiers.slice(0, 2);
+            const secondRow = tiers.slice(2);
+            // Beide rijen delen hetzelfde aantal kolommen (het aantal van de
+            // langste rij) zodat de tegels op de eerste rij precies even
+            // breed zijn als die op de tweede — de eerste rij vult dan
+            // simpelweg niet alle kolommen (lege ruimte rechts) i.p.v. dat
+            // haar 2 tegels tot de volle kaartbreedte uitrekken.
+            const cols = Math.max(firstRow.length, secondRow.length, 1);
+            const rowStyle = { ...styles.tierGrid, gridTemplateColumns: `repeat(${cols}, minmax(150px, 1fr))` };
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={rowStyle}>{firstRow.map(renderTierCard)}</div>
+                {secondRow.length > 0 && <div style={rowStyle}>{secondRow.map(renderTierCard)}</div>}
+              </div>
+            );
+          })()}
 
           {/* Alles vanaf hier op leesbare regelbreedte houden (i.t.t. de
               tiergrid hierboven, die juist de volle, bredere kaartbreedte
@@ -187,18 +225,26 @@ export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBac
               </div>
             )}
 
-            {selectedTier?.allModulesIncluded ? (
-              <p style={{ ...styles.sectionLabel, fontWeight: 400, color: '#6c6f76', fontSize: 13 }}>
-                Alle modules zijn bij dit abonnement inbegrepen — er hoeft niets apart gekozen te worden.
-              </p>
-            ) : (
-              modules && modules.length > 0 && (
+            {modules && modules.length > 0 && (() => {
+              const forced = !!selectedTier?.allModulesIncluded;
+              return (
                 <div>
-                  <p style={styles.sectionLabel}>Optionele modules</p>
+                  <p style={styles.sectionLabel}>{forced ? 'Modules (alle inbegrepen)' : 'Optionele modules'}</p>
+                  {forced && (
+                    <p style={{ margin: '0 0 6px', fontSize: 12, color: '#6c6f76' }}>
+                      Bij dit abonnement zijn alle modules automatisch inbegrepen — hieronder alvast aangevinkt, er
+                      hoeft niets apart gekozen te worden.
+                    </p>
+                  )}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {modules.map((m) => (
-                      <label key={m.id} style={styles.moduleRow}>
-                        <input type="checkbox" checked={selectedModules.has(m.key)} onChange={() => toggleModule(m.key)} />
+                      <label key={m.id} style={{ ...styles.moduleRow, ...(forced ? { opacity: 0.75 } : {}) }}>
+                        <input
+                          type="checkbox"
+                          checked={forced || selectedModules.has(m.key)}
+                          disabled={forced}
+                          onChange={() => !forced && toggleModule(m.key)}
+                        />
                         <span>
                           <strong>{m.name}</strong>
                           {m.currentSurchargePct != null && (
@@ -210,8 +256,8 @@ export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBac
                     ))}
                   </div>
                 </div>
-              )
-            )}
+              );
+            })()}
 
             <p style={styles.sectionLabel}>Jouw gegevens</p>
             <label style={styles.label}>
@@ -295,9 +341,10 @@ const styles: Record<string, React.CSSProperties> = {
     padding: 'clamp(1.25rem, 4vw, 2.5rem)',
     width: '100%',
     // Breder dan de rest van het formulier (dat blijft op leesbare
-    // regelbreedte) zodat de 5 tier-tiles hieronder in één rij naast elkaar
-    // passen i.p.v. te wrappen — zie tierGrid, dat zelf geen eigen maxWidth
-    // heeft en dus meeschaalt met deze kaart.
+    // regelbreedte) zodat de tier-tiles hieronder (verdeeld over twee rijen,
+    // zie de renderTierCard-aanroepen) ruim naast elkaar passen — zie
+    // tierGrid, dat zelf geen eigen maxWidth heeft en dus meeschaalt met
+    // deze kaart.
     maxWidth: 900,
     boxSizing: 'border-box',
     height: 'fit-content',
@@ -311,6 +358,9 @@ const styles: Record<string, React.CSSProperties> = {
   // Houdt de rest van het formulier (prijsopgave, modules, persoonsgegevens)
   // op leesbare regelbreedte, los van de bredere kaart hierboven (zie card.maxWidth).
   narrowSection: { display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 480, margin: '0 auto', width: '100%', boxSizing: 'border-box' },
+  // gridTemplateColumns wordt per rij overschreven (zie de rowStyle-berekening
+  // hierboven, die beide rijen op hetzelfde aantal kolommen zet) — dit is
+  // alleen de fallback-basisstijl.
   tierGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 },
   tierCard: {
     textAlign: 'left', border: '1px solid #e4e6ea', borderTop: '4px solid #e4e6ea', borderRadius: 10,
