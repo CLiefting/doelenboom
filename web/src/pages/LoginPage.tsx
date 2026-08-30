@@ -49,11 +49,13 @@ export default function LoginPage({
   notice,
   onSignupRequest,
   onAboutRequest,
+  onLegalRequest,
 }: {
   onLoggedIn: (token: string, user: User) => void;
   notice?: string | null;
   onSignupRequest?: () => void;
   onAboutRequest?: () => void;
+  onLegalRequest?: (type: 'terms' | 'privacy') => void;
 }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -182,6 +184,17 @@ export default function LoginPage({
             <button type="button" onClick={onSignupRequest} style={styles.signupLink}>
               Nog geen account? Abonnement aanvragen →
             </button>
+          )}
+          {onLegalRequest && (
+            <div style={styles.legalRow}>
+              <button type="button" onClick={() => onLegalRequest('terms')} style={styles.legalLink}>
+                Gebruiksvoorwaarden
+              </button>
+              <span>·</span>
+              <button type="button" onClick={() => onLegalRequest('privacy')} style={styles.legalLink}>
+                Privacyverklaring
+              </button>
+            </div>
           )}
         </form>
       </div>
@@ -396,6 +409,14 @@ const styles: Record<string, React.CSSProperties> = {
   signupLink: {
     marginTop: 2, border: 'none', background: 'none', color: '#2F5597', fontSize: 13,
     cursor: 'pointer', textAlign: 'center', padding: '0.25rem',
+  },
+  legalRow: {
+    display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 8,
+    marginTop: 2, fontSize: 11.5, color: '#9aa1ab',
+  },
+  legalLink: {
+    border: 'none', background: 'none', color: '#9aa1ab', fontSize: 11.5,
+    cursor: 'pointer', padding: 0, textDecoration: 'underline',
   },
   notice: {
     color: '#664d03', background: '#FFF3CD', border: '1px solid #FFE69C',

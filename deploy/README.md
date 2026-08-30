@@ -314,6 +314,31 @@ migratietool, `init.sql` is bewust "plat"); tot die tijd: schemawijzigingen
 handmatig met `docker compose exec db psql ...` doorvoeren, nooit
 `down -v` op productiedata.
 
+### Een los migratiebestand draaien (bv. `db/migrations/0017_...sql`)
+
+Elk bestand in `db/migrations/` is bewust idempotent (`if not exists`,
+`on conflict ... do nothing`) — veilig om per ongeluk twee keer te draaien,
+en de exacte SQL die ook al in `db/init.sql` is gespiegeld (zie de
+toelichting bovenaan elk migratiebestand), zodat een gloednieuwe installatie
+en een bestaande productiedatabase op hetzelfde schema uitkomen. Zorg eerst
+dat de VPS-checkout het bestand ook daadwerkelijk heeft (`git pull` — een
+migratie die alleen lokaal bestaat, bestaat voor de VPS niet):
+
+**Op de VPS:**
+```bash
+cd ~/doelenboom
+git pull
+docker compose -f docker-compose.yml -f docker-compose.prod.yml exec -T db \
+  psql -U doelenboom -d doelenboom -v ON_ERROR_STOP=1 < db/migrations/0017_legal_and_retention.sql
+```
+
+Draai dit vóór (of tegelijk met) het uitrollen van de nieuwe `api`/`web`-
+images uit die release — de nieuwe applicatiecode verwacht de nieuwe kolommen
+en tabellen (`legal_documents`, `legal_acceptances`, `account_retention_events`,
+`users.last_login_at`/`inactivity_warning_sent_at`/`scheduled_deletion_at`)
+al te bestaan. Zie ook `docs/juridische-documenten-en-retentie.md` voor wat
+deze specifieke migratie toevoegt en waarom.
+
 ## Backups
 
 Een echte databasebackup is nog niet ingericht (zelfde aandachtspunt als bij

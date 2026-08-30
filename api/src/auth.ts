@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { pool } from './db.js';
 import { previewOrCommitWipe } from './tenantWipe.js';
+import { needsTermsAcceptance } from './legal.js';
 
 const JWT_SECRET = process.env.JWT_SECRET ?? 'dev-secret-change-me';
 
@@ -72,7 +73,7 @@ authRouter.post('/login', async (req, res) => {
     return res.status(400).json({ error: 'E-mail en wachtwoord verplicht' });
   }
   const result = await pool.query(
-    `select id, email, is_sysadmin, must_change_password
+    `select id, email, is_sysadmin, must_change_password, scheduled_deletion_at
      from users
      where email = $1 and password_hash = crypt($2, password_hash)`,
     [email, password]
@@ -80,6 +81,27 @@ authRouter.post('/login', async (req, res) => {
   const user = result.rows[0];
   if (!user) {
     return res.status(401).json({ error: 'Onjuiste inloggegevens' });
+  }
+
+  // last_login_at is de enige gekozen basis voor "relevant gebruik" in de
+  // accountretentiesweep (zie accountRetention.ts) — bij elke geslaagde login
+  // bijgewerkt. Stond er al een geplande verwijdering/waarschuwing klaar
+  // (scheduled_deletion_at/inactivity_warning_sent_at), dan annuleert deze
+  // login die volledig en start de 12-maanden-klok opnieuw (§9 van de
+  // opdracht) — vastgelegd als apart auditlog-event zodat zichtbaar blijft
+  // wanneer/waardoor een geplande verwijdering is afgeblazen.
+  await pool.query(
+    `update users
+     set last_login_at = now(), scheduled_deletion_at = null, inactivity_warning_sent_at = null
+     where id = $1`,
+    [user.id]
+  );
+  if (user.scheduled_deletion_at) {
+    await pool.query(
+      `insert into account_retention_events (user_id, event_type, detail)
+       values ($1, 'deletion_cancelled_by_login', '{}'::jsonb)`,
+      [user.id]
+    );
   }
 
   const sessionResult = await pool.query(
@@ -94,6 +116,7 @@ authRouter.post('/login', async (req, res) => {
     { expiresIn: '12h' }
   );
   const tenantRoles = await fetchTenantRoles(user.id);
+  const termsAcceptanceRequired = await needsTermsAcceptance(user.id);
   res.json({
     token,
     user: {
@@ -101,6 +124,7 @@ authRouter.post('/login', async (req, res) => {
       email: user.email,
       isSysadmin: user.is_sysadmin,
       mustChangePassword: user.must_change_password,
+      termsAcceptanceRequired,
       tenantRoles,
     },
   });
@@ -133,7 +157,15 @@ async function fetchTenantRoles(userId: number) {
 authRouter.get('/me', requireAuth, async (req: AuthedRequest, res) => {
   const tenantRoles = req.user!.isSysadmin ? [] : await fetchTenantRoles(req.user!.id);
   const mcp = await pool.query('select must_change_password from users where id = $1', [req.user!.id]);
-  res.json({ user: { ...req.user, mustChangePassword: mcp.rows[0]?.must_change_password ?? false, tenantRoles } });
+  const termsAcceptanceRequired = await needsTermsAcceptance(req.user!.id);
+  res.json({
+    user: {
+      ...req.user,
+      mustChangePassword: mcp.rows[0]?.must_change_password ?? false,
+      termsAcceptanceRequired,
+      tenantRoles,
+    },
+  });
 });
 
 // POST /api/auth/change-password — zelfbediening: elke ingelogde gebruiker mag
@@ -165,7 +197,8 @@ authRouter.post('/change-password', requireAuth, async (req: AuthedRequest, res)
     [newPassword, req.user!.id]
   );
   const tenantRoles = req.user!.isSysadmin ? [] : await fetchTenantRoles(req.user!.id);
-  res.json({ user: { ...req.user, mustChangePassword: false, tenantRoles } });
+  const termsAcceptanceRequired = await needsTermsAcceptance(req.user!.id);
+  res.json({ user: { ...req.user, mustChangePassword: false, termsAcceptanceRequired, tenantRoles } });
 });
 
 // Heartbeat: zolang de tab open is stuurt de frontend dit elke minuut (zie

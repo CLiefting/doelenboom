@@ -12,7 +12,9 @@ import LicenseCatalogPage from './pages/LicenseCatalogPage';
 import ChangePasswordPage from './pages/ChangePasswordPage';
 import HelpPage from './pages/HelpPage';
 import AboutPage from './pages/AboutPage';
+import LegalPage from './pages/LegalPage';
 import LogoutFlow from './components/LogoutFlow';
+import TermsAcceptanceGate from './components/TermsAcceptanceGate';
 import VersionFooter from './components/VersionFooter';
 import AnnouncementBanner from './components/AnnouncementBanner';
 import PendingSubscriptionsBanner from './components/PendingSubscriptionsBanner';
@@ -68,6 +70,13 @@ export default function App() {
   const [publicView, setPublicView] = useState<
     { name: 'login' } | { name: 'signup' } | { name: 'signup-done'; email: string } | { name: 'about' }
   >({ name: 'login' });
+  // Overlay voor de gebruiksvoorwaarden/privacyverklaring (LegalPage) — los
+  // van publicView/View gehouden omdat deze pagina vanaf ELK scherm bereikbaar
+  // moet zijn (VersionFooter, zichtbaar op elk scherm inclusief vóór inloggen)
+  // en niet alleen vanuit het inlogscherm (§19 van de opdracht: "reachable
+  // from the footer" op elk scherm). Overschrijft de rest van de UI volledig
+  // zolang gezet, met een eigen "← Terug" die 'm weer op null zet.
+  const [legalOverlay, setLegalOverlay] = useState<'terms' | 'privacy' | null>(null);
   // Eénmalig (bij eerste render) uitgelezen én meteen gewist — een sessionStorage-
   // "boodschap voor de volgende load", niet iets dat blijvend in state hoort te
   // hangen (anders zou 'ie bij een latere, ongerelateerde 401 blijven staan).
@@ -122,6 +131,10 @@ export default function App() {
     return () => clearInterval(interval);
   }, [session]);
 
+  if (legalOverlay) {
+    return <LegalPage type={legalOverlay} onBack={() => setLegalOverlay(null)} />;
+  }
+
   if (!session) {
     let publicContent;
     if (publicView.name === 'signup') {
@@ -144,6 +157,7 @@ export default function App() {
           onLoggedIn={(token, user) => setSession({ token, user })}
           onSignupRequest={() => setPublicView({ name: 'signup' })}
           onAboutRequest={() => setPublicView({ name: 'about' })}
+          onLegalRequest={(type) => setLegalOverlay(type)}
         />
       );
     }
@@ -153,7 +167,7 @@ export default function App() {
           <AnnouncementBanner />
           <div style={contentAreaStyle}>{publicContent}</div>
         </div>
-        <VersionFooter />
+        <VersionFooter onLegalRequest={(type) => setLegalOverlay(type)} />
       </>
     );
   }
@@ -170,6 +184,26 @@ export default function App() {
           <ChangePasswordPage
             token={session.token}
             forced
+            onDone={(user) => setSession({ ...session, user })}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  // Afgedwongen acceptatie van de gebruiksvoorwaarden — zelfde plek/patroon
+  // als de mustChangePassword-gate hierboven (ná die gate: een tijdelijk
+  // wachtwoord moet sowieso eerst vervangen worden, ongeacht de voorwaarden).
+  // Blokkeert de rest van de app totdat needsTermsAcceptance (server) false
+  // teruggeeft — zie api/src/legal.ts en TermsAcceptanceGate.tsx.
+  if (session.user.termsAcceptanceRequired) {
+    return (
+      <div style={pageStyle}>
+        <AnnouncementBanner />
+        <div style={contentAreaStyle}>
+          <TermsAcceptanceGate
+            token={session.token}
+            user={session.user}
             onDone={(user) => setSession({ ...session, user })}
           />
         </div>
@@ -274,7 +308,7 @@ export default function App() {
       {loggingOut && (
         <LogoutFlow token={session.token} onDone={finishLogout} onCancel={() => setLoggingOut(false)} />
       )}
-      <VersionFooter />
+      <VersionFooter onLegalRequest={(type) => setLegalOverlay(type)} />
     </>
   );
 }

@@ -480,4 +480,16 @@ export const api = {
   // docker-compose.yml) voor de versie-footer (App.tsx). Geen token nodig:
   // dit staat ook zichtbaar voordat iemand is ingelogd.
   version: () => request<{ version: string }>('/api/version', {}),
+
+  // --- Juridische documenten (gebruiksvoorwaarden/privacyverklaring) — zie
+  // api/src/routes/legal.ts. GET is bewust ongeauthenticeerd (ook zichtbaar
+  // vóór inloggen), dus geen token-param. ---
+  legalDocument: (type: 'terms' | 'privacy') =>
+    request<import('./types').LegalDocument>(`/api/legal/${type}`, {}),
+
+  termsAcceptanceStatus: (token: string) =>
+    request<{ acceptanceRequired: boolean }>('/api/legal/terms/status', {}, token),
+
+  acceptTerms: (token: string) =>
+    request<{ accepted: true; version: string }>('/api/legal/terms/accept', { method: 'POST' }, token),
 };

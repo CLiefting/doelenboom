@@ -12,7 +12,27 @@ export type User = {
   email: string;
   isSysadmin: boolean;
   mustChangePassword: boolean;
+  // Moet de gebruiker eerst de geldende gebruiksvoorwaarden (opnieuw)
+  // accepteren voordat de rest van de app te gebruiken is? Zie
+  // TermsAcceptanceGate.tsx (mirrort het mustChangePassword-patroon
+  // hierboven) en api/src/legal.ts (needsTermsAcceptance).
+  termsAcceptanceRequired: boolean;
   tenantRoles: UserTenantRole[];
+};
+
+// Eén juridisch document (gebruiksvoorwaarden of privacyverklaring) zoals
+// geserveerd door GET /api/legal/:type — zie api/src/legal.ts. content volgt
+// een lichte, zelfbedachte Markdown-achtige conventie ('## '/'### '/'- ',
+// verder platte alinea's) die LegalPage.tsx regel-voor-regel rendert.
+export type LegalDocument = {
+  id: number;
+  docType: 'terms' | 'privacy';
+  version: string;
+  effectiveDate: string;
+  publishedAt: string | null;
+  status: 'draft' | 'published';
+  requiresReacceptance: boolean;
+  content: string;
 };
 
 export type UserSummary = {

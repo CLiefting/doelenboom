@@ -22,6 +22,7 @@ import { dbstatRouter } from './routes/dbstat.js';
 import { sessionsRouter } from './routes/sessions.js';
 import { announcementRouter } from './routes/announcement.js';
 import { subscriptionsRouter } from './routes/subscriptions.js';
+import { legalRouter } from './routes/legal.js';
 import { pool } from './db.js';
 
 // Bouwt de Express-app zonder 'm te starten (geen app.listen, geen idle-sweep-
@@ -83,6 +84,10 @@ export function createApp() {
   // bestand) — vandaar hier vóór de kaal-'/api'-gemounte routers hieronder,
   // om dezelfde reden als announcementRouter hierboven.
   app.use('/api', subscriptionsRouter);
+  // legalRouter: zelfde reden als announcementRouter/subscriptionsRouter
+  // hierboven — GET /api/legal/:type is bewust ongeauthenticeerd, dus vóór de
+  // kaal-'/api'-gemounte routers hieronder (zie legal.ts).
+  app.use('/api', legalRouter);
 
   app.use('/api/auth', authRouter);
   app.use('/api/tenants', tenantsRouter);
