@@ -292,13 +292,31 @@ export const api = {
   // sysadmin-only (de server handhaaft dit, zie api/src/routes/licenses.ts).
   tiers: (token: string) => request<import('./types').Tier[]>('/api/tiers', {}, token),
 
-  createTier: (token: string, body: { name: string; maxAdmins: number; maxBomen: number; sortOrder: number }) =>
-    request<import('./types').Tier>('/api/tiers', { method: 'POST', body: JSON.stringify(body) }, token),
+  createTier: (
+    token: string,
+    body: {
+      name: string;
+      maxAdmins: number;
+      maxBomen: number;
+      sortOrder: number;
+      priceEur?: number | null;
+      priceValidFrom?: string | null;
+      priceValidUntil?: string | null;
+    }
+  ) => request<import('./types').Tier>('/api/tiers', { method: 'POST', body: JSON.stringify(body) }, token),
 
   updateTier: (
     token: string,
     tierId: number,
-    body: Partial<{ name: string; maxAdmins: number; maxBomen: number; sortOrder: number }>
+    body: Partial<{
+      name: string;
+      maxAdmins: number;
+      maxBomen: number;
+      sortOrder: number;
+      priceEur: number | null;
+      priceValidFrom: string | null;
+      priceValidUntil: string | null;
+    }>
   ) => request<import('./types').Tier>(`/api/tiers/${tierId}`, { method: 'PUT', body: JSON.stringify(body) }, token),
 
   deleteTier: (token: string, tierId: number) => request<void>(`/api/tiers/${tierId}`, { method: 'DELETE' }, token),
@@ -313,6 +331,95 @@ export const api = {
 
   deleteModule: (token: string, moduleId: number) =>
     request<void>(`/api/modules/${moduleId}`, { method: 'DELETE' }, token),
+
+  // --- Aanbiedingen (offers) — zie doelenboom_licentiemodel.md §9 ---
+
+  offers: (token: string) => request<import('./types').Offer[]>('/api/offers', {}, token),
+
+  createOffer: (
+    token: string,
+    body: {
+      name: string;
+      kind: import('./types').OfferKind;
+      value: number | null;
+      validFrom: string;
+      validUntil: string;
+      tierIds: number[];
+    }
+  ) => request<import('./types').Offer>('/api/offers', { method: 'POST', body: JSON.stringify(body) }, token),
+
+  updateOffer: (
+    token: string,
+    offerId: number,
+    body: {
+      name: string;
+      kind: import('./types').OfferKind;
+      value: number | null;
+      validFrom: string;
+      validUntil: string;
+      tierIds: number[];
+    }
+  ) => request<import('./types').Offer>(`/api/offers/${offerId}`, { method: 'PUT', body: JSON.stringify(body) }, token),
+
+  deleteOffer: (token: string, offerId: number) => request<void>(`/api/offers/${offerId}`, { method: 'DELETE' }, token),
+
+  // --- Zelfbedieningsaanvraag ("nieuw abonnement aanvragen") — de eerste vier
+  // hieronder zijn bewust ONGEAUTHENTICEERD (geen token-param), zie
+  // api/src/routes/subscriptions.ts. ---
+
+  subscriptionTiers: () => request<import('./types').Tier[]>('/api/subscription-tiers'),
+
+  subscriptionOffers: () => request<import('./types').Offer[]>('/api/subscription-offers'),
+
+  subscriptionModules: () => request<import('./types').ModuleDef[]>('/api/subscription-modules'),
+
+  subscriptionPriceForTier: (tierId: number) =>
+    request<import('./types').PriceQuote>(`/api/subscription-tiers/${tierId}/price`),
+
+  createSubscriptionRequest: (body: {
+    organizationName: string;
+    applicantName: string;
+    applicantEmail: string;
+    password: string;
+    tierId: number;
+    moduleKeys: string[];
+  }) =>
+    request<{ tenantId: number; tenantSlug: string; requestId: number }>('/api/subscription-requests', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  // --- Sysadmin-beheer van aanvragen/verlengingen ---
+
+  subscriptionRequests: (token: string) =>
+    request<import('./types').SubscriptionRequest[]>('/api/subscription-requests', {}, token),
+
+  subscriptionRequestsPendingCount: (token: string) =>
+    request<{ pendingRequests: number; upcomingRenewals: number }>('/api/subscription-requests/pending-count', {}, token),
+
+  subscriptionRequestEvents: (token: string, requestId: number) =>
+    request<import('./types').LicenseEvent[]>(`/api/subscription-requests/${requestId}/events`, {}, token),
+
+  registerSubscriptionPayment: (token: string, requestId: number) =>
+    request<import('./types').SubscriptionRequest>(
+      `/api/subscription-requests/${requestId}/register-payment`,
+      { method: 'POST' },
+      token
+    ),
+
+  registerSubscriptionRenewal: (token: string, requestId: number) =>
+    request<import('./types').SubscriptionRequest>(
+      `/api/subscription-requests/${requestId}/register-renewal`,
+      { method: 'POST' },
+      token
+    ),
+
+  rejectSubscriptionRequest: (token: string, requestId: number, reason: string) =>
+    request<import('./types').SubscriptionRequest>(
+      `/api/subscription-requests/${requestId}/reject`,
+      { method: 'POST', body: JSON.stringify({ reason }) },
+      token
+    ),
 
   // Per-tenant licentie: huidig tier + actieve modules + gebruik. Lezen mag
   // een sysadmin of tenant-admin van díe tenant; wijzigen (tier/modules) is

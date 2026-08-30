@@ -11,7 +11,7 @@ import {
 import { createDoelenboomConfigFromTenantDefault, copyDoelenboomConfig } from '../columnConfig.js';
 import { seedExampleTree } from '../exampleTree.js';
 import { applyTemplateToNewDoelenboom } from '../doelenboomTemplates.js';
-import { assertCanCreateBoom, incrementLifetimeTreesCreated, LicenseLimitError } from '../license.js';
+import { assertCanCreateBoom, incrementLifetimeTreesCreated, isLicenseExpired, LicenseLimitError } from '../license.js';
 
 function isUniqueViolation(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { code?: string }).code === '23505';
@@ -104,6 +104,16 @@ doelenbomenRouter.post(
     const { slug, name, templateId } = req.body ?? {};
     if (!slug || !name) {
       return res.status(400).json({ error: 'slug en name zijn verplicht' });
+    }
+    // Verlopen licentie (zie license.ts isLicenseExpired,
+    // doelenboom_licentiemodel.md §6/§9) blokkeert ook het aanmaken van een
+    // NIEUWE doelenboom — zonder deze check zou requireWritableDoelenboom's
+    // read_only/verlopen-check (die alleen op BESTAANDE doelenbomen werkt)
+    // omzeild kunnen worden door simpelweg een nieuwe boom aan te maken.
+    if (await isLicenseExpired(req.params.tenantId)) {
+      return res.status(403).json({
+        error: 'De licentie van deze tenant is verlopen; neem contact op om te verlengen.',
+      });
     }
     // Vóór de transactie: telt tegen de tier-limiet (actieve bomen, zie
     // license.ts) — geen tier ingesteld = onbeperkt, dan is dit een no-op.

@@ -302,6 +302,12 @@ export type Tier = {
   maxAdmins: number;
   maxBomen: number;
   sortOrder: number;
+  // Prijs + geldigheidsperiode — zie doelenboom_licentiemodel.md §9. Alle drie
+  // nullable: een tier kan (nog) geen prijs hebben, dan verschijnt 'ie
+  // simpelweg niet op de publieke aanvraagpagina.
+  priceEur: string | null;
+  priceValidFrom: string | null;
+  priceValidUntil: string | null;
 };
 
 export type ModuleDef = {
@@ -309,6 +315,57 @@ export type ModuleDef = {
   key: string;
   name: string;
   description: string;
+};
+
+export type OfferKind = 'percentage' | 'fixed_amount' | 'btw_vrij';
+
+export type Offer = {
+  id: number;
+  name: string;
+  kind: OfferKind;
+  value: string | null;
+  validFrom: string;
+  validUntil: string;
+  tierIds: number[];
+};
+
+export type PriceQuote = {
+  tierPriceEur: number | null;
+  offer: Offer | null;
+  finalPriceEur: number | null;
+  btwVrij: boolean;
+};
+
+export type SubscriptionRequestStatus = 'proef' | 'actief' | 'afgewezen';
+
+export type SubscriptionRequest = {
+  id: number;
+  tenantId: number;
+  tenantSlug: string;
+  tenantName: string;
+  tierId: number | null;
+  tierName: string | null;
+  organizationName: string;
+  applicantName: string;
+  applicantEmail: string;
+  requestedModules: string[];
+  status: SubscriptionRequestStatus;
+  requestedAt: string;
+  priceAtRequest: string | null;
+  contractEndDate: string | null;
+  licenseEndDate: string | null;
+  paymentRegisteredAt: string | null;
+  rejectedAt: string | null;
+  rejectedReason: string | null;
+};
+
+export type LicenseEvent = {
+  id: number;
+  eventType: string;
+  detail: Record<string, unknown>;
+  performedBy: number | null;
+  performedByEmail: string | null;
+  createdAt: string;
 };
 
 export type TenantLicense = {

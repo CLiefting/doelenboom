@@ -21,6 +21,7 @@ import { licensesRouter } from './routes/licenses.js';
 import { dbstatRouter } from './routes/dbstat.js';
 import { sessionsRouter } from './routes/sessions.js';
 import { announcementRouter } from './routes/announcement.js';
+import { subscriptionsRouter } from './routes/subscriptions.js';
 import { pool } from './db.js';
 
 // Bouwt de Express-app zonder 'm te starten (geen app.listen, geen idle-sweep-
@@ -76,6 +77,12 @@ export function createApp() {
   // ongeauthenticeerde GET al met 401 afkappen, en announcementRouter's eigen
   // (bewust publieke) GET nooit bereikt worden.
   app.use('/api/announcement', announcementRouter);
+  // subscriptionsRouter definieert zelf zowel publieke routes (aanvraag
+  // indienen, tiers/aanbiedingen/prijs opvragen) als sysadmin-only
+  // beheerroutes (elk met hun eigen requireAuth/requireSysadmin, zie dat
+  // bestand) — vandaar hier vóór de kaal-'/api'-gemounte routers hieronder,
+  // om dezelfde reden als announcementRouter hierboven.
+  app.use('/api', subscriptionsRouter);
 
   app.use('/api/auth', authRouter);
   app.use('/api/tenants', tenantsRouter);

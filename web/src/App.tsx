@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import LoginPage from './pages/LoginPage';
+import SubscriptionRequestPage from './pages/SubscriptionRequestPage';
 import PickerPage from './pages/PickerPage';
 import TreePage from './pages/TreePage';
 import ImportPage from './pages/ImportPage';
 import TenantManagementPage from './pages/TenantManagementPage';
 import DoelenboomTemplatesPage from './pages/DoelenboomTemplatesPage';
+import SubscriptionRequestsPage from './pages/SubscriptionRequestsPage';
 import AccountManagementPage from './pages/AccountManagementPage';
 import LicenseCatalogPage from './pages/LicenseCatalogPage';
 import ChangePasswordPage from './pages/ChangePasswordPage';
@@ -30,6 +32,7 @@ type View =
   | { name: 'import' }
   | { name: 'tenants' }
   | { name: 'templates' }
+  | { name: 'subscription-requests' }
   | { name: 'accounts' }
   | { name: 'licenses' }
   | { name: 'password' }
@@ -57,6 +60,12 @@ export default function App() {
   // boomweergave (tree.html, via postMessage) dezelfde flow starten, ongeacht
   // welk scherm er op dat moment getoond wordt.
   const [loggingOut, setLoggingOut] = useState(false);
+  // Alleen relevant zolang er nog geen sessie is (zie de !session-tak
+  // hieronder) — welk van de twee publieke schermen getoond wordt: het
+  // inlogscherm zelf, de aanvraagpagina, of de bevestiging na het indienen.
+  const [publicView, setPublicView] = useState<
+    { name: 'login' } | { name: 'signup' } | { name: 'signup-done'; email: string }
+  >({ name: 'login' });
   // Eénmalig (bij eerste render) uitgelezen én meteen gewist — een sessionStorage-
   // "boodschap voor de volgende load", niet iets dat blijvend in state hoort te
   // hangen (anders zou 'ie bij een latere, ongerelateerde 401 blijven staan).
@@ -85,13 +94,32 @@ export default function App() {
   }, [session]);
 
   if (!session) {
+    let publicContent;
+    if (publicView.name === 'signup') {
+      publicContent = (
+        <SubscriptionRequestPage
+          onBack={() => setPublicView({ name: 'login' })}
+          onSubmitted={(email) => setPublicView({ name: 'signup-done', email })}
+        />
+      );
+    } else if (publicView.name === 'signup-done') {
+      publicContent = (
+        <SignupDoneNotice email={publicView.email} onBack={() => setPublicView({ name: 'login' })} />
+      );
+    } else {
+      publicContent = (
+        <LoginPage
+          notice={authNotice}
+          onLoggedIn={(token, user) => setSession({ token, user })}
+          onSignupRequest={() => setPublicView({ name: 'signup' })}
+        />
+      );
+    }
     return (
       <>
         <div style={pageStyle}>
           <AnnouncementBanner />
-          <div style={contentAreaStyle}>
-            <LoginPage notice={authNotice} onLoggedIn={(token, user) => setSession({ token, user })} />
-          </div>
+          <div style={contentAreaStyle}>{publicContent}</div>
         </div>
         <VersionFooter />
       </>
@@ -138,6 +166,8 @@ export default function App() {
     content = <TenantManagementPage token={session.token} user={session.user} onBack={() => setView({ name: 'picker' })} />;
   } else if (view.name === 'templates') {
     content = <DoelenboomTemplatesPage token={session.token} onBack={() => setView({ name: 'picker' })} />;
+  } else if (view.name === 'subscription-requests') {
+    content = <SubscriptionRequestsPage token={session.token} onBack={() => setView({ name: 'picker' })} />;
   } else if (view.name === 'accounts') {
     content = <AccountManagementPage token={session.token} user={session.user} onBack={() => setView({ name: 'picker' })} />;
   } else if (view.name === 'licenses') {
@@ -169,6 +199,7 @@ export default function App() {
         onLogoutRequest={requestLogout}
         onTenantsRequest={() => setView({ name: 'tenants' })}
         onTemplatesRequest={() => setView({ name: 'templates' })}
+        onSubscriptionRequestsRequest={() => setView({ name: 'subscription-requests' })}
         onAccountsRequest={() => setView({ name: 'accounts' })}
         onLicensesRequest={() => setView({ name: 'licenses' })}
         onHelpRequest={() => setView({ name: 'help', from: 'picker' })}
@@ -208,5 +239,28 @@ export default function App() {
       )}
       <VersionFooter />
     </>
+  );
+}
+
+// Bevestiging na een geslaagde abonnementsaanvraag (zie SubscriptionRequestPage) —
+// simpel bericht, geen eigen route: de proefaccount is er al, alleen inloggen
+// hoeft nog.
+function SignupDoneNotice({ email, onBack }: { email: string; onBack: () => void }) {
+  return (
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#eef1f8', fontFamily: 'system-ui, sans-serif', padding: '1rem' }}>
+      <div style={{ background: 'white', borderRadius: 12, boxShadow: '0 1px 3px rgba(0,0,0,0.1)', padding: '2rem', maxWidth: 420, textAlign: 'center' }}>
+        <h1 style={{ color: '#203864', margin: '0 0 10px' }}>Aanvraag ontvangen</h1>
+        <p style={{ color: '#444', fontSize: 14.5, lineHeight: 1.5 }}>
+          Je proefaccount staat klaar. Log in met <strong>{email}</strong> en het wachtwoord dat je net gekozen hebt
+          om meteen te beginnen — je hebt 14 dagen om de betaling te regelen.
+        </p>
+        <button
+          onClick={onBack}
+          style={{ marginTop: 12, padding: '0.6rem 1.2rem', borderRadius: 6, border: 'none', background: '#2F5597', color: 'white', fontSize: 14, cursor: 'pointer' }}
+        >
+          Naar inloggen
+        </button>
+      </div>
+    </div>
   );
 }

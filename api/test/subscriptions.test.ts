@@ -1,0 +1,475 @@
+import { after, before, describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  startTestServer, stopTestServer, closePool, req, unique, createSysadminUser, login, cleanupByPrefix,
+} from './helpers.js';
+
+const PREFIX = unique('sub');
+
+// Zelfbedieningsaanvraag voor een nieuw abonnement — zie
+// doelenboom_licentiemodel.md §2/§9, api/src/subscriptions.ts,
+// api/src/offers.ts en api/src/routes/subscriptions.ts. Dekt de volledige
+// levenscyclus (aanvragen -> proef -> betaling -> actief -> verlengen /
+// afwijzen), de aanbiedingen-catalogus, de licentie-events-logging (aparte
+// traceerbaarheid-eis uit het interview) en de doelenbomen.ts-fix die
+// voorkwam dat een tenant met verlopen licentie toch nog nieuwe doelenbomen
+// kon aanmaken.
+describe('zelfbedieningsaanvraag', () => {
+  let sysadminToken: string;
+  const sysadminEmail = `${PREFIX}-admin@test.local`;
+
+  before(async () => {
+    await startTestServer();
+    await createSysadminUser(sysadminEmail, 'wachtwoord123');
+    sysadminToken = await login(sysadminEmail, 'wachtwoord123');
+  });
+
+  after(async () => {
+    await cleanupByPrefix(PREFIX);
+    await stopTestServer();
+    await closePool();
+  });
+
+  // --- Helpers: een tier met een op dit moment geldige prijs, en datumrekenkunde ---
+
+  function today(): string {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  function addDaysStr(dateStr: string, days: number): string {
+    const d = new Date(`${dateStr}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+  }
+
+  function lastDayOfMonth(year: number, month1to12: number): number {
+    return new Date(Date.UTC(year, month1to12, 0)).getUTCDate();
+  }
+
+  async function makeTier(namePrefix: string, priceEur: number, validFrom?: string, validUntil?: string) {
+    const r = await req('POST', '/api/tiers', {
+      token: sysadminToken,
+      body: {
+        name: `${PREFIX}-${namePrefix}`,
+        maxAdmins: 5,
+        maxBomen: 20,
+        sortOrder: 0,
+        priceEur,
+        priceValidFrom: validFrom ?? addDaysStr(today(), -30),
+        priceValidUntil: validUntil ?? addDaysStr(today(), 30),
+      },
+    });
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    return r.body;
+  }
+
+  async function makeOffer(body: Record<string, unknown>) {
+    const r = await req('POST', '/api/offers', { token: sysadminToken, body });
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    return r.body;
+  }
+
+  describe('publieke aanvraagpagina (ongeauthenticeerd)', () => {
+    it('GET /api/subscription-tiers toont alleen tiers met een op dit moment geldige prijs', async () => {
+      const geldig = await makeTier('geldig1', 500);
+      const verlopen = await makeTier('verlopen1', 500, addDaysStr(today(), -60), addDaysStr(today(), -1));
+      const zonderPrijs = await req('POST', '/api/tiers', {
+        token: sysadminToken, body: { name: `${PREFIX}-zonderprijs1`, maxAdmins: 1, maxBomen: 1, sortOrder: 0 },
+      });
+
+      const anon = await req('GET', '/api/subscription-tiers');
+      assert.equal(anon.status, 200);
+      const ids = anon.body.map((t: any) => String(t.id));
+      assert.ok(ids.includes(String(geldig.id)));
+      assert.ok(!ids.includes(String(verlopen.id)), 'tier met verlopen prijsperiode hoort niet in de publieke lijst');
+      assert.ok(!ids.includes(String(zonderPrijs.body.id)), 'tier zonder prijs hoort niet in de publieke lijst');
+    });
+
+    it('GET /api/subscription-modules en /api/subscription-offers werken zonder token', async () => {
+      const modules = await req('GET', '/api/subscription-modules');
+      assert.equal(modules.status, 200);
+      assert.ok(modules.body.some((m: any) => m.key === 'projecten'));
+
+      const offers = await req('GET', '/api/subscription-offers');
+      assert.equal(offers.status, 200);
+      assert.ok(Array.isArray(offers.body));
+    });
+
+    it('GET /api/subscription-tiers/:id/price berekent het effectieve tarief inclusief lopende aanbieding', async () => {
+      const tier = await makeTier('prijsquote', 1000);
+      const offer = await makeOffer({
+        name: `${PREFIX}-33pct`, kind: 'percentage', value: 33,
+        validFrom: addDaysStr(today(), -1), validUntil: addDaysStr(today(), 1), tierIds: [tier.id],
+      });
+
+      const quote = await req('GET', `/api/subscription-tiers/${tier.id}/price`);
+      assert.equal(quote.status, 200);
+      assert.equal(Number(quote.body.tierPriceEur), 1000);
+      assert.equal(quote.body.offer.id, offer.id);
+      assert.equal(Number(quote.body.finalPriceEur), 670);
+      assert.equal(quote.body.btwVrij, false);
+
+      const missing = await req('GET', '/api/subscription-tiers/999999999/price');
+      assert.equal(missing.status, 404);
+    });
+
+    it('een BTW-vrij-aanbieding laat de prijs ongewijzigd maar zet btwVrij op true', async () => {
+      const tier = await makeTier('btwvrij', 800);
+      await makeOffer({
+        name: `${PREFIX}-btwvrij-offer`, kind: 'btw_vrij', value: null,
+        validFrom: addDaysStr(today(), -1), validUntil: addDaysStr(today(), 1), tierIds: [tier.id],
+      });
+
+      const quote = await req('GET', `/api/subscription-tiers/${tier.id}/price`);
+      assert.equal(Number(quote.body.finalPriceEur), 800);
+      assert.equal(quote.body.btwVrij, true);
+    });
+
+    it('POST /api/subscription-requests valideert invoer', async () => {
+      const tier = await makeTier('validatie', 250);
+      const empty = await req('POST', '/api/subscription-requests', { body: {} });
+      assert.equal(empty.status, 400);
+
+      const badEmail = await req('POST', '/api/subscription-requests', {
+        body: {
+          organizationName: 'Test BV', applicantName: 'Jan', applicantEmail: 'niet-geldig',
+          password: 'wachtwoord123', tierId: tier.id, moduleKeys: [],
+        },
+      });
+      assert.equal(badEmail.status, 400);
+
+      const kortWachtwoord = await req('POST', '/api/subscription-requests', {
+        body: {
+          organizationName: 'Test BV', applicantName: 'Jan', applicantEmail: `${PREFIX}-kort@test.local`,
+          password: 'kort', tierId: tier.id, moduleKeys: [],
+        },
+      });
+      assert.equal(kortWachtwoord.status, 400);
+
+      const onbekendeTier = await req('POST', '/api/subscription-requests', {
+        body: {
+          organizationName: 'Test BV', applicantName: 'Jan', applicantEmail: `${PREFIX}-tier@test.local`,
+          password: 'wachtwoord123', tierId: 999999999, moduleKeys: [],
+        },
+      });
+      assert.equal(onbekendeTier.status, 400);
+      assert.match(onbekendeTier.body.error, /Onbekende tier/);
+
+      const onbekendeModule = await req('POST', '/api/subscription-requests', {
+        body: {
+          organizationName: 'Test BV', applicantName: 'Jan', applicantEmail: `${PREFIX}-mod@test.local`,
+          password: 'wachtwoord123', tierId: tier.id, moduleKeys: ['bestaat-niet-echt'],
+        },
+      });
+      assert.equal(onbekendeModule.status, 400);
+      assert.match(onbekendeModule.body.error, /modules bestaan niet/);
+    });
+
+    it('een geslaagde aanvraag maakt tenant + proefaccount (14 dagen) + snapshot van de prijs, en logt "aangevraagd"', async () => {
+      const tier = await makeTier('geslaagd', 500);
+      const offer = await makeOffer({
+        name: `${PREFIX}-geslaagd-offer`, kind: 'fixed_amount', value: 50,
+        validFrom: addDaysStr(today(), -1), validUntil: addDaysStr(today(), 1), tierIds: [tier.id],
+      });
+
+      const email = `${PREFIX}-nieuw@test.local`;
+      const created = await req('POST', '/api/subscription-requests', {
+        body: {
+          organizationName: `${PREFIX} Organisatie`, applicantName: 'Nieuwe Aanvrager', applicantEmail: email,
+          password: 'wachtwoord123', tierId: tier.id, moduleKeys: ['projecten'],
+        },
+      });
+      assert.equal(created.status, 201, JSON.stringify(created.body));
+      assert.ok(created.body.tenantId);
+      assert.ok(created.body.requestId);
+
+      // Duplicaat e-mailadres is een 400.
+      const dup = await req('POST', '/api/subscription-requests', {
+        body: {
+          organizationName: 'Nog een keer', applicantName: 'Iemand', applicantEmail: email,
+          password: 'wachtwoord123', tierId: tier.id, moduleKeys: [],
+        },
+      });
+      assert.equal(dup.status, 400);
+      assert.match(dup.body.error, /bestaat al/);
+
+      // Proefaccount werkt meteen (zelfgekozen wachtwoord, geen
+      // must_change_password) en kan lezen (bv. GET /api/doelenbomen) — de
+      // licentie is nog niet verlopen (14 dagen proef).
+      const applicantToken = await login(email, 'wachtwoord123');
+      const doelenbomen = await req('GET', '/api/doelenbomen', { token: applicantToken });
+      assert.equal(doelenbomen.status, 200);
+      assert.deepEqual(doelenbomen.body, []);
+
+      // Sysadmin-only overzicht toont de aanvraag met status 'proef' en de
+      // gesnapshotte (verdisconteerde) prijs.
+      const list = await req('GET', '/api/subscription-requests', { token: sysadminToken });
+      const row = list.body.find((r: any) => r.requestId === created.body.requestId || r.id === created.body.requestId);
+      assert.ok(row, 'aanvraag moet in het sysadmin-overzicht staan');
+      assert.equal(row.status, 'proef');
+      assert.equal(Number(row.priceAtRequest), 450, 'prijs moet de € 50 vaste korting al verdisconteren');
+      assert.equal(row.licenseEndDate, addDaysStr(today(), 14), 'proefperiode is 14 dagen vanaf aanvraagdatum');
+
+      // Aparte logging-module: de aanvraag zelf is gelogd, zonder performedBy
+      // (publieke actie, geen ingelogde gebruiker).
+      const events = await req('GET', `/api/subscription-requests/${row.id}/events`, { token: sysadminToken });
+      assert.equal(events.status, 200);
+      const aangevraagd = events.body.find((e: any) => e.eventType === 'aangevraagd');
+      assert.ok(aangevraagd, 'er moet een "aangevraagd"-event gelogd zijn');
+      assert.equal(aangevraagd.performedByEmail, null);
+      assert.equal(aangevraagd.detail.offerId, offer.id);
+
+      void offer;
+    });
+
+    it('sysadmin-beheerroutes zijn niet publiek toegankelijk en niet voor gewone tenant-admins', async () => {
+      const anon = await req('GET', '/api/subscription-requests');
+      assert.equal(anon.status, 401);
+
+      // Maak een gewone (niet-sysadmin) tenant-admin via een eigen aanvraag.
+      const tier = await makeTier('nietsysadmin', 300);
+      const email = `${PREFIX}-nietsysadmin@test.local`;
+      await req('POST', '/api/subscription-requests', {
+        body: {
+          organizationName: `${PREFIX} NietSysadmin`, applicantName: 'X', applicantEmail: email,
+          password: 'wachtwoord123', tierId: tier.id, moduleKeys: [],
+        },
+      });
+      const tenantAdminToken = await login(email, 'wachtwoord123');
+      const asTenantAdmin = await req('GET', '/api/subscription-requests', { token: tenantAdminToken });
+      assert.equal(asTenantAdmin.status, 403);
+    });
+  });
+
+  describe('sysadmin-beheer: betaling, verlenging, afwijzen', () => {
+    async function makeTrialRequest(prefix: string, tierPrice = 500) {
+      const tier = await makeTier(prefix, tierPrice);
+      const email = `${PREFIX}-${prefix}@test.local`;
+      const created = await req('POST', '/api/subscription-requests', {
+        body: {
+          organizationName: `${PREFIX}-${prefix} Org`, applicantName: 'Aanvrager', applicantEmail: email,
+          password: 'wachtwoord123', tierId: tier.id, moduleKeys: [],
+        },
+      });
+      assert.equal(created.status, 201, JSON.stringify(created.body));
+      return { requestId: created.body.requestId as number, tenantId: created.body.tenantId as number, email };
+    }
+
+    it('betaling registreren zet "proef" -> "actief", berekent contract- en licentie-einddatum, en logt het event', async () => {
+      const { requestId } = await makeTrialRequest('betaling1');
+
+      const anon = await req('POST', `/api/subscription-requests/${requestId}/register-payment`, {});
+      assert.equal(anon.status, 401);
+
+      const result = await req('POST', `/api/subscription-requests/${requestId}/register-payment`, { token: sysadminToken });
+      assert.equal(result.status, 200, JSON.stringify(result.body));
+      assert.equal(result.body.status, 'actief');
+      assert.ok(result.body.contractEndDate);
+      assert.ok(result.body.licenseEndDate);
+
+      // Contractuele einddatum = laatste dag van de maand van de aanvraagdatum
+      // (vandaag, in deze test), +12 maanden — zie doelenboom_licentiemodel.md
+      // §6/license.ts computeDefaultLicenseEndDate.
+      const now = new Date();
+      const [cy, cm, cd] = result.body.contractEndDate.split('-').map(Number);
+      assert.equal(cy, now.getUTCFullYear() + 1);
+      assert.equal(cm, now.getUTCMonth() + 1);
+      assert.equal(cd, lastDayOfMonth(now.getUTCFullYear(), now.getUTCMonth() + 1));
+
+      // Licentie-einddatum (de daadwerkelijke handhavingsdatum) = contractuele
+      // einddatum + 30 dagen coulance.
+      assert.equal(result.body.licenseEndDate, addDaysStr(result.body.contractEndDate, 30));
+
+      // Nogmaals proberen (niet meer op 'proef') geeft een duidelijke 409.
+      const again = await req('POST', `/api/subscription-requests/${requestId}/register-payment`, { token: sysadminToken });
+      assert.equal(again.status, 409);
+
+      const events = await req('GET', `/api/subscription-requests/${requestId}/events`, { token: sysadminToken });
+      const betaling = events.body.find((e: any) => e.eventType === 'betaling_geregistreerd');
+      assert.ok(betaling);
+      assert.equal(betaling.performedByEmail, sysadminEmail);
+    });
+
+    it('verlenging schuift de contractuele einddatum exact 12 maanden op (regressietest voor de maand-opschuif-bug)', async () => {
+      const { requestId } = await makeTrialRequest('verleng1');
+      const payment = await req('POST', `/api/subscription-requests/${requestId}/register-payment`, { token: sysadminToken });
+      const contractEndDate = payment.body.contractEndDate as string;
+
+      // Vóór er een contract_end_date is (nog op 'proef') kan er niet verlengd worden.
+      const { requestId: proefId } = await makeTrialRequest('verleng-proef');
+      const geenContract = await req('POST', `/api/subscription-requests/${proefId}/register-renewal`, { token: sysadminToken });
+      assert.equal(geenContract.status, 409);
+
+      const renewal = await req('POST', `/api/subscription-requests/${requestId}/register-renewal`, { token: sysadminToken });
+      assert.equal(renewal.status, 200, JSON.stringify(renewal.body));
+      const newContractEndDate = renewal.body.contractEndDate as string;
+
+      const [y1, m1, d1] = contractEndDate.split('-').map(Number);
+      const [y2, m2, d2] = newContractEndDate.split('-').map(Number);
+      // Vóór de fix schoof dit een maand op (omdat er intern "dag erna" werd
+      // doorgegeven aan computeDefaultLicenseEndDate i.p.v. de datum zelf) —
+      // bv. 2027-08-31 werd dan foutief 2028-09-30 i.p.v. 2028-08-31.
+      assert.equal(m2, m1, 'maand moet exact gelijk blijven bij verlengen');
+      assert.equal(y2, y1 + 1, 'jaar moet precies 1 opschuiven bij verlengen');
+      assert.equal(d2, d1, 'dag moet gelijk blijven (beide zijn al "laatste dag van de maand")');
+
+      assert.equal(renewal.body.licenseEndDate, addDaysStr(newContractEndDate, 30));
+
+      const events = await req('GET', `/api/subscription-requests/${requestId}/events`, { token: sysadminToken });
+      const verlengd = events.body.find((e: any) => e.eventType === 'verlengd');
+      assert.ok(verlengd);
+      assert.equal(verlengd.detail.previousContractEndDate, contractEndDate);
+      assert.equal(verlengd.performedByEmail, sysadminEmail);
+    });
+
+    it('afwijzen vereist een reden, blokkeert de tenant onmiddellijk (schrijven dicht, lezen blijft open), en logt het event', async () => {
+      const { requestId, tenantId, email } = await makeTrialRequest('afwijzen1');
+
+      const zonderReden = await req('POST', `/api/subscription-requests/${requestId}/reject`, { token: sysadminToken, body: {} });
+      assert.equal(zonderReden.status, 400);
+
+      const rejected = await req('POST', `/api/subscription-requests/${requestId}/reject`, {
+        token: sysadminToken, body: { reason: 'Onvolledige gegevens' },
+      });
+      assert.equal(rejected.status, 200, JSON.stringify(rejected.body));
+      assert.equal(rejected.body.status, 'afgewezen');
+      assert.equal(rejected.body.rejectedReason, 'Onvolledige gegevens');
+      assert.equal(rejected.body.licenseEndDate, addDaysStr(today(), -1), 'blokkade moet meteen ingaan (gisteren)');
+
+      // Nogmaals afwijzen (niet meer op 'proef') geeft 409.
+      const again = await req('POST', `/api/subscription-requests/${requestId}/reject`, {
+        token: sysadminToken, body: { reason: 'nogmaals' },
+      });
+      assert.equal(again.status, 409);
+
+      // Lezen blijft mogelijk (alleen-lezen, geen volledige lockout).
+      const applicantToken = await login(email, 'wachtwoord123');
+      const lezen = await req('GET', '/api/doelenbomen', { token: applicantToken });
+      assert.equal(lezen.status, 200);
+
+      // Maar een nieuwe doelenboom aanmaken is geblokkeerd (de doelenbomen.ts-
+      // fix: zonder deze check kon een afgewezen/verlopen tenant alsnog een
+      // gloednieuwe doelenboom aanmaken).
+      const geblokkeerd = await req('POST', `/api/tenants/${tenantId}/doelenbomen`, {
+        token: applicantToken, body: { slug: 'nieuweboom', name: 'Nieuwe boom' },
+      });
+      assert.equal(geblokkeerd.status, 403);
+      assert.match(geblokkeerd.body.error, /licentie.*verlopen/i);
+
+      const events = await req('GET', `/api/subscription-requests/${requestId}/events`, { token: sysadminToken });
+      const afgewezen = events.body.find((e: any) => e.eventType === 'afgewezen');
+      assert.ok(afgewezen);
+      assert.equal(afgewezen.detail.reason, 'Onvolledige gegevens');
+      assert.equal(afgewezen.performedByEmail, sysadminEmail);
+    });
+
+    it('pending-count en upcoming-renewals geven de juiste tellingen/lijst terug', async () => {
+      const { requestId: proefId } = await makeTrialRequest('tellen-proef');
+      const { requestId: actiefId } = await makeTrialRequest('tellen-actief');
+      await req('POST', `/api/subscription-requests/${actiefId}/register-payment`, { token: sysadminToken });
+
+      const counts = await req('GET', '/api/subscription-requests/pending-count', { token: sysadminToken });
+      assert.equal(counts.status, 200);
+      assert.ok(counts.body.pendingRequests >= 1);
+
+      // withinDays=9999 zodat de zojuist geregistreerde 12-maanden-out
+      // verlenging (ver in de toekomst) toch als "aanstaand" meetelt in de test.
+      const renewals = await req('GET', '/api/subscription-requests/upcoming-renewals?withinDays=9999', { token: sysadminToken });
+      assert.equal(renewals.status, 200);
+      const ids = renewals.body.map((r: any) => r.id);
+      assert.ok(ids.includes(actiefId));
+      assert.ok(!ids.includes(proefId), 'een aanvraag die nog op proef staat telt niet als "verlenging"');
+    });
+  });
+
+  describe('aanbiedingen (offers) — CRUD en validatie', () => {
+    it('validatie: naam/kind/datums/value/percentage-grens', async () => {
+      const tier = await makeTier('offervalidatie', 400);
+
+      const geenNaam = await req('POST', '/api/offers', {
+        token: sysadminToken, body: { kind: 'percentage', value: 10, validFrom: today(), validUntil: today(), tierIds: [tier.id] },
+      });
+      assert.equal(geenNaam.status, 400);
+
+      const fouteKind = await req('POST', '/api/offers', {
+        token: sysadminToken, body: { name: 'x', kind: 'onzin', value: 10, validFrom: today(), validUntil: today(), tierIds: [] },
+      });
+      assert.equal(fouteKind.status, 400);
+
+      const foutePeriode = await req('POST', '/api/offers', {
+        token: sysadminToken,
+        body: { name: 'x', kind: 'percentage', value: 10, validFrom: today(), validUntil: addDaysStr(today(), -5), tierIds: [] },
+      });
+      assert.equal(foutePeriode.status, 400);
+
+      const geenValue = await req('POST', '/api/offers', {
+        token: sysadminToken, body: { name: 'x', kind: 'percentage', validFrom: today(), validUntil: today(), tierIds: [] },
+      });
+      assert.equal(geenValue.status, 400);
+
+      const teHoogPercentage = await req('POST', '/api/offers', {
+        token: sysadminToken,
+        body: { name: 'x', kind: 'percentage', value: 150, validFrom: today(), validUntil: today(), tierIds: [] },
+      });
+      assert.equal(teHoogPercentage.status, 400);
+
+      const btwVrijZonderValue = await req('POST', '/api/offers', {
+        token: sysadminToken,
+        body: { name: 'x', kind: 'btw_vrij', validFrom: today(), validUntil: today(), tierIds: [tier.id] },
+      });
+      assert.equal(btwVrijZonderValue.status, 201, 'btw_vrij heeft geen value nodig');
+    });
+
+    it('aanmaken/bewerken/verwijderen is sysadmin-only', async () => {
+      const tier = await makeTier('offersysadminonly', 300);
+      const email = `${PREFIX}-offer-tenantadmin@test.local`;
+      await req('POST', '/api/subscription-requests', {
+        body: {
+          organizationName: `${PREFIX} OfferTenantAdmin`, applicantName: 'X', applicantEmail: email,
+          password: 'wachtwoord123', tierId: tier.id, moduleKeys: [],
+        },
+      });
+      const tenantAdminToken = await login(email, 'wachtwoord123');
+
+      const asTenantAdmin = await req('POST', '/api/offers', {
+        token: tenantAdminToken,
+        body: { name: 'poging', kind: 'percentage', value: 10, validFrom: today(), validUntil: today(), tierIds: [] },
+      });
+      assert.equal(asTenantAdmin.status, 403);
+    });
+
+    it('CRUD: aanmaken, bewerken (incl. tier-koppeling), verwijderen', async () => {
+      const tierA = await makeTier('offercrudA', 300);
+      const tierB = await makeTier('offercrudB', 600);
+
+      const created = await makeOffer({
+        name: `${PREFIX}-crud-offer`, kind: 'percentage', value: 10,
+        validFrom: today(), validUntil: addDaysStr(today(), 10), tierIds: [tierA.id],
+      });
+      assert.deepEqual(created.tierIds, [tierA.id]);
+
+      const updated = await req('PUT', `/api/offers/${created.id}`, {
+        token: sysadminToken,
+        body: {
+          name: `${PREFIX}-crud-offer-gewijzigd`, kind: 'fixed_amount', value: 25,
+          validFrom: today(), validUntil: addDaysStr(today(), 20), tierIds: [tierA.id, tierB.id],
+        },
+      });
+      assert.equal(updated.status, 200);
+      assert.equal(updated.body.name, `${PREFIX}-crud-offer-gewijzigd`);
+      assert.equal(updated.body.kind, 'fixed_amount');
+      assert.deepEqual([...updated.body.tierIds].sort(), [tierA.id, tierB.id].sort());
+
+      const list = await req('GET', '/api/offers', { token: sysadminToken });
+      assert.ok(list.body.some((o: any) => o.id === created.id));
+
+      const deleted = await req('DELETE', `/api/offers/${created.id}`, { token: sysadminToken });
+      assert.equal(deleted.status, 204);
+      const missing = await req('PUT', `/api/offers/${created.id}`, {
+        token: sysadminToken,
+        body: { name: 'weg', kind: 'percentage', value: 5, validFrom: today(), validUntil: today(), tierIds: [] },
+      });
+      assert.equal(missing.status, 404);
+    });
+  });
+});

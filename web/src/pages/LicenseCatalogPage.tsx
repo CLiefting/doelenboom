@@ -1,17 +1,20 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '../api';
-import type { ModuleDef, Tier } from '../types';
+import type { ModuleDef, Offer, OfferKind, Tier } from '../types';
 
 // Sysadmin-only catalogusbeheer voor het licentiemodel: tiers (naam + max.
-// admins/bomen) en modules (key + naam + omschrijving) — zie
-// doelenboom_licentiemodel.md. Los van de toewijzing PER tenant (welk tier/
-// welke modules een specifieke klant heeft), dat gebeurt in
-// TenantLicensePanel binnen TenantManagementPage. Bewust geen prijsveld
-// nergens in dit scherm: prijzen vallen buiten de app (§2/§7 van het
-// licentiedocument).
+// admins/bomen + prijs/geldigheidsperiode), modules (key + naam +
+// omschrijving) en aanbiedingen (tijdelijke kortingen/BTW-vrijstellingen per
+// tier) — zie doelenboom_licentiemodel.md §9. Los van de toewijzing PER
+// tenant (welk tier/welke modules een specifieke klant heeft), dat gebeurt in
+// TenantLicensePanel binnen TenantManagementPage. Prijzen/aanbiedingen
+// hierboven voeden de publieke aanvraagpagina (SubscriptionRequestPage) —
+// dit wijkt bewust af van het oorspronkelijke §7 ("geen prijsveld"), zie de
+// toelichting bovenaan doelenboom_licentiemodel.md §9.
 export default function LicenseCatalogPage({ token, onBack }: { token: string; onBack: () => void }) {
   const [tiers, setTiers] = useState<Tier[] | null>(null);
   const [modules, setModules] = useState<ModuleDef[] | null>(null);
+  const [offers, setOffers] = useState<Offer[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -21,9 +24,13 @@ export default function LicenseCatalogPage({ token, onBack }: { token: string; o
   function loadModules() {
     api.modules(token).then(setModules).catch((err) => setError(errMsg(err)));
   }
+  function loadOffers() {
+    api.offers(token).then(setOffers).catch((err) => setError(errMsg(err)));
+  }
   useEffect(() => {
     loadTiers();
     loadModules();
+    loadOffers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
@@ -33,8 +40,8 @@ export default function LicenseCatalogPage({ token, onBack }: { token: string; o
         <div>
           <h1 style={styles.title}>Licentiecatalogus</h1>
           <p style={styles.subtitle}>
-            Tiers en modules zelf beheren — welk tier/welke modules een specifieke tenant heeft, stel je in bij
-            "Tenantbeheer" → Licentie. Prijzen staan hier bewust niet bij: die vallen buiten de app.
+            Tiers, modules en aanbiedingen beheren — welk tier/welke modules een specifieke tenant heeft, stel je in
+            bij "Tenantbeheer" → Licentie. Prijzen en aanbiedingen hieronder voeden de publieke aanvraagpagina.
           </p>
         </div>
         <button onClick={onBack} style={btnStyle('ghost')}>← Terug</button>
@@ -68,6 +75,26 @@ export default function LicenseCatalogPage({ token, onBack }: { token: string; o
             setBusy={setBusy}
             setError={setError}
             onChanged={loadModules}
+          />
+        )}
+      </section>
+
+      <section style={styles.section}>
+        <h2 style={styles.h2}>Aanbiedingen</h2>
+        <p style={{ fontSize: 12.5, color: '#6c6f76', margin: '-6px 0 12px' }}>
+          Tijdelijk, per tier gekoppeld (bv. "eerste jaar 33% korting", "nu zonder BTW") — verschijnt automatisch op
+          de aanvraagpagina zolang de geldigheidsperiode loopt.
+        </p>
+        {!offers && <p style={styles.muted}>Laden…</p>}
+        {offers && tiers && (
+          <OfferList
+            token={token}
+            offers={offers}
+            tiers={tiers}
+            busy={busy}
+            setBusy={setBusy}
+            setError={setError}
+            onChanged={loadOffers}
           />
         )}
       </section>
@@ -138,6 +165,18 @@ function TierList({
               <span style={{ opacity: 0.7, fontSize: 12.5 }}>
                 — max {t.maxAdmins} admin{t.maxAdmins === 1 ? '' : 's'}, max {t.maxBomen} doelenbomen
               </span>
+              <div style={{ fontSize: 12, marginTop: 2 }}>
+                {t.priceEur ? (
+                  <span style={{ color: '#203864' }}>
+                    € {Number(t.priceEur).toLocaleString('nl-NL')} / jaar
+                    {t.priceValidFrom && t.priceValidUntil && (
+                      <span style={{ opacity: 0.6 }}> (geldig {t.priceValidFrom} t/m {t.priceValidUntil})</span>
+                    )}
+                  </span>
+                ) : (
+                  <span style={{ color: '#9aa0a8', fontStyle: 'italic' }}>nog geen prijs ingesteld</span>
+                )}
+              </div>
             </div>
             <div style={{ display: 'flex', gap: 6 }}>
               <button disabled={busy} onClick={() => setEditingId(t.id)} style={btnStyle('ghost')}>
@@ -184,6 +223,9 @@ function TierForm({
   const [maxAdmins, setMaxAdmins] = useState(String(initial?.maxAdmins ?? ''));
   const [maxBomen, setMaxBomen] = useState(String(initial?.maxBomen ?? ''));
   const [sortOrder, setSortOrder] = useState(String(initial?.sortOrder ?? 0));
+  const [priceEur, setPriceEur] = useState(initial?.priceEur ?? '');
+  const [priceValidFrom, setPriceValidFrom] = useState(initial?.priceValidFrom ?? '');
+  const [priceValidUntil, setPriceValidUntil] = useState(initial?.priceValidUntil ?? '');
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -193,18 +235,40 @@ function TierForm({
     if (!name.trim()) return setError('Naam is verplicht.');
     if (!Number.isFinite(admins) || admins <= 0) return setError('Max. admins moet een positief getal zijn.');
     if (!Number.isFinite(bomen) || bomen <= 0) return setError('Max. bomen moet een positief getal zijn.');
+    const price = priceEur.trim() ? Number(priceEur) : null;
+    if (priceEur.trim() && (!Number.isFinite(price) || (price as number) < 0)) {
+      return setError('Prijs moet een positief getal zijn.');
+    }
+    if (price != null && (!priceValidFrom || !priceValidUntil)) {
+      return setError('Bij een prijs hoort een geldig-vanaf en geldig-tot datum.');
+    }
+    if (priceValidFrom && priceValidUntil && priceValidUntil < priceValidFrom) {
+      return setError('Geldig-tot mag niet vóór geldig-vanaf liggen.');
+    }
 
     setBusy(true);
     setError(null);
     try {
+      const priceFields = {
+        priceEur: price,
+        priceValidFrom: price != null ? priceValidFrom : null,
+        priceValidUntil: price != null ? priceValidUntil : null,
+      };
       if (initial) {
-        await api.updateTier(token, initial.id, { name: name.trim(), maxAdmins: admins, maxBomen: bomen, sortOrder: order });
+        await api.updateTier(token, initial.id, {
+          name: name.trim(), maxAdmins: admins, maxBomen: bomen, sortOrder: order, ...priceFields,
+        });
       } else {
-        await api.createTier(token, { name: name.trim(), maxAdmins: admins, maxBomen: bomen, sortOrder: order });
+        await api.createTier(token, {
+          name: name.trim(), maxAdmins: admins, maxBomen: bomen, sortOrder: order, ...priceFields,
+        });
         setName('');
         setMaxAdmins('');
         setMaxBomen('');
         setSortOrder('0');
+        setPriceEur('');
+        setPriceValidFrom('');
+        setPriceValidUntil('');
       }
       onSaved();
     } catch (err) {
@@ -229,6 +293,24 @@ function TierForm({
         style={{ ...styles.input, width: 110 }} type="number" placeholder="volgorde" value={sortOrder}
         onChange={(e) => setSortOrder(e.target.value)}
       />
+      <input
+        style={{ ...styles.input, width: 110 }} type="number" min={0} step="0.01" placeholder="prijs €/jaar"
+        value={priceEur} onChange={(e) => setPriceEur(e.target.value)}
+      />
+      <label style={styles.dateLabel}>
+        geldig vanaf
+        <input
+          style={{ ...styles.input, width: 140 }} type="date" value={priceValidFrom}
+          onChange={(e) => setPriceValidFrom(e.target.value)}
+        />
+      </label>
+      <label style={styles.dateLabel}>
+        geldig tot
+        <input
+          style={{ ...styles.input, width: 140 }} type="date" value={priceValidUntil}
+          onChange={(e) => setPriceValidUntil(e.target.value)}
+        />
+      </label>
       <button style={btnStyle('primary')} type="submit" disabled={busy}>
         {initial ? 'Opslaan' : '+ Tier toevoegen'}
       </button>
@@ -387,6 +469,207 @@ function ModuleForm({
   );
 }
 
+function OfferList({
+  token,
+  offers,
+  tiers,
+  busy,
+  setBusy,
+  setError,
+  onChanged,
+}: {
+  token: string;
+  offers: Offer[];
+  tiers: Tier[];
+  busy: boolean;
+  setBusy: (b: boolean) => void;
+  setError: (e: string | null) => void;
+  onChanged: () => void;
+}) {
+  const [editingId, setEditingId] = useState<number | null>(null);
+
+  async function remove(o: Offer) {
+    const ok = window.confirm(`Aanbieding "${o.name}" verwijderen?`);
+    if (!ok) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.deleteOffer(token, o.id);
+      onChanged();
+    } catch (err) {
+      setError(errMsg(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function tierNames(o: Offer): string {
+    const names = tiers.filter((t) => o.tierIds.includes(t.id)).map((t) => t.name);
+    return names.length ? names.join(', ') : '(geen tiers gekoppeld)';
+  }
+
+  function describeValue(o: Offer): string {
+    if (o.kind === 'percentage') return `${o.value ?? '?'}% korting`;
+    if (o.kind === 'fixed_amount') return `€ ${o.value ?? '?'} korting`;
+    return 'BTW-vrij';
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {offers.length === 0 && <p style={styles.muted}>Nog geen aanbiedingen.</p>}
+      {offers.map((o) =>
+        editingId === o.id ? (
+          <OfferForm
+            key={o.id}
+            token={token}
+            tiers={tiers}
+            initial={o}
+            busy={busy}
+            setBusy={setBusy}
+            setError={setError}
+            onSaved={() => {
+              setEditingId(null);
+              onChanged();
+            }}
+            onCancel={() => setEditingId(null)}
+          />
+        ) : (
+          <div key={o.id} style={styles.row}>
+            <div>
+              <strong>{o.name}</strong>{' '}
+              <span style={{ opacity: 0.7, fontSize: 12.5 }}>
+                — {describeValue(o)}, geldig {o.validFrom} t/m {o.validUntil}
+              </span>
+              <div style={{ fontSize: 12, color: '#6c6f76', marginTop: 2 }}>tiers: {tierNames(o)}</div>
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button disabled={busy} onClick={() => setEditingId(o.id)} style={btnStyle('ghost')}>
+                Bewerken
+              </button>
+              <button disabled={busy} onClick={() => remove(o)} style={btnStyle('danger-text')}>
+                Verwijderen
+              </button>
+            </div>
+          </div>
+        )
+      )}
+      <OfferForm token={token} tiers={tiers} initial={null} busy={busy} setBusy={setBusy} setError={setError} onSaved={onChanged} onCancel={null} />
+    </div>
+  );
+}
+
+function OfferForm({
+  token,
+  tiers,
+  initial,
+  busy,
+  setBusy,
+  setError,
+  onSaved,
+  onCancel,
+}: {
+  token: string;
+  tiers: Tier[];
+  initial: Offer | null;
+  busy: boolean;
+  setBusy: (b: boolean) => void;
+  setError: (e: string | null) => void;
+  onSaved: () => void;
+  onCancel: (() => void) | null;
+}) {
+  const [name, setName] = useState(initial?.name ?? '');
+  const [kind, setKind] = useState<OfferKind>(initial?.kind ?? 'percentage');
+  const [value, setValue] = useState(initial?.value ?? '');
+  const [validFrom, setValidFrom] = useState(initial?.validFrom ?? '');
+  const [validUntil, setValidUntil] = useState(initial?.validUntil ?? '');
+  const [tierIds, setTierIds] = useState<number[]>(initial?.tierIds ?? []);
+
+  function toggleTier(id: number) {
+    setTierIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!name.trim()) return setError('Naam is verplicht.');
+    if (!validFrom || !validUntil) return setError('Geldig-vanaf en geldig-tot zijn verplicht.');
+    if (validUntil < validFrom) return setError('Geldig-tot mag niet vóór geldig-vanaf liggen.');
+    if (tierIds.length === 0) return setError('Kies minstens één tier waarvoor deze aanbieding geldt.');
+    let numValue: number | null = null;
+    if (kind !== 'btw_vrij') {
+      numValue = value.trim() ? Number(value) : NaN;
+      if (!Number.isFinite(numValue) || numValue <= 0) {
+        return setError(kind === 'percentage' ? 'Percentage moet een positief getal zijn.' : 'Bedrag moet een positief getal zijn.');
+      }
+    }
+
+    setBusy(true);
+    setError(null);
+    try {
+      const body = { name: name.trim(), kind, value: numValue, validFrom, validUntil, tierIds };
+      if (initial) {
+        await api.updateOffer(token, initial.id, body);
+      } else {
+        await api.createOffer(token, body);
+        setName('');
+        setKind('percentage');
+        setValue('');
+        setValidFrom('');
+        setValidUntil('');
+        setTierIds([]);
+      }
+      onSaved();
+    } catch (err) {
+      setError(errMsg(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} style={{ ...styles.inlineForm, alignItems: 'flex-start' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+        <input style={styles.input} placeholder="naam (bv. eerste jaar 33% korting)" required value={name} onChange={(e) => setName(e.target.value)} />
+        <select style={styles.input} value={kind} onChange={(e) => setKind(e.target.value as OfferKind)}>
+          <option value="percentage">percentage korting</option>
+          <option value="fixed_amount">vast bedrag korting</option>
+          <option value="btw_vrij">BTW-vrij</option>
+        </select>
+        {kind !== 'btw_vrij' && (
+          <input
+            style={{ ...styles.input, width: 110 }} type="number" min={0} step="0.01"
+            placeholder={kind === 'percentage' ? '% korting' : '€ korting'}
+            value={value} onChange={(e) => setValue(e.target.value)}
+          />
+        )}
+        <label style={styles.dateLabel}>
+          geldig vanaf
+          <input style={{ ...styles.input, width: 140 }} type="date" required value={validFrom} onChange={(e) => setValidFrom(e.target.value)} />
+        </label>
+        <label style={styles.dateLabel}>
+          geldig tot
+          <input style={{ ...styles.input, width: 140 }} type="date" required value={validUntil} onChange={(e) => setValidUntil(e.target.value)} />
+        </label>
+        <button style={btnStyle('primary')} type="submit" disabled={busy}>
+          {initial ? 'Opslaan' : '+ Aanbieding toevoegen'}
+        </button>
+        {onCancel && (
+          <button type="button" style={btnStyle('ghost')} disabled={busy} onClick={onCancel}>
+            Annuleren
+          </button>
+        )}
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', fontSize: 12.5 }}>
+        {tiers.map((t) => (
+          <label key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <input type="checkbox" checked={tierIds.includes(t.id)} onChange={() => toggleTier(t.id)} />
+            {t.name}
+          </label>
+        ))}
+      </div>
+    </form>
+  );
+}
+
 function btnStyle(kind: 'ghost' | 'primary' | 'danger-text'): React.CSSProperties {
   const base: React.CSSProperties = {
     borderRadius: 8, padding: '7px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
@@ -405,6 +688,7 @@ const styles: Record<string, React.CSSProperties> = {
   h2: { fontSize: 15, margin: '0 0 12px', color: '#203864' },
   inlineForm: { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginTop: 4 },
   input: { padding: '7px 10px', borderRadius: 6, border: '1px solid #d0d4da', fontSize: 13 },
+  dateLabel: { display: 'flex', flexDirection: 'column', gap: 2, fontSize: 11, color: '#6c6f76' },
   muted: { color: '#9aa0a8', fontSize: 13, margin: 0 },
   error: { color: '#DC3545', fontSize: 13 },
   row: {

@@ -47,9 +47,11 @@ const FEATURES: { icon: JSX.Element; title: string; description: string }[] = [
 export default function LoginPage({
   onLoggedIn,
   notice,
+  onSignupRequest,
 }: {
   onLoggedIn: (token: string, user: User) => void;
   notice?: string | null;
+  onSignupRequest?: () => void;
 }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -159,6 +161,11 @@ export default function LoginPage({
           <button style={styles.button} type="submit" disabled={busy}>
             {busy ? 'Bezig…' : 'Inloggen'}
           </button>
+          {onSignupRequest && (
+            <button type="button" onClick={onSignupRequest} style={styles.signupLink}>
+              Nog geen account? Abonnement aanvragen →
+            </button>
+          )}
         </form>
       </div>
       </div>
@@ -356,6 +363,10 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
   },
   error: { color: '#DC3545', fontSize: 13, margin: 0 },
+  signupLink: {
+    marginTop: 2, border: 'none', background: 'none', color: '#2F5597', fontSize: 13,
+    cursor: 'pointer', textAlign: 'center', padding: '0.25rem',
+  },
   notice: {
     color: '#664d03', background: '#FFF3CD', border: '1px solid #FFE69C',
     borderRadius: 6, padding: '0.5rem 0.65rem', fontSize: 13, margin: 0,

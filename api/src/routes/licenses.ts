@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { requireAuth } from '../auth.js';
 import { requireSysadmin, requireTenantRoleForTenantParam } from '../rbac.js';
 import * as license from '../license.js';
+import * as offers from '../offers.js';
 
 // Licentiebeheer — zie doelenboom_licentiemodel.md in het Doelenboom-project.
 // Twee niveaus:
@@ -30,21 +31,48 @@ licensesRouter.get('/tiers', async (_req, res) => {
   res.json(await license.listTiers());
 });
 
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+// priceEur/priceValidFrom/priceValidUntil zijn alle drie optioneel (een tier
+// hoeft geen prijs te hebben — dan verschijnt 'ie simpelweg niet op de
+// publieke aanvraagpagina, zie subscriptions.ts). Meegeven mag null zijn
+// (expliciet leegmaken) of een geldige waarde; iets anders is een 400.
+function parsePriceFields(b: Record<string, unknown>): { priceEur: number | null; priceValidFrom: string | null; priceValidUntil: string | null } | null {
+  let priceEur: number | null = null;
+  if (b.priceEur !== undefined && b.priceEur !== null) {
+    if (typeof b.priceEur !== 'number' || !Number.isFinite(b.priceEur) || b.priceEur < 0) return null;
+    priceEur = b.priceEur;
+  }
+  let priceValidFrom: string | null = null;
+  if (b.priceValidFrom !== undefined && b.priceValidFrom !== null) {
+    if (typeof b.priceValidFrom !== 'string' || !DATE_RE.test(b.priceValidFrom)) return null;
+    priceValidFrom = b.priceValidFrom;
+  }
+  let priceValidUntil: string | null = null;
+  if (b.priceValidUntil !== undefined && b.priceValidUntil !== null) {
+    if (typeof b.priceValidUntil !== 'string' || !DATE_RE.test(b.priceValidUntil)) return null;
+    priceValidUntil = b.priceValidUntil;
+  }
+  return { priceEur, priceValidFrom, priceValidUntil };
+}
+
 licensesRouter.post('/tiers', requireSysadmin, async (req, res) => {
   const b = (req.body ?? {}) as Record<string, unknown>;
   const name = typeof b.name === 'string' ? b.name.trim() : '';
   const maxAdmins = Number(b.maxAdmins);
   const maxBomen = Number(b.maxBomen);
   const sortOrder = Number.isFinite(Number(b.sortOrder)) ? Number(b.sortOrder) : 0;
+  const priceFields = parsePriceFields(b);
 
   const errors: string[] = [];
   if (!name) errors.push('Naam is verplicht.');
   if (!Number.isFinite(maxAdmins) || maxAdmins <= 0) errors.push('maxAdmins moet een positief getal zijn.');
   if (!Number.isFinite(maxBomen) || maxBomen <= 0) errors.push('maxBomen moet een positief getal zijn.');
+  if (!priceFields) errors.push('priceEur moet een niet-negatief getal zijn, priceValidFrom/priceValidUntil "YYYY-MM-DD".');
   if (errors.length) return res.status(400).json({ error: errors.join(' ') });
 
   try {
-    const tier = await license.createTier({ name, maxAdmins, maxBomen, sortOrder });
+    const tier = await license.createTier({ name, maxAdmins, maxBomen, sortOrder, ...priceFields! });
     res.status(201).json(tier);
   } catch (err) {
     if (isUniqueViolation(err)) return res.status(409).json({ error: `Er bestaat al een tier met naam "${name}".` });
@@ -65,9 +93,24 @@ licensesRouter.put('/tiers/:id', requireSysadmin, async (req, res) => {
   if (b.maxBomen !== undefined && maxBomen === undefined) {
     return res.status(400).json({ error: 'maxBomen moet een positief getal zijn.' });
   }
+  const priceFields = parsePriceFields(b);
+  if (!priceFields) {
+    return res.status(400).json({ error: 'priceEur moet een niet-negatief getal zijn, priceValidFrom/priceValidUntil "YYYY-MM-DD".' });
+  }
 
   try {
-    const tier = await license.updateTier(req.params.id, { name, maxAdmins, maxBomen, sortOrder });
+    const tier = await license.updateTier(req.params.id, {
+      name,
+      maxAdmins,
+      maxBomen,
+      sortOrder,
+      priceEur: priceFields.priceEur,
+      hasPriceEur: 'priceEur' in b,
+      priceValidFrom: priceFields.priceValidFrom,
+      hasPriceValidFrom: 'priceValidFrom' in b,
+      priceValidUntil: priceFields.priceValidUntil,
+      hasPriceValidUntil: 'priceValidUntil' in b,
+    });
     if (!tier) return res.status(404).json({ error: 'Tier niet gevonden.' });
     res.json(tier);
   } catch (err) {
@@ -194,4 +237,84 @@ licensesRouter.put('/tenants/:tenantId/license/end-date', requireSysadmin, async
   }
   await license.setTenantLicenseEndDate(req.params.tenantId, raw);
   res.json(await license.getTenantLicense(req.params.tenantId));
+});
+
+// --- Aanbiedingen (offers) — zie offers.ts en doelenboom_licentiemodel.md §9.
+// Zelfde toegangsmodel als tiers/modules hierboven: lezen mag iedereen
+// ingelogd (nodig voor het Sjablonen/Aanvragen-scherm en de publieke
+// aanvraagpagina, zie routes/subscriptions.ts), wijzigen is sysadmin-only. ---
+
+licensesRouter.get('/offers', async (_req, res) => {
+  res.json(await offers.listOffers());
+});
+
+function parseOfferBody(b: Record<string, unknown>): {
+  name: string;
+  kind: offers.OfferKind;
+  value: number | null;
+  validFrom: string;
+  validUntil: string;
+  tierIds: number[];
+} | { error: string } {
+  const name = typeof b.name === 'string' ? b.name.trim() : '';
+  const kind = b.kind === 'percentage' || b.kind === 'fixed_amount' || b.kind === 'btw_vrij' ? b.kind : null;
+  const validFrom = typeof b.validFrom === 'string' ? b.validFrom : '';
+  const validUntil = typeof b.validUntil === 'string' ? b.validUntil : '';
+  // tiers.id is bigint -> de pg-driver geeft 'm als STRING terug om precisie-
+  // verlies te voorkomen (zelfde conventie als parseTierId hierboven), dus een
+  // client die een eerder opgehaalde tier.id ongewijzigd terugstuurt (zoals de
+  // OfferForm-checkboxes in LicenseCatalogPage.tsx, gevuld vanuit GET
+  // /api/tiers) stuurt numerieke STRINGS, geen getallen — filteren op
+  // `typeof === 'number'` liet die dus stilzwijgend allemaal vallen.
+  const tierIds = Array.isArray(b.tierIds)
+    ? b.tierIds
+        .map((x) => {
+          if (typeof x === 'number' && Number.isInteger(x) && x > 0) return x;
+          if (typeof x === 'string' && /^[1-9][0-9]*$/.test(x)) return Number(x);
+          return null;
+        })
+        .filter((x): x is number => x !== null)
+    : [];
+
+  if (!name) return { error: 'Naam is verplicht.' };
+  if (!kind) return { error: 'kind moet "percentage", "fixed_amount" of "btw_vrij" zijn.' };
+  if (!DATE_RE.test(validFrom) || !DATE_RE.test(validUntil)) {
+    return { error: 'validFrom/validUntil moeten "YYYY-MM-DD" zijn.' };
+  }
+  if (validUntil < validFrom) return { error: 'validUntil mag niet vóór validFrom liggen.' };
+
+  let value: number | null = null;
+  if (kind === 'percentage' || kind === 'fixed_amount') {
+    if (typeof b.value !== 'number' || !Number.isFinite(b.value) || b.value < 0) {
+      return { error: 'value is verplicht (niet-negatief getal) voor kind "percentage"/"fixed_amount".' };
+    }
+    if (kind === 'percentage' && b.value > 100) return { error: 'Een percentagekorting kan niet boven 100 zijn.' };
+    value = b.value;
+  }
+
+  return { name, kind, value, validFrom, validUntil, tierIds };
+}
+
+licensesRouter.post('/offers', requireSysadmin, async (req, res) => {
+  const parsed = parseOfferBody((req.body ?? {}) as Record<string, unknown>);
+  if ('error' in parsed) return res.status(400).json({ error: parsed.error });
+  const offer = await offers.createOffer(parsed);
+  res.status(201).json(offer);
+});
+
+licensesRouter.put('/offers/:id', requireSysadmin, async (req, res) => {
+  const b = (req.body ?? {}) as Record<string, unknown>;
+  const parsed = parseOfferBody({
+    name: b.name, kind: b.kind, validFrom: b.validFrom, validUntil: b.validUntil, value: b.value, tierIds: b.tierIds,
+  });
+  if ('error' in parsed) return res.status(400).json({ error: parsed.error });
+  const offer = await offers.updateOffer(req.params.id, { ...parsed, hasValue: true });
+  if (!offer) return res.status(404).json({ error: 'Aanbieding niet gevonden.' });
+  res.json(offer);
+});
+
+licensesRouter.delete('/offers/:id', requireSysadmin, async (req, res) => {
+  const ok = await offers.deleteOffer(req.params.id);
+  if (!ok) return res.status(404).json({ error: 'Aanbieding niet gevonden.' });
+  res.status(204).send();
 });

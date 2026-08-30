@@ -1,0 +1,262 @@
+import { FormEvent, useEffect, useState } from 'react';
+import { api, ApiError } from '../api';
+import type { ModuleDef, PriceQuote, Tier } from '../types';
+
+// Publieke aanvraagpagina ("nieuw abonnement aanvragen") — zie
+// doelenboom_licentiemodel.md §9. Ongeauthenticeerd, bereikbaar via een link
+// op LoginPage (App.tsx regelt de omschakeling, dit component zelf weet
+// niets van sessies). Bij indienen ontstaat direct een tenant + admin-account
+// (proefperiode van 14 dagen) — de aanvrager kan na het succesbericht meteen
+// inloggen met het zelfgekozen wachtwoord.
+export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBack: () => void; onSubmitted: (email: string) => void }) {
+  const [tiers, setTiers] = useState<Tier[] | null>(null);
+  const [modules, setModules] = useState<ModuleDef[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.subscriptionTiers().then(setTiers).catch((err) => setError(errMsg(err)));
+    api.subscriptionModules().then(setModules).catch((err) => setError(errMsg(err)));
+  }, []);
+
+  const [tierId, setTierId] = useState<number | null>(null);
+  const [selectedModules, setSelectedModules] = useState<Set<string>>(new Set());
+  const [quote, setQuote] = useState<PriceQuote | null>(null);
+
+  useEffect(() => {
+    if (tierId == null) {
+      setQuote(null);
+      return;
+    }
+    api.subscriptionPriceForTier(tierId).then(setQuote).catch(() => setQuote(null));
+  }, [tierId]);
+
+  const [organizationName, setOrganizationName] = useState('');
+  const [applicantName, setApplicantName] = useState('');
+  const [applicantEmail, setApplicantEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  function toggleModule(key: string) {
+    setSelectedModules((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    if (tierId == null) return setError('Kies een abonnement.');
+    if (password.length < 8) return setError('Wachtwoord moet minstens 8 tekens zijn.');
+    if (password !== confirmPassword) return setError('Wachtwoord en bevestiging komen niet overeen.');
+
+    setBusy(true);
+    try {
+      await api.createSubscriptionRequest({
+        organizationName: organizationName.trim(),
+        applicantName: applicantName.trim(),
+        applicantEmail: applicantEmail.trim(),
+        password,
+        tierId,
+        moduleKeys: [...selectedModules],
+      });
+      onSubmitted(applicantEmail.trim());
+    } catch (err) {
+      setError(errMsg(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={styles.page}>
+      <div style={styles.card}>
+        <button onClick={onBack} style={styles.backLink} type="button">
+          ← Terug naar inloggen
+        </button>
+        <h1 style={styles.title}>Nieuw abonnement aanvragen</h1>
+        <p style={styles.subtitle}>
+          Kies een abonnement, vul je gegevens in en je krijgt direct een proefaccount voor 14 dagen — meteen aan de
+          slag, betaling regelen we daarna.
+        </p>
+
+        {error && <p style={styles.error}>{error}</p>}
+        {!tiers && <p style={styles.muted}>Laden…</p>}
+
+        <form onSubmit={handleSubmit} style={styles.form}>
+          {tiers && (
+            <div style={styles.tierGrid}>
+              {tiers.map((t) => (
+                <button
+                  type="button"
+                  key={t.id}
+                  onClick={() => setTierId(t.id)}
+                  style={{ ...styles.tierCard, ...(tierId === t.id ? styles.tierCardSelected : {}) }}
+                >
+                  <div style={styles.tierName}>{t.name}</div>
+                  <div style={styles.tierMeta}>
+                    max {t.maxAdmins} admin{t.maxAdmins === 1 ? '' : 's'}, max {t.maxBomen} doelenbomen
+                  </div>
+                  {t.priceEur != null && (
+                    <>
+                      <div style={styles.tierPrice}>€ {Number(t.priceEur).toLocaleString('nl-NL')} / jaar</div>
+                      <div style={styles.tierPriceBtw}>
+                        € {(Number(t.priceEur) * 1.21).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} incl. BTW (21%)
+                      </div>
+                    </>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Alles vanaf hier op leesbare regelbreedte houden (i.t.t. de
+              tiergrid hierboven, die juist de volle, bredere kaartbreedte
+              gebruikt zodat de 5 tiles naast elkaar passen). */}
+          <div style={styles.narrowSection}>
+            {quote && quote.tierPriceEur != null && (
+              <div style={styles.priceBox}>
+                {quote.offer ? (
+                  <>
+                    <div style={styles.priceStrike}>€ {quote.tierPriceEur.toLocaleString('nl-NL')} / jaar</div>
+                    <div style={styles.priceFinal}>
+                      {quote.btwVrij
+                        ? `€ ${quote.tierPriceEur.toLocaleString('nl-NL')} / jaar, zonder BTW`
+                        : `€ ${quote.finalPriceEur?.toLocaleString('nl-NL')} / jaar`}{' '}
+                      <span style={styles.offerBadge}>{quote.offer.name}</span>
+                    </div>
+                  </>
+                ) : (
+                  <div style={styles.priceFinal}>€ {quote.finalPriceEur?.toLocaleString('nl-NL')} / jaar</div>
+                )}
+                {!quote.btwVrij && quote.finalPriceEur != null && (
+                  <div style={styles.priceBtwLine}>
+                    € {(quote.finalPriceEur * 1.21).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} incl. BTW (21%)
+                  </div>
+                )}
+              </div>
+            )}
+
+            {modules && modules.length > 0 && (
+              <div>
+                <p style={styles.sectionLabel}>Optionele modules</p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {modules.map((m) => (
+                    <label key={m.id} style={styles.moduleRow}>
+                      <input type="checkbox" checked={selectedModules.has(m.key)} onChange={() => toggleModule(m.key)} />
+                      <span>
+                        <strong>{m.name}</strong>
+                        {m.description && <span style={{ opacity: 0.7 }}> — {m.description}</span>}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <p style={styles.sectionLabel}>Jouw gegevens</p>
+            <label style={styles.label}>
+              Organisatienaam
+              <input style={styles.input} required value={organizationName} onChange={(e) => setOrganizationName(e.target.value)} />
+            </label>
+            <label style={styles.label}>
+              Jouw naam
+              <input style={styles.input} required value={applicantName} onChange={(e) => setApplicantName(e.target.value)} />
+            </label>
+            <label style={styles.label}>
+              E-mail
+              <input
+                style={styles.input}
+                type="email"
+                required
+                value={applicantEmail}
+                onChange={(e) => setApplicantEmail(e.target.value)}
+              />
+            </label>
+            <label style={styles.label}>
+              Wachtwoord
+              <input style={styles.input} type="password" required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} />
+            </label>
+            <label style={styles.label}>
+              Wachtwoord bevestigen
+              <input
+                style={styles.input}
+                type="password"
+                required
+                minLength={8}
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+              />
+            </label>
+
+            <button style={styles.button} type="submit" disabled={busy}>
+              {busy ? 'Bezig…' : 'Aanvraag indienen'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function errMsg(err: unknown): string {
+  return err instanceof ApiError ? err.message : 'Er ging iets mis.';
+}
+
+const styles: Record<string, React.CSSProperties> = {
+  page: {
+    minHeight: '100vh',
+    display: 'flex',
+    justifyContent: 'center',
+    padding: 'clamp(1rem, 4vw, 3rem) 1rem',
+    background: '#eef1f8',
+    fontFamily: 'system-ui, sans-serif',
+    boxSizing: 'border-box',
+  },
+  card: {
+    background: 'white',
+    borderRadius: 12,
+    boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+    padding: 'clamp(1.25rem, 4vw, 2.5rem)',
+    width: '100%',
+    // Breder dan de rest van het formulier (dat blijft op leesbare
+    // regelbreedte) zodat de 5 tier-tiles hieronder in één rij naast elkaar
+    // passen i.p.v. te wrappen — zie tierGrid, dat zelf geen eigen maxWidth
+    // heeft en dus meeschaalt met deze kaart.
+    maxWidth: 900,
+    boxSizing: 'border-box',
+    height: 'fit-content',
+  },
+  backLink: { border: 'none', background: 'none', color: '#2F5597', cursor: 'pointer', padding: 0, fontSize: 13.5, marginBottom: 12 },
+  title: { margin: '0 0 6px', color: '#203864' },
+  subtitle: { margin: '0 0 1.25rem', color: '#6c6f76', fontSize: 14, lineHeight: 1.5 },
+  muted: { color: '#9aa0a8', fontSize: 14 },
+  error: { color: '#DC3545', fontSize: 13.5, background: '#FBE9EA', border: '1px solid #f3c2c6', borderRadius: 6, padding: '0.5rem 0.75rem' },
+  form: { display: 'flex', flexDirection: 'column', gap: 14 },
+  // Houdt de rest van het formulier (prijsopgave, modules, persoonsgegevens)
+  // op leesbare regelbreedte, los van de bredere kaart hierboven (zie card.maxWidth).
+  narrowSection: { display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 480, margin: '0 auto', width: '100%', boxSizing: 'border-box' },
+  tierGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 },
+  tierCard: {
+    textAlign: 'left', border: '1px solid #e4e6ea', borderRadius: 10, padding: '0.75rem 0.9rem',
+    background: 'white', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 3,
+  },
+  tierCardSelected: { border: '2px solid #2F5597', background: '#f0f4fc' },
+  tierName: { fontWeight: 700, color: '#203864', fontSize: 14.5 },
+  tierMeta: { fontSize: 11.5, color: '#6c6f76' },
+  tierPrice: { fontSize: 13, color: '#2F5597', fontWeight: 600, marginTop: 4 },
+  tierPriceBtw: { fontSize: 10.5, color: '#9aa0a8' },
+  priceBox: { background: '#f4f5f7', borderRadius: 8, padding: '0.75rem 1rem' },
+  priceStrike: { fontSize: 13, color: '#9aa0a8', textDecoration: 'line-through' },
+  priceFinal: { fontSize: 16, fontWeight: 700, color: '#203864' },
+  priceBtwLine: { fontSize: 11.5, color: '#9aa0a8', marginTop: 2 },
+  offerBadge: { fontSize: 11, fontWeight: 600, color: '#946200', background: '#FFF3CD', border: '1px solid #FFE69C', borderRadius: 999, padding: '2px 8px', marginLeft: 6 },
+  sectionLabel: { margin: '0.5rem 0 0', fontSize: 13, fontWeight: 700, color: '#203864' },
+  moduleRow: { display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13.5 },
+  label: { display: 'flex', flexDirection: 'column', gap: 4, fontSize: 14, color: '#333' },
+  input: { padding: '0.5rem', borderRadius: 6, border: '1px solid #d0d4da', fontSize: 16, boxSizing: 'border-box' },
+  button: { marginTop: '0.5rem', padding: '0.65rem', borderRadius: 6, border: 'none', background: '#2F5597', color: 'white', fontSize: 14.5, fontWeight: 600, cursor: 'pointer' },
+};

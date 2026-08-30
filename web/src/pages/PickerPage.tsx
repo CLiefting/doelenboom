@@ -9,6 +9,7 @@ export default function PickerPage({
   onLogoutRequest,
   onTenantsRequest,
   onTemplatesRequest,
+  onSubscriptionRequestsRequest,
   onAccountsRequest,
   onLicensesRequest,
   onHelpRequest,
@@ -20,6 +21,7 @@ export default function PickerPage({
   onLogoutRequest: () => void;
   onTenantsRequest: () => void;
   onTemplatesRequest: () => void;
+  onSubscriptionRequestsRequest: () => void;
   onAccountsRequest: () => void;
   onLicensesRequest: () => void;
   onHelpRequest: () => void;
@@ -28,6 +30,10 @@ export default function PickerPage({
   const canManageUsers = user.isSysadmin || user.tenantRoles.some((r) => r.role === 'admin');
   const [items, setItems] = useState<DoelenboomSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Alleen sysadmins beheren abonnementsaanvragen (platformbreed, niet per
+  // tenant) — de badge toont hoeveel er nu te behandelen zijn (proef +
+  // naderende verlengingen), zie subscriptions.ts countPendingSubscriptionActions.
+  const [pendingSubscriptions, setPendingSubscriptions] = useState<number | null>(null);
 
   useEffect(() => {
     api
@@ -35,6 +41,14 @@ export default function PickerPage({
       .then(setItems)
       .catch((err) => setError(err instanceof ApiError ? err.message : 'Kon doelenbomen niet laden'));
   }, [token]);
+
+  useEffect(() => {
+    if (!user.isSysadmin) return;
+    api
+      .subscriptionRequestsPendingCount(token)
+      .then((c) => setPendingSubscriptions(c.pendingRequests + c.upcomingRenewals))
+      .catch(() => setPendingSubscriptions(null));
+  }, [token, user.isSysadmin]);
 
   const grouped = new Map<string, DoelenboomSummary[]>();
   for (const d of items ?? []) {
@@ -57,6 +71,14 @@ export default function PickerPage({
             {canManageUsers && (
               <button onClick={onTemplatesRequest} style={pillStyle()}>
                 Sjablonen
+              </button>
+            )}
+            {user.isSysadmin && (
+              <button onClick={onSubscriptionRequestsRequest} style={{ ...pillStyle(), position: 'relative' }}>
+                Aanvragen
+                {!!pendingSubscriptions && (
+                  <span style={styles.pendingBadge}>{pendingSubscriptions}</span>
+                )}
               </button>
             )}
             <button onClick={onHelpRequest} style={styles.helpButton} title="Help" aria-label="Help">
@@ -235,6 +257,11 @@ function pillStyle(): React.CSSProperties {
 }
 
 const styles: Record<string, React.CSSProperties> = {
+  pendingBadge: {
+    position: 'absolute', top: -6, right: -6, minWidth: 18, height: 18, borderRadius: 999,
+    background: '#DC3545', color: 'white', fontSize: 10.5, fontWeight: 700, lineHeight: '18px',
+    textAlign: 'center', padding: '0 4px', boxSizing: 'border-box',
+  },
   page: { minHeight: '100vh', background: '#f4f5f8' },
   main: { fontFamily: 'system-ui, sans-serif', padding: 'clamp(1.25rem, 4vw, 2.5rem)', maxWidth: 860, margin: '0 auto' },
   header: {
