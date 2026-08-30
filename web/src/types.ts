@@ -302,13 +302,24 @@ export type Tier = {
   maxAdmins: number;
   maxBomen: number;
   sortOrder: number;
-  // Prijs + geldigheidsperiode — zie doelenboom_licentiemodel.md §9. Alle drie
-  // nullable: een tier kan (nog) geen prijs hebben, dan verschijnt 'ie
-  // simpelweg niet op de publieke aanvraagpagina.
-  priceEur: string | null;
-  priceValidFrom: string | null;
-  priceValidUntil: string | null;
 };
+
+// Eén prijsperiode van een tier — een abonnement heeft door de tijd heen
+// meerdere prijzen (bv. € 125/jaar in 2026, een ander tarief in 2027), dus
+// dit is een eigen geschiedenis i.p.v. een enkel prijsveld op Tier zelf. Zie
+// doelenboom_licentiemodel.md §9.
+export type TierPrice = {
+  id: number;
+  tierId: number;
+  priceEur: string;
+  validFrom: string;
+  validUntil: string;
+};
+
+// Publieke tier-listing (GET /api/subscription-tiers) — Tier + de op dit
+// moment geldige prijs (null-tiers worden al server-side weggefilterd, dus
+// dit veld is hier altijd gezet).
+export type PublicTier = Tier & { currentPriceEur: string };
 
 export type ModuleDef = {
   id: number;
@@ -316,6 +327,21 @@ export type ModuleDef = {
   name: string;
   description: string;
 };
+
+// Eén opslagperiode van een module (% van de tier-basisprijs) — zelfde
+// geschiedenis-principe als TierPrice hierboven. Zie doelenboom_licentiemodel.md §3/§9.
+export type ModuleSurcharge = {
+  id: number;
+  moduleId: number;
+  surchargePct: string;
+  validFrom: string;
+  validUntil: string;
+};
+
+// Publieke module-listing (GET /api/subscription-modules) — ModuleDef + de op
+// dit moment geldige opslag (null = nog niet bepaald, telt dan niet mee in
+// de aanvraagprijs).
+export type PublicModule = ModuleDef & { currentSurchargePct: string | null };
 
 export type OfferKind = 'percentage' | 'fixed_amount' | 'btw_vrij';
 
@@ -329,8 +355,17 @@ export type Offer = {
   tierIds: number[];
 };
 
+export type PriceQuoteModuleLine = {
+  moduleKey: string;
+  moduleName: string;
+  surchargePct: number;
+  amountEur: number;
+};
+
 export type PriceQuote = {
   tierPriceEur: number | null;
+  moduleSurcharges: PriceQuoteModuleLine[];
+  subtotalEur: number | null;
   offer: Offer | null;
   finalPriceEur: number | null;
   btwVrij: boolean;

@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { api, ApiError } from '../api';
-import type { ModuleDef, PriceQuote, Tier } from '../types';
+import type { PriceQuote, PublicModule, PublicTier } from '../types';
 
 // Publieke aanvraagpagina ("nieuw abonnement aanvragen") — zie
 // doelenboom_licentiemodel.md §9. Ongeauthenticeerd, bereikbaar via een link
@@ -9,8 +9,8 @@ import type { ModuleDef, PriceQuote, Tier } from '../types';
 // (proefperiode van 14 dagen) — de aanvrager kan na het succesbericht meteen
 // inloggen met het zelfgekozen wachtwoord.
 export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBack: () => void; onSubmitted: (email: string) => void }) {
-  const [tiers, setTiers] = useState<Tier[] | null>(null);
-  const [modules, setModules] = useState<ModuleDef[] | null>(null);
+  const [tiers, setTiers] = useState<PublicTier[] | null>(null);
+  const [modules, setModules] = useState<PublicModule[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -27,8 +27,9 @@ export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBac
       setQuote(null);
       return;
     }
-    api.subscriptionPriceForTier(tierId).then(setQuote).catch(() => setQuote(null));
-  }, [tierId]);
+    api.subscriptionPriceForTier(tierId, [...selectedModules]).then(setQuote).catch(() => setQuote(null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tierId, [...selectedModules].sort().join(',')]);
 
   const [organizationName, setOrganizationName] = useState('');
   const [applicantName, setApplicantName] = useState('');
@@ -89,27 +90,35 @@ export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBac
         <form onSubmit={handleSubmit} style={styles.form}>
           {tiers && (
             <div style={styles.tierGrid}>
-              {tiers.map((t) => (
-                <button
-                  type="button"
-                  key={t.id}
-                  onClick={() => setTierId(t.id)}
-                  style={{ ...styles.tierCard, ...(tierId === t.id ? styles.tierCardSelected : {}) }}
-                >
-                  <div style={styles.tierName}>{t.name}</div>
-                  <div style={styles.tierMeta}>
-                    max {t.maxAdmins} admin{t.maxAdmins === 1 ? '' : 's'}, max {t.maxBomen} doelenbomen
-                  </div>
-                  {t.priceEur != null && (
-                    <>
-                      <div style={styles.tierPrice}>€ {Number(t.priceEur).toLocaleString('nl-NL')} / jaar</div>
-                      <div style={styles.tierPriceBtw}>
-                        € {(Number(t.priceEur) * 1.21).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} incl. BTW (21%)
-                      </div>
-                    </>
-                  )}
-                </button>
-              ))}
+              {tiers.map((t) => {
+                const accent = tierAccent(t.name);
+                const selected = tierId === t.id;
+                return (
+                  <button
+                    type="button"
+                    key={t.id}
+                    onClick={() => setTierId(t.id)}
+                    style={{
+                      ...styles.tierCard,
+                      ...(accent ? { borderTopColor: accent.border, background: selected ? styles.tierCardSelected.background : accent.bg } : {}),
+                      ...(selected ? styles.tierCardSelected : {}),
+                    }}
+                  >
+                    <div style={{ ...styles.tierName, ...(accent ? { color: accent.text } : {}) }}>{t.name}</div>
+                    <div style={styles.tierMeta}>
+                      max {t.maxAdmins} admin{t.maxAdmins === 1 ? '' : 's'}, max {t.maxBomen} doelenbomen
+                    </div>
+                    {t.currentPriceEur != null && (
+                      <>
+                        <div style={styles.tierPrice}>€ {Number(t.currentPriceEur).toLocaleString('nl-NL')} / jaar</div>
+                        <div style={styles.tierPriceBtw}>
+                          € {(Number(t.currentPriceEur) * 1.21).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} incl. BTW (21%)
+                        </div>
+                      </>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           )}
 
@@ -119,12 +128,21 @@ export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBac
           <div style={styles.narrowSection}>
             {quote && quote.tierPriceEur != null && (
               <div style={styles.priceBox}>
+                <div style={styles.priceLineItem}>Abonnement: € {quote.tierPriceEur.toLocaleString('nl-NL')} / jaar</div>
+                {quote.moduleSurcharges.map((s) => (
+                  <div key={s.moduleKey} style={styles.priceLineItem}>
+                    + {s.moduleName} ({s.surchargePct}% opslag): € {s.amountEur.toLocaleString('nl-NL')} / jaar
+                  </div>
+                ))}
+                {quote.moduleSurcharges.length > 0 && quote.subtotalEur != null && (
+                  <div style={styles.priceLineItem}>Subtotaal: € {quote.subtotalEur.toLocaleString('nl-NL')} / jaar</div>
+                )}
                 {quote.offer ? (
                   <>
-                    <div style={styles.priceStrike}>€ {quote.tierPriceEur.toLocaleString('nl-NL')} / jaar</div>
+                    <div style={styles.priceStrike}>€ {quote.subtotalEur?.toLocaleString('nl-NL')} / jaar</div>
                     <div style={styles.priceFinal}>
                       {quote.btwVrij
-                        ? `€ ${quote.tierPriceEur.toLocaleString('nl-NL')} / jaar, zonder BTW`
+                        ? `€ ${quote.subtotalEur?.toLocaleString('nl-NL')} / jaar, zonder BTW`
                         : `€ ${quote.finalPriceEur?.toLocaleString('nl-NL')} / jaar`}{' '}
                       <span style={styles.offerBadge}>{quote.offer.name}</span>
                     </div>
@@ -149,6 +167,9 @@ export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBac
                       <input type="checkbox" checked={selectedModules.has(m.key)} onChange={() => toggleModule(m.key)} />
                       <span>
                         <strong>{m.name}</strong>
+                        {m.currentSurchargePct != null && (
+                          <span style={{ opacity: 0.7 }}> (+{Number(m.currentSurchargePct).toLocaleString('nl-NL')}%)</span>
+                        )}
                         {m.description && <span style={{ opacity: 0.7 }}> — {m.description}</span>}
                       </span>
                     </label>
@@ -206,6 +227,18 @@ function errMsg(err: unknown): string {
   return err instanceof ApiError ? err.message : 'Er ging iets mis.';
 }
 
+// Metaal-accenten per tiernaam — Single-Use en eventuele eigen/maatwerktiers
+// krijgen bewust geen accent (vallen terug op de neutrale kaartstijl).
+const TIER_ACCENTS: Record<string, { border: string; bg: string; text: string }> = {
+  brons: { border: '#B08D57', bg: '#FBF3EA', text: '#8C5A2B' },
+  zilver: { border: '#9FA3A8', bg: '#F4F5F6', text: '#5B6066' },
+  goud: { border: '#D4AF37', bg: '#FFFBEA', text: '#8A6D1B' },
+  diamant: { border: '#4FC3D9', bg: '#EAFBFE', text: '#1D7A8C' },
+};
+function tierAccent(name: string) {
+  return TIER_ACCENTS[name.trim().toLowerCase()] ?? null;
+}
+
 const styles: Record<string, React.CSSProperties> = {
   page: {
     minHeight: '100vh',
@@ -241,15 +274,24 @@ const styles: Record<string, React.CSSProperties> = {
   narrowSection: { display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 480, margin: '0 auto', width: '100%', boxSizing: 'border-box' },
   tierGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 },
   tierCard: {
-    textAlign: 'left', border: '1px solid #e4e6ea', borderRadius: 10, padding: '0.75rem 0.9rem',
-    background: 'white', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 3,
+    textAlign: 'left', border: '1px solid #e4e6ea', borderTop: '4px solid #e4e6ea', borderRadius: 10,
+    padding: '0.75rem 0.9rem', background: 'white', cursor: 'pointer', display: 'flex', flexDirection: 'column',
+    gap: 3,
   },
-  tierCardSelected: { border: '2px solid #2F5597', background: '#f0f4fc' },
+  // Zet bewust alléén de zij-/onderrand blauw (longhand-properties, geen
+  // "border"-shorthand) — de bovenrand houdt zo zijn metaal-accentkleur
+  // (zie tierAccent hierboven) ook wanneer de tile geselecteerd is.
+  tierCardSelected: {
+    borderLeftColor: '#2F5597', borderRightColor: '#2F5597', borderBottomColor: '#2F5597',
+    borderLeftWidth: 2, borderRightWidth: 2, borderBottomWidth: 2, borderTopWidth: 4,
+    background: '#f0f4fc',
+  },
   tierName: { fontWeight: 700, color: '#203864', fontSize: 14.5 },
   tierMeta: { fontSize: 11.5, color: '#6c6f76' },
   tierPrice: { fontSize: 13, color: '#2F5597', fontWeight: 600, marginTop: 4 },
   tierPriceBtw: { fontSize: 10.5, color: '#9aa0a8' },
   priceBox: { background: '#f4f5f7', borderRadius: 8, padding: '0.75rem 1rem' },
+  priceLineItem: { fontSize: 12, color: '#6c6f76' },
   priceStrike: { fontSize: 13, color: '#9aa0a8', textDecoration: 'line-through' },
   priceFinal: { fontSize: 16, fontWeight: 700, color: '#203864' },
   priceBtwLine: { fontSize: 11.5, color: '#9aa0a8', marginTop: 2 },

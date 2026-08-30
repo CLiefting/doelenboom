@@ -292,34 +292,30 @@ export const api = {
   // sysadmin-only (de server handhaaft dit, zie api/src/routes/licenses.ts).
   tiers: (token: string) => request<import('./types').Tier[]>('/api/tiers', {}, token),
 
-  createTier: (
-    token: string,
-    body: {
-      name: string;
-      maxAdmins: number;
-      maxBomen: number;
-      sortOrder: number;
-      priceEur?: number | null;
-      priceValidFrom?: string | null;
-      priceValidUntil?: string | null;
-    }
-  ) => request<import('./types').Tier>('/api/tiers', { method: 'POST', body: JSON.stringify(body) }, token),
+  createTier: (token: string, body: { name: string; maxAdmins: number; maxBomen: number; sortOrder: number }) =>
+    request<import('./types').Tier>('/api/tiers', { method: 'POST', body: JSON.stringify(body) }, token),
 
   updateTier: (
     token: string,
     tierId: number,
-    body: Partial<{
-      name: string;
-      maxAdmins: number;
-      maxBomen: number;
-      sortOrder: number;
-      priceEur: number | null;
-      priceValidFrom: string | null;
-      priceValidUntil: string | null;
-    }>
+    body: Partial<{ name: string; maxAdmins: number; maxBomen: number; sortOrder: number }>
   ) => request<import('./types').Tier>(`/api/tiers/${tierId}`, { method: 'PUT', body: JSON.stringify(body) }, token),
 
   deleteTier: (token: string, tierId: number) => request<void>(`/api/tiers/${tierId}`, { method: 'DELETE' }, token),
+
+  // --- Prijsgeschiedenis van tiers — zie doelenboom_licentiemodel.md §9 ---
+
+  tierPrices: (token: string, tierId: number) =>
+    request<import('./types').TierPrice[]>(`/api/tiers/${tierId}/prices`, {}, token),
+
+  createTierPrice: (token: string, tierId: number, body: { priceEur: number; validFrom: string; validUntil: string }) =>
+    request<import('./types').TierPrice>(`/api/tiers/${tierId}/prices`, { method: 'POST', body: JSON.stringify(body) }, token),
+
+  updateTierPrice: (token: string, priceId: number, body: { priceEur: number; validFrom: string; validUntil: string }) =>
+    request<import('./types').TierPrice>(`/api/tier-prices/${priceId}`, { method: 'PUT', body: JSON.stringify(body) }, token),
+
+  deleteTierPrice: (token: string, priceId: number) =>
+    request<void>(`/api/tier-prices/${priceId}`, { method: 'DELETE' }, token),
 
   modules: (token: string) => request<import('./types').ModuleDef[]>('/api/modules', {}, token),
 
@@ -331,6 +327,20 @@ export const api = {
 
   deleteModule: (token: string, moduleId: number) =>
     request<void>(`/api/modules/${moduleId}`, { method: 'DELETE' }, token),
+
+  // --- Opslagpercentage-geschiedenis van modules — zie doelenboom_licentiemodel.md §3/§9 ---
+
+  moduleSurcharges: (token: string, moduleId: number) =>
+    request<import('./types').ModuleSurcharge[]>(`/api/modules/${moduleId}/surcharges`, {}, token),
+
+  createModuleSurcharge: (token: string, moduleId: number, body: { surchargePct: number; validFrom: string; validUntil: string }) =>
+    request<import('./types').ModuleSurcharge>(`/api/modules/${moduleId}/surcharges`, { method: 'POST', body: JSON.stringify(body) }, token),
+
+  updateModuleSurcharge: (token: string, surchargeId: number, body: { surchargePct: number; validFrom: string; validUntil: string }) =>
+    request<import('./types').ModuleSurcharge>(`/api/module-surcharges/${surchargeId}`, { method: 'PUT', body: JSON.stringify(body) }, token),
+
+  deleteModuleSurcharge: (token: string, surchargeId: number) =>
+    request<void>(`/api/module-surcharges/${surchargeId}`, { method: 'DELETE' }, token),
 
   // --- Aanbiedingen (offers) — zie doelenboom_licentiemodel.md §9 ---
 
@@ -367,14 +377,18 @@ export const api = {
   // hieronder zijn bewust ONGEAUTHENTICEERD (geen token-param), zie
   // api/src/routes/subscriptions.ts. ---
 
-  subscriptionTiers: () => request<import('./types').Tier[]>('/api/subscription-tiers'),
+  subscriptionTiers: () => request<import('./types').PublicTier[]>('/api/subscription-tiers'),
 
   subscriptionOffers: () => request<import('./types').Offer[]>('/api/subscription-offers'),
 
-  subscriptionModules: () => request<import('./types').ModuleDef[]>('/api/subscription-modules'),
+  subscriptionModules: () => request<import('./types').PublicModule[]>('/api/subscription-modules'),
 
-  subscriptionPriceForTier: (tierId: number) =>
-    request<import('./types').PriceQuote>(`/api/subscription-tiers/${tierId}/price`),
+  // moduleKeys: de aangevinkte modules — hun (op dit moment geldige) opslag
+  // wordt meegerekend in tierPriceEur/subtotalEur (zie offers.ts computeOfferedPrice).
+  subscriptionPriceForTier: (tierId: number, moduleKeys: string[] = []) =>
+    request<import('./types').PriceQuote>(
+      `/api/subscription-tiers/${tierId}/price${moduleKeys.length ? `?modules=${moduleKeys.map(encodeURIComponent).join(',')}` : ''}`
+    ),
 
   createSubscriptionRequest: (body: {
     organizationName: string;

@@ -3,6 +3,8 @@ import { AuthedRequest, requireAuth } from '../auth.js';
 import { requireSysadmin } from '../rbac.js';
 import { listModules, listTiers } from '../license.js';
 import { listOffers } from '../offers.js';
+import { getCurrentTierPrice } from '../tierPrices.js';
+import { getCurrentModuleSurcharge } from '../moduleSurcharges.js';
 import {
   countPendingSubscriptionActions,
   createSubscriptionRequest,
@@ -10,7 +12,7 @@ import {
   listLicenseEventsForTenant,
   listSubscriptionRequests,
   listUpcomingRenewals,
-  quotePriceForTier,
+  quotePrice,
   registerPayment,
   registerRenewal,
   rejectSubscriptionRequest,
@@ -27,23 +29,34 @@ export const subscriptionsRouter = Router();
 
 subscriptionsRouter.get('/subscription-tiers', async (_req, res) => {
   // Alleen tiers met een op dit moment geldige prijs — de aanvraagpagina kan
-  // met een tier zonder (geldige) prijs sowieso niks tonen/aanvragen.
-  const tiers = await listTiers();
+  // met een tier zonder (geldige) prijs sowieso niks tonen/aanvragen. De
+  // huidige prijs wordt meegegeven als "currentPriceEur" (geen los endpoint
+  // nodig per tier alleen om de tegel te vullen) — het volledige, met modules/
+  // aanbieding verdisconteerde tarief blijft via .../price hieronder.
+  const [tiers] = await Promise.all([listTiers()]);
   const today = new Date().toISOString().slice(0, 10);
-  const withPrice = tiers.filter(
-    (t) =>
-      t.priceEur != null &&
-      (t.priceValidFrom == null || t.priceValidFrom <= today) &&
-      (t.priceValidUntil == null || t.priceValidUntil >= today)
-  );
+  const withPrice = (
+    await Promise.all(
+      tiers.map(async (t) => ({ ...t, currentPriceEur: (await getCurrentTierPrice(t.id, today))?.priceEur ?? null }))
+    )
+  ).filter((t) => t.currentPriceEur != null);
   res.json(withPrice);
 });
 
 // Modulecatalogus, publiek — zelfde data als GET /api/modules maar zonder
 // login nodig (die route zit achter licensesRouter.use(requireAuth)), voor de
-// modulekeuze op de aanvraagpagina.
+// modulekeuze op de aanvraagpagina. currentSurchargePct erbij zodat de UI kan
+// tonen wat een module momenteel aan opslag kost (null = nog niet bepaald).
 subscriptionsRouter.get('/subscription-modules', async (_req, res) => {
-  res.json(await listModules());
+  const modules = await listModules();
+  const today = new Date().toISOString().slice(0, 10);
+  const withSurcharge = await Promise.all(
+    modules.map(async (m) => ({
+      ...m,
+      currentSurchargePct: (await getCurrentModuleSurcharge(m.id, today))?.surchargePct ?? null,
+    }))
+  );
+  res.json(withSurcharge);
 });
 
 subscriptionsRouter.get('/subscription-offers', async (_req, res) => {
@@ -52,8 +65,12 @@ subscriptionsRouter.get('/subscription-offers', async (_req, res) => {
   res.json(offers.filter((o) => o.validFrom <= today && o.validUntil >= today));
 });
 
+// ?modules=projecten,templating — optioneel, om de opslag van geselecteerde
+// modules mee te laten wegen in de prijsopgave (zie subscriptions.ts quotePrice).
 subscriptionsRouter.get('/subscription-tiers/:tierId/price', async (req, res) => {
-  const quote = await quotePriceForTier(req.params.tierId);
+  const rawModules = typeof req.query.modules === 'string' ? req.query.modules : '';
+  const moduleKeys = rawModules.split(',').map((k) => k.trim()).filter(Boolean);
+  const quote = await quotePrice(req.params.tierId, moduleKeys);
   if (!quote) return res.status(404).json({ error: 'Tier niet gevonden.' });
   res.json(quote);
 });

@@ -46,21 +46,28 @@ describe('zelfbedieningsaanvraag', () => {
     return new Date(Date.UTC(year, month1to12, 0)).getUTCDate();
   }
 
-  async function makeTier(namePrefix: string, priceEur: number, validFrom?: string, validUntil?: string) {
+  // Maakt een tier aan én, tenzij priceEur null is, een direct geldige
+  // prijsperiode ervoor (via de losse prijsgeschiedenis-endpoints — een tier
+  // heeft zelf geen prijsveld meer, zie api/src/tierPrices.ts).
+  async function makeTier(namePrefix: string, priceEur: number | null, validFrom?: string, validUntil?: string) {
     const r = await req('POST', '/api/tiers', {
       token: sysadminToken,
-      body: {
-        name: `${PREFIX}-${namePrefix}`,
-        maxAdmins: 5,
-        maxBomen: 20,
-        sortOrder: 0,
-        priceEur,
-        priceValidFrom: validFrom ?? addDaysStr(today(), -30),
-        priceValidUntil: validUntil ?? addDaysStr(today(), 30),
-      },
+      body: { name: `${PREFIX}-${namePrefix}`, maxAdmins: 5, maxBomen: 20, sortOrder: 0 },
     });
     assert.equal(r.status, 201, JSON.stringify(r.body));
-    return r.body;
+    const tier = r.body;
+    if (priceEur != null) {
+      const priceR = await req('POST', `/api/tiers/${tier.id}/prices`, {
+        token: sysadminToken,
+        body: {
+          priceEur,
+          validFrom: validFrom ?? addDaysStr(today(), -30),
+          validUntil: validUntil ?? addDaysStr(today(), 30),
+        },
+      });
+      assert.equal(priceR.status, 201, JSON.stringify(priceR.body));
+    }
+    return tier;
   }
 
   async function makeOffer(body: Record<string, unknown>) {
@@ -111,6 +118,50 @@ describe('zelfbedieningsaanvraag', () => {
 
       const missing = await req('GET', '/api/subscription-tiers/999999999/price');
       assert.equal(missing.status, 404);
+    });
+
+    it('module-opslagpercentages tellen mee in de aanvraagprijs (subtotaal vóór aanbieding)', async () => {
+      const tier = await makeTier('metmodule', 1000);
+      const modR = await req('POST', '/api/modules', {
+        token: sysadminToken, body: { key: `${PREFIX}-opslagmodule`, name: 'Opslagmodule test' },
+      });
+      assert.equal(modR.status, 201, JSON.stringify(modR.body));
+      const mod = modR.body;
+      const surchargeR = await req('POST', `/api/modules/${mod.id}/surcharges`, {
+        token: sysadminToken,
+        body: { surchargePct: 20, validFrom: addDaysStr(today(), -30), validUntil: addDaysStr(today(), 30) },
+      });
+      assert.equal(surchargeR.status, 201, JSON.stringify(surchargeR.body));
+
+      // Zonder de module geselecteerd: alleen de tierprijs.
+      const zonderModule = await req('GET', `/api/subscription-tiers/${tier.id}/price`);
+      assert.equal(Number(zonderModule.body.tierPriceEur), 1000);
+      assert.deepEqual(zonderModule.body.moduleSurcharges, []);
+      assert.equal(Number(zonderModule.body.subtotalEur), 1000);
+      assert.equal(Number(zonderModule.body.finalPriceEur), 1000);
+
+      // Met de module: 20% opslag over de tierprijs (€ 200) komt bovenop.
+      const metModule = await req('GET', `/api/subscription-tiers/${tier.id}/price?modules=${mod.key}`);
+      assert.equal(metModule.status, 200);
+      assert.equal(metModule.body.moduleSurcharges.length, 1);
+      assert.equal(metModule.body.moduleSurcharges[0].moduleKey, mod.key);
+      assert.equal(Number(metModule.body.moduleSurcharges[0].amountEur), 200);
+      assert.equal(Number(metModule.body.subtotalEur), 1200);
+      assert.equal(Number(metModule.body.finalPriceEur), 1200);
+
+      // En dat subtotaal (tier + opslag) telt ook mee als basis voor de
+      // gesnapshotte prijs van een echte aanvraag.
+      const email = `${PREFIX}-metmodule@test.local`;
+      const created = await req('POST', '/api/subscription-requests', {
+        body: {
+          organizationName: `${PREFIX} MetModule`, applicantName: 'X', applicantEmail: email,
+          password: 'wachtwoord123', tierId: tier.id, moduleKeys: [mod.key],
+        },
+      });
+      assert.equal(created.status, 201, JSON.stringify(created.body));
+      const list = await req('GET', '/api/subscription-requests', { token: sysadminToken });
+      const row = list.body.find((r: any) => r.requestId === created.body.requestId || r.id === created.body.requestId);
+      assert.equal(Number(row.priceAtRequest), 1200);
     });
 
     it('een BTW-vrij-aanbieding laat de prijs ongewijzigd maar zet btwVrij op true', async () => {
@@ -202,12 +253,21 @@ describe('zelfbedieningsaanvraag', () => {
       assert.deepEqual(doelenbomen.body, []);
 
       // Sysadmin-only overzicht toont de aanvraag met status 'proef' en de
-      // gesnapshotte (verdisconteerde) prijs.
+      // gesnapshotte (verdisconteerde) prijs. De verwachte prijs wordt via
+      // dezelfde price-quote-endpoint opgevraagd i.p.v. hardgecodeerd, zodat
+      // deze test niet breekt op het (elders al gedekte) opslagpercentage van
+      // de "projecten"-module, dat zelf ook een eigen, tijdgebonden waarde heeft.
+      const expectedQuote = await req('GET', `/api/subscription-tiers/${tier.id}/price?modules=projecten`);
+      assert.equal(expectedQuote.status, 200);
+
       const list = await req('GET', '/api/subscription-requests', { token: sysadminToken });
       const row = list.body.find((r: any) => r.requestId === created.body.requestId || r.id === created.body.requestId);
       assert.ok(row, 'aanvraag moet in het sysadmin-overzicht staan');
       assert.equal(row.status, 'proef');
-      assert.equal(Number(row.priceAtRequest), 450, 'prijs moet de € 50 vaste korting al verdisconteren');
+      assert.equal(
+        Number(row.priceAtRequest), Number(expectedQuote.body.finalPriceEur),
+        'gesnapshotte prijs moet de € 50 vaste korting (en evt. module-opslag) al verdisconteren'
+      );
       assert.equal(row.licenseEndDate, addDaysStr(today(), 14), 'proefperiode is 14 dagen vanaf aanvraagdatum');
 
       // Aparte logging-module: de aanvraag zelf is gelogd, zonder performedBy

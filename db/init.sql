@@ -493,13 +493,42 @@ on conflict (key) do nothing;
 
 -- Zelfbedieningsaanvraag ("nieuw abonnement aanvragen") — zie
 -- doelenboom_licentiemodel.md §2/§9 en db/migrations/0015_subscription_requests.sql
--- voor de volledige toelichting. Dit wijkt bewust af van de eerdere §7 ("geen
--- prijsveld — prijs wordt niet in de app opgeslagen"): voor de aanvraagpagina
--- moet een aanvrager een tarief + eventuele aanbieding kunnen zien, dus komt
--- er alsnog een prijsveld bij, met geldigheidsperiode.
-alter table tiers add column if not exists price_eur numeric(10,2);
-alter table tiers add column if not exists price_valid_from date;
-alter table tiers add column if not exists price_valid_until date;
+-- + 0016_price_history.sql voor de volledige toelichting. Dit wijkt bewust af
+-- van de eerdere §7 ("geen prijsveld — prijs wordt niet in de app
+-- opgeslagen"): voor de aanvraagpagina moet een aanvrager een tarief +
+-- eventuele aanbieding kunnen zien.
+--
+-- Prijs (en, voor modules, opslagpercentage) is GEEN los veld op tiers/
+-- modules zelf: een abonnement heeft door de tijd heen meerdere tarieven
+-- (bv. € 125/jaar in 2026, een ander tarief in 2027), dus dit is een eigen
+-- geschiedenis-tabel — zie api/src/tierPrices.ts / api/src/moduleSurcharges.ts.
+-- Meerdere (ook overlappende) periodes per tier/module zijn toegestaan; bij
+-- overlap wint de meest recent gestarte periode (zie getCurrentTierPrice/
+-- getCurrentModuleSurcharge) — de UI markeert duidelijk welke op dit moment
+-- geldig is.
+create table if not exists tier_prices (
+  id bigserial primary key,
+  tier_id bigint not null references tiers(id) on delete cascade,
+  price_eur numeric(10,2) not null,
+  valid_from date not null,
+  valid_until date not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  check (valid_until >= valid_from)
+);
+create index if not exists idx_tier_prices_tier on tier_prices(tier_id);
+
+create table if not exists module_surcharges (
+  id bigserial primary key,
+  module_id bigint not null references modules(id) on delete cascade,
+  surcharge_pct numeric(5,2) not null,
+  valid_from date not null,
+  valid_until date not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  check (valid_until >= valid_from)
+);
+create index if not exists idx_module_surcharges_module on module_surcharges(module_id);
 
 -- Tijdelijke aanbiedingen (bv. "eerste jaar 33% korting", "nu zonder BTW"),
 -- per tier instelbaar (offer_tiers). kind='percentage' → value is een
@@ -579,11 +608,30 @@ create table if not exists license_events (
 create index if not exists idx_license_events_tenant on license_events(tenant_id);
 create index if not exists idx_license_events_created on license_events(created_at desc);
 
-update tiers set price_eur = 125, price_valid_from = '2026-01-01', price_valid_until = '2026-12-31' where name = 'Single-Use' and price_eur is null;
-update tiers set price_eur = 250, price_valid_from = '2026-01-01', price_valid_until = '2026-12-31' where name = 'Brons' and price_eur is null;
-update tiers set price_eur = 500, price_valid_from = '2026-01-01', price_valid_until = '2026-12-31' where name = 'Zilver' and price_eur is null;
-update tiers set price_eur = 1000, price_valid_from = '2026-01-01', price_valid_until = '2026-12-31' where name = 'Goud' and price_eur is null;
-update tiers set price_eur = 2000, price_valid_from = '2026-01-01', price_valid_until = '2026-12-31' where name = 'Diamant' and price_eur is null;
+-- Eerste geldige prijsperiode per tier (2026 kalenderjaar, bevestigde
+-- tarieven — zie doelenboom_licentiemodel.md §2). "not exists"-guard i.p.v.
+-- "on conflict" (er is geen unique constraint op tier_id — meerdere periodes
+-- per tier zijn juist bedoeld) zodat dit blok alleen bij een verse tier-rij
+-- zonder enige prijs iets invoegt, nooit een dubbele seed bij herhaald draaien.
+insert into tier_prices (tier_id, price_eur, valid_from, valid_until)
+select t.id, v.price_eur, '2026-01-01', '2026-12-31'
+from tiers t
+join (values ('Single-Use', 125), ('Brons', 250), ('Zilver', 500), ('Goud', 1000), ('Diamant', 2000)) as v(name, price_eur)
+  on v.name = t.name
+where not exists (select 1 from tier_prices tp where tp.tier_id = t.id);
+
+-- Initiële module-opslagpercentages (doelenboom_licentiemodel.md §3):
+-- Projecten 20%. Templating (10%, per het document) heeft nog geen eigen rij
+-- in `modules` (de Sjablonenbeheer-feature is nu nog los van het
+-- licentiemodel) — die opslag zaaien we pas zodra die module-rij bestaat.
+-- KPI/Backup/Auditing: nog niet bepaald, bewust geen rij (zo'n module telt
+-- dan simpelweg niet mee in de aanvraagprijs, zie moduleSurcharges.ts).
+insert into module_surcharges (module_id, surcharge_pct, valid_from, valid_until)
+select m.id, v.surcharge_pct, '2026-01-01', '2026-12-31'
+from modules m
+join (values ('projecten', 20)) as v(key, surcharge_pct)
+  on v.key = m.key
+where not exists (select 1 from module_surcharges ms where ms.module_id = m.id);
 
 -- Eén systeembrede mededeling (bv. een onderhoudsaankondiging), door een
 -- sysadmin aan/uit te zetten met een eigen tekst — zie routes/announcement.ts.

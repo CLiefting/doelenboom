@@ -1,5 +1,4 @@
 import { pool } from './db.js';
-import { Tier } from './license.js';
 
 // Tijdelijke aanbiedingen (bv. "eerste jaar 33% korting", "nu zonder BTW") —
 // zie doelenboom_licentiemodel.md §2/§9 en db/migrations/
@@ -135,37 +134,56 @@ export async function deleteOffer(id: number | string): Promise<boolean> {
   return (r.rowCount ?? 0) > 0;
 }
 
+// Eén geselecteerde module in de prijsopgave: het bedrag is altijd het
+// percentage van de tier-BASISPRIJS (niet van het subtotaal/de vorige
+// module) — zie doelenboom_licentiemodel.md §3 ("opslag als percentage van
+// de tier-basisprijs").
+export interface ModuleSurchargeLine {
+  moduleKey: string;
+  moduleName: string;
+  surchargePct: number;
+  amountEur: number;
+}
+
 export interface PriceQuote {
   tierPriceEur: number | null;
+  moduleSurcharges: ModuleSurchargeLine[];
+  // tierPriceEur + som van moduleSurcharges, vóór een eventuele aanbieding.
+  subtotalEur: number | null;
   offer: Offer | null;
   finalPriceEur: number | null;
   btwVrij: boolean;
 }
 
-// Berekent het effectieve tarief voor één tier op datum `onDate`: basisprijs
-// (alleen als de prijs zelf op dat moment geldig is, zie tier.priceValidFrom/
-// Until) minus een eventuele automatisch-toepasbare aanbieding (de eerst
-// gevonden lopende aanbieding voor deze tier — zie listActiveOffersForTier).
-// Puur berekening, geen bijeffecten — gebruikt door zowel de publieke
+// Berekent het effectieve tarief: tier-basisprijs (op dit moment geldig, zie
+// tierPrices.ts getCurrentTierPrice) + module-opslagen (module_surcharges,
+// eveneens "op dit moment geldig" — zie moduleSurcharges.ts) min een
+// eventuele automatisch-toepasbare aanbieding (de eerst gevonden lopende
+// aanbieding voor deze tier — zie listActiveOffersForTier), toegepast op het
+// SUBTOTAAL (tier + modules), niet alleen op de tier-basisprijs. Puur
+// berekening, geen bijeffecten — gebruikt door zowel de publieke
 // aanvraagpagina (GET .../price) als het aanmaken van de aanvraag zelf (om
 // price_at_request/applied_offer_id te snapshotten).
-export function computeOfferedPrice(tier: Tier, onDate: string, offers: Offer[]): PriceQuote {
-  const priceValid =
-    tier.priceEur != null &&
-    (tier.priceValidFrom == null || tier.priceValidFrom <= onDate) &&
-    (tier.priceValidUntil == null || tier.priceValidUntil >= onDate);
-  const tierPriceEur = priceValid ? Number(tier.priceEur) : null;
+export function computeOfferedPrice(
+  tierPriceEur: number | null,
+  moduleSurcharges: ModuleSurchargeLine[],
+  offers: Offer[]
+): PriceQuote {
+  const subtotalEur =
+    tierPriceEur == null
+      ? null
+      : Math.round((tierPriceEur + moduleSurcharges.reduce((sum, m) => sum + m.amountEur, 0)) * 100) / 100;
 
   const offer = offers[0] ?? null;
-  if (tierPriceEur == null || !offer) {
-    return { tierPriceEur, offer, finalPriceEur: tierPriceEur, btwVrij: false };
+  if (subtotalEur == null || !offer) {
+    return { tierPriceEur, moduleSurcharges, subtotalEur, offer, finalPriceEur: subtotalEur, btwVrij: false };
   }
 
-  let finalPriceEur = tierPriceEur;
+  let finalPriceEur = subtotalEur;
   if (offer.kind === 'percentage' && offer.value != null) {
-    finalPriceEur = Math.round(tierPriceEur * (1 - Number(offer.value) / 100) * 100) / 100;
+    finalPriceEur = Math.round(subtotalEur * (1 - Number(offer.value) / 100) * 100) / 100;
   } else if (offer.kind === 'fixed_amount' && offer.value != null) {
-    finalPriceEur = Math.max(0, tierPriceEur - Number(offer.value));
+    finalPriceEur = Math.max(0, Math.round((subtotalEur - Number(offer.value)) * 100) / 100);
   }
-  return { tierPriceEur, offer, finalPriceEur, btwVrij: offer.kind === 'btw_vrij' };
+  return { tierPriceEur, moduleSurcharges, subtotalEur, offer, finalPriceEur, btwVrij: offer.kind === 'btw_vrij' };
 }

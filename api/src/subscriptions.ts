@@ -1,7 +1,9 @@
 import { pool } from './db.js';
 import { createTenantDefaultConfig } from './columnConfig.js';
-import { computeDefaultLicenseEndDate, listTiers, Tier } from './license.js';
-import { computeOfferedPrice, listActiveOffersForTier, PriceQuote } from './offers.js';
+import { computeDefaultLicenseEndDate, listModules, listTiers } from './license.js';
+import { computeOfferedPrice, listActiveOffersForTier, ModuleSurchargeLine, PriceQuote } from './offers.js';
+import { getCurrentTierPrice } from './tierPrices.js';
+import { getCurrentModuleSurcharge } from './moduleSurcharges.js';
 
 // Zelfbedieningsaanvraag voor een nieuw abonnement — zie
 // doelenboom_licentiemodel.md §2/§9 (het volledige ontwerp, uit het gesprek
@@ -107,17 +109,45 @@ export class SubscriptionRequestError extends Error {
   }
 }
 
-// Prijsopgave voor de publieke aanvraagpagina: tarief van de gekozen tier
-// (indien op dit moment geldig) + eerst-gevonden lopende aanbieding voor die
-// tier. Ongeauthenticeerd te gebruiken (routes/subscriptions.ts) — puur
-// leeswerk, geen bijeffecten.
-export async function quotePriceForTier(tierId: number | string): Promise<PriceQuote | null> {
+// Prijsopgave voor de publieke aanvraagpagina: het op dit moment geldige
+// tarief van de gekozen tier (zie tierPrices.ts) + de op dit moment geldige
+// opslag van elke gekozen module (moduleSurcharges.ts) + eerst-gevonden
+// lopende aanbieding voor die tier (toegepast op tier + modules samen, zie
+// computeOfferedPrice). Ongeauthenticeerd te gebruiken
+// (routes/subscriptions.ts) — puur leeswerk, geen bijeffecten.
+export async function quotePrice(
+  tierId: number | string,
+  moduleKeys: string[],
+  onDate?: string
+): Promise<PriceQuote | null> {
   const tiers = await listTiers();
   const tier = tiers.find((t) => String(t.id) === String(tierId));
   if (!tier) return null;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = onDate ?? new Date().toISOString().slice(0, 10);
+
+  const tierPrice = await getCurrentTierPrice(tierId, today);
+  const tierPriceEur = tierPrice ? Number(tierPrice.priceEur) : null;
+
+  const allModules = moduleKeys.length > 0 ? await listModules() : [];
+  const moduleSurcharges: ModuleSurchargeLine[] = [];
+  if (tierPriceEur != null) {
+    for (const key of moduleKeys) {
+      const mod = allModules.find((m) => m.key === key);
+      if (!mod) continue;
+      const surcharge = await getCurrentModuleSurcharge(mod.id, today);
+      if (!surcharge) continue; // (nog) geen opslag ingesteld voor deze module -> telt niet mee
+      const pct = Number(surcharge.surchargePct);
+      moduleSurcharges.push({
+        moduleKey: mod.key,
+        moduleName: mod.name,
+        surchargePct: pct,
+        amountEur: Math.round(tierPriceEur * (pct / 100) * 100) / 100,
+      });
+    }
+  }
+
   const offers = await listActiveOffersForTier(tierId, today);
-  return computeOfferedPrice(tier, today, offers);
+  return computeOfferedPrice(tierPriceEur, moduleSurcharges, offers);
 }
 
 // De publieke aanvraag zelf: maakt in één transactie de tenant, het
@@ -155,8 +185,8 @@ export async function createSubscriptionRequest(input: {
   const slug = await uniqueSlug(input.organizationName);
 
   const today = requestedAt.slice(0, 10);
-  const activeOffers = await listActiveOffersForTier(tier.id, today);
-  const quote = computeOfferedPrice(tier, today, activeOffers);
+  const quote = await quotePrice(tier.id, input.moduleKeys, today);
+  if (!quote) throw new SubscriptionRequestError('Onbekende tier.'); // kan hier niet echt gebeuren (tier hierboven al gevonden)
 
   const client = await pool.connect();
   try {
@@ -217,6 +247,9 @@ export async function createSubscriptionRequest(input: {
         tierId: tier.id,
         tierName: tier.name,
         modules: input.moduleKeys,
+        tierPriceEur: quote.tierPriceEur,
+        moduleSurcharges: quote.moduleSurcharges,
+        subtotalEur: quote.subtotalEur,
         priceAtRequest: quote.finalPriceEur,
         offerId: quote.offer?.id ?? null,
         trialEndDate,

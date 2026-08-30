@@ -9,18 +9,18 @@ import { pool } from './db.js';
 // routes/tenants.ts (admin-limiet), routes/doelenbomen.ts (bomen-limiet) en
 // rbac.ts (requireModule, voor de "Projecten"-module-gating).
 
+// Prijs staat sinds 30 augustus 2026 NIET meer op de tier zelf — een
+// abonnement heeft meerdere prijzen door de tijd heen (bv. € 125/jaar in
+// 2026, een ander tarief in 2027), dus dat is een eigen geschiedenis-tabel
+// geworden. Zie tierPrices.ts (tier_prices) voor het prijsbeheer, en
+// moduleSurcharges.ts (module_surcharges) voor de module-opslagpercentages,
+// die om dezelfde reden ook een eigen geschiedenis hebben.
 export interface Tier {
   id: number;
   name: string;
   maxAdmins: number;
   maxBomen: number;
   sortOrder: number;
-  // Prijs + geldigheidsperiode — zie db/migrations/0015_subscription_requests.sql
-  // en subscriptions.ts. Alle drie nullable: een tier kan (nog) geen prijs
-  // ingesteld hebben, dan toont de aanvraagpagina 'm simpelweg niet.
-  priceEur: string | null;
-  priceValidFrom: string | null;
-  priceValidUntil: string | null;
 }
 
 export interface ModuleDef {
@@ -57,10 +57,7 @@ export class LicenseLimitError extends Error {
   }
 }
 
-const TIER_SELECT_FIELDS =
-  'id, name, max_admins as "maxAdmins", max_bomen as "maxBomen", sort_order as "sortOrder", ' +
-  'price_eur as "priceEur", to_char(price_valid_from, \'YYYY-MM-DD\') as "priceValidFrom", ' +
-  'to_char(price_valid_until, \'YYYY-MM-DD\') as "priceValidUntil"';
+const TIER_SELECT_FIELDS = 'id, name, max_admins as "maxAdmins", max_bomen as "maxBomen", sort_order as "sortOrder"';
 const MODULE_SELECT_FIELDS = 'id, key, name, description';
 
 // --- Tiers: door sysadmins vrij te beheren (CRUD), zie routes/licenses.ts. ---
@@ -75,45 +72,19 @@ export async function createTier(input: {
   maxAdmins: number;
   maxBomen: number;
   sortOrder: number;
-  priceEur?: number | null;
-  priceValidFrom?: string | null;
-  priceValidUntil?: string | null;
 }): Promise<Tier> {
   const r = await pool.query(
-    `insert into tiers (name, max_admins, max_bomen, sort_order, price_eur, price_valid_from, price_valid_until)
-     values ($1,$2,$3,$4,$5,$6,$7)
+    `insert into tiers (name, max_admins, max_bomen, sort_order)
+     values ($1,$2,$3,$4)
      returning ${TIER_SELECT_FIELDS}`,
-    [
-      input.name,
-      input.maxAdmins,
-      input.maxBomen,
-      input.sortOrder,
-      input.priceEur ?? null,
-      input.priceValidFrom ?? null,
-      input.priceValidUntil ?? null,
-    ]
+    [input.name, input.maxAdmins, input.maxBomen, input.sortOrder]
   );
   return r.rows[0];
 }
 
-// priceEur/priceValidFrom/priceValidUntil: alleen bijgewerkt als de key
-// ÜBERHAUPT in de patch zit (zie routes/licenses.ts) — coalesce() alleen
-// volstaat niet, want dat kan "expliciet wissen" (null meesturen) niet
-// onderscheiden van "niet meegestuurd".
 export async function updateTier(
   id: number | string,
-  input: {
-    name?: string;
-    maxAdmins?: number;
-    maxBomen?: number;
-    sortOrder?: number;
-    priceEur?: number | null;
-    priceValidFrom?: string | null;
-    priceValidUntil?: string | null;
-    hasPriceEur?: boolean;
-    hasPriceValidFrom?: boolean;
-    hasPriceValidUntil?: boolean;
-  }
+  input: { name?: string; maxAdmins?: number; maxBomen?: number; sortOrder?: number }
 ): Promise<Tier | null> {
   const r = await pool.query(
     `update tiers set
@@ -121,25 +92,10 @@ export async function updateTier(
        max_admins = coalesce($2, max_admins),
        max_bomen = coalesce($3, max_bomen),
        sort_order = coalesce($4, sort_order),
-       price_eur = case when $5 then $6 else price_eur end,
-       price_valid_from = case when $7 then $8 else price_valid_from end,
-       price_valid_until = case when $9 then $10 else price_valid_until end,
        updated_at = now()
-     where id = $11
+     where id = $5
      returning ${TIER_SELECT_FIELDS}`,
-    [
-      input.name ?? null,
-      input.maxAdmins ?? null,
-      input.maxBomen ?? null,
-      input.sortOrder ?? null,
-      !!input.hasPriceEur,
-      input.priceEur ?? null,
-      !!input.hasPriceValidFrom,
-      input.priceValidFrom ?? null,
-      !!input.hasPriceValidUntil,
-      input.priceValidUntil ?? null,
-      id,
-    ]
+    [input.name ?? null, input.maxAdmins ?? null, input.maxBomen ?? null, input.sortOrder ?? null, id]
   );
   return r.rows[0] ?? null;
 }

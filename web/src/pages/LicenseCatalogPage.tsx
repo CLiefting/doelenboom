@@ -1,16 +1,21 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '../api';
-import type { ModuleDef, Offer, OfferKind, Tier } from '../types';
+import type { ModuleDef, ModuleSurcharge, Offer, OfferKind, Tier, TierPrice } from '../types';
 
 // Sysadmin-only catalogusbeheer voor het licentiemodel: tiers (naam + max.
-// admins/bomen + prijs/geldigheidsperiode), modules (key + naam +
-// omschrijving) en aanbiedingen (tijdelijke kortingen/BTW-vrijstellingen per
-// tier) — zie doelenboom_licentiemodel.md §9. Los van de toewijzing PER
-// tenant (welk tier/welke modules een specifieke klant heeft), dat gebeurt in
-// TenantLicensePanel binnen TenantManagementPage. Prijzen/aanbiedingen
-// hierboven voeden de publieke aanvraagpagina (SubscriptionRequestPage) —
-// dit wijkt bewust af van het oorspronkelijke §7 ("geen prijsveld"), zie de
-// toelichting bovenaan doelenboom_licentiemodel.md §9.
+// admins/bomen + eigen prijsGESCHIEDENIS), modules (key + naam + omschrijving
+// + eigen opslagpercentage-geschiedenis) en aanbiedingen (tijdelijke
+// kortingen/BTW-vrijstellingen per tier) — zie doelenboom_licentiemodel.md
+// §9. Los van de toewijzing PER tenant (welk tier/welke modules een
+// specifieke klant heeft), dat gebeurt in TenantLicensePanel binnen
+// TenantManagementPage. Prijzen/opslagen/aanbiedingen hierboven voeden de
+// publieke aanvraagpagina (SubscriptionRequestPage) — dit wijkt bewust af van
+// het oorspronkelijke §7 ("geen prijsveld"), zie de toelichting bovenaan
+// doelenboom_licentiemodel.md §9. Een tier/module heeft NIET één prijsveld:
+// een abonnement heeft door de tijd heen meerdere prijzen (bv. een ander
+// tarief per kalenderjaar), dus prijzen/opslagen zijn een eigen, uitklapbare
+// geschiedenis per tier/module (zie TierPriceSection/ModuleSurchargeSection),
+// met duidelijke markering van welke periode op dit moment geldig is.
 export default function LicenseCatalogPage({ token, onBack }: { token: string; onBack: () => void }) {
   const [tiers, setTiers] = useState<Tier[] | null>(null);
   const [modules, setModules] = useState<ModuleDef[] | null>(null);
@@ -122,6 +127,20 @@ function TierList({
   onChanged: () => void;
 }) {
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [pricesOpenFor, setPricesOpenFor] = useState<number | null>(null);
+  const [currentPrices, setCurrentPrices] = useState<Record<number, TierPrice | undefined>>({});
+
+  function loadCurrentPrices() {
+    Promise.all(
+      tiers.map((t) =>
+        api
+          .tierPrices(token, t.id)
+          .then((prices) => [t.id, prices.find((p) => isCurrentPeriod(p.validFrom, p.validUntil))] as const)
+          .catch(() => [t.id, undefined] as const)
+      )
+    ).then((entries) => setCurrentPrices(Object.fromEntries(entries)));
+  }
+  useEffect(loadCurrentPrices, [token, tiers.map((t) => t.id).join(',')]);
 
   async function remove(t: Tier) {
     const ok = window.confirm(
@@ -159,33 +178,47 @@ function TierList({
             onCancel={() => setEditingId(null)}
           />
         ) : (
-          <div key={t.id} style={styles.row}>
-            <div>
-              <strong>{t.name}</strong>{' '}
-              <span style={{ opacity: 0.7, fontSize: 12.5 }}>
-                — max {t.maxAdmins} admin{t.maxAdmins === 1 ? '' : 's'}, max {t.maxBomen} doelenbomen
-              </span>
-              <div style={{ fontSize: 12, marginTop: 2 }}>
-                {t.priceEur ? (
-                  <span style={{ color: '#203864' }}>
-                    € {Number(t.priceEur).toLocaleString('nl-NL')} / jaar
-                    {t.priceValidFrom && t.priceValidUntil && (
-                      <span style={{ opacity: 0.6 }}> (geldig {t.priceValidFrom} t/m {t.priceValidUntil})</span>
-                    )}
+          <div key={t.id} style={styles.rowGroup}>
+            <div style={styles.row}>
+              <div>
+                <strong>{t.name}</strong>{' '}
+                <span style={{ opacity: 0.7, fontSize: 12.5 }}>
+                  — max {t.maxAdmins} admin{t.maxAdmins === 1 ? '' : 's'}, max {t.maxBomen} doelenbomen
+                </span>
+                {currentPrices[t.id] ? (
+                  <span style={styles.currentPriceInline}>
+                    € {Number(currentPrices[t.id]!.priceEur).toLocaleString('nl-NL')} / jaar
                   </span>
                 ) : (
-                  <span style={{ color: '#9aa0a8', fontStyle: 'italic' }}>nog geen prijs ingesteld</span>
+                  <span style={styles.noPriceInline}>geen huidige prijs</span>
                 )}
               </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button
+                  disabled={busy}
+                  onClick={() => setPricesOpenFor(pricesOpenFor === t.id ? null : t.id)}
+                  style={btnStyle('ghost')}
+                >
+                  {pricesOpenFor === t.id ? 'Prijzen ▲' : 'Prijzen ▾'}
+                </button>
+                <button disabled={busy} onClick={() => setEditingId(t.id)} style={btnStyle('ghost')}>
+                  Bewerken
+                </button>
+                <button disabled={busy} onClick={() => remove(t)} style={btnStyle('danger-text')}>
+                  Verwijderen
+                </button>
+              </div>
             </div>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <button disabled={busy} onClick={() => setEditingId(t.id)} style={btnStyle('ghost')}>
-                Bewerken
-              </button>
-              <button disabled={busy} onClick={() => remove(t)} style={btnStyle('danger-text')}>
-                Verwijderen
-              </button>
-            </div>
+            {pricesOpenFor === t.id && (
+              <TierPriceSection
+                token={token}
+                tierId={t.id}
+                busy={busy}
+                setBusy={setBusy}
+                setError={setError}
+                onPriceListChanged={loadCurrentPrices}
+              />
+            )}
           </div>
         )
       )}
@@ -223,9 +256,6 @@ function TierForm({
   const [maxAdmins, setMaxAdmins] = useState(String(initial?.maxAdmins ?? ''));
   const [maxBomen, setMaxBomen] = useState(String(initial?.maxBomen ?? ''));
   const [sortOrder, setSortOrder] = useState(String(initial?.sortOrder ?? 0));
-  const [priceEur, setPriceEur] = useState(initial?.priceEur ?? '');
-  const [priceValidFrom, setPriceValidFrom] = useState(initial?.priceValidFrom ?? '');
-  const [priceValidUntil, setPriceValidUntil] = useState(initial?.priceValidUntil ?? '');
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -235,40 +265,22 @@ function TierForm({
     if (!name.trim()) return setError('Naam is verplicht.');
     if (!Number.isFinite(admins) || admins <= 0) return setError('Max. admins moet een positief getal zijn.');
     if (!Number.isFinite(bomen) || bomen <= 0) return setError('Max. bomen moet een positief getal zijn.');
-    const price = priceEur.trim() ? Number(priceEur) : null;
-    if (priceEur.trim() && (!Number.isFinite(price) || (price as number) < 0)) {
-      return setError('Prijs moet een positief getal zijn.');
-    }
-    if (price != null && (!priceValidFrom || !priceValidUntil)) {
-      return setError('Bij een prijs hoort een geldig-vanaf en geldig-tot datum.');
-    }
-    if (priceValidFrom && priceValidUntil && priceValidUntil < priceValidFrom) {
-      return setError('Geldig-tot mag niet vóór geldig-vanaf liggen.');
-    }
 
     setBusy(true);
     setError(null);
     try {
-      const priceFields = {
-        priceEur: price,
-        priceValidFrom: price != null ? priceValidFrom : null,
-        priceValidUntil: price != null ? priceValidUntil : null,
-      };
       if (initial) {
         await api.updateTier(token, initial.id, {
-          name: name.trim(), maxAdmins: admins, maxBomen: bomen, sortOrder: order, ...priceFields,
+          name: name.trim(), maxAdmins: admins, maxBomen: bomen, sortOrder: order,
         });
       } else {
         await api.createTier(token, {
-          name: name.trim(), maxAdmins: admins, maxBomen: bomen, sortOrder: order, ...priceFields,
+          name: name.trim(), maxAdmins: admins, maxBomen: bomen, sortOrder: order,
         });
         setName('');
         setMaxAdmins('');
         setMaxBomen('');
         setSortOrder('0');
-        setPriceEur('');
-        setPriceValidFrom('');
-        setPriceValidUntil('');
       }
       onSaved();
     } catch (err) {
@@ -293,24 +305,6 @@ function TierForm({
         style={{ ...styles.input, width: 110 }} type="number" placeholder="volgorde" value={sortOrder}
         onChange={(e) => setSortOrder(e.target.value)}
       />
-      <input
-        style={{ ...styles.input, width: 110 }} type="number" min={0} step="0.01" placeholder="prijs €/jaar"
-        value={priceEur} onChange={(e) => setPriceEur(e.target.value)}
-      />
-      <label style={styles.dateLabel}>
-        geldig vanaf
-        <input
-          style={{ ...styles.input, width: 140 }} type="date" value={priceValidFrom}
-          onChange={(e) => setPriceValidFrom(e.target.value)}
-        />
-      </label>
-      <label style={styles.dateLabel}>
-        geldig tot
-        <input
-          style={{ ...styles.input, width: 140 }} type="date" value={priceValidUntil}
-          onChange={(e) => setPriceValidUntil(e.target.value)}
-        />
-      </label>
       <button style={btnStyle('primary')} type="submit" disabled={busy}>
         {initial ? 'Opslaan' : '+ Tier toevoegen'}
       </button>
@@ -319,6 +313,186 @@ function TierForm({
           Annuleren
         </button>
       )}
+    </form>
+  );
+}
+
+function isCurrentPeriod(validFrom: string, validUntil: string): boolean {
+  const today = new Date().toISOString().slice(0, 10);
+  return today >= validFrom && today <= validUntil;
+}
+
+function TierPriceSection({
+  token,
+  tierId,
+  busy,
+  setBusy,
+  setError,
+  onPriceListChanged,
+}: {
+  token: string;
+  tierId: number;
+  busy: boolean;
+  setBusy: (b: boolean) => void;
+  setError: (e: string | null) => void;
+  onPriceListChanged: () => void;
+}) {
+  const [prices, setPrices] = useState<TierPrice[] | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [adding, setAdding] = useState(false);
+
+  function load() {
+    api.tierPrices(token, tierId).then(setPrices).catch((err) => setError(errMsg(err)));
+    onPriceListChanged();
+  }
+  useEffect(load, [token, tierId]);
+
+  async function remove(p: TierPrice) {
+    const ok = window.confirm(`Prijsperiode ${p.validFrom} t/m ${p.validUntil} verwijderen?`);
+    if (!ok) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.deleteTierPrice(token, p.id);
+      load();
+    } catch (err) {
+      setError(errMsg(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const sorted = prices ? [...prices].sort((a, b) => b.validFrom.localeCompare(a.validFrom)) : null;
+
+  return (
+    <div style={styles.historyBox}>
+      {!sorted && <p style={styles.muted}>Laden…</p>}
+      {sorted && sorted.length === 0 && !adding && <p style={styles.muted}>Nog geen prijzen ingesteld.</p>}
+      {sorted && sorted.map((p) =>
+        editingId === p.id ? (
+          <TierPriceForm
+            key={p.id}
+            token={token}
+            tierId={tierId}
+            initial={p}
+            busy={busy}
+            setBusy={setBusy}
+            setError={setError}
+            onSaved={() => {
+              setEditingId(null);
+              load();
+            }}
+            onCancel={() => setEditingId(null)}
+          />
+        ) : (
+          <div key={p.id} style={{ ...styles.historyRow, ...(isCurrentPeriod(p.validFrom, p.validUntil) ? styles.historyRowCurrent : {}) }}>
+            <div>
+              € {Number(p.priceEur).toLocaleString('nl-NL')} / jaar
+              <span style={{ opacity: 0.7, fontSize: 12, marginLeft: 8 }}>
+                {p.validFrom} t/m {p.validUntil}
+              </span>
+              {isCurrentPeriod(p.validFrom, p.validUntil) && <span style={styles.currentBadge}>huidig geldig</span>}
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button disabled={busy} onClick={() => setEditingId(p.id)} style={btnStyle('ghost')}>
+                Bewerken
+              </button>
+              <button disabled={busy} onClick={() => remove(p)} style={btnStyle('danger-text')}>
+                Verwijderen
+              </button>
+            </div>
+          </div>
+        )
+      )}
+      {adding ? (
+        <TierPriceForm
+          token={token}
+          tierId={tierId}
+          initial={null}
+          busy={busy}
+          setBusy={setBusy}
+          setError={setError}
+          onSaved={() => {
+            setAdding(false);
+            load();
+          }}
+          onCancel={() => setAdding(false)}
+        />
+      ) : (
+        <button type="button" disabled={busy} onClick={() => setAdding(true)} style={btnStyle('ghost')}>
+          + Prijsperiode toevoegen
+        </button>
+      )}
+    </div>
+  );
+}
+
+function TierPriceForm({
+  token,
+  tierId,
+  initial,
+  busy,
+  setBusy,
+  setError,
+  onSaved,
+  onCancel,
+}: {
+  token: string;
+  tierId: number;
+  initial: TierPrice | null;
+  busy: boolean;
+  setBusy: (b: boolean) => void;
+  setError: (e: string | null) => void;
+  onSaved: () => void;
+  onCancel: () => void;
+}) {
+  const [priceEur, setPriceEur] = useState(initial?.priceEur ?? '');
+  const [validFrom, setValidFrom] = useState(initial?.validFrom ?? '');
+  const [validUntil, setValidUntil] = useState(initial?.validUntil ?? '');
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const price = Number(priceEur);
+    if (!priceEur.trim() || !Number.isFinite(price) || price < 0) return setError('Prijs moet een positief getal zijn.');
+    if (!validFrom || !validUntil) return setError('Geldig-vanaf en geldig-tot zijn verplicht.');
+    if (validUntil < validFrom) return setError('Geldig-tot mag niet vóór geldig-vanaf liggen.');
+
+    setBusy(true);
+    setError(null);
+    try {
+      if (initial) {
+        await api.updateTierPrice(token, initial.id, { priceEur: price, validFrom, validUntil });
+      } else {
+        await api.createTierPrice(token, tierId, { priceEur: price, validFrom, validUntil });
+      }
+      onSaved();
+    } catch (err) {
+      setError(errMsg(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} style={styles.inlineForm}>
+      <input
+        style={{ ...styles.input, width: 110 }} type="number" min={0} step="0.01" placeholder="prijs €/jaar" required
+        value={priceEur} onChange={(e) => setPriceEur(e.target.value)}
+      />
+      <label style={styles.dateLabel}>
+        geldig vanaf
+        <input style={{ ...styles.input, width: 140 }} type="date" required value={validFrom} onChange={(e) => setValidFrom(e.target.value)} />
+      </label>
+      <label style={styles.dateLabel}>
+        geldig tot
+        <input style={{ ...styles.input, width: 140 }} type="date" required value={validUntil} onChange={(e) => setValidUntil(e.target.value)} />
+      </label>
+      <button style={btnStyle('primary')} type="submit" disabled={busy}>
+        {initial ? 'Opslaan' : '+ Toevoegen'}
+      </button>
+      <button type="button" style={btnStyle('ghost')} disabled={busy} onClick={onCancel}>
+        Annuleren
+      </button>
     </form>
   );
 }
@@ -339,6 +513,20 @@ function ModuleList({
   onChanged: () => void;
 }) {
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [surchargesOpenFor, setSurchargesOpenFor] = useState<number | null>(null);
+  const [currentSurcharges, setCurrentSurcharges] = useState<Record<number, ModuleSurcharge | undefined>>({});
+
+  function loadCurrentSurcharges() {
+    Promise.all(
+      modules.map((m) =>
+        api
+          .moduleSurcharges(token, m.id)
+          .then((list) => [m.id, list.find((s) => isCurrentPeriod(s.validFrom, s.validUntil))] as const)
+          .catch(() => [m.id, undefined] as const)
+      )
+    ).then((entries) => setCurrentSurcharges(Object.fromEntries(entries)));
+  }
+  useEffect(loadCurrentSurcharges, [token, modules.map((m) => m.id).join(',')]);
 
   async function remove(m: ModuleDef) {
     const ok = window.confirm(
@@ -376,19 +564,45 @@ function ModuleList({
             onCancel={() => setEditingId(null)}
           />
         ) : (
-          <div key={m.id} style={styles.row}>
-            <div>
-              <strong>{m.name}</strong> <span style={{ opacity: 0.6, fontSize: 12 }}>({m.key})</span>
-              {m.description && <div style={{ fontSize: 12.5, color: '#6c6f76', marginTop: 2 }}>{m.description}</div>}
+          <div key={m.id} style={styles.rowGroup}>
+            <div style={styles.row}>
+              <div>
+                <strong>{m.name}</strong> <span style={{ opacity: 0.6, fontSize: 12 }}>({m.key})</span>
+                {currentSurcharges[m.id] ? (
+                  <span style={styles.currentPriceInline}>
+                    +{Number(currentSurcharges[m.id]!.surchargePct).toLocaleString('nl-NL')}% opslag
+                  </span>
+                ) : (
+                  <span style={styles.noPriceInline}>geen huidige opslag</span>
+                )}
+                {m.description && <div style={{ fontSize: 12.5, color: '#6c6f76', marginTop: 2 }}>{m.description}</div>}
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button
+                  disabled={busy}
+                  onClick={() => setSurchargesOpenFor(surchargesOpenFor === m.id ? null : m.id)}
+                  style={btnStyle('ghost')}
+                >
+                  {surchargesOpenFor === m.id ? 'Opslag ▲' : 'Opslag ▾'}
+                </button>
+                <button disabled={busy} onClick={() => setEditingId(m.id)} style={btnStyle('ghost')}>
+                  Bewerken
+                </button>
+                <button disabled={busy} onClick={() => remove(m)} style={btnStyle('danger-text')}>
+                  Verwijderen
+                </button>
+              </div>
             </div>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <button disabled={busy} onClick={() => setEditingId(m.id)} style={btnStyle('ghost')}>
-                Bewerken
-              </button>
-              <button disabled={busy} onClick={() => remove(m)} style={btnStyle('danger-text')}>
-                Verwijderen
-              </button>
-            </div>
+            {surchargesOpenFor === m.id && (
+              <ModuleSurchargeSection
+                token={token}
+                moduleId={m.id}
+                busy={busy}
+                setBusy={setBusy}
+                setError={setError}
+                onSurchargeListChanged={loadCurrentSurcharges}
+              />
+            )}
           </div>
         )
       )}
@@ -465,6 +679,181 @@ function ModuleForm({
           Annuleren
         </button>
       )}
+    </form>
+  );
+}
+
+function ModuleSurchargeSection({
+  token,
+  moduleId,
+  busy,
+  setBusy,
+  setError,
+  onSurchargeListChanged,
+}: {
+  token: string;
+  moduleId: number;
+  busy: boolean;
+  setBusy: (b: boolean) => void;
+  setError: (e: string | null) => void;
+  onSurchargeListChanged: () => void;
+}) {
+  const [surcharges, setSurcharges] = useState<ModuleSurcharge[] | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [adding, setAdding] = useState(false);
+
+  function load() {
+    api.moduleSurcharges(token, moduleId).then(setSurcharges).catch((err) => setError(errMsg(err)));
+    onSurchargeListChanged();
+  }
+  useEffect(load, [token, moduleId]);
+
+  async function remove(s: ModuleSurcharge) {
+    const ok = window.confirm(`Opslagperiode ${s.validFrom} t/m ${s.validUntil} verwijderen?`);
+    if (!ok) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.deleteModuleSurcharge(token, s.id);
+      load();
+    } catch (err) {
+      setError(errMsg(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const sorted = surcharges ? [...surcharges].sort((a, b) => b.validFrom.localeCompare(a.validFrom)) : null;
+
+  return (
+    <div style={styles.historyBox}>
+      {!sorted && <p style={styles.muted}>Laden…</p>}
+      {sorted && sorted.length === 0 && !adding && <p style={styles.muted}>Nog geen opslagpercentages ingesteld.</p>}
+      {sorted && sorted.map((s) =>
+        editingId === s.id ? (
+          <ModuleSurchargeForm
+            key={s.id}
+            token={token}
+            moduleId={moduleId}
+            initial={s}
+            busy={busy}
+            setBusy={setBusy}
+            setError={setError}
+            onSaved={() => {
+              setEditingId(null);
+              load();
+            }}
+            onCancel={() => setEditingId(null)}
+          />
+        ) : (
+          <div key={s.id} style={{ ...styles.historyRow, ...(isCurrentPeriod(s.validFrom, s.validUntil) ? styles.historyRowCurrent : {}) }}>
+            <div>
+              {Number(s.surchargePct).toLocaleString('nl-NL')}% opslag
+              <span style={{ opacity: 0.7, fontSize: 12, marginLeft: 8 }}>
+                {s.validFrom} t/m {s.validUntil}
+              </span>
+              {isCurrentPeriod(s.validFrom, s.validUntil) && <span style={styles.currentBadge}>huidig geldig</span>}
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button disabled={busy} onClick={() => setEditingId(s.id)} style={btnStyle('ghost')}>
+                Bewerken
+              </button>
+              <button disabled={busy} onClick={() => remove(s)} style={btnStyle('danger-text')}>
+                Verwijderen
+              </button>
+            </div>
+          </div>
+        )
+      )}
+      {adding ? (
+        <ModuleSurchargeForm
+          token={token}
+          moduleId={moduleId}
+          initial={null}
+          busy={busy}
+          setBusy={setBusy}
+          setError={setError}
+          onSaved={() => {
+            setAdding(false);
+            load();
+          }}
+          onCancel={() => setAdding(false)}
+        />
+      ) : (
+        <button type="button" disabled={busy} onClick={() => setAdding(true)} style={btnStyle('ghost')}>
+          + Opslagperiode toevoegen
+        </button>
+      )}
+    </div>
+  );
+}
+
+function ModuleSurchargeForm({
+  token,
+  moduleId,
+  initial,
+  busy,
+  setBusy,
+  setError,
+  onSaved,
+  onCancel,
+}: {
+  token: string;
+  moduleId: number;
+  initial: ModuleSurcharge | null;
+  busy: boolean;
+  setBusy: (b: boolean) => void;
+  setError: (e: string | null) => void;
+  onSaved: () => void;
+  onCancel: () => void;
+}) {
+  const [surchargePct, setSurchargePct] = useState(initial?.surchargePct ?? '');
+  const [validFrom, setValidFrom] = useState(initial?.validFrom ?? '');
+  const [validUntil, setValidUntil] = useState(initial?.validUntil ?? '');
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const pct = Number(surchargePct);
+    if (!surchargePct.trim() || !Number.isFinite(pct) || pct < 0) return setError('Opslagpercentage moet een positief getal zijn.');
+    if (!validFrom || !validUntil) return setError('Geldig-vanaf en geldig-tot zijn verplicht.');
+    if (validUntil < validFrom) return setError('Geldig-tot mag niet vóór geldig-vanaf liggen.');
+
+    setBusy(true);
+    setError(null);
+    try {
+      if (initial) {
+        await api.updateModuleSurcharge(token, initial.id, { surchargePct: pct, validFrom, validUntil });
+      } else {
+        await api.createModuleSurcharge(token, moduleId, { surchargePct: pct, validFrom, validUntil });
+      }
+      onSaved();
+    } catch (err) {
+      setError(errMsg(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} style={styles.inlineForm}>
+      <input
+        style={{ ...styles.input, width: 110 }} type="number" min={0} step="0.01" placeholder="% opslag" required
+        value={surchargePct} onChange={(e) => setSurchargePct(e.target.value)}
+      />
+      <label style={styles.dateLabel}>
+        geldig vanaf
+        <input style={{ ...styles.input, width: 140 }} type="date" required value={validFrom} onChange={(e) => setValidFrom(e.target.value)} />
+      </label>
+      <label style={styles.dateLabel}>
+        geldig tot
+        <input style={{ ...styles.input, width: 140 }} type="date" required value={validUntil} onChange={(e) => setValidUntil(e.target.value)} />
+      </label>
+      <button style={btnStyle('primary')} type="submit" disabled={busy}>
+        {initial ? 'Opslaan' : '+ Toevoegen'}
+      </button>
+      <button type="button" style={btnStyle('ghost')} disabled={busy} onClick={onCancel}>
+        Annuleren
+      </button>
     </form>
   );
 }
@@ -694,5 +1083,26 @@ const styles: Record<string, React.CSSProperties> = {
   row: {
     display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8,
     padding: '8px 10px', borderRadius: 8, background: '#f7f8fa', border: '1px solid #e4e6ea',
+  },
+  rowGroup: { display: 'flex', flexDirection: 'column', gap: 6 },
+  historyBox: {
+    display: 'flex', flexDirection: 'column', gap: 6, marginLeft: 16, padding: '10px 12px',
+    borderRadius: 8, background: '#fbfbfc', border: '1px dashed #d0d4da',
+  },
+  historyRow: {
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8,
+    padding: '6px 10px', borderRadius: 6, background: 'white', border: '1px solid #e4e6ea', fontSize: 13,
+  },
+  historyRowCurrent: { border: '1.5px solid #2F9E44', background: '#F1FBF3' },
+  currentBadge: {
+    marginLeft: 8, fontSize: 10.5, fontWeight: 700, color: '#2F9E44', background: '#E3F7E7',
+    borderRadius: 4, padding: '1px 6px', verticalAlign: 'middle',
+  },
+  currentPriceInline: {
+    marginLeft: 8, fontSize: 12.5, fontWeight: 700, color: '#2F9E44', background: '#E3F7E7',
+    borderRadius: 4, padding: '1px 7px',
+  },
+  noPriceInline: {
+    marginLeft: 8, fontSize: 11.5, fontStyle: 'italic', color: '#9aa0a8',
   },
 };
