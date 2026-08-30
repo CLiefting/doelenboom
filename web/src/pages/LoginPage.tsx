@@ -48,10 +48,12 @@ export default function LoginPage({
   onLoggedIn,
   notice,
   onSignupRequest,
+  onAboutRequest,
 }: {
   onLoggedIn: (token: string, user: User) => void;
   notice?: string | null;
   onSignupRequest?: () => void;
+  onAboutRequest?: () => void;
 }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -164,6 +166,11 @@ export default function LoginPage({
           {onSignupRequest && (
             <button type="button" onClick={onSignupRequest} style={styles.signupLink}>
               Nog geen account? Abonnement aanvragen →
+            </button>
+          )}
+          {onAboutRequest && (
+            <button type="button" onClick={onAboutRequest} style={styles.signupLink}>
+              Wat is een doelenboom? Bekijk een voorbeeld →
             </button>
           )}
         </form>

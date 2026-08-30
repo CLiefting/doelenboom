@@ -11,6 +11,7 @@ import AccountManagementPage from './pages/AccountManagementPage';
 import LicenseCatalogPage from './pages/LicenseCatalogPage';
 import ChangePasswordPage from './pages/ChangePasswordPage';
 import HelpPage from './pages/HelpPage';
+import AboutPage from './pages/AboutPage';
 import LogoutFlow from './components/LogoutFlow';
 import VersionFooter from './components/VersionFooter';
 import AnnouncementBanner from './components/AnnouncementBanner';
@@ -65,7 +66,7 @@ export default function App() {
   // hieronder) — welk van de twee publieke schermen getoond wordt: het
   // inlogscherm zelf, de aanvraagpagina, of de bevestiging na het indienen.
   const [publicView, setPublicView] = useState<
-    { name: 'login' } | { name: 'signup' } | { name: 'signup-done'; email: string }
+    { name: 'login' } | { name: 'signup' } | { name: 'signup-done'; email: string } | { name: 'about' }
   >({ name: 'login' });
   // Eénmalig (bij eerste render) uitgelezen én meteen gewist — een sessionStorage-
   // "boodschap voor de volgende load", niet iets dat blijvend in state hoort te
@@ -134,12 +135,15 @@ export default function App() {
       publicContent = (
         <SignupDoneNotice email={publicView.email} onBack={() => setPublicView({ name: 'login' })} />
       );
+    } else if (publicView.name === 'about') {
+      publicContent = <AboutPage onBack={() => setPublicView({ name: 'login' })} />;
     } else {
       publicContent = (
         <LoginPage
           notice={authNotice}
           onLoggedIn={(token, user) => setSession({ token, user })}
           onSignupRequest={() => setPublicView({ name: 'signup' })}
+          onAboutRequest={() => setPublicView({ name: 'about' })}
         />
       );
     }
