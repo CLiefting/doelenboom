@@ -108,12 +108,24 @@ export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBac
                     <div style={{ ...styles.tierName, ...(accent ? { color: accent.text } : {}) }}>{t.name}</div>
                     <div style={styles.tierMeta}>
                       max {t.maxAdmins} admin{t.maxAdmins === 1 ? '' : 's'}, max {t.maxBomen} doelenbomen
-                      {t.trialDays != null && `, ${t.trialDays} dagen proef`}
-                      {t.allModulesIncluded && ' — alle modules inbegrepen'}
                     </div>
+                    {(t.trialDays != null || t.allModulesIncluded) && (
+                      <div style={styles.tierBadgeRow}>
+                        {t.trialDays != null && (
+                          <span style={{ ...styles.tierBadge, ...(accent ? { color: accent.text, background: accent.bg, borderColor: accent.border } : {}) }}>
+                            {t.trialDays} dagen proef
+                          </span>
+                        )}
+                        {t.allModulesIncluded && (
+                          <span style={{ ...styles.tierBadge, ...(accent ? { color: accent.text, background: accent.bg, borderColor: accent.border } : {}) }}>
+                            ✓ alle modules
+                          </span>
+                        )}
+                      </div>
+                    )}
                     {t.currentPriceEur != null && (
                       Number(t.currentPriceEur) === 0 ? (
-                        <div style={styles.tierPrice}>Gratis</div>
+                        <div style={{ ...styles.tierPriceFree, ...(accent ? { color: accent.text } : {}) }}>Gratis</div>
                       ) : (
                         <>
                           <div style={styles.tierPrice}>€ {Number(t.currentPriceEur).toLocaleString('nl-NL')} / jaar</div>
@@ -135,14 +147,22 @@ export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBac
           <div style={styles.narrowSection}>
             {quote && quote.tierPriceEur != null && (
               <div style={styles.priceBox}>
-                <div style={styles.priceLineItem}>Abonnement: € {quote.tierPriceEur.toLocaleString('nl-NL')} / jaar</div>
-                {quote.moduleSurcharges.map((s) => (
-                  <div key={s.moduleKey} style={styles.priceLineItem}>
-                    + {s.moduleName} ({s.surchargePct}% opslag): € {s.amountEur.toLocaleString('nl-NL')} / jaar
-                  </div>
-                ))}
-                {quote.moduleSurcharges.length > 0 && quote.subtotalEur != null && (
-                  <div style={styles.priceLineItem}>Subtotaal: € {quote.subtotalEur.toLocaleString('nl-NL')} / jaar</div>
+                {/* Bij een tier die per saldo gratis is (Evaluatie: tierPriceEur
+                    0 en dus ook altijd 0% moduleopslag) voegt de itemisering
+                    hieronder niets toe naast de "Gratis"-regel — die wordt dan
+                    overgeslagen zodat er niet twee keer hetzelfde staat. */}
+                {!(quote.finalPriceEur === 0 && !quote.offer) && (
+                  <>
+                    <div style={styles.priceLineItem}>Abonnement: € {quote.tierPriceEur.toLocaleString('nl-NL')} / jaar</div>
+                    {quote.moduleSurcharges.map((s) => (
+                      <div key={s.moduleKey} style={styles.priceLineItem}>
+                        + {s.moduleName} ({s.surchargePct}% opslag): € {s.amountEur.toLocaleString('nl-NL')} / jaar
+                      </div>
+                    ))}
+                    {quote.moduleSurcharges.length > 0 && quote.subtotalEur != null && (
+                      <div style={styles.priceLineItem}>Subtotaal: € {quote.subtotalEur.toLocaleString('nl-NL')} / jaar</div>
+                    )}
+                  </>
                 )}
                 {quote.offer ? (
                   <>
@@ -155,7 +175,7 @@ export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBac
                     </div>
                   </>
                 ) : (
-                  <div style={styles.priceFinal}>
+                  <div style={{ ...styles.priceFinal, ...(quote.finalPriceEur === 0 ? { color: '#2F9E44' } : {}) }}>
                     {quote.finalPriceEur === 0 ? 'Gratis' : `€ ${quote.finalPriceEur?.toLocaleString('nl-NL')} / jaar`}
                   </div>
                 )}
@@ -243,8 +263,12 @@ function errMsg(err: unknown): string {
 }
 
 // Metaal-accenten per tiernaam — Single-Use en eventuele eigen/maatwerktiers
-// krijgen bewust geen accent (vallen terug op de neutrale kaartstijl).
+// krijgen bewust geen accent (vallen terug op de neutrale kaartstijl). Evaluatie
+// krijgt bewust geen metaalkleur maar hetzelfde groen als elders in de app voor
+// "gratis"/"nu geldig" (zie LicenseCatalogPage.tsx currentBadge/historyRowCurrent)
+// — zo oogt de gratis proeftier meteen als een uitnodigende, positieve keuze.
 const TIER_ACCENTS: Record<string, { border: string; bg: string; text: string }> = {
+  evaluatie: { border: '#2F9E44', bg: '#F1FBF3', text: '#1F7A34' },
   brons: { border: '#B08D57', bg: '#FBF3EA', text: '#8C5A2B' },
   zilver: { border: '#9FA3A8', bg: '#F4F5F6', text: '#5B6066' },
   goud: { border: '#D4AF37', bg: '#FFFBEA', text: '#8A6D1B' },
@@ -303,7 +327,15 @@ const styles: Record<string, React.CSSProperties> = {
   },
   tierName: { fontWeight: 700, color: '#203864', fontSize: 14.5 },
   tierMeta: { fontSize: 11.5, color: '#6c6f76' },
+  tierBadgeRow: { display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 1 },
+  tierBadge: {
+    fontSize: 10, fontWeight: 600, color: '#5B6066', background: '#F4F5F6',
+    border: '1px solid #e4e6ea', borderRadius: 999, padding: '2px 7px', whiteSpace: 'nowrap',
+  },
   tierPrice: { fontSize: 13, color: '#2F5597', fontWeight: 600, marginTop: 4 },
+  // Iets groter/steviger dan tierPrice: "Gratis" is bij Evaluatie het hele
+  // verkoopargument, dat mag zichtbaar zwaarder wegen dan een gewoon bedrag.
+  tierPriceFree: { fontSize: 16, fontWeight: 700, color: '#2F9E44', marginTop: 4 },
   tierPriceBtw: { fontSize: 10.5, color: '#9aa0a8' },
   priceBox: { background: '#f4f5f7', borderRadius: 8, padding: '0.75rem 1rem' },
   priceLineItem: { fontSize: 12, color: '#6c6f76' },
