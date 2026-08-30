@@ -35,21 +35,41 @@ licensesRouter.get('/tiers', async (_req, res) => {
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+// trialDays: optioneel, null = "gebruik de standaard proefduur" (zie
+// subscriptions.ts TRIAL_DAYS), een positief geheel getal = eigen proefduur
+// voor deze tier (bv. Evaluatie: 30). undefined (veld ontbreekt) wordt door
+// de aanroeper onderscheiden van expliciet null via hasTrialDays hieronder.
+function parseTrialDays(raw: unknown): { trialDays: number | null } | { error: string } {
+  if (raw === null || raw === undefined) return { trialDays: null };
+  if (typeof raw === 'number' && Number.isInteger(raw) && raw > 0) return { trialDays: raw };
+  return { error: 'trialDays moet een positief geheel getal of null zijn.' };
+}
+
 licensesRouter.post('/tiers', requireSysadmin, async (req, res) => {
   const b = (req.body ?? {}) as Record<string, unknown>;
   const name = typeof b.name === 'string' ? b.name.trim() : '';
   const maxAdmins = Number(b.maxAdmins);
   const maxBomen = Number(b.maxBomen);
   const sortOrder = Number.isFinite(Number(b.sortOrder)) ? Number(b.sortOrder) : 0;
+  const allModulesIncluded = b.allModulesIncluded === true;
+  const trialDaysParsed = parseTrialDays(b.trialDays);
 
   const errors: string[] = [];
   if (!name) errors.push('Naam is verplicht.');
   if (!Number.isFinite(maxAdmins) || maxAdmins <= 0) errors.push('maxAdmins moet een positief getal zijn.');
   if (!Number.isFinite(maxBomen) || maxBomen <= 0) errors.push('maxBomen moet een positief getal zijn.');
+  if ('error' in trialDaysParsed) errors.push(trialDaysParsed.error);
   if (errors.length) return res.status(400).json({ error: errors.join(' ') });
 
   try {
-    const tier = await license.createTier({ name, maxAdmins, maxBomen, sortOrder });
+    const tier = await license.createTier({
+      name,
+      maxAdmins,
+      maxBomen,
+      sortOrder,
+      trialDays: (trialDaysParsed as { trialDays: number | null }).trialDays,
+      allModulesIncluded,
+    });
     res.status(201).json(tier);
   } catch (err) {
     if (isUniqueViolation(err)) return res.status(409).json({ error: `Er bestaat al een tier met naam "${name}".` });
@@ -63,6 +83,9 @@ licensesRouter.put('/tiers/:id', requireSysadmin, async (req, res) => {
   const maxAdmins = typeof b.maxAdmins === 'number' && Number.isFinite(b.maxAdmins) && b.maxAdmins > 0 ? b.maxAdmins : undefined;
   const maxBomen = typeof b.maxBomen === 'number' && Number.isFinite(b.maxBomen) && b.maxBomen > 0 ? b.maxBomen : undefined;
   const sortOrder = typeof b.sortOrder === 'number' && Number.isFinite(b.sortOrder) ? b.sortOrder : undefined;
+  const allModulesIncluded = typeof b.allModulesIncluded === 'boolean' ? b.allModulesIncluded : undefined;
+  const hasTrialDays = b.trialDays !== undefined;
+  const trialDaysParsed = hasTrialDays ? parseTrialDays(b.trialDays) : null;
 
   if (b.maxAdmins !== undefined && maxAdmins === undefined) {
     return res.status(400).json({ error: 'maxAdmins moet een positief getal zijn.' });
@@ -70,9 +93,20 @@ licensesRouter.put('/tiers/:id', requireSysadmin, async (req, res) => {
   if (b.maxBomen !== undefined && maxBomen === undefined) {
     return res.status(400).json({ error: 'maxBomen moet een positief getal zijn.' });
   }
+  if (trialDaysParsed && 'error' in trialDaysParsed) {
+    return res.status(400).json({ error: trialDaysParsed.error });
+  }
 
   try {
-    const tier = await license.updateTier(req.params.id, { name, maxAdmins, maxBomen, sortOrder });
+    const tier = await license.updateTier(req.params.id, {
+      name,
+      maxAdmins,
+      maxBomen,
+      sortOrder,
+      allModulesIncluded,
+      hasTrialDays,
+      trialDays: trialDaysParsed && 'trialDays' in trialDaysParsed ? trialDaysParsed.trialDays : undefined,
+    });
     if (!tier) return res.status(404).json({ error: 'Tier niet gevonden.' });
     res.json(tier);
   } catch (err) {

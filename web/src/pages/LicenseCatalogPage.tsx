@@ -184,6 +184,8 @@ function TierList({
                 <strong>{t.name}</strong>{' '}
                 <span style={{ opacity: 0.7, fontSize: 12.5 }}>
                   — max {t.maxAdmins} admin{t.maxAdmins === 1 ? '' : 's'}, max {t.maxBomen} doelenbomen
+                  {t.trialDays != null && `, ${t.trialDays} dagen proef`}
+                  {t.allModulesIncluded && ', alle modules inbegrepen'}
                 </span>
                 {currentPrices[t.id] ? (
                   <span style={styles.currentPriceInline}>
@@ -256,6 +258,8 @@ function TierForm({
   const [maxAdmins, setMaxAdmins] = useState(String(initial?.maxAdmins ?? ''));
   const [maxBomen, setMaxBomen] = useState(String(initial?.maxBomen ?? ''));
   const [sortOrder, setSortOrder] = useState(String(initial?.sortOrder ?? 0));
+  const [trialDays, setTrialDays] = useState(initial?.trialDays != null ? String(initial.trialDays) : '');
+  const [allModulesIncluded, setAllModulesIncluded] = useState(initial?.allModulesIncluded ?? false);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -265,6 +269,13 @@ function TierForm({
     if (!name.trim()) return setError('Naam is verplicht.');
     if (!Number.isFinite(admins) || admins <= 0) return setError('Max. admins moet een positief getal zijn.');
     if (!Number.isFinite(bomen) || bomen <= 0) return setError('Max. bomen moet een positief getal zijn.');
+    let trialDaysValue: number | null = null;
+    if (trialDays.trim()) {
+      trialDaysValue = Number(trialDays);
+      if (!Number.isFinite(trialDaysValue) || trialDaysValue <= 0) {
+        return setError('Proefdagen moet een positief getal zijn (of leeg voor de standaardduur).');
+      }
+    }
 
     setBusy(true);
     setError(null);
@@ -272,15 +283,19 @@ function TierForm({
       if (initial) {
         await api.updateTier(token, initial.id, {
           name: name.trim(), maxAdmins: admins, maxBomen: bomen, sortOrder: order,
+          trialDays: trialDaysValue, allModulesIncluded,
         });
       } else {
         await api.createTier(token, {
           name: name.trim(), maxAdmins: admins, maxBomen: bomen, sortOrder: order,
+          trialDays: trialDaysValue, allModulesIncluded,
         });
         setName('');
         setMaxAdmins('');
         setMaxBomen('');
         setSortOrder('0');
+        setTrialDays('');
+        setAllModulesIncluded(false);
       }
       onSaved();
     } catch (err) {
@@ -305,6 +320,14 @@ function TierForm({
         style={{ ...styles.input, width: 110 }} type="number" placeholder="volgorde" value={sortOrder}
         onChange={(e) => setSortOrder(e.target.value)}
       />
+      <input
+        style={{ ...styles.input, width: 140 }} type="number" min={1} placeholder="proefdagen (std. 14)"
+        value={trialDays} onChange={(e) => setTrialDays(e.target.value)}
+      />
+      <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12.5 }}>
+        <input type="checkbox" checked={allModulesIncluded} onChange={(e) => setAllModulesIncluded(e.target.checked)} />
+        alle modules inbegrepen
+      </label>
       <button style={btnStyle('primary')} type="submit" disabled={busy}>
         {initial ? 'Opslaan' : '+ Tier toevoegen'}
       </button>

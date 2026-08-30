@@ -21,6 +21,12 @@ export interface Tier {
   maxAdmins: number;
   maxBomen: number;
   sortOrder: number;
+  // Zie db/migrations/0018_evaluatie_tier.sql: generieke velden voor een
+  // "gratis proeftier" zoals Evaluatie, i.p.v. dit hard te coderen als
+  // uitzondering voor één specifieke tiernaam. trialDays null = gebruik de
+  // standaard TRIAL_DAYS uit subscriptions.ts.
+  trialDays: number | null;
+  allModulesIncluded: boolean;
 }
 
 export interface ModuleDef {
@@ -57,7 +63,9 @@ export class LicenseLimitError extends Error {
   }
 }
 
-const TIER_SELECT_FIELDS = 'id, name, max_admins as "maxAdmins", max_bomen as "maxBomen", sort_order as "sortOrder"';
+const TIER_SELECT_FIELDS =
+  'id, name, max_admins as "maxAdmins", max_bomen as "maxBomen", sort_order as "sortOrder", ' +
+  'trial_days as "trialDays", all_modules_included as "allModulesIncluded"';
 const MODULE_SELECT_FIELDS = 'id, key, name, description';
 
 // --- Tiers: door sysadmins vrij te beheren (CRUD), zie routes/licenses.ts. ---
@@ -72,19 +80,36 @@ export async function createTier(input: {
   maxAdmins: number;
   maxBomen: number;
   sortOrder: number;
+  trialDays?: number | null;
+  allModulesIncluded?: boolean;
 }): Promise<Tier> {
   const r = await pool.query(
-    `insert into tiers (name, max_admins, max_bomen, sort_order)
-     values ($1,$2,$3,$4)
+    `insert into tiers (name, max_admins, max_bomen, sort_order, trial_days, all_modules_included)
+     values ($1,$2,$3,$4,$5,$6)
      returning ${TIER_SELECT_FIELDS}`,
-    [input.name, input.maxAdmins, input.maxBomen, input.sortOrder]
+    [
+      input.name,
+      input.maxAdmins,
+      input.maxBomen,
+      input.sortOrder,
+      input.trialDays ?? null,
+      input.allModulesIncluded ?? false,
+    ]
   );
   return r.rows[0];
 }
 
 export async function updateTier(
   id: number | string,
-  input: { name?: string; maxAdmins?: number; maxBomen?: number; sortOrder?: number }
+  input: {
+    name?: string;
+    maxAdmins?: number;
+    maxBomen?: number;
+    sortOrder?: number;
+    trialDays?: number | null;
+    hasTrialDays?: boolean;
+    allModulesIncluded?: boolean;
+  }
 ): Promise<Tier | null> {
   const r = await pool.query(
     `update tiers set
@@ -92,10 +117,21 @@ export async function updateTier(
        max_admins = coalesce($2, max_admins),
        max_bomen = coalesce($3, max_bomen),
        sort_order = coalesce($4, sort_order),
+       trial_days = case when $5 then $6 else trial_days end,
+       all_modules_included = coalesce($7, all_modules_included),
        updated_at = now()
-     where id = $5
+     where id = $8
      returning ${TIER_SELECT_FIELDS}`,
-    [input.name ?? null, input.maxAdmins ?? null, input.maxBomen ?? null, input.sortOrder ?? null, id]
+    [
+      input.name ?? null,
+      input.maxAdmins ?? null,
+      input.maxBomen ?? null,
+      input.sortOrder ?? null,
+      !!input.hasTrialDays,
+      input.trialDays ?? null,
+      input.allModulesIncluded ?? null,
+      id,
+    ]
   );
   return r.rows[0] ?? null;
 }

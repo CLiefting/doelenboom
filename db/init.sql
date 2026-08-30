@@ -430,6 +430,16 @@ create table if not exists tiers (
   max_admins integer not null check (max_admins > 0),
   max_bomen integer not null check (max_bomen > 0),
   sort_order integer not null default 0,
+  -- Generieke velden voor een "gratis proeftier" zoals Evaluatie (zie
+  -- db/migrations/0018_evaluatie_tier.sql) i.p.v. dit hard te coderen als
+  -- uitzondering voor één specifieke tiernaam — consistent met "tiers zijn
+  -- volledig door sysadmins beheerbaar, geen vaste hardgecodeerde set".
+  -- trial_days: proefduur in dagen bij een zelfbedieningsaanvraag op deze
+  -- tier (null = standaard TRIAL_DAYS uit subscriptions.ts). all_modules_
+  -- included: bij zo'n aanvraag worden ALLE bestaande modules geactiveerd,
+  -- ongeacht wat de aanvrager zelf aanvinkte.
+  trial_days integer,
+  all_modules_included boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -479,6 +489,13 @@ insert into tiers (name, max_admins, max_bomen, sort_order) values
   ('Zilver', 5, 25, 2),
   ('Goud', 10, 100, 3),
   ('Diamant', 25, 100, 4)
+on conflict (name) do nothing;
+
+-- Evaluatie: gratis proeftier (zie db/migrations/0018_evaluatie_tier.sql) —
+-- 1 admin, 2 bomen, 30 dagen proefperiode, alle modules automatisch aan.
+-- sort_order -1 zet 'm vóór Single-Use in de tier-lijst/aanvraagpagina.
+insert into tiers (name, max_admins, max_bomen, sort_order, trial_days, all_modules_included) values
+  ('Evaluatie', 1, 2, -1, 30, true)
 on conflict (name) do nothing;
 
 insert into modules (key, name, description) values
@@ -616,7 +633,7 @@ create index if not exists idx_license_events_created on license_events(created_
 insert into tier_prices (tier_id, price_eur, valid_from, valid_until)
 select t.id, v.price_eur, '2026-01-01', '2026-12-31'
 from tiers t
-join (values ('Single-Use', 125), ('Brons', 250), ('Zilver', 500), ('Goud', 1000), ('Diamant', 2000)) as v(name, price_eur)
+join (values ('Single-Use', 125), ('Brons', 250), ('Zilver', 500), ('Goud', 1000), ('Diamant', 2000), ('Evaluatie', 0)) as v(name, price_eur)
   on v.name = t.name
 where not exists (select 1 from tier_prices tp where tp.tier_id = t.id);
 

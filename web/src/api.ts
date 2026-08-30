@@ -292,13 +292,29 @@ export const api = {
   // sysadmin-only (de server handhaaft dit, zie api/src/routes/licenses.ts).
   tiers: (token: string) => request<import('./types').Tier[]>('/api/tiers', {}, token),
 
-  createTier: (token: string, body: { name: string; maxAdmins: number; maxBomen: number; sortOrder: number }) =>
-    request<import('./types').Tier>('/api/tiers', { method: 'POST', body: JSON.stringify(body) }, token),
+  createTier: (
+    token: string,
+    body: {
+      name: string;
+      maxAdmins: number;
+      maxBomen: number;
+      sortOrder: number;
+      trialDays?: number | null;
+      allModulesIncluded?: boolean;
+    }
+  ) => request<import('./types').Tier>('/api/tiers', { method: 'POST', body: JSON.stringify(body) }, token),
 
   updateTier: (
     token: string,
     tierId: number,
-    body: Partial<{ name: string; maxAdmins: number; maxBomen: number; sortOrder: number }>
+    body: Partial<{
+      name: string;
+      maxAdmins: number;
+      maxBomen: number;
+      sortOrder: number;
+      trialDays: number | null;
+      allModulesIncluded: boolean;
+    }>
   ) => request<import('./types').Tier>(`/api/tiers/${tierId}`, { method: 'PUT', body: JSON.stringify(body) }, token),
 
   deleteTier: (token: string, tierId: number) => request<void>(`/api/tiers/${tierId}`, { method: 'DELETE' }, token),

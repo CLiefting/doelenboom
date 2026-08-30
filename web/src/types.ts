@@ -322,6 +322,11 @@ export type Tier = {
   maxAdmins: number;
   maxBomen: number;
   sortOrder: number;
+  // Zie db/migrations/0018_evaluatie_tier.sql — generieke velden voor een
+  // "gratis proeftier" zoals Evaluatie. trialDays null = standaard proefduur
+  // (14 dagen, zie api/src/subscriptions.ts TRIAL_DAYS).
+  trialDays: number | null;
+  allModulesIncluded: boolean;
 };
 
 // Eén prijsperiode van een tier — een abonnement heeft door de tijd heen

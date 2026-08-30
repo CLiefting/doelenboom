@@ -532,4 +532,154 @@ describe('zelfbedieningsaanvraag', () => {
       assert.equal(missing.status, 404);
     });
   });
+
+  // "Evaluatie"-achtige tiers (zie db/migrations/0018_evaluatie_tier.sql en
+  // Charles' verzoek van 30 augustus 2026: 1 admin, 2 bomen, 30 dagen proef,
+  // alle modules automatisch aan, gratis). trialDays/allModulesIncluded zijn
+  // generieke tier-velden (geen hardgecodeerde uitzondering op tiernaam), dus
+  // deze tests zetten zelf een eigen tier met die velden op i.p.v. te
+  // vertrouwen op de seed-rij "Evaluatie".
+  describe('tiers met trialDays/allModulesIncluded (generalisatie voor "gratis proeftier"-tiers)', () => {
+    async function makeEvaluatieAchtigeTier(namePrefix: string, opts: { trialDays?: number | null; allModulesIncluded?: boolean; priceEur?: number } = {}) {
+      const r = await req('POST', '/api/tiers', {
+        token: sysadminToken,
+        body: {
+          name: `${PREFIX}-${namePrefix}`, maxAdmins: 1, maxBomen: 2, sortOrder: -1,
+          trialDays: opts.trialDays ?? 30, allModulesIncluded: opts.allModulesIncluded ?? true,
+        },
+      });
+      assert.equal(r.status, 201, JSON.stringify(r.body));
+      const tier = r.body;
+      const priceEur = opts.priceEur ?? 0;
+      const priceR = await req('POST', `/api/tiers/${tier.id}/prices`, {
+        token: sysadminToken,
+        body: { priceEur, validFrom: addDaysStr(today(), -30), validUntil: addDaysStr(today(), 30) },
+      });
+      assert.equal(priceR.status, 201, JSON.stringify(priceR.body));
+      return tier;
+    }
+
+    it('POST /api/tiers accepteert trialDays/allModulesIncluded en geeft ze terug', async () => {
+      const tier = await makeEvaluatieAchtigeTier('velden', { trialDays: 30, allModulesIncluded: true });
+      assert.equal(tier.trialDays, 30);
+      assert.equal(tier.allModulesIncluded, true);
+
+      // Standaard (geen van beide meegegeven): trialDays null, allModulesIncluded false.
+      const standaard = await req('POST', '/api/tiers', {
+        token: sysadminToken,
+        body: { name: `${PREFIX}-standaardtier`, maxAdmins: 3, maxBomen: 8, sortOrder: 0 },
+      });
+      assert.equal(standaard.status, 201, JSON.stringify(standaard.body));
+      assert.equal(standaard.body.trialDays, null);
+      assert.equal(standaard.body.allModulesIncluded, false);
+    });
+
+    it('PUT /api/tiers/:id kan trialDays expliciet terugzetten naar null (standaardduur)', async () => {
+      const tier = await makeEvaluatieAchtigeTier('resettrial', { trialDays: 45 });
+      assert.equal(tier.trialDays, 45);
+
+      const updated = await req('PUT', `/api/tiers/${tier.id}`, {
+        token: sysadminToken, body: { trialDays: null },
+      });
+      assert.equal(updated.status, 200, JSON.stringify(updated.body));
+      assert.equal(updated.body.trialDays, null);
+      // Andere velden (incl. allModulesIncluded) blijven ongewijzigd als ze niet meegegeven worden.
+      assert.equal(updated.body.allModulesIncluded, true);
+      assert.equal(updated.body.maxAdmins, 1);
+    });
+
+    it('een aanvraag op zo\'n tier krijgt de tier-specifieke proefduur i.p.v. de standaard 14 dagen', async () => {
+      const tier = await makeEvaluatieAchtigeTier('proefduur', { trialDays: 30, allModulesIncluded: false });
+      const email = `${PREFIX}-proefduur@test.local`;
+      const created = await req('POST', '/api/subscription-requests', {
+        body: {
+          organizationName: `${PREFIX} Proefduur`, applicantName: 'X', applicantEmail: email,
+          password: 'wachtwoord123', tierId: tier.id, moduleKeys: [],
+        },
+      });
+      assert.equal(created.status, 201, JSON.stringify(created.body));
+
+      const list = await req('GET', '/api/subscription-requests', { token: sysadminToken });
+      const row = list.body.find((r: any) => r.requestId === created.body.requestId || r.id === created.body.requestId);
+      assert.ok(row);
+      assert.equal(row.licenseEndDate, addDaysStr(today(), 30), 'proefperiode moet de tier-specifieke 30 dagen zijn, niet de standaard 14');
+    });
+
+    it('allModulesIncluded activeert ALLE bestaande modules, ongeacht de aangevinkte moduleKeys, en de prijs is € 0 (gratis)', async () => {
+      // Extra module aanmaken zodat er zeker meerdere modules bestaan (naast
+      // de al bestaande "projecten") — allModulesIncluded moet ze ALLEBEI
+      // activeren, ook al selecteert de aanvrager er zelf geen enkele.
+      const extraModR = await req('POST', '/api/modules', {
+        token: sysadminToken, body: { key: `${PREFIX}-extramodule`, name: 'Extra module test' },
+      });
+      assert.equal(extraModR.status, 201, JSON.stringify(extraModR.body));
+      const extraMod = extraModR.body;
+
+      const tier = await makeEvaluatieAchtigeTier('allemodules', { allModulesIncluded: true, priceEur: 0 });
+      const allModules = await req('GET', '/api/modules', { token: sysadminToken });
+      assert.ok(allModules.body.some((m: any) => m.key === extraMod.key));
+
+      const email = `${PREFIX}-allemodules@test.local`;
+      const created = await req('POST', '/api/subscription-requests', {
+        body: {
+          organizationName: `${PREFIX} AlleModules`, applicantName: 'X', applicantEmail: email,
+          password: 'wachtwoord123', tierId: tier.id, moduleKeys: [], // bewust leeg — moet toch alles krijgen
+        },
+      });
+      assert.equal(created.status, 201, JSON.stringify(created.body));
+      const tenantId = created.body.tenantId as number;
+
+      const license = await req('GET', `/api/tenants/${tenantId}/license`, { token: sysadminToken });
+      assert.equal(license.status, 200, JSON.stringify(license.body));
+      const activeKeys: string[] = license.body.activeModules;
+      const expectedKeys = allModules.body.map((m: any) => m.key);
+      assert.deepEqual([...activeKeys].sort(), [...expectedKeys].sort(), 'alle op dat moment bestaande modules moeten actief zijn');
+
+      // Prijs: € 0 (gratis) — ondanks dat er modules "geactiveerd" zijn, telt
+      // er geen opslag mee omdat er voor deze test-modules geen surcharge is
+      // ingesteld; de tier-basisprijs zelf is 0.
+      const list = await req('GET', '/api/subscription-requests', { token: sysadminToken });
+      const row = list.body.find((r: any) => r.requestId === created.body.requestId || r.id === created.body.requestId);
+      assert.equal(Number(row.priceAtRequest), 0);
+    });
+
+    it('allModulesIncluded negeert ook een onbekende/ongeldige moduleKeys-waarde van de aanvrager', async () => {
+      const tier = await makeEvaluatieAchtigeTier('onbekendemodules', { allModulesIncluded: true });
+      const email = `${PREFIX}-onbekendemodules@test.local`;
+      const created = await req('POST', '/api/subscription-requests', {
+        body: {
+          organizationName: `${PREFIX} OnbekendeModules`, applicantName: 'X', applicantEmail: email,
+          password: 'wachtwoord123', tierId: tier.id, moduleKeys: ['bestaat-niet-echt'],
+        },
+      });
+      assert.equal(created.status, 201, JSON.stringify(created.body), 'allModulesIncluded moet de opgegeven (ongeldige) moduleKeys al overschreven hebben vóór de validatie');
+    });
+
+    it('regressie: een tier ZONDER trialDays/allModulesIncluded houdt de standaard 14-dagen-proef en alleen-aangevinkte-modules', async () => {
+      const tier = await makeTier('regressiestandaard', 300);
+      const modR = await req('POST', '/api/modules', {
+        token: sysadminToken, body: { key: `${PREFIX}-regressiemodule`, name: 'Regressiemodule test' },
+      });
+      assert.equal(modR.status, 201, JSON.stringify(modR.body));
+      const mod = modR.body;
+
+      const email = `${PREFIX}-regressiestandaard@test.local`;
+      const created = await req('POST', '/api/subscription-requests', {
+        body: {
+          organizationName: `${PREFIX} RegressieStandaard`, applicantName: 'X', applicantEmail: email,
+          password: 'wachtwoord123', tierId: tier.id, moduleKeys: [], // bewust geen modules gekozen
+        },
+      });
+      assert.equal(created.status, 201, JSON.stringify(created.body));
+      const tenantId = created.body.tenantId as number;
+
+      const list = await req('GET', '/api/subscription-requests', { token: sysadminToken });
+      const row = list.body.find((r: any) => r.requestId === created.body.requestId || r.id === created.body.requestId);
+      assert.equal(row.licenseEndDate, addDaysStr(today(), 14), 'zonder eigen trialDays blijft de standaardduur gelden');
+
+      const license = await req('GET', `/api/tenants/${tenantId}/license`, { token: sysadminToken });
+      assert.deepEqual(license.body.activeModules, [], 'zonder allModulesIncluded blijft alleen-aangevinkte-modules het gedrag, en er was niets aangevinkt');
+      void mod;
+    });
+  });
 });

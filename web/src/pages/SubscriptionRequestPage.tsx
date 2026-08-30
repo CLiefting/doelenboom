@@ -21,6 +21,7 @@ export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBac
   const [tierId, setTierId] = useState<number | null>(null);
   const [selectedModules, setSelectedModules] = useState<Set<string>>(new Set());
   const [quote, setQuote] = useState<PriceQuote | null>(null);
+  const selectedTier = tiers?.find((t) => t.id === tierId) ?? null;
 
   useEffect(() => {
     if (tierId == null) {
@@ -80,8 +81,8 @@ export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBac
         </button>
         <h1 style={styles.title}>Nieuw abonnement aanvragen</h1>
         <p style={styles.subtitle}>
-          Kies een abonnement, vul je gegevens in en je krijgt direct een proefaccount voor 14 dagen — meteen aan de
-          slag, betaling regelen we daarna.
+          Kies een abonnement, vul je gegevens in en je krijgt direct een proefaccount voor{' '}
+          {selectedTier?.trialDays ?? 14} dagen — meteen aan de slag, betaling regelen we daarna.
         </p>
 
         {error && <p style={styles.error}>{error}</p>}
@@ -107,14 +108,20 @@ export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBac
                     <div style={{ ...styles.tierName, ...(accent ? { color: accent.text } : {}) }}>{t.name}</div>
                     <div style={styles.tierMeta}>
                       max {t.maxAdmins} admin{t.maxAdmins === 1 ? '' : 's'}, max {t.maxBomen} doelenbomen
+                      {t.trialDays != null && `, ${t.trialDays} dagen proef`}
+                      {t.allModulesIncluded && ' — alle modules inbegrepen'}
                     </div>
                     {t.currentPriceEur != null && (
-                      <>
-                        <div style={styles.tierPrice}>€ {Number(t.currentPriceEur).toLocaleString('nl-NL')} / jaar</div>
-                        <div style={styles.tierPriceBtw}>
-                          € {(Number(t.currentPriceEur) * 1.21).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} incl. BTW (21%)
-                        </div>
-                      </>
+                      Number(t.currentPriceEur) === 0 ? (
+                        <div style={styles.tierPrice}>Gratis</div>
+                      ) : (
+                        <>
+                          <div style={styles.tierPrice}>€ {Number(t.currentPriceEur).toLocaleString('nl-NL')} / jaar</div>
+                          <div style={styles.tierPriceBtw}>
+                            € {(Number(t.currentPriceEur) * 1.21).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} incl. BTW (21%)
+                          </div>
+                        </>
+                      )
                     )}
                   </button>
                 );
@@ -148,9 +155,11 @@ export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBac
                     </div>
                   </>
                 ) : (
-                  <div style={styles.priceFinal}>€ {quote.finalPriceEur?.toLocaleString('nl-NL')} / jaar</div>
+                  <div style={styles.priceFinal}>
+                    {quote.finalPriceEur === 0 ? 'Gratis' : `€ ${quote.finalPriceEur?.toLocaleString('nl-NL')} / jaar`}
+                  </div>
                 )}
-                {!quote.btwVrij && quote.finalPriceEur != null && (
+                {!quote.btwVrij && quote.finalPriceEur != null && quote.finalPriceEur > 0 && (
                   <div style={styles.priceBtwLine}>
                     € {(quote.finalPriceEur * 1.21).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} incl. BTW (21%)
                   </div>
@@ -158,24 +167,30 @@ export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBac
               </div>
             )}
 
-            {modules && modules.length > 0 && (
-              <div>
-                <p style={styles.sectionLabel}>Optionele modules</p>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {modules.map((m) => (
-                    <label key={m.id} style={styles.moduleRow}>
-                      <input type="checkbox" checked={selectedModules.has(m.key)} onChange={() => toggleModule(m.key)} />
-                      <span>
-                        <strong>{m.name}</strong>
-                        {m.currentSurchargePct != null && (
-                          <span style={{ opacity: 0.7 }}> (+{Number(m.currentSurchargePct).toLocaleString('nl-NL')}%)</span>
-                        )}
-                        {m.description && <span style={{ opacity: 0.7 }}> — {m.description}</span>}
-                      </span>
-                    </label>
-                  ))}
+            {selectedTier?.allModulesIncluded ? (
+              <p style={{ ...styles.sectionLabel, fontWeight: 400, color: '#6c6f76', fontSize: 13 }}>
+                Alle modules zijn bij dit abonnement inbegrepen — er hoeft niets apart gekozen te worden.
+              </p>
+            ) : (
+              modules && modules.length > 0 && (
+                <div>
+                  <p style={styles.sectionLabel}>Optionele modules</p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {modules.map((m) => (
+                      <label key={m.id} style={styles.moduleRow}>
+                        <input type="checkbox" checked={selectedModules.has(m.key)} onChange={() => toggleModule(m.key)} />
+                        <span>
+                          <strong>{m.name}</strong>
+                          {m.currentSurchargePct != null && (
+                            <span style={{ opacity: 0.7 }}> (+{Number(m.currentSurchargePct).toLocaleString('nl-NL')}%)</span>
+                          )}
+                          {m.description && <span style={{ opacity: 0.7 }}> — {m.description}</span>}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )
             )}
 
             <p style={styles.sectionLabel}>Jouw gegevens</p>

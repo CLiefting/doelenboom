@@ -172,20 +172,29 @@ export async function createSubscriptionRequest(input: {
   const tier = tiers.find((t) => String(t.id) === String(input.tierId));
   if (!tier) throw new SubscriptionRequestError('Onbekende tier.');
 
-  if (input.moduleKeys.length > 0) {
-    const modRows = await pool.query('select key from modules where key = any($1)', [input.moduleKeys]);
-    if (modRows.rows.length !== input.moduleKeys.length) {
+  // Tiers met allModulesIncluded (bv. Evaluatie, zie db/migrations/
+  // 0018_evaluatie_tier.sql) negeren de door de aanvrager aangevinkte modules
+  // en krijgen ALTIJD alle op dit moment bestaande modules — vóór de
+  // validatie hieronder, zodat een leeg of onbekend moduleKeys-veld van de
+  // aanvrager hier al geen verschil meer maakt.
+  const moduleKeys = tier.allModulesIncluded ? (await listModules()).map((m) => m.key) : input.moduleKeys;
+
+  if (moduleKeys.length > 0) {
+    const modRows = await pool.query('select key from modules where key = any($1)', [moduleKeys]);
+    if (modRows.rows.length !== moduleKeys.length) {
       throw new SubscriptionRequestError('Eén of meer gekozen modules bestaan niet.');
     }
   }
 
   const now = new Date();
   const requestedAt = now.toISOString();
-  const trialEndDate = addDays(now, TRIAL_DAYS);
+  // Tier-specifieke proefduur (bv. Evaluatie: 30 dagen) valt terug op de
+  // standaard TRIAL_DAYS als de tier zelf geen eigen trialDays heeft.
+  const trialEndDate = addDays(now, tier.trialDays ?? TRIAL_DAYS);
   const slug = await uniqueSlug(input.organizationName);
 
   const today = requestedAt.slice(0, 10);
-  const quote = await quotePrice(tier.id, input.moduleKeys, today);
+  const quote = await quotePrice(tier.id, moduleKeys, today);
   if (!quote) throw new SubscriptionRequestError('Onbekende tier.'); // kan hier niet echt gebeuren (tier hierboven al gevonden)
 
   const client = await pool.connect();
@@ -211,7 +220,7 @@ export async function createSubscriptionRequest(input: {
       userId,
     ]);
 
-    for (const key of input.moduleKeys) {
+    for (const key of moduleKeys) {
       await client.query(
         `insert into tenant_modules (tenant_id, module_id)
          select $1, id from modules where key = $2 on conflict do nothing`,
@@ -231,7 +240,7 @@ export async function createSubscriptionRequest(input: {
         input.organizationName,
         input.applicantName,
         input.applicantEmail,
-        JSON.stringify(input.moduleKeys),
+        JSON.stringify(moduleKeys),
         requestedAt,
         quote.finalPriceEur,
         quote.offer?.id ?? null,
@@ -246,7 +255,7 @@ export async function createSubscriptionRequest(input: {
       detail: {
         tierId: tier.id,
         tierName: tier.name,
-        modules: input.moduleKeys,
+        modules: moduleKeys,
         tierPriceEur: quote.tierPriceEur,
         moduleSurcharges: quote.moduleSurcharges,
         subtotalEur: quote.subtotalEur,
