@@ -408,6 +408,7 @@ export type SubscriptionRequest = {
   organizationName: string;
   applicantName: string;
   applicantEmail: string;
+  applicantPhone: string | null;
   requestedModules: string[];
   status: SubscriptionRequestStatus;
   requestedAt: string;
@@ -417,6 +418,23 @@ export type SubscriptionRequest = {
   paymentRegisteredAt: string | null;
   rejectedAt: string | null;
   rejectedReason: string | null;
+};
+
+// Eén rij per tenant (ook tenants zonder zelfbedieningsaanvraag) — voor het
+// sorteerbare abonnementenoverzicht naast Tenantbeheer, zie
+// SubscriptionOverviewPage.tsx / GET /api/subscription-requests/overview.
+export type TenantSubscriptionOverviewRow = {
+  tenantId: number;
+  tenantSlug: string;
+  tenantName: string;
+  tierId: number | null;
+  tierName: string | null;
+  licenseEndDate: string | null;
+  status: SubscriptionRequestStatus | null;
+  applicantName: string | null;
+  applicantEmail: string | null;
+  applicantPhone: string | null;
+  requestedAt: string | null;
 };
 
 export type LicenseEvent = {

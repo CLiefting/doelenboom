@@ -27,10 +27,16 @@ export default function TenantManagementPage({
   token,
   user,
   onBack,
+  onSubscriptionOverviewRequest,
 }: {
   token: string;
   user: User;
   onBack: () => void;
+  // Sysadmin-only: link naar het sorteerbare abonnementenoverzicht (per
+  // tenant tier/verloopdatum/aanvrager/e-mail/telefoon), zie
+  // SubscriptionOverviewPage.tsx. Optioneel omdat deze pagina ook door een
+  // niet-sysadmin tenant-admin gebruikt wordt, die dat overzicht niet mag zien.
+  onSubscriptionOverviewRequest?: () => void;
 }) {
   const [tenants, setTenants] = useState<TenantSummary[] | null>(null);
   const [selectedTenantId, setSelectedTenantId] = useState<number | null>(null);
@@ -97,7 +103,12 @@ export default function TenantManagementPage({
             {user.isSysadmin ? 'Sysadmin — alle tenants.' : 'Tenant(s), doelenbomen en leden beheren.'}
           </p>
         </div>
-        <button onClick={onBack} style={btnStyle('ghost')}>← Terug</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {user.isSysadmin && onSubscriptionOverviewRequest && (
+            <button onClick={onSubscriptionOverviewRequest} style={btnStyle('ghost')}>Abonnementenoverzicht</button>
+          )}
+          <button onClick={onBack} style={btnStyle('ghost')}>← Terug</button>
+        </div>
       </header>
 
       {error && <p style={styles.error}>{error}</p>}

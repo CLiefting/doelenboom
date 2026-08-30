@@ -55,6 +55,7 @@ export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBac
   const [organizationName, setOrganizationName] = useState('');
   const [applicantName, setApplicantName] = useState('');
   const [applicantEmail, setApplicantEmail] = useState('');
+  const [applicantPhone, setApplicantPhone] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -99,6 +100,7 @@ export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBac
         organizationName: organizationName.trim(),
         applicantName: applicantName.trim(),
         applicantEmail: applicantEmail.trim(),
+        applicantPhone: applicantPhone.trim() || undefined,
         password,
         tierId,
         moduleKeys: [...selectedModules],
@@ -296,6 +298,15 @@ export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBac
                 required
                 value={applicantEmail}
                 onChange={(e) => setApplicantEmail(e.target.value)}
+              />
+            </label>
+            <label style={styles.label}>
+              Telefoonnummer (optioneel)
+              <input
+                style={styles.input}
+                type="tel"
+                value={applicantPhone}
+                onChange={(e) => setApplicantPhone(e.target.value)}
               />
             </label>
             <label style={styles.label}>

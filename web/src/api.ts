@@ -410,6 +410,7 @@ export const api = {
     organizationName: string;
     applicantName: string;
     applicantEmail: string;
+    applicantPhone?: string;
     password: string;
     tierId: number;
     moduleKeys: string[];
@@ -423,6 +424,9 @@ export const api = {
 
   subscriptionRequests: (token: string) =>
     request<import('./types').SubscriptionRequest[]>('/api/subscription-requests', {}, token),
+
+  subscriptionOverview: (token: string) =>
+    request<import('./types').TenantSubscriptionOverviewRow[]>('/api/subscription-requests/overview', {}, token),
 
   subscriptionRequestsPendingCount: (token: string) =>
     request<{ pendingRequests: number; upcomingRenewals: number }>('/api/subscription-requests/pending-count', {}, token),

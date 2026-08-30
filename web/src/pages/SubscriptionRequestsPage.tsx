@@ -158,7 +158,8 @@ function RowInfo({ r, extra }: { r: SubscriptionRequest; extra?: string }) {
     <div>
       <strong>{r.organizationName}</strong>{' '}
       <span style={{ opacity: 0.7, fontSize: 12.5 }}>
-        — {r.tierName ?? 'onbekende tier'}, {r.applicantName} ({r.applicantEmail})
+        — {r.tierName ?? 'onbekende tier'}, {r.applicantName} ({r.applicantEmail}
+        {r.applicantPhone && <>, {r.applicantPhone}</>})
         {r.priceAtRequest && <> · € {Number(r.priceAtRequest).toLocaleString('nl-NL')}</>}
       </span>
       {extra && <div style={{ fontSize: 11.5, color: '#946200', marginTop: 2 }}>{extra}</div>}

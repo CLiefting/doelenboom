@@ -11,6 +11,7 @@ import {
   getSubscriptionRequestById,
   listLicenseEventsForTenant,
   listSubscriptionRequests,
+  listTenantSubscriptionOverview,
   listUpcomingRenewals,
   quotePrice,
   registerPayment,
@@ -80,6 +81,9 @@ subscriptionsRouter.post('/subscription-requests', async (req, res) => {
   const organizationName = typeof b.organizationName === 'string' ? b.organizationName.trim() : '';
   const applicantName = typeof b.applicantName === 'string' ? b.applicantName.trim() : '';
   const applicantEmail = typeof b.applicantEmail === 'string' ? b.applicantEmail.trim().toLowerCase() : '';
+  // Optioneel — zie db/migrations/0019_applicant_phone.sql, geen validatie op
+  // format (internationale nummers, spaties/haakjes etc. moeten allemaal kunnen).
+  const applicantPhone = typeof b.applicantPhone === 'string' && b.applicantPhone.trim() ? b.applicantPhone.trim() : null;
   const password = typeof b.password === 'string' ? b.password : '';
   const tierId = Number(b.tierId);
   const moduleKeys = Array.isArray(b.moduleKeys) ? b.moduleKeys.filter((x): x is string => typeof x === 'string') : [];
@@ -97,6 +101,7 @@ subscriptionsRouter.post('/subscription-requests', async (req, res) => {
       organizationName,
       applicantName,
       applicantEmail,
+      applicantPhone,
       password,
       tierId,
       moduleKeys,
@@ -115,6 +120,15 @@ subscriptionsRouter.use('/subscription-requests', requireSysadmin);
 
 subscriptionsRouter.get('/subscription-requests', async (_req, res) => {
   res.json(await listSubscriptionRequests());
+});
+
+// Eén rij per tenant (ook tenants zonder zelfbedieningsaanvraag) — voor het
+// sorteerbare abonnementenoverzicht naast Tenantbeheer, zie
+// listTenantSubscriptionOverview in subscriptions.ts. Sortering zelf gebeurt
+// client-side (web/src/pages/SubscriptionOverviewPage.tsx) — dit endpoint
+// geeft altijd de volledige, ongesorteerde lijst.
+subscriptionsRouter.get('/subscription-requests/overview', async (_req, res) => {
+  res.json(await listTenantSubscriptionOverview());
 });
 
 // Telling voor de meldingsbanner bovenin (zie App.tsx/PickerPage.tsx) —

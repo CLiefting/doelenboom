@@ -7,6 +7,7 @@ import ImportPage from './pages/ImportPage';
 import TenantManagementPage from './pages/TenantManagementPage';
 import DoelenboomTemplatesPage from './pages/DoelenboomTemplatesPage';
 import SubscriptionRequestsPage from './pages/SubscriptionRequestsPage';
+import SubscriptionOverviewPage from './pages/SubscriptionOverviewPage';
 import AccountManagementPage from './pages/AccountManagementPage';
 import LicenseCatalogPage from './pages/LicenseCatalogPage';
 import ChangePasswordPage from './pages/ChangePasswordPage';
@@ -37,6 +38,7 @@ type View =
   | { name: 'tenants' }
   | { name: 'templates' }
   | { name: 'subscription-requests' }
+  | { name: 'subscription-overview' }
   | { name: 'accounts' }
   | { name: 'licenses' }
   | { name: 'password' }
@@ -229,11 +231,20 @@ export default function App() {
   // gold alleen voor 'import'/'tree', die wél een geselecteerde doelenboom
   // nodig hebben).
   if (view.name === 'tenants') {
-    content = <TenantManagementPage token={session.token} user={session.user} onBack={() => setView({ name: 'picker' })} />;
+    content = (
+      <TenantManagementPage
+        token={session.token}
+        user={session.user}
+        onBack={() => setView({ name: 'picker' })}
+        onSubscriptionOverviewRequest={() => setView({ name: 'subscription-overview' })}
+      />
+    );
   } else if (view.name === 'templates') {
     content = <DoelenboomTemplatesPage token={session.token} onBack={() => setView({ name: 'picker' })} />;
   } else if (view.name === 'subscription-requests') {
     content = <SubscriptionRequestsPage token={session.token} onBack={() => setView({ name: 'picker' })} />;
+  } else if (view.name === 'subscription-overview') {
+    content = <SubscriptionOverviewPage token={session.token} onBack={() => setView({ name: 'tenants' })} />;
   } else if (view.name === 'accounts') {
     content = <AccountManagementPage token={session.token} user={session.user} onBack={() => setView({ name: 'picker' })} />;
   } else if (view.name === 'licenses') {

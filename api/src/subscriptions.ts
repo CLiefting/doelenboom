@@ -30,6 +30,7 @@ export interface SubscriptionRequestRow {
   organizationName: string;
   applicantName: string;
   applicantEmail: string;
+  applicantPhone: string | null;
   requestedModules: string[];
   status: 'proef' | 'actief' | 'afgewezen';
   requestedAt: string;
@@ -45,7 +46,8 @@ const REQUEST_SELECT_FIELDS = `
   sr.id, sr.tenant_id as "tenantId", t.slug as "tenantSlug", t.name as "tenantName",
   sr.tier_id as "tierId", ti.name as "tierName",
   sr.organization_name as "organizationName", sr.applicant_name as "applicantName",
-  sr.applicant_email as "applicantEmail", sr.requested_modules as "requestedModules",
+  sr.applicant_email as "applicantEmail", sr.applicant_phone as "applicantPhone",
+  sr.requested_modules as "requestedModules",
   sr.status, sr.requested_at as "requestedAt", sr.price_at_request as "priceAtRequest",
   to_char(sr.contract_end_date, 'YYYY-MM-DD') as "contractEndDate",
   to_char(t.license_end_date, 'YYYY-MM-DD') as "licenseEndDate",
@@ -160,6 +162,7 @@ export async function createSubscriptionRequest(input: {
   organizationName: string;
   applicantName: string;
   applicantEmail: string;
+  applicantPhone: string | null;
   password: string;
   tierId: number;
   moduleKeys: string[];
@@ -230,9 +233,9 @@ export async function createSubscriptionRequest(input: {
 
     const requestResult = await client.query(
       `insert into subscription_requests
-         (tenant_id, tier_id, organization_name, applicant_name, applicant_email, requested_modules,
-          status, requested_at, price_at_request, applied_offer_id)
-       values ($1,$2,$3,$4,$5,$6,'proef',$7,$8,$9)
+         (tenant_id, tier_id, organization_name, applicant_name, applicant_email, applicant_phone,
+          requested_modules, status, requested_at, price_at_request, applied_offer_id)
+       values ($1,$2,$3,$4,$5,$6,$7,'proef',$8,$9,$10)
        returning id`,
       [
         tenantId,
@@ -240,6 +243,7 @@ export async function createSubscriptionRequest(input: {
         input.organizationName,
         input.applicantName,
         input.applicantEmail,
+        input.applicantPhone,
         JSON.stringify(moduleKeys),
         requestedAt,
         quote.finalPriceEur,
@@ -274,6 +278,47 @@ export async function createSubscriptionRequest(input: {
   } finally {
     client.release();
   }
+}
+
+export interface TenantSubscriptionOverviewRow {
+  tenantId: number;
+  tenantSlug: string;
+  tenantName: string;
+  tierId: number | null;
+  tierName: string | null;
+  licenseEndDate: string | null;
+  status: 'proef' | 'actief' | 'afgewezen' | null;
+  applicantName: string | null;
+  applicantEmail: string | null;
+  applicantPhone: string | null;
+  requestedAt: string | null;
+}
+
+// Eén rij per tenant (in tegenstelling tot listSubscriptionRequests hierboven,
+// dat alleen tenants toont die via de zelfbedieningsaanvraag zijn ontstaan) —
+// voor het sorteerbare abonnementenoverzicht naast Tenantbeheer (verzoek van
+// Charles, 30 augustus 2026: "welk abonnement bij de tenant hoort, tot
+// wanneer, wie de aanvrager is en wat het email/tel nummer is"). Tier en
+// verloopdatum komen bewust van tenants zelf (tier_id/license_end_date) i.p.v.
+// subscription_requests — dat zijn de levende/actuele velden, ook voor een
+// handmatig door een sysadmin aangemaakte tenant zonder aanvraag (dan blijven
+// status/aanvrager/e-mail/telefoon gewoon null).
+export async function listTenantSubscriptionOverview(): Promise<TenantSubscriptionOverviewRow[]> {
+  const r = await pool.query(
+    `select t.id as "tenantId", t.slug as "tenantSlug", t.name as "tenantName",
+            t.tier_id as "tierId", ti.name as "tierName",
+            to_char(t.license_end_date, 'YYYY-MM-DD') as "licenseEndDate",
+            sr.status,
+            sr.applicant_name as "applicantName",
+            sr.applicant_email as "applicantEmail",
+            sr.applicant_phone as "applicantPhone",
+            sr.requested_at as "requestedAt"
+     from tenants t
+     left join tiers ti on ti.id = t.tier_id
+     left join subscription_requests sr on sr.tenant_id = t.id
+     order by t.name`
+  );
+  return r.rows;
 }
 
 export async function listSubscriptionRequests(): Promise<SubscriptionRequestRow[]> {

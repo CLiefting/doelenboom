@@ -585,6 +585,9 @@ create table if not exists subscription_requests (
   organization_name text not null,
   applicant_name text not null,
   applicant_email text not null,
+  -- Optioneel — zie db/migrations/0019_applicant_phone.sql: niet elke
+  -- organisatie wil een telefoonnummer opgeven, dus bewust geen "not null".
+  applicant_phone text,
   requested_modules jsonb not null default '[]'::jsonb,
   status text not null default 'proef' check (status in ('proef', 'actief', 'afgewezen')),
   requested_at timestamptz not null default now(),

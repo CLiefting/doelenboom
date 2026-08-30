@@ -2,6 +2,7 @@ import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   startTestServer, stopTestServer, closePool, req, unique, createSysadminUser, login, cleanupByPrefix,
+  setupWritableDoelenboom,
 } from './helpers.js';
 
 const PREFIX = unique('sub');
@@ -680,6 +681,85 @@ describe('zelfbedieningsaanvraag', () => {
       const license = await req('GET', `/api/tenants/${tenantId}/license`, { token: sysadminToken });
       assert.deepEqual(license.body.activeModules, [], 'zonder allModulesIncluded blijft alleen-aangevinkte-modules het gedrag, en er was niets aangevinkt');
       void mod;
+    });
+  });
+
+  // Telefoonnummer (db/migrations/0019_applicant_phone.sql) + het sorteerbare
+  // abonnementenoverzicht-endpoint (web/src/pages/SubscriptionOverviewPage.tsx)
+  // — verzoek van Charles (30 augustus 2026): "welk abonnement bij de tenant
+  // hoort, tot wanneer, wie de aanvrager is en wat het email/tel nummer is."
+  describe('telefoonnummer bij aanvraag + abonnementenoverzicht (GET /api/subscription-requests/overview)', () => {
+    it('POST /api/subscription-requests slaat een optioneel telefoonnummer op, of laat het leeg (null)', async () => {
+      const tier = await makeTier('meteltelefoon', 250);
+
+      const metTelefoon = await req('POST', '/api/subscription-requests', {
+        body: {
+          organizationName: `${PREFIX} MetTelefoon`, applicantName: 'Y', applicantEmail: `${PREFIX}-mettel@test.local`,
+          applicantPhone: '06-12345678', password: 'wachtwoord123', tierId: tier.id, moduleKeys: [],
+        },
+      });
+      assert.equal(metTelefoon.status, 201, JSON.stringify(metTelefoon.body));
+
+      const zonderTelefoon = await req('POST', '/api/subscription-requests', {
+        body: {
+          organizationName: `${PREFIX} ZonderTelefoon`, applicantName: 'Z', applicantEmail: `${PREFIX}-zondertel@test.local`,
+          password: 'wachtwoord123', tierId: tier.id, moduleKeys: [], // geen applicantPhone meegegeven
+        },
+      });
+      assert.equal(zonderTelefoon.status, 201, JSON.stringify(zonderTelefoon.body));
+
+      const list = await req('GET', '/api/subscription-requests', { token: sysadminToken });
+      const rowMet = list.body.find((r: any) => r.id === metTelefoon.body.requestId);
+      const rowZonder = list.body.find((r: any) => r.id === zonderTelefoon.body.requestId);
+      assert.equal(rowMet.applicantPhone, '06-12345678');
+      assert.equal(rowZonder.applicantPhone, null);
+    });
+
+    it('GET /api/subscription-requests/overview is sysadmin-only', async () => {
+      const anon = await req('GET', '/api/subscription-requests/overview');
+      assert.equal(anon.status, 401);
+
+      const setup = await setupWritableDoelenboom(sysadminToken, unique(`${PREFIX}-nietsysadmin`));
+      const nietSysadmin = await req('GET', '/api/subscription-requests/overview', { token: setup.adminToken });
+      assert.equal(nietSysadmin.status, 403);
+    });
+
+    it('GET /api/subscription-requests/overview toont één rij per tenant, ook een handmatig aangemaakte tenant zonder aanvraag', async () => {
+      const tier = await makeTier('overview', 250);
+      const email = `${PREFIX}-overview@test.local`;
+      const created = await req('POST', '/api/subscription-requests', {
+        body: {
+          organizationName: `${PREFIX} Overview`, applicantName: 'Overview Aanvrager', applicantEmail: email,
+          applicantPhone: '020-1234567', password: 'wachtwoord123', tierId: tier.id, moduleKeys: [],
+        },
+      });
+      assert.equal(created.status, 201, JSON.stringify(created.body));
+
+      const handmatigSlug = unique(`${PREFIX}-handmatig`);
+      const handmatig = await req('POST', '/api/tenants', {
+        token: sysadminToken, body: { slug: handmatigSlug, name: handmatigSlug },
+      });
+      assert.equal(handmatig.status, 201, JSON.stringify(handmatig.body));
+
+      const overview = await req('GET', '/api/subscription-requests/overview', { token: sysadminToken });
+      assert.equal(overview.status, 200, JSON.stringify(overview.body));
+
+      const zelfbediening = overview.body.find((r: any) => r.tenantId === created.body.tenantId);
+      assert.ok(zelfbediening, 'de zelfbedieningstenant moet in het overzicht staan');
+      assert.equal(zelfbediening.tierName, tier.name);
+      assert.equal(zelfbediening.applicantName, 'Overview Aanvrager');
+      assert.equal(zelfbediening.applicantEmail, email);
+      assert.equal(zelfbediening.applicantPhone, '020-1234567');
+      assert.equal(zelfbediening.status, 'proef');
+      assert.ok(zelfbediening.licenseEndDate, 'proeftenant moet een verloopdatum hebben');
+
+      const rijHandmatig = overview.body.find((r: any) => r.tenantId === handmatig.body.id);
+      assert.ok(rijHandmatig, 'ook een handmatig (niet via zelfbediening) aangemaakte tenant moet in het overzicht staan');
+      assert.equal(rijHandmatig.tierName, null);
+      assert.equal(rijHandmatig.applicantName, null);
+      assert.equal(rijHandmatig.applicantEmail, null);
+      assert.equal(rijHandmatig.applicantPhone, null);
+      assert.equal(rijHandmatig.status, null);
     });
   });
 });
