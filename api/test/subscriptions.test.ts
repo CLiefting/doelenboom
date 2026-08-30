@@ -746,6 +746,7 @@ describe('zelfbedieningsaanvraag', () => {
 
       const zelfbediening = overview.body.find((r: any) => r.tenantId === created.body.tenantId);
       assert.ok(zelfbediening, 'de zelfbedieningstenant moet in het overzicht staan');
+      assert.equal(zelfbediening.requestId, created.body.requestId);
       assert.equal(zelfbediening.tierName, tier.name);
       assert.equal(zelfbediening.applicantName, 'Overview Aanvrager');
       assert.equal(zelfbediening.applicantEmail, email);
@@ -755,11 +756,73 @@ describe('zelfbedieningsaanvraag', () => {
 
       const rijHandmatig = overview.body.find((r: any) => r.tenantId === handmatig.body.id);
       assert.ok(rijHandmatig, 'ook een handmatig (niet via zelfbediening) aangemaakte tenant moet in het overzicht staan');
+      assert.equal(rijHandmatig.requestId, null);
       assert.equal(rijHandmatig.tierName, null);
       assert.equal(rijHandmatig.applicantName, null);
       assert.equal(rijHandmatig.applicantEmail, null);
       assert.equal(rijHandmatig.applicantPhone, null);
       assert.equal(rijHandmatig.status, null);
+    });
+
+    it('PUT /api/subscription-requests/:id werkt aanvrager-/contactgegevens bij, zonder het inlogaccount te raken', async () => {
+      const tier = await makeTier('bewerken', 250);
+      const email = `${PREFIX}-bewerken@test.local`;
+      const created = await req('POST', '/api/subscription-requests', {
+        body: {
+          organizationName: `${PREFIX} Bewerken`, applicantName: 'Origineel Naam', applicantEmail: email,
+          applicantPhone: '010-0000000', password: 'wachtwoord123', tierId: tier.id, moduleKeys: [],
+        },
+      });
+      assert.equal(created.status, 201, JSON.stringify(created.body));
+      const requestId = created.body.requestId;
+
+      const updated = await req('PUT', `/api/subscription-requests/${requestId}`, {
+        token: sysadminToken,
+        body: { applicantName: 'Nieuwe Naam', applicantPhone: '06-99999999' },
+      });
+      assert.equal(updated.status, 200, JSON.stringify(updated.body));
+      assert.equal(updated.body.applicantName, 'Nieuwe Naam');
+      assert.equal(updated.body.applicantPhone, '06-99999999');
+      // Niet meegegeven veld (applicantEmail) blijft ongewijzigd.
+      assert.equal(updated.body.applicantEmail, email);
+
+      // Het inlogaccount (users.email) is niet aangeraakt — nog steeds
+      // inloggen met het OORSPRONKELIJKE e-mailadres.
+      const stillLoginable = await login(email, 'wachtwoord123');
+      assert.ok(stillLoginable);
+
+      // Telefoon expliciet leegmaken.
+      const cleared = await req('PUT', `/api/subscription-requests/${requestId}`, {
+        token: sysadminToken, body: { applicantPhone: null },
+      });
+      assert.equal(cleared.status, 200, JSON.stringify(cleared.body));
+      assert.equal(cleared.body.applicantPhone, null);
+    });
+
+    it('PUT /api/subscription-requests/:id valideert e-mail, is sysadmin-only en geeft 404 voor onbekend id', async () => {
+      const tier = await makeTier('bewerkenvalidatie', 250);
+      const created = await req('POST', '/api/subscription-requests', {
+        body: {
+          organizationName: `${PREFIX} BewerkenValidatie`, applicantName: 'X', applicantEmail: `${PREFIX}-bewval@test.local`,
+          password: 'wachtwoord123', tierId: tier.id, moduleKeys: [],
+        },
+      });
+      assert.equal(created.status, 201, JSON.stringify(created.body));
+
+      const ongeldig = await req('PUT', `/api/subscription-requests/${created.body.requestId}`, {
+        token: sysadminToken, body: { applicantEmail: 'geen-emailadres' },
+      });
+      assert.equal(ongeldig.status, 400);
+
+      const anon = await req('PUT', `/api/subscription-requests/${created.body.requestId}`, {
+        body: { applicantName: 'Zonder Token' },
+      });
+      assert.equal(anon.status, 401);
+
+      const notFound = await req('PUT', '/api/subscription-requests/999999999', {
+        token: sysadminToken, body: { applicantName: 'Bestaat Niet' },
+      });
+      assert.equal(notFound.status, 404);
     });
   });
 });

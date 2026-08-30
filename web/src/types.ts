@@ -427,6 +427,10 @@ export type TenantSubscriptionOverviewRow = {
   tenantId: number;
   tenantSlug: string;
   tenantName: string;
+  // null als deze tenant geen zelfbedieningsaanvraag heeft (handmatig
+  // aangemaakt) — bepaalt of bewerken van aanvragergegevens en betaling/
+  // verlenging registreren mogelijk is.
+  requestId: number | null;
   tierId: number | null;
   tierName: string | null;
   licenseEndDate: string | null;

@@ -18,6 +18,7 @@ import {
   registerRenewal,
   rejectSubscriptionRequest,
   SubscriptionRequestError,
+  updateSubscriptionRequestApplicant,
 } from '../subscriptions.js';
 
 // Zelfbedieningsaanvraag voor een nieuw abonnement — zie
@@ -146,6 +147,33 @@ subscriptionsRouter.get('/subscription-requests/:id/events', async (req, res) =>
   const request = await getSubscriptionRequestById(req.params.id);
   if (!request) return res.status(404).json({ error: 'Aanvraag niet gevonden.' });
   res.json(await listLicenseEventsForTenant(request.tenantId));
+});
+
+// Aanvrager-/contactgegevens corrigeren (naam/e-mail/telefoon) — zie het
+// abonnementenoverzicht (SubscriptionOverviewPage.tsx). Raakt bewust NIET het
+// inlogaccount van de aanvrager, zie updateSubscriptionRequestApplicant.
+subscriptionsRouter.put('/subscription-requests/:id', async (req, res) => {
+  const b = (req.body ?? {}) as Record<string, unknown>;
+  const updates: { applicantName?: string; applicantEmail?: string; applicantPhone?: string | null } = {};
+
+  if ('applicantName' in b) {
+    const v = typeof b.applicantName === 'string' ? b.applicantName.trim() : '';
+    if (!v) return res.status(400).json({ error: 'Naam mag niet leeg zijn.' });
+    updates.applicantName = v;
+  }
+  if ('applicantEmail' in b) {
+    const v = typeof b.applicantEmail === 'string' ? b.applicantEmail.trim().toLowerCase() : '';
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) return res.status(400).json({ error: 'Geldig e-mailadres is verplicht.' });
+    updates.applicantEmail = v;
+  }
+  if ('applicantPhone' in b) {
+    updates.applicantPhone = typeof b.applicantPhone === 'string' && b.applicantPhone.trim() ? b.applicantPhone.trim() : null;
+  }
+  if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'Niets om bij te werken.' });
+
+  const updated = await updateSubscriptionRequestApplicant(req.params.id, updates);
+  if (!updated) return res.status(404).json({ error: 'Aanvraag niet gevonden.' });
+  res.json(updated);
 });
 
 subscriptionsRouter.post('/subscription-requests/:id/register-payment', async (req: AuthedRequest, res) => {

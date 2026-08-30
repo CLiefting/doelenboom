@@ -434,6 +434,19 @@ export const api = {
   subscriptionRequestEvents: (token: string, requestId: number) =>
     request<import('./types').LicenseEvent[]>(`/api/subscription-requests/${requestId}/events`, {}, token),
 
+  // Aanvrager-/contactgegevens corrigeren (naam/e-mail/telefoon) — raakt
+  // bewust NIET het inlogaccount van de aanvrager. Elk veld is optioneel.
+  updateSubscriptionRequestApplicant: (
+    token: string,
+    requestId: number,
+    body: { applicantName?: string; applicantEmail?: string; applicantPhone?: string | null }
+  ) =>
+    request<import('./types').SubscriptionRequest>(
+      `/api/subscription-requests/${requestId}`,
+      { method: 'PUT', body: JSON.stringify(body) },
+      token
+    ),
+
   registerSubscriptionPayment: (token: string, requestId: number) =>
     request<import('./types').SubscriptionRequest>(
       `/api/subscription-requests/${requestId}/register-payment`,

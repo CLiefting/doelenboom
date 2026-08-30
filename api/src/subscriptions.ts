@@ -284,6 +284,11 @@ export interface TenantSubscriptionOverviewRow {
   tenantId: number;
   tenantSlug: string;
   tenantName: string;
+  // null als deze tenant geen zelfbedieningsaanvraag heeft (handmatig door
+  // een sysadmin aangemaakt) — bepaalt in de UI of bewerken van
+  // aanvrager-/contactgegevens en betaling/verlenging registreren mogelijk
+  // is (die acties werken op een subscription_requests-rij).
+  requestId: number | null;
   tierId: number | null;
   tierName: string | null;
   licenseEndDate: string | null;
@@ -306,6 +311,7 @@ export interface TenantSubscriptionOverviewRow {
 export async function listTenantSubscriptionOverview(): Promise<TenantSubscriptionOverviewRow[]> {
   const r = await pool.query(
     `select t.id as "tenantId", t.slug as "tenantSlug", t.name as "tenantName",
+            sr.id as "requestId",
             t.tier_id as "tierId", ti.name as "tierName",
             to_char(t.license_end_date, 'YYYY-MM-DD') as "licenseEndDate",
             sr.status,
@@ -515,6 +521,37 @@ export async function rejectSubscriptionRequest(
     client.release();
   }
   return getSubscriptionRequestById(requestId);
+}
+
+// Aanvrager-/contactgegevens van een bestaande aanvraag corrigeren (bv. een
+// tikfout, of een gewijzigd telefoonnummer) — zie het abonnementenoverzicht
+// (SubscriptionOverviewPage.tsx). BEWUST alleen de kolommen op
+// subscription_requests zelf: dit raakt NIET het inlogaccount (users.email/
+// wachtwoord) van de aanvrager — dat is een apart, bewust gescheiden concept
+// (zie AccountManagementPage.tsx voor accountbeheer). Elk veld is optioneel:
+// alleen meegegeven velden worden bijgewerkt (undefined = ongewijzigd
+// laten); applicantPhone mag expliciet naar null (leegmaken).
+export async function updateSubscriptionRequestApplicant(
+  id: number | string,
+  input: { applicantName?: string; applicantEmail?: string; applicantPhone?: string | null }
+): Promise<SubscriptionRequestRow | null> {
+  const r = await pool.query(
+    `update subscription_requests set
+       applicant_name = coalesce($1, applicant_name),
+       applicant_email = coalesce($2, applicant_email),
+       applicant_phone = case when $3 then $4 else applicant_phone end
+     where id = $5
+     returning id`,
+    [
+      input.applicantName ?? null,
+      input.applicantEmail ?? null,
+      'applicantPhone' in input,
+      input.applicantPhone ?? null,
+      id,
+    ]
+  );
+  if (r.rows.length === 0) return null;
+  return getSubscriptionRequestById(id);
 }
 
 export async function getSubscriptionRequestById(id: number | string): Promise<SubscriptionRequestRow | null> {
