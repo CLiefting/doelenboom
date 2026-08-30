@@ -83,13 +83,21 @@ create table if not exists account_retention_events (
 create index if not exists idx_retention_events_user on account_retention_events(user_id);
 create index if not exists idx_retention_events_created on account_retention_events(created_at desc);
 
--- Zaai Gebruiksvoorwaarden v0.3 als de eerste, gepubliceerde versie --
--- letterlijk overgenomen uit Doelenboom_Gebruiksvoorwaarden_v0.3.docx, geen
--- enkel woord aangepast (inclusief het document z'n eigen "concept, nog
--- juridisch te toetsen"-voorbehoud, dat bewust onderdeel is van de getoonde
--- tekst -- zie docs/juridische-documenten-en-retentie.md).
+-- Zaai Gebruiksvoorwaarden v0.3 -- letterlijk overgenomen uit
+-- Doelenboom_Gebruiksvoorwaarden_v0.3.docx, geen enkel woord aangepast
+-- (inclusief het document z'n eigen "concept, nog juridisch te toetsen"-
+-- voorbehoud, dat bewust onderdeel is van de getoonde tekst). Status 'draft'
+-- (i.p.v. 'published'): de tekst zelf is nog geen door een jurist getoetste,
+-- definitieve versie (zie Gebruiksvoorwaarden headertekst "Conceptversie 0.3"
+-- en de lijst "Openstaande punten voor versie 1.0" onderaan de tekst) en is
+-- daarom bewust nog niet bindend -- getCurrentDocument toont 'm alsnog (met
+-- een zichtbare conceptbanner, zie LegalPage.tsx), maar needsTermsAcceptance
+-- vereist alleen acceptatie van een 'published' versie, dus er wordt nu geen
+-- acceptatie afgedwongen. Zet dit pas op 'published' (met een eigen
+-- published_at) zodra een juridisch getoetste versie definitief is -- zie
+-- docs/juridische-documenten-en-retentie.md.
 insert into legal_documents (doc_type, version, effective_date, published_at, status, content)
-values ('terms', '0.3', '2026-08-30', now(), 'published', $doc$
+values ('terms', '0.3', '2026-08-30', null, 'draft', $doc$
 Eigenaar: Code072.nl
 Status: Concept – voor juridische toetsing
 Datum: 30 augustus 2026

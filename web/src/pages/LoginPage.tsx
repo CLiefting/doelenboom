@@ -1,4 +1,4 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import { api, ApiError } from '../api';
 import type { User } from '../types';
 
@@ -61,6 +61,23 @@ export default function LoginPage({
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const emailRef = useRef<HTMLInputElement>(null);
+
+  // Focus zonder scroll i.p.v. de JSX-autoFocus-prop: het inlogformulier zit
+  // in App.tsx's contentAreaStyle-wrapper (flex:1, overflow:'auto') — een
+  // eigen, in hoogte begrensd scrollvak i.p.v. de gewone paginascroll (zo kan
+  // TreePage.tsx's iframe daarbinnen precies passen). Een gewone autoFocus
+  // laat de browser dat scrollvak automatisch naar het inputveld scrollen —
+  // op mobiel, nu het features-paneel (incl. eye-catcher) hierboven niet
+  // meer verborgen is maar het formulier daardoor wél verder naar beneden
+  // staat, schoot dat scrollvak bij het laden meteen honderden pixels naar
+  // beneden, waardoor precies de eye-catcher en de features onzichtbaar
+  // bleven totdat je zelf terugscrolde. { preventScroll: true } geeft het
+  // veld nog steeds meteen focus (toetsenbordgebruikers kunnen direct
+  // typen), maar zonder die ongewenste sprong.
+  useEffect(() => {
+    emailRef.current?.focus({ preventScroll: true });
+  }, []);
 
   const noticeText =
     notice === 'idle_timeout'
@@ -85,14 +102,28 @@ export default function LoginPage({
 
   return (
     <div style={styles.page}>
-      {/* Media query kan niet via inline styles — dit stukje CSS verbergt het
-          features-paneel op smalle schermen (telefoon/smalle tablet), zodat
-          daar alleen het inlogformulier overblijft. De hero-tile blijft altijd
-          zichtbaar, ook op mobiel. */}
+      {/* Media query kan niet via inline styles — op smalle schermen
+          (telefoon/smalle tablet) stapelt dit de twee kolommen onder elkaar
+          i.p.v. naast elkaar. Eerder werd het features-paneel op mobiel
+          volledig verborgen (display:none), maar dat nam ook de eye-catcher-
+          screenshot mee — die zit in hetzelfde paneel. Nu blijft alles
+          zichtbaar, in één kolom i.p.v. twee naast elkaar.
+          featuresPanel.overflowY:'auto' (styles hieronder) is nodig op
+          desktop, waar de twee kolommen een gelijke, door flex bepaalde
+          hoogte delen (een vangnet tegen clippen bij een lage viewport) —
+          maar 'flex:1' + 'overflow:auto' samen laat een flex-item in de
+          flexbox-spec zijn 'automatic minimum size' verliezen, waardoor het
+          op mobiel (nu in kolomvorm, geen gedeelde hoogte meer nodig) kleiner
+          werd geknepen dan zijn eigen inhoud en de features/eye-catcher
+          onbedoeld in een eigen scrollvakje terechtkwamen i.p.v. gewoon mee
+          te groeien met de pagina. overflow:visible + flex:none hieronder
+          zet dat op mobiel recht. */}
       <style>{`
         @media (max-width: 860px) {
-          .login-features-panel { display: none !important; }
-          .login-form-panel { flex: 1 1 100% !important; }
+          .login-split { flex-direction: column !important; }
+          .login-features-panel, .login-form-panel {
+            flex: none !important; width: 100%; overflow: visible !important; max-height: none !important;
+          }
         }
       `}</style>
 
@@ -109,7 +140,7 @@ export default function LoginPage({
         </div>
       </div>
 
-      <div style={styles.split}>
+      <div className="login-split" style={styles.split}>
       <div className="login-features-panel" style={styles.featuresPanel}>
         <div style={styles.featuresPanelInner}>
           {/* Eén compacte alinea i.p.v. de eerdere drie — zo blijft er op een
@@ -158,12 +189,12 @@ export default function LoginPage({
           <label style={styles.label}>
             E-mail
             <input
+              ref={emailRef}
               style={styles.input}
               type="email"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              autoFocus
             />
           </label>
           <label style={styles.label}>

@@ -697,9 +697,12 @@ create index if not exists idx_retention_events_user on account_retention_events
 create index if not exists idx_retention_events_created on account_retention_events(created_at desc);
 
 -- Gebruiksvoorwaarden v0.3, letterlijk overgenomen -- zie de toelichting bij
--- migratie 0017.
+-- migratie 0017. Status 'draft' (niet 'published'): de tekst is zelf nog een
+-- niet-juridisch-getoetst concept ("Conceptversie 0.3", zie de tekst zelf) en
+-- wordt daarom nu getoond maar niet als bindend afgedwongen -- zie
+-- docs/juridische-documenten-en-retentie.md.
 insert into legal_documents (doc_type, version, effective_date, published_at, status, content)
-values ('terms', '0.3', '2026-08-30', now(), 'published', $doc$
+values ('terms', '0.3', '2026-08-30', null, 'draft', $doc$
 Eigenaar: Code072.nl
 Status: Concept – voor juridische toetsing
 Datum: 30 augustus 2026

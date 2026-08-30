@@ -7,14 +7,16 @@ automatische verwijdering van 12+ maanden inactieve gebruikersaccounts. Zie
 ook `db/migrations/0017_legal_and_retention.sql` (schema + zaaidata) en de
 brontekst `Doelenboom_Gebruiksvoorwaarden_v0.3.docx`.
 
-**Status van de tekst zelf**: de gepubliceerde gebruiksvoorwaarden zijn
-letterlijk overgenomen uit het door de opdrachtgever aangeleverde
-Word-document — geen woord aangepast, inclusief het document z'n eigen
-"concept, nog juridisch te toetsen"-voorbehoud en de lijst "Openstaande
-punten vóór versie 1.0" onderaan de tekst zelf. De privacyverklaring is nog
-niet aangeleverd/goedgekeurd en staat daarom als expliciet gelabelde
-conceptplaceholder in de database (status `draft`, nooit `published`) — er
-is bewust geen privacytekst verzonnen.
+**Status van de tekst zelf**: de gebruiksvoorwaarden zijn letterlijk
+overgenomen uit het door de opdrachtgever aangeleverde Word-document — geen
+woord aangepast, inclusief het document z'n eigen "Conceptversie 0.3, nog
+juridisch te toetsen"-voorbehoud en de lijst "Openstaande punten vóór versie
+1.0" onderaan de tekst zelf. Precies om die reden staat v0.3 in de database
+zelf ook op status `draft`, niet `published` — de tekst is zichtbaar en
+klaar, maar wordt (nog) niet als bindend afgedwongen (zie §4 en §14). De
+privacyverklaring is nog niet aangeleverd/goedgekeurd en staat om dezelfde
+reden als expliciet gelabelde conceptplaceholder in de database (status
+`draft`) — er is bewust geen privacytekst verzonnen.
 
 ## 1. Datamodel
 
@@ -74,9 +76,9 @@ regel-voor-regel renderer voor deze conventie.
 
 - `GET /api/legal/:type` (`terms`/`privacy`, publiek, geen token) geeft het
   meest relevante document terug: bij voorkeur de meest recente
-  `published`-versie, anders (voor `privacy`, dat nog geen gepubliceerde
-  versie heeft) de meest recente `draft` — zodat de pagina nooit leeg is en
-  altijd laat zien of het om een concept gaat (`status`-veld,
+  `published`-versie, anders (op dit moment het geval voor zowel `terms` als
+  `privacy` — zie hierboven) de meest recente `draft` — zodat de pagina nooit
+  leeg is en altijd laat zien of het om een concept gaat (`status`-veld,
   `LegalPage.tsx` toont dan een oranje conceptbanner).
 - `LegalPage.tsx` is een losstaande, publiek bereikbare React-pagina (geen
   inlogscherm-modal met een klein scrollvak) met een duidelijke H1/H2-
@@ -116,6 +118,28 @@ dit wordt bepaald:
 bestaande gebruikers opnieuw moeten accepteren (bv. bij een materiële
 wijziging) of niet (bv. een tekstuele correctie zonder inhoudelijke
 wijziging).
+
+**Huidige situatie**: omdat v0.3 op status `draft` staat (zie hierboven),
+bestaat er op dit moment geen enkele gepubliceerde `terms`-versie — regel 1
+hierboven is dus voor iedereen van toepassing. `termsAcceptanceRequired`
+staat voor elke gebruiker op `false` en `TermsAcceptanceGate.tsx` verschijnt
+nergens, tot het moment dat er daadwerkelijk een `published`-versie bestaat.
+
+**Een versie publiceren** (zodra een tekst juridisch is getoetst en
+definitief is): er is bewust geen sysadmin-beheerscherm voor gebouwd — dat
+was geen onderdeel van de opdracht en publiceren is geen dagelijkse
+handeling. Publiceren gebeurt nu door een rij toe te voegen (of de
+bestaande conceptrij bij te werken) via een migratie, op dezelfde manier als
+v0.3 zelf is gezaaid:
+
+```sql
+insert into legal_documents (doc_type, version, effective_date, published_at, status, requires_reacceptance, content)
+values ('terms', '1.0', '2026-..', now(), 'published', true, $doc$ ... $doc$);
+```
+
+Vanaf dat moment wordt acceptatie voor iedereen afgedwongen (zie §14 voor de
+volledige acceptatiecriteria-lijst, die dit expliciet als open punt
+benoemt).
 
 ## 5. Inactiviteitsbeleid: definities en constanten
 
@@ -279,9 +303,14 @@ gemiste run (bv. door een herstart) snel wordt ingehaald.
 
 ## 14. Acceptatiecriteria ("wanneer is dit klaar?")
 
-- [x] De letterlijke Gebruiksvoorwaarden v0.3-tekst is ongewijzigd
-      gepubliceerd en publiek bereikbaar (`GET /api/legal/terms`,
-      `LegalPage.tsx`).
+- [x] De letterlijke Gebruiksvoorwaarden v0.3-tekst is ongewijzigd en
+      publiek bereikbaar (`GET /api/legal/terms`, `LegalPage.tsx`), duidelijk
+      gelabeld als concept (status `draft`, zie §4) zolang er geen
+      juridisch getoetste, definitieve versie is gepubliceerd.
+- [ ] Een juridisch getoetste, definitieve versie is gepubliceerd (status
+      `published`) — pas dan wordt acceptatie daadwerkelijk afgedwongen, zie
+      §4 "Een versie publiceren". Bewust nog open: dit is een inhoudelijke/
+      juridische beslissing, geen technische.
 - [x] De privacyverklaring is een duidelijk gelabelde conceptplaceholder,
       geen verzonnen tekst.
 - [x] Versiebeheer (`version`, `effective_date`, `status`,
