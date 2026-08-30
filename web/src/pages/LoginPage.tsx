@@ -119,6 +119,21 @@ export default function LoginPage({
             investering naar aantoonbare impact.
           </p>
 
+          {/* Eye-catcher: een echte, herkenbare doelenboom (screenshot van de
+              Demo-tenant, zie AboutPage.tsx/web/public/about/) i.p.v. alleen
+              tekst — klikbaar naar dezelfde uitlegpagina als de tekstlink
+              hieronder had. Toont meteen wát dit is, nog vóór iemand een
+              feature-omschrijving leest. */}
+          {onAboutRequest && (
+            <button type="button" onClick={onAboutRequest} style={styles.previewCard} aria-label="Bekijk een voorbeeld doelenboom">
+              <img src="/about/overzicht.png" alt="Voorbeeld van een doelenboom: van project tot missie" style={styles.previewImg} />
+              <span style={styles.previewOverlay}>
+                <span>Zo ziet een doelenboom eruit</span>
+                <span style={styles.previewCta}>Bekijk een voorbeeld →</span>
+              </span>
+            </button>
+          )}
+
           <ul style={styles.featureList}>
             {FEATURES.map((f) => (
               <li key={f.title} style={styles.featureItem}>
@@ -130,12 +145,6 @@ export default function LoginPage({
               </li>
             ))}
           </ul>
-
-          {onAboutRequest && (
-            <button type="button" onClick={onAboutRequest} style={styles.aboutLink}>
-              Wat is een doelenboom? Bekijk een voorbeeld →
-            </button>
-          )}
         </div>
       </div>
 
@@ -316,10 +325,19 @@ const styles: Record<string, React.CSSProperties> = {
   brandName: { color: 'white', fontWeight: 700, fontSize: 16, letterSpacing: -0.3 },
   tagline: { color: 'rgba(255,255,255,0.82)', fontSize: 14, lineHeight: 1.45, margin: 0 },
   featureList: { listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: '0.75rem' },
-  aboutLink: {
-    marginTop: '0.9rem', alignSelf: 'flex-start', border: '1px solid rgba(255,255,255,0.35)', background: 'rgba(255,255,255,0.08)',
-    color: 'white', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', borderRadius: 999, padding: '6px 12px',
+  previewCard: {
+    position: 'relative', display: 'block', width: '100%', padding: 0, margin: 0,
+    border: '1px solid rgba(255,255,255,0.25)', borderRadius: 10, overflow: 'hidden',
+    cursor: 'pointer', background: 'none', boxShadow: '0 6px 18px rgba(0,0,0,0.18)',
   },
+  previewImg: { display: 'block', width: '100%', height: 'auto' },
+  previewOverlay: {
+    position: 'absolute', left: 0, right: 0, bottom: 0,
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+    padding: '7px 10px', background: 'linear-gradient(0deg, rgba(15,26,50,0.92) 0%, rgba(15,26,50,0.0) 100%)',
+    color: 'white', fontSize: 11.5, fontWeight: 600,
+  },
+  previewCta: { color: '#9fc0ff', fontWeight: 700, whiteSpace: 'nowrap' },
   featureItem: { display: 'flex', gap: 12, alignItems: 'flex-start' },
   featureIcon: {
     flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
