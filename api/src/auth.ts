@@ -5,27 +5,50 @@ import { previewOrCommitWipe } from './tenantWipe.js';
 
 const JWT_SECRET = process.env.JWT_SECRET ?? 'dev-secret-change-me';
 
+// 15-minuten-inactiviteit-beveiliging (zie POST /activity hieronder en
+// web/src/useActivityPing.ts / web/public/tree.html's eigen kopie daarvan):
+// een sessie waarvan de écht-activiteit langer dan dit aantal minuten
+// geleden is, wordt hard geweigerd — geen glijdend venster, zie de
+// toelichting bij de /activity-check verderop.
+const IDLE_TIMEOUT_MINUTES = 15;
+
 export type AuthedRequest = Request & {
   user?: { id: number; email: string; isSysadmin: boolean; sessionId: string };
 };
 
-export function requireAuth(req: AuthedRequest, res: Response, next: NextFunction) {
+// Async, want naast de JWT-handtekening wordt ook de sessions-rij zelf
+// gecontroleerd: een geldige JWT alleen is niet genoeg zodra er is uitgelogd
+// (ended_at, zie POST /logout) of de sessie te lang inactief is geweest
+// (last_activity_at, zie IDLE_TIMEOUT_MINUTES hierboven) — anders zou een JWT
+// tot z'n 12 uur-vervaldatum blijven werken ondanks een expliciete logout of
+// een dichtgeklapte laptop.
+export async function requireAuth(req: AuthedRequest, res: Response, next: NextFunction) {
   const header = req.headers.authorization;
   if (!header?.startsWith('Bearer ')) {
     return res.status(401).json({ error: 'Niet ingelogd' });
   }
+  let payload: { id: number; email: string; isSysadmin: boolean; sid: string };
   try {
-    const payload = jwt.verify(header.slice('Bearer '.length), JWT_SECRET) as {
-      id: number;
-      email: string;
-      isSysadmin: boolean;
-      sid: string;
-    };
-    req.user = { id: payload.id, email: payload.email, isSysadmin: payload.isSysadmin, sessionId: payload.sid };
-    next();
+    payload = jwt.verify(header.slice('Bearer '.length), JWT_SECRET) as typeof payload;
   } catch {
     return res.status(401).json({ error: 'Ongeldige of verlopen sessie' });
   }
+
+  const sessionResult = await pool.query(
+    `select ended_at, (last_activity_at < now() - interval '${IDLE_TIMEOUT_MINUTES} minutes') as idle
+     from sessions where id = $1`,
+    [payload.sid]
+  );
+  const session = sessionResult.rows[0];
+  if (!session || session.ended_at !== null) {
+    return res.status(401).json({ error: 'Sessie is beëindigd', reason: 'session_ended' });
+  }
+  if (session.idle) {
+    return res.status(401).json({ error: 'Sessie is verlopen door inactiviteit', reason: 'idle_timeout' });
+  }
+
+  req.user = { id: payload.id, email: payload.email, isSysadmin: payload.isSysadmin, sessionId: payload.sid };
+  next();
 }
 
 export const authRouter = Router();
@@ -152,6 +175,16 @@ authRouter.post('/change-password', requireAuth, async (req: AuthedRequest, res)
 // last_seen_at), dus dit is vooral defensief.
 authRouter.post('/heartbeat', requireAuth, async (req: AuthedRequest, res) => {
   await pool.query('update sessions set last_seen_at = now() where id = $1', [req.user!.sessionId]);
+  res.status(204).send();
+});
+
+// Échte-activiteit-ping (i.t.t. /heartbeat hierboven, dat blind elke minuut
+// gaat ongeacht of er iemand meekijkt) — ververst last_activity_at, de basis
+// van de IDLE_TIMEOUT_MINUTES-check in requireAuth hierboven. Zie
+// web/src/useActivityPing.ts en web/public/tree.html's eigen kopie daarvan
+// (muis/toetsenbord/scroll/touch, gethrottled tot 1x/minuut).
+authRouter.post('/activity', requireAuth, async (req: AuthedRequest, res) => {
+  await pool.query('update sessions set last_activity_at = now() where id = $1', [req.user!.sessionId]);
   res.status(204).send();
 });
 
