@@ -130,6 +130,12 @@ export default function LoginPage({
               </li>
             ))}
           </ul>
+
+          {onAboutRequest && (
+            <button type="button" onClick={onAboutRequest} style={styles.aboutLink}>
+              Wat is een doelenboom? Bekijk een voorbeeld →
+            </button>
+          )}
         </div>
       </div>
 
@@ -166,11 +172,6 @@ export default function LoginPage({
           {onSignupRequest && (
             <button type="button" onClick={onSignupRequest} style={styles.signupLink}>
               Nog geen account? Abonnement aanvragen →
-            </button>
-          )}
-          {onAboutRequest && (
-            <button type="button" onClick={onAboutRequest} style={styles.signupLink}>
-              Wat is een doelenboom? Bekijk een voorbeeld →
             </button>
           )}
         </form>
@@ -315,6 +316,10 @@ const styles: Record<string, React.CSSProperties> = {
   brandName: { color: 'white', fontWeight: 700, fontSize: 16, letterSpacing: -0.3 },
   tagline: { color: 'rgba(255,255,255,0.82)', fontSize: 14, lineHeight: 1.45, margin: 0 },
   featureList: { listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: '0.75rem' },
+  aboutLink: {
+    marginTop: '0.9rem', alignSelf: 'flex-start', border: '1px solid rgba(255,255,255,0.35)', background: 'rgba(255,255,255,0.08)',
+    color: 'white', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', borderRadius: 999, padding: '6px 12px',
+  },
   featureItem: { display: 'flex', gap: 12, alignItems: 'flex-start' },
   featureIcon: {
     flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
