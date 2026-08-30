@@ -28,7 +28,27 @@ export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBac
       setQuote(null);
       return;
     }
-    api.subscriptionPriceForTier(tierId, [...selectedModules]).then(setQuote).catch(() => setQuote(null));
+    // Bij het wisselen van tier vuurt dit effect eerst nog één keer met de
+    // (op dat moment nog niet bijgewerkte) modules van de VORIGE tier —
+    // pas de render erna heeft de aparte reset-modules-useEffect hieronder
+    // selectedModules al leeggemaakt/op "alles" gezet. Dat geeft twee vlak
+    // na elkaar vurende requests voor dezelfde tier; zonder deze
+    // cancelled-guard kon het eerste (verouderde) antwoord later terug-
+    // komen dan het tweede en zo de juiste prijsopgave weer overschrijven
+    // met een verouderde (bv. nog met een module-opslag die niet meer
+    // aangevinkt staat).
+    let cancelled = false;
+    api
+      .subscriptionPriceForTier(tierId, [...selectedModules])
+      .then((q) => {
+        if (!cancelled) setQuote(q);
+      })
+      .catch(() => {
+        if (!cancelled) setQuote(null);
+      });
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tierId, [...selectedModules].sort().join(',')]);
 
