@@ -14,6 +14,7 @@ import HelpPage from './pages/HelpPage';
 import LogoutFlow from './components/LogoutFlow';
 import VersionFooter from './components/VersionFooter';
 import AnnouncementBanner from './components/AnnouncementBanner';
+import PendingSubscriptionsBanner from './components/PendingSubscriptionsBanner';
 import { api } from './api';
 import { useSession } from './useSession';
 import { useActivityPing } from './useActivityPing';
@@ -259,6 +260,11 @@ export default function App() {
     <>
       <div style={pageStyle}>
         <AnnouncementBanner />
+        <PendingSubscriptionsBanner
+          token={session.token}
+          user={session.user}
+          onOpenRequests={() => setView({ name: 'subscription-requests' })}
+        />
         <div style={contentAreaStyle}>{content}</div>
       </div>
       {loggingOut && (
