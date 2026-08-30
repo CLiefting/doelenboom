@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import LoginPage from './pages/LoginPage';
 import SubscriptionRequestPage from './pages/SubscriptionRequestPage';
 import PickerPage from './pages/PickerPage';
@@ -74,6 +74,33 @@ export default function App() {
     if (notice) sessionStorage.removeItem(AUTH_NOTICE_KEY);
     return notice;
   });
+  // Ingelogd, geen enkele doelenboom (bv. een gloednieuwe tenant via de
+  // zelfbedieningsaanvraag, of een tenant waarvan alle bomen inmiddels
+  // verwijderd zijn) én de gebruiker is ergens admin: dan is de lege
+  // doelenboom-kiezer hieronder ("Nog geen doelenbomen beschikbaar.") geen
+  // zinnig startscherm — open in plaats daarvan meteen Tenantbeheer, waar
+  // "Maak hier uw eerste doelenboom aan" staat (zie TenantManagementPage).
+  // Eénmalig per login (autoRedirectDoneRef) — anders zou "← Terug" naar de
+  // nog altijd lege kiezer weer meteen terugklappen naar Tenantbeheer, en zo
+  // zou een gebruiker via de UI nooit meer bij bv. "Uitloggen" (dat zit in
+  // PickerPage se gebruikersmenu, niet in Tenantbeheer) kunnen komen.
+  const autoRedirectDoneRef = useRef(false);
+  useEffect(() => {
+    if (!session) {
+      autoRedirectDoneRef.current = false;
+      return;
+    }
+    if (autoRedirectDoneRef.current) return;
+    autoRedirectDoneRef.current = true;
+    const isAdmin = session.user.isSysadmin || session.user.tenantRoles.some((r) => r.role === 'admin');
+    if (!isAdmin) return;
+    api
+      .doelenbomen(session.token)
+      .then((items) => {
+        if (items.length === 0) setView((prev) => (prev.name === 'picker' ? { name: 'tenants' } : prev));
+      })
+      .catch(() => {});
+  }, [session]);
 
   // 15-minuten-inactiviteitsbeveiliging (zie useActivityPing.ts) — dekt de
   // React-schermen zelf; tree.html (iframe) heeft z'n eigen, identieke logica.

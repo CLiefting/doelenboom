@@ -38,8 +38,18 @@ export default function TenantManagementPage({
   const [doelenbomen, setDoelenbomen] = useState<DoelenboomSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Zoeken op naam/slug — zelfde soort zoekbalk als in een doelenboom zelf
+  // (tree.html), alleen hier client-side over de al opgehaalde tenantlijst
+  // i.p.v. tegen de server (die is voor een sysadmin met veel tenants nooit
+  // groot genoeg om dat de moeite waard te maken).
+  const [tenantQuery, setTenantQuery] = useState('');
 
   const manageableTenants = (tenants ?? []).filter((t) => user.isSysadmin || t.my_role === 'admin');
+  const visibleTenants = (() => {
+    const q = tenantQuery.trim().toLowerCase();
+    if (!q) return manageableTenants;
+    return manageableTenants.filter((t) => t.name.toLowerCase().includes(q) || t.slug.toLowerCase().includes(q));
+  })();
 
   useEffect(() => {
     api.tenants(token).then(setTenants).catch((err) => setError(errMsg(err)));
@@ -53,6 +63,17 @@ export default function TenantManagementPage({
   function refreshDoelenbomen() {
     api.doelenbomen(token).then(setDoelenbomen).catch((err) => setError(errMsg(err)));
   }
+
+  // Een tenant-admin beheert vrijwel altijd precies één tenant — die dan
+  // meteen selecteren scheelt een overbodige extra klik, en zorgt dat de
+  // "eerste doelenboom aanmaken"-melding (zie firstTreeCallout hieronder)
+  // direct zichtbaar is i.p.v. achter een handmatige tenant-keuze.
+  useEffect(() => {
+    if (selectedTenantId == null && manageableTenants.length === 1) {
+      setSelectedTenantId(manageableTenants[0].id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [manageableTenants.length]);
 
   useEffect(() => {
     if (selectedTenantId == null) {
@@ -86,10 +107,36 @@ export default function TenantManagementPage({
         {!tenants && <p>Laden…</p>}
         {tenants && manageableTenants.length === 0 && <p style={styles.muted}>Geen tenants om te beheren.</p>}
         {tenants && manageableTenants.length > 0 && (
-          <p style={styles.muted}>Klik op een tenant om de leden (rol admin/gebruiker/bezoeker) te beheren.</p>
+          <>
+            <p style={styles.muted}>Klik op een tenant om de leden (rol admin/gebruiker/bezoeker) te beheren.</p>
+            <div style={styles.tenantSearchWrap}>
+              <input
+                type="text"
+                value={tenantQuery}
+                onChange={(e) => setTenantQuery(e.target.value)}
+                placeholder="Zoek op naam of slug…"
+                autoComplete="off"
+                style={styles.tenantSearchInput}
+              />
+              {tenantQuery && (
+                <button
+                  type="button"
+                  onClick={() => setTenantQuery('')}
+                  title="Wis zoekopdracht"
+                  aria-label="Wis zoekopdracht"
+                  style={styles.tenantSearchClear}
+                >
+                  ×
+                </button>
+              )}
+            </div>
+            {visibleTenants.length === 0 && (
+              <p style={styles.muted}>Geen tenants gevonden voor "{tenantQuery}".</p>
+            )}
+          </>
         )}
         <div style={styles.tenantList}>
-          {manageableTenants.map((t) => {
+          {visibleTenants.map((t) => {
             const licenseBorder = licenseBorderColor(t.license_end_date);
             return (
               <button
@@ -583,7 +630,9 @@ function DoelenbomenSection({
 
   return (
     <div>
-      {doelenbomen.length === 0 && <p style={styles.muted}>Nog geen doelenbomen in deze tenant.</p>}
+      {doelenbomen.length === 0 && (
+        <p style={styles.firstTreeCallout}>🌳 Maak hier uw eerste doelenboom aan</p>
+      )}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
         {doelenbomen.map((d) => {
           if (editingId === d.id) {
@@ -1339,6 +1388,19 @@ const styles: Record<string, React.CSSProperties> = {
   subtitle: { margin: '4px 0 0', color: '#6c6f76', fontSize: 13.5 },
   section: { marginBottom: '2rem', background: 'white', borderRadius: 10, padding: '1.25rem 1.5rem', border: '1px solid #e4e6ea' },
   h2: { fontSize: 15, margin: '0 0 12px', color: '#203864' },
+  // Zelfde pil-vormige zoekbalk-stijl als in een doelenboom zelf (zie
+  // .search-input/.search-clear-btn in tree.html) — herkenbaar hetzelfde
+  // patroon, hier alleen als React inline-stijl i.p.v. CSS-klasse.
+  tenantSearchWrap: { position: 'relative', display: 'inline-flex', alignItems: 'center', margin: '2px 0 12px' },
+  tenantSearchInput: {
+    fontFamily: 'inherit', fontSize: 13.5, padding: '9px 34px 9px 14px', borderRadius: 999,
+    border: '1.5px solid #ccc', width: 260, maxWidth: '60vw', outline: 'none', boxSizing: 'border-box',
+  },
+  tenantSearchClear: {
+    position: 'absolute', right: 6, width: 22, height: 22, borderRadius: '50%', border: 'none',
+    background: '#e2e4e8', color: '#555', fontSize: 13, lineHeight: 1, cursor: 'pointer',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+  },
   tenantList: { display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
   inlineForm: { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginTop: 12 },
   input: { padding: '7px 10px', borderRadius: 6, border: '1px solid #d0d4da', fontSize: 13 },
@@ -1351,6 +1413,15 @@ const styles: Record<string, React.CSSProperties> = {
   td: { borderBottom: '1px solid #f0f1f3', padding: '6px 8px' },
   muted: { color: '#9aa0a8', fontSize: 13, margin: 0 },
   error: { color: '#DC3545', fontSize: 13 },
+  // Prominente call-to-action i.p.v. de gewone "muted" lege-staat-tekst,
+  // zolang een tenant nog geen enkele doelenboom heeft (bv. meteen na een
+  // geslaagde zelfbedieningsaanvraag, zie App.tsx) — wijst expliciet naar het
+  // aanmaakformulier eronder.
+  firstTreeCallout: {
+    display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 12px', padding: '10px 14px',
+    borderRadius: 8, background: '#EAF1FE', border: '1px solid #C7D7F5', color: '#203864',
+    fontSize: 13.5, fontWeight: 600,
+  },
   mustChangeBadge: {
     marginLeft: 8, fontSize: 11, color: '#946200', background: '#FFF3CD',
     border: '1px solid #FFE69C', borderRadius: 999, padding: '2px 8px',
