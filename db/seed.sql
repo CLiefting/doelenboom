@@ -25,6 +25,35 @@ begin
     insert into doelenbomen (tenant_id, slug, name)
     select id, 'gezond-ouder', 'Gezond ouder' from tenants where slug = 'demo';
 
+    -- column_configs / columns — de tenant-default (sjabloon voor eventuele
+    -- nieuwe doelenbomen bij deze tenant) én de eigen config van de
+    -- gezond-ouder-boom zelf. Zonder deze twee rijen toont tree.html een
+    -- volledig lege kolommenweergave (elk element wordt dan als "onbekend
+    -- type" overgeslagen, zie buildColumnsHtml() in web/public/tree.html) —
+    -- dit bestand omzeilt bewust de normale aanmaakroutes
+    -- (createTenantDefaultConfig/createDoelenboomConfigFromTenantDefault in
+    -- api/src/columnConfig.ts), dus die twee rijen moeten hier expliciet
+    -- gezaaid worden. Zelfde 8 standaardkolommen als standardColumns('Demo').
+    insert into column_configs (scope, tenant_id)
+    values ('tenant_default', (select id from tenants where slug = 'demo'));
+    insert into column_configs (scope, tenant_id, doelenboom_id)
+    values ('doelenboom', (select id from tenants where slug = 'demo'), (select id from doelenbomen where slug = 'gezond-ouder'));
+
+    insert into columns (column_config_id, position, type_name, title, subtitle, color, is_narrow, node_font_size, is_project_role, relation_label_to_next)
+    select cc.id, v.position, v.type_name, v.title, v.subtitle, v.color, v.is_narrow, v.node_font_size, v.is_project_role, v.relation_label_to_next
+    from column_configs cc
+    cross join (values
+      (0, 'Project', 'Project', 'Welke projecten ontwikkelen deze capability?', '#3E6FA6', true, null::int, true, 'ontwikkelt'),
+      (1, 'Capability', 'Capability', 'Welk vermogen wordt hiermee opgebouwd?', '#6B4C8A', true, null::int, false, 'ondersteunt'),
+      (2, 'Operationele benefit', 'Operationele benefit', 'Welke operationele verbetering levert dit op? Wat verandert er in de dagelijkse uitvoering?', '#C05A2C', false, null::int, false, 'realiseert'),
+      (3, 'Sub-benefit', 'Sub-benefit Demo', 'Welk direct effect ontstaat hierdoor?', '#B8862E', false, null::int, false, 'versterkt'),
+      (4, 'Programmabaat', 'Programmabaat Demo', 'Welke waarde levert dit aan Demo?', '#2E7D5B', false, null::int, false, 'draagt bij aan'),
+      (5, 'Strategische benefit', 'Strategisch benefit Demo', 'Wat betekent dit voor Demo?', '#8FAADC', false, 10, false, 'ondersteunt'),
+      (6, 'Strategisch doel', 'Strategisch doel', 'Welk doel ondersteunt dit?', '#2F5597', false, 12, false, 'geeft invulling aan'),
+      (7, 'Missie', 'Missie Demo', 'Waarom doen we dit uiteindelijk?', '#203864', false, 10, false, null)
+    ) as v(position, type_name, title, subtitle, color, is_narrow, node_font_size, is_project_role, relation_label_to_next)
+    where cc.tenant_id = (select id from tenants where slug = 'demo');
+
     -- elements
     insert into elements (doelenboom_id, code, type, name, description, parent_text, kpi, taakveld, subtaakveld, sort_order) values ((select id from doelenbomen where slug='gezond-ouder'), 'M1', 'Missie', 'Gezond ouder worden door gezamenlijk lichamelijk en geestelijk te blijven bewegen', 'De missie van het verzorgingshuis: bewoners zo lang en zo prettig mogelijk vitaal houden, samen — niet alleen door beweging, maar ook door sociale verbondenheid en geestelijke activiteit. Dit vormt het hoogste anker van de doelenboom: alle onderliggende doelen, benefits en programmabaten moeten hier aantoonbaar aan bijdragen.', '', '-', '', '', 0);
     insert into elements (doelenboom_id, code, type, name, description, parent_text, kpi, taakveld, subtaakveld, sort_order) values ((select id from doelenbomen where slug='gezond-ouder'), 'SD1', 'Strategisch doel', 'Bewoners blijven langer lichamelijk vitaal', 'Bewoners behouden zo lang mogelijk hun lichamelijke zelfredzaamheid en mobiliteit, met minder functieverlies en minder valincidenten.', 'Missie', 'Gemiddelde ADL-zelfredzaamheidsscore bewoners', '', '', 1);
