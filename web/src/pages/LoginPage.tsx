@@ -213,7 +213,7 @@ export default function LoginPage({
           </button>
           {onSignupRequest && (
             <button type="button" onClick={onSignupRequest} style={styles.signupLink}>
-              Nog geen account? Abonnement aanvragen →
+              Nog geen account? Registreren →
             </button>
           )}
           {onLegalRequest && (
