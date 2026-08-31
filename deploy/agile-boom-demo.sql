@@ -10,6 +10,12 @@
 -- seed.sql dat ook al doet), dus column_configs/columns worden hier
 -- expliciet gezaaid i.p.v. gekopieerd van de tenant-default.
 --
+-- Eén voorbeeldelement per kolom (V1..V9, "Voorbeeld van <Type>"), aan
+-- elkaar geketend met edges V1->V2->...->V9 — zelfde conventie als het
+-- systeembrede "Batenboom"-sjabloon (zie diens elements_snapshot/
+-- edges_snapshot in db/init.sql), zodat de boom nooit volledig leeg start en
+-- meteen laat zien wat er in elke kolom hoort.
+--
 -- Idempotent: als een doelenboom met slug 'agile-boom' al bij tenant 'demo'
 -- bestaat, doet dit script niets (veilig om per ongeluk twee keer te
 -- draaien, en dus ook veilig om identiek te draaien in test én productie).
@@ -65,5 +71,38 @@ begin
     (v_config_id, 7, 'Strategisch doel', 'Strategisch doel', 'Welk doel ondersteunt dit?', '#2F5597', false, null, false, 'geeft invulling aan'),
     (v_config_id, 8, 'Missie', 'Missie', 'Waarom doen we dit uiteindelijk?', '#203864', false, null, false, null);
 
-  raise notice 'Doelenboom "Agile boom" (id=%) aangemaakt bij tenant Demo, met 9 kolommen.', v_doelenboom_id;
+  -- Voorbeeldelementen: één per kolom, code V1..V9 volgens dezelfde
+  -- positie-volgorde als de kolommen hierboven (V1 = Task t/m V9 = Missie).
+  insert into elements (doelenboom_id, code, type, name, description, parent_text, kpi, taakveld, subtaakveld, sort_order)
+  values
+    (v_doelenboom_id, 'V1', 'Task', 'Voorbeeld van Task', '', '', '', '', '', 1),
+    (v_doelenboom_id, 'V2', 'User Story', 'Voorbeeld van User Story', '', '', '', '', '', 2),
+    (v_doelenboom_id, 'V3', 'Feature', 'Voorbeeld van Feature', '', '', '', '', '', 3),
+    (v_doelenboom_id, 'V4', 'Epic', 'Voorbeeld van Epic', '', '', '', '', '', 4),
+    (v_doelenboom_id, 'V5', 'Capability', 'Voorbeeld van Capability', '', '', '', '', '', 5),
+    (v_doelenboom_id, 'V6', 'Operationele Benefits', 'Voorbeeld van Operationele Benefits', '', '', '', '', '', 6),
+    (v_doelenboom_id, 'V7', 'Benefits', 'Voorbeeld van Benefits', '', '', '', '', '', 7),
+    (v_doelenboom_id, 'V8', 'Strategisch doel', 'Voorbeeld van Strategisch doel', '', '', '', '', '', 8),
+    (v_doelenboom_id, 'V9', 'Missie', 'Voorbeeld van Missie', '', '', '', '', '', 9);
+
+  -- Eén keten V1->V2->...->V9 (source = concreter, target = abstracter,
+  -- zelfde richting als de kolommen zelf) -- toelichting = de
+  -- relation_label_to_next van de bronkolom, zodat de pijltekst in de boom
+  -- overeenkomt met wat er in de Kolommen-editor staat.
+  insert into edges (doelenboom_id, source_element_id, target_element_id, weight, toelichting)
+  select v_doelenboom_id, src.id, tgt.id, 'primair', label
+  from (values
+    ('V1','V2','draagt bij aan'),
+    ('V2','V3','maakt deel uit van'),
+    ('V3','V4','maakt deel uit van'),
+    ('V4','V5','ontwikkelt'),
+    ('V5','V6','realiseert'),
+    ('V6','V7','draagt bij aan'),
+    ('V7','V8','ondersteunt'),
+    ('V8','V9','geeft invulling aan')
+  ) as chain(src_code, tgt_code, label)
+  join elements src on src.doelenboom_id = v_doelenboom_id and src.code = chain.src_code
+  join elements tgt on tgt.doelenboom_id = v_doelenboom_id and tgt.code = chain.tgt_code;
+
+  raise notice 'Doelenboom "Agile boom" (id=%) aangemaakt bij tenant Demo, met 9 kolommen en 9 voorbeeldelementen.', v_doelenboom_id;
 end $$;
