@@ -204,19 +204,42 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml exec -T db \
   -v ON_ERROR_STOP=1 < db/seed.sql
 ```
 
-## Nachtelijke reset van de Demo-doelenboom
+## Nachtelijke reset van tenant Demo
 
-De Demo-doelenboom is bedoeld om vrij in te kunnen rondklikken/bewerken (alle
-leden van de tenant Demo hebben admin-rechten) — daarom wordt de inhoud elke
-nacht om 00:01 teruggezet naar de canonieke demo-data uit
-`deploy/reset-demo.sql` (een kopie van het demo-gedeelte van `db/seed.sql`,
-zonder de tenant/doelenboom zelf opnieuw aan te maken). Andere tenants worden
-niet geraakt.
+De tenant Demo is bedoeld om vrij in te kunnen rondklikken/bewerken (alle
+leden hebben admin-rechten) — daarom wordt elke nacht om 00:01 de VOLLEDIGE
+tenant (alle doelenbomen, hun kolomconfiguraties, elementen/relaties/tags/
+organisatieonderdelen, en project-info zoals deliverables/activiteiten/
+projectstatus) teruggezet naar een eerder vastgelegde momentopname —
+inclusief het weer verwijderen van een doelenboom die een bezoeker die dag
+zelf heeft aangemaakt. Andere tenants worden niet geraakt, en de
+inlog-accounts van de demo-gebruikers zelf blijven altijd bestaan.
 
-Eenmalig instellen op de VPS:
+Twee scripts (`api/src/scripts/snapshotDemoTenant.ts` /
+`resetDemoTenant.ts`, draaien binnen de al-lopende api-container, geen
+herstart nodig — zelfde patroon als de nachtelijke Excel-backup hieronder):
+
+- **`deploy/snapshot-demo-tenant.sh`** — legt de HUIDIGE staat van tenant
+  Demo vast als canonieke momentopname (JSON, weggeschreven naar
+  `~/doelenboom/backups/demo-tenant-snapshot.json`, dezelfde bind mount als
+  de Excel-backups). Draai dit **handmatig**, nooit via cron: alleen
+  wanneer je de vaste demo-inhoud bewust wilt bijwerken (een nieuwe
+  voorbeeldboom toevoegen, bestaande inhoud aanpassen). Generiek — pakt
+  gewoon alles wat er op dat moment in de tenant staat, dus een later
+  toegevoegde doelenboom wordt vanzelf meegenomen bij de eerstvolgende run.
+- **`deploy/reset-demo.sh`** — zet tenant Demo terug naar de laatst
+  vastgelegde momentopname. Dit is wat elke nacht via cron draait.
+
+Eenmalig instellen op de VPS (na de eerstvolgende deploy die deze scripts
+bevat):
 
 ```bash
-chmod +x ~/doelenboom/deploy/reset-demo.sh
+chmod +x ~/doelenboom/deploy/reset-demo.sh ~/doelenboom/deploy/snapshot-demo-tenant.sh
+
+# Leg de huidige staat vast als startpunt (zonder dit heeft reset-demo.sh
+# nog niets om naar terug te zetten):
+~/doelenboom/deploy/snapshot-demo-tenant.sh
+
 crontab -e
 ```
 
@@ -225,15 +248,20 @@ Voeg toe:
 1 0 * * * /home/charles/doelenboom/deploy/reset-demo.sh >> /home/charles/doelenboom-demo-reset.log 2>&1
 ```
 
-Handmatig testen (mag altijd, ook overdag):
+Handmatig testen (mag altijd, ook overdag — idempotent, eindigt altijd
+exact in de snapshot-staat):
 ```bash
 ~/doelenboom/deploy/reset-demo.sh
 tail -20 ~/doelenboom-demo-reset.log
 ```
 
-Wijzig je later de demo-inhoud in `db/seed.sql`, werk dan ook
-`deploy/reset-demo.sql` bij (zelfde INSERT-blokken) — zie de toelichting
-bovenaan dat bestand.
+Wil je de vaste demo-inhoud bewust bijwerken (nieuwe voorbeeldboom, aanpassing
+aan een bestaande boom die moet blijven staan): breng die wijziging eerst zelf
+aan in de app (of via een los data-script zoals
+`deploy/vergunningen-boom-demo.sql`), en draai daarna
+`~/doelenboom/deploy/snapshot-demo-tenant.sh` opnieuw om die staat als nieuwe
+canonieke momentopname vast te leggen — anders wist de eerstvolgende
+nachtelijke reset 'm weer.
 
 ## Nachtelijke Excel-backup
 
