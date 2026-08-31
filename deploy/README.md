@@ -234,19 +234,20 @@ Eenmalig instellen op de VPS (na de eerstvolgende deploy die deze scripts
 bevat):
 
 ```bash
-chmod +x ~/doelenboom/deploy/reset-demo.sh ~/doelenboom/deploy/snapshot-demo-tenant.sh
+chmod +x ~/doelenboom/deploy/reset-demo.sh ~/doelenboom/deploy/snapshot-demo-tenant.sh ~/doelenboom/deploy/install-cron-reset-demo.sh
 
 # Leg de huidige staat vast als startpunt (zonder dit heeft reset-demo.sh
 # nog niets om naar terug te zetten):
 ~/doelenboom/deploy/snapshot-demo-tenant.sh
 
-crontab -e
+~/doelenboom/deploy/install-cron-reset-demo.sh
 ```
 
-Voeg toe:
-```
-1 0 * * * /home/charles/doelenboom/deploy/reset-demo.sh >> /home/charles/doelenboom-demo-reset.log 2>&1
-```
+`install-cron-reset-demo.sh` zet de cronregel niet-interactief neer (geen
+`crontab -e`-editor nodig — die ontbreekt vaak op een kale VPS-shell) en is
+idempotent, zelfde patroon als `install-cron-export-all.sh` hieronder:
+bestaande regels blijven staan, opnieuw draaien voegt de regel niet nog een
+keer toe. Controleren: `crontab -l`.
 
 Handmatig testen (mag altijd, ook overdag — idempotent, eindigt altijd
 exact in de snapshot-staat):
