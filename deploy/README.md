@@ -297,6 +297,7 @@ docker load < ~/doelenboom-images.tar.gz
 rm ~/doelenboom-images.tar.gz
 cd ~/doelenboom
 git pull   # voor eventuele niet-image-wijzigingen (docker-compose*.yml, db/init.sql, README's)
+./deploy/check-no-active-users.sh   # verplicht — zie hieronder
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 ```
 
@@ -305,6 +306,32 @@ de wijziging alléén in `api`/`web`/`excel-service`-code, dan volstaat
 `docker load` + `up -d` (compose herstart alleen containers waarvan de image
 veranderd is). Alleen als `docker-compose.yml`/`docker-compose.prod.yml`
 zelf wijzigde, is de `git pull` op de VPS ook nodig vóór `up -d`.
+
+### Verplichte check: geen actieve gebruikers vóór `up -d`
+
+`docker compose ... up -d` herstart de `api`/`web`-containers zodra hun image
+is vervangen — dat onderbreekt iedereen die op dat moment ingelogd is midden
+in hun werk (de React-app verliest zijn state, een openstaande wijziging in
+de boom kan verloren gaan). Draai daarom altijd eerst, ná `git pull` en vóór
+`up -d`:
+
+```bash
+./deploy/check-no-active-users.sh
+```
+
+Dit script (`deploy/check-no-active-users.sh`) query't rechtstreeks de
+`sessions`-tabel in de lopende `db`-container, met exact dezelfde
+"actief"-definitie als het Login-overzicht in de app zelf (`GET
+/api/sessions`, zie `api/src/routes/sessions.ts`): niet expliciet uitgelogd
+(`ended_at is null`) én de laatste heartbeat niet langer dan 5 minuten
+geleden. Twee uitkomsten:
+
+- **Geen actieve gebruikers** → exit 0, meteen door naar `up -d`.
+- **Wel iemand actief** → exit 1, met een lijst van welk(e) e-mailadres(sen)
+  nu ingelogd zijn en sinds wanneer. **Niet updaten** in dat geval — wacht
+  tot iedereen is uitgelogd (of stem eerst met ze af) en draai het script
+  daarna opnieuw. Overweeg bij herhaaldelijk actieve gebruikers een update
+  buiten kantooruren.
 
 Een schemawijziging (`db/init.sql`) werkt **niet** met een simpele restart —
 die scripts draaien alleen bij de allereerste containerstart op een lege
