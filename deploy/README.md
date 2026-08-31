@@ -108,6 +108,7 @@ WWspeur's `POSTGRES_PASSWORD`/`SECRET_KEY`).
 
 ```bash
 cd ~/pad/naar/doelenboom   # je lokale dev-checkout, niet de VPS
+export BUILD_VERSION="$(./scripts/build-version.sh)"   # anders toont de footer straks "dev" i.p.v. de release
 DOCKER_DEFAULT_PLATFORM=linux/amd64 docker compose -f docker-compose.yml -f docker-compose.prod.yml build api web excel-service
 docker save doelenboom-api:latest doelenboom-web:latest doelenboom-excel-service:latest \
   | gzip > doelenboom-images.tar.gz
@@ -284,6 +285,7 @@ Mac, zet ze over, laad ze op de VPS, herstart alleen dan.
 ```bash
 cd ~/pad/naar/doelenboom
 git pull   # zorg dat je lokale checkout de wijziging heeft die je wilt uitrollen
+export BUILD_VERSION="$(./scripts/build-version.sh)"   # anders toont de footer straks "dev" i.p.v. de release
 DOCKER_DEFAULT_PLATFORM=linux/amd64 docker compose -f docker-compose.yml -f docker-compose.prod.yml build api web excel-service
 docker save doelenboom-api:latest doelenboom-web:latest doelenboom-excel-service:latest \
   | gzip > doelenboom-images.tar.gz
