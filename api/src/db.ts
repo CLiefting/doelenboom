@@ -22,3 +22,15 @@ types.setTypeParser(types.builtins.DATE, (value) => value);
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
 });
+
+// Zonder deze listener crasht het hele Node-proces zodra een IDLE
+// (niet-actief-in-gebruik) verbinding in de pool een verbindingsfout krijgt
+// — bv. omdat de db-container herstart (docker compose restart/recreate db,
+// of een crash daarvan). `pg` geeft die fout door als een 'error'-event op
+// de Pool zelf; zonder listener behandelt Node dat als een onafgehandelde
+// exception en sluit het proces af (zie de node-postgres-documentatie).
+// De pool herstelt zichzelf daarna gewoon: de kapotte cliënt wordt uit de
+// pool verwijderd en een volgende query opent een nieuwe verbinding.
+pool.on('error', (err) => {
+  console.error('Onverwachte fout op een inactieve databaseverbinding (pool blijft in gebruik):', err);
+});
