@@ -227,6 +227,60 @@
   }
   .element-modal-status { font-size: 12px; color: #DC3545; min-height: 16px; margin: 4px 0 10px; }
   .element-modal-hint { font-size: 11.5px; color: #888; margin: 0 0 14px; }
+
+  /* ---- Kolom-samenvatting (dubbelklik op een kolomkop): grote, exporteerbare
+     samenvatting van alle elementen in één kolom, gegroepeerd per taakveld.
+     Hergebruikt .element-modal-backdrop (positionering/overlay), maar met een
+     eigen, veel bredere inhoud-klasse i.p.v. de standaard 420px van
+     .element-modal — zie openColumnSummaryModal() verderop. ---- */
+  .cs-modal { max-width: 1400px; width: 94vw; max-height: 92vh; padding: 0; display: flex; flex-direction: column; }
+  .cs-modal-head {
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
+    padding: 22px 28px 16px; border-bottom: 1px solid #eee; flex: 0 0 auto;
+  }
+  .cs-modal-title { margin: 0 0 4px; color: var(--navy); font-size: 20px; }
+  .cs-modal-subtitle { margin: 0; color: #777; font-size: 13px; }
+  .cs-modal-actions { display: flex; gap: 8px; flex: 0 0 auto; align-items: flex-start; }
+  .cs-modal-close {
+    border: none; background: none; font-size: 22px; line-height: 1; color: #999;
+    cursor: pointer; padding: 4px 9px; border-radius: 6px;
+  }
+  .cs-modal-close:hover { background: #f0f1f3; color: var(--navy); }
+  .cs-modal-body { padding: 20px 28px 8px; overflow-y: auto; }
+  .cs-modal-footer { padding: 10px 28px 20px; font-size: 11px; color: #999; border-top: 1px solid #f0f0f0; flex: 0 0 auto; }
+
+  .cs-ribbon { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-bottom: 22px; }
+  .cs-ribbon-item {
+    display: inline-flex; align-items: center; padding: 5px 11px; border-radius: 999px;
+    font-size: 11.5px; font-weight: 600; background: #f0f1f3; color: #888;
+  }
+  .cs-ribbon-item.active { color: #fff; }
+  .cs-ribbon-arrow { color: #ccc; font-size: 11px; }
+
+  .cs-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 22px; }
+  .cs-stat-tile { border-radius: 10px; padding: 14px 16px; background: #f7f8fa; border: 1px solid #eee; }
+  .cs-stat-value { font-size: 26px; font-weight: 700; color: var(--navy); line-height: 1.1; }
+  .cs-stat-label { font-size: 11.5px; color: #777; margin-top: 4px; }
+
+  .cs-dist-bar { display: flex; height: 14px; border-radius: 7px; overflow: hidden; margin-bottom: 8px; background: #eee; }
+  .cs-dist-seg { height: 100%; }
+  .cs-dist-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-bottom: 24px; font-size: 11.5px; color: #555; }
+  .cs-dist-legend-item { display: flex; align-items: center; gap: 5px; }
+  .cs-dist-dot { width: 9px; height: 9px; border-radius: 2px; flex: 0 0 auto; }
+
+  .cs-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; margin-bottom: 4px; }
+  .cs-group-card { border-radius: 10px; border: 1px solid #eee; border-top: 4px solid #ccc; background: #fff; padding: 14px 16px; }
+  .cs-group-title { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 0 0 10px; }
+  .cs-group-name { font-weight: 700; color: var(--navy); font-size: 13.5px; }
+  .cs-group-count { font-size: 11px; color: #888; font-weight: 600; white-space: nowrap; }
+  .cs-item { padding: 9px 0; border-top: 1px solid #f0f0f0; }
+  .cs-item:first-child { border-top: none; padding-top: 0; }
+  .cs-item-title { font-size: 13px; font-weight: 600; color: #222; margin: 0 0 3px; }
+  .cs-item-code { color: #999; font-weight: 700; margin-right: 5px; }
+  .cs-item-desc { font-size: 12px; color: #555; line-height: 1.4; margin: 0 0 4px; }
+  .cs-item-meta { font-size: 11px; color: #777; margin-top: 2px; }
+  .cs-item-meta b { color: #555; font-weight: 600; }
+  .cs-empty-note { color: #888; font-size: 13px; font-style: italic; }
   /* Kleine, niet-vetgedrukte toelichting ná een label-tekst (bv. "Deadline
      (uiterste opleverdatum, los van...)") — i.p.v. een aparte .element-modal-
      hint-regel per veld, wat bij een korter formulier al snel overdreven
@@ -1338,6 +1392,23 @@
     </div>
   </div>
 
+  <div class="element-modal-backdrop" id="column-summary-modal-backdrop">
+    <div class="element-modal cs-modal">
+      <div class="cs-modal-head">
+        <div>
+          <h3 class="cs-modal-title" id="column-summary-title">Kolomsamenvatting</h3>
+          <p class="cs-modal-subtitle" id="column-summary-subtitle"></p>
+        </div>
+        <div class="cs-modal-actions">
+          <button type="button" class="btn ghost" id="column-summary-export-btn">Exporteer als HTML</button>
+          <button type="button" class="cs-modal-close" id="column-summary-close-btn" aria-label="Sluiten" title="Sluiten">&times;</button>
+        </div>
+      </div>
+      <div class="cs-modal-body" id="column-summary-body"></div>
+      <p class="cs-modal-footer" id="column-summary-footer"></p>
+    </div>
+  </div>
+
   <div class="element-modal-backdrop" id="product-modal-backdrop">
     <div class="element-modal wide">
       <h3 id="product-modal-title">Nieuw product</h3>
@@ -1813,6 +1884,51 @@
   <div id="hover-tooltip"></div>
 
 <script>
+// Compacte, op zichzelf staande CSS voor de kolomsamenvatting-export (zie
+// exportColumnSummaryHtml in runApp) — dit is bewust een kleine, eigen kopie
+// van de .cs-*-regels uit de hoofdstijl hierboven i.p.v. de hele pagina-CSS
+// meesturen: het geëxporteerde bestand is een klein rapport, geen werkende
+// kopie van de boom-app (dat doet exportStaticHtml() al, met de volledige
+// paginabron). Bij wijzigingen aan de .cs-*-regels in de <style> hierboven:
+// deze kopie voor consistentie meenemen.
+const CS_EXPORT_CSS = [
+  ':root { --navy: #002855; }',
+  '* { box-sizing: border-box; }',
+  'body { font-family: "Calibri", "Segoe UI", Arial, sans-serif; background: #f4f5f7; margin: 0; padding: 24px 16px 60px; color: #1a1a1a; }',
+  '.cs-modal { max-width: 1100px; width: 100%; margin: 0 auto; background: #fff; border-radius: 12px; box-shadow: 0 4px 18px rgba(0,0,0,0.12); }',
+  '.cs-modal-head { padding: 24px 28px 16px; border-bottom: 1px solid #eee; }',
+  '.cs-modal-title { margin: 0 0 4px; color: var(--navy); font-size: 20px; }',
+  '.cs-modal-subtitle { margin: 0; color: #777; font-size: 13px; }',
+  '.cs-modal-body { padding: 20px 28px 8px; }',
+  '.cs-modal-footer { padding: 10px 28px 20px; font-size: 11px; color: #999; border-top: 1px solid #f0f0f0; }',
+  '.cs-ribbon { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-bottom: 22px; }',
+  '.cs-ribbon-item { display: inline-flex; align-items: center; padding: 5px 11px; border-radius: 999px; font-size: 11.5px; font-weight: 600; background: #f0f1f3; color: #888; }',
+  '.cs-ribbon-item.active { color: #fff; }',
+  '.cs-ribbon-arrow { color: #ccc; font-size: 11px; }',
+  '.cs-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 22px; }',
+  '.cs-stat-tile { border-radius: 10px; padding: 14px 16px; background: #f7f8fa; border: 1px solid #eee; }',
+  '.cs-stat-value { font-size: 26px; font-weight: 700; color: var(--navy); line-height: 1.1; }',
+  '.cs-stat-label { font-size: 11.5px; color: #777; margin-top: 4px; }',
+  '.cs-dist-bar { display: flex; height: 14px; border-radius: 7px; overflow: hidden; margin-bottom: 8px; background: #eee; }',
+  '.cs-dist-seg { height: 100%; }',
+  '.cs-dist-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-bottom: 24px; font-size: 11.5px; color: #555; }',
+  '.cs-dist-legend-item { display: flex; align-items: center; gap: 5px; }',
+  '.cs-dist-dot { width: 9px; height: 9px; border-radius: 2px; flex: 0 0 auto; }',
+  '.cs-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-bottom: 4px; }',
+  '.cs-group-card { border-radius: 10px; border: 1px solid #eee; border-top: 4px solid #ccc; background: #fff; padding: 14px 16px; }',
+  '.cs-group-title { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 0 0 10px; }',
+  '.cs-group-name { font-weight: 700; color: var(--navy); font-size: 13.5px; }',
+  '.cs-group-count { font-size: 11px; color: #888; font-weight: 600; white-space: nowrap; }',
+  '.cs-item { padding: 9px 0; border-top: 1px solid #f0f0f0; }',
+  '.cs-item:first-child { border-top: none; padding-top: 0; }',
+  '.cs-item-title { font-size: 13px; font-weight: 600; color: #222; margin: 0 0 3px; }',
+  '.cs-item-code { color: #999; font-weight: 700; margin-right: 5px; }',
+  '.cs-item-desc { font-size: 12px; color: #555; line-height: 1.4; margin: 0 0 4px; }',
+  '.cs-item-meta { font-size: 11px; color: #777; margin-top: 2px; }',
+  '.cs-item-meta b { color: #555; font-weight: 600; }',
+  '.cs-empty-note { color: #888; font-size: 13px; font-style: italic; }',
+].join('\n');
+
 // Sinds de configureerbare kolommen (zie docs/kolommen-configuratie-ontwerp.md)
 // komt de kolommenset zelf niet meer uit een vaste constante, maar uit
 // tree.columns (per doelenboom ingesteld, zie api/src/columnConfig.ts en
@@ -2044,6 +2160,10 @@ function runApp(data) {
   document.querySelectorAll('.column').forEach(col => {
     const header = col.querySelector('.col-header');
     if (!header) return;
+    // Dubbelklik op de kop opent een samenvatting van alle elementen in deze
+    // kolom (zie openColumnSummaryModal hieronder) — title als hint, want een
+    // dubbelklik is verder nergens anders in de UI zo direct zichtbaar.
+    header.title = 'Dubbelklik voor een samenvatting van deze kolom';
     const hideBtn = document.createElement('button');
     hideBtn.type = 'button';
     hideBtn.className = 'col-hide-btn';
@@ -2666,6 +2786,208 @@ function runApp(data) {
     if (t) return t;
     if (s) return s;
     return '';
+  }
+
+  // ---- Kolomsamenvatting (dubbelklik op een kolomkop) ----
+  const CS_OVERIG_LABEL = 'Overig (geen taakveld ingevuld)';
+
+  // Verzamelt en groepeert alle elementen van één kolom (typeName) voor de
+  // samenvatting-modal — gegroepeerd per taakveld (taakveldLine(d), dus
+  // "taakveld / sub-taakveld" als beide gevuld zijn), met een vaste
+  // vangnet-groep CS_OVERIG_LABEL voor elementen zonder taakveld, zodat geen
+  // enkel element stilzwijgend uit de samenvatting valt. Telstatistieken
+  // (metKpi, taakveldGroepen) tellen bewust alléén gevulde waarden — zie
+  // Charles' antwoord "Alleen indien gevuld".
+  function computeColumnSummary(typeName) {
+    const col = COLUMNS.find((c) => c.typeName === typeName);
+    if (!col) return null;
+    const items = Object.keys(DETAILS)
+      .map((id) => DETAILS[id])
+      .filter((d) => d.type === typeName)
+      .sort((a, b) => (a.code || '').localeCompare(b.code || '', 'nl'));
+
+    const groupsMap = new Map();
+    items.forEach((d) => {
+      const label = taakveldLine(d) || CS_OVERIG_LABEL;
+      if (!groupsMap.has(label)) groupsMap.set(label, []);
+      groupsMap.get(label).push(d);
+    });
+    const groupLabels = Array.from(groupsMap.keys()).sort((a, b) => {
+      if (a === CS_OVERIG_LABEL) return 1;
+      if (b === CS_OVERIG_LABEL) return -1;
+      return a.localeCompare(b, 'nl');
+    });
+    const groups = groupLabels.map((label) => ({
+      label,
+      isOverig: label === CS_OVERIG_LABEL,
+      items: groupsMap.get(label),
+    }));
+
+    const metKpi = items.filter((d) => (d.kpi || '').trim().length > 0).length;
+    const taakveldGroepen = groups.filter((g) => !g.isOverig).length;
+
+    return {
+      col,
+      idx: CANONICAL_COL_ORDER.indexOf(typeName),
+      items,
+      groups,
+      stats: {
+        totaal: items.length,
+        taakveldGroepen,
+        metKpi,
+        schakels: CANONICAL_COL_ORDER.length,
+      },
+    };
+  }
+
+  function columnSummaryStamp() {
+    return lastTreeResponse.doelenboom.tenant.name + ' · ' + lastTreeResponse.doelenboom.name + ' · kolom "' +
+      COLUMNS.find((c) => c.typeName === lastColumnSummaryType).title + '" · samenvatting opgehaald op ' +
+      new Date().toLocaleString('nl-NL');
+  }
+
+  // Bouwt de binnenkant van de modal (ribbon + stat-tiles + verdelingsbalk +
+  // groepskaarten) — als losse HTML-string, zodat dezelfde opbouw zowel de
+  // on-screen modal vult (columnSummaryBody.innerHTML) als, gewikkeld in een
+  // eigen <style>/<head>, de geëxporteerde standalone HTML-export vormt (zie
+  // exportColumnSummaryHtml). Geen aparte DOM-manipulatie-variant nodig omdat
+  // dit een puur weergave-overzicht is (geen interactieve elementen).
+  function columnSummaryBodyHtml(summary) {
+    const col = summary.col;
+    const ribbonHtml = COLUMNS.map((c, i) => {
+      const isActive = c.typeName === col.typeName;
+      const style = isActive ? ' style="background:' + c.color + ';"' : '';
+      const arrow = i < COLUMNS.length - 1 ? '<span class="cs-ribbon-arrow">&rarr;</span>' : '';
+      return '<span class="cs-ribbon-item' + (isActive ? ' active' : '') + '"' + style + '>' +
+        escapeHtml(c.title) + '</span>' + arrow;
+    }).join('');
+
+    const statsHtml = [
+      { value: summary.stats.totaal, label: 'Elementen in deze kolom' },
+      { value: summary.stats.taakveldGroepen, label: 'Taakvelden (gevuld)' },
+      { value: summary.stats.metKpi, label: 'Met KPI / indicator' },
+      { value: summary.stats.schakels, label: 'Schakels in de Golden Thread' },
+    ].map((s) => '<div class="cs-stat-tile"><div class="cs-stat-value">' + s.value +
+      '</div><div class="cs-stat-label">' + escapeHtml(s.label) + '</div></div>').join('');
+
+    const total = summary.items.length;
+    const segHtml = total === 0 ? '' : summary.groups.map((g) => {
+      const pct = (g.items.length / total) * 100;
+      const bg = g.isOverig ? '#ccc' : col.color;
+      return '<span class="cs-dist-seg" style="width:' + pct.toFixed(2) + '%;background:' + bg + ';" title="' +
+        escapeHtml(g.label) + ' (' + g.items.length + ')"></span>';
+    }).join('');
+    const legendHtml = summary.groups.map((g) => {
+      const bg = g.isOverig ? '#ccc' : col.color;
+      return '<span class="cs-dist-legend-item"><span class="cs-dist-dot" style="background:' + bg + ';"></span>' +
+        escapeHtml(g.label) + ' (' + g.items.length + ')</span>';
+    }).join('');
+    const distributionHtml = total === 0 ? '' :
+      '<div class="cs-dist-bar">' + segHtml + '</div><div class="cs-dist-legend">' + legendHtml + '</div>';
+
+    const groupsHtml = summary.groups.map((g) => {
+      const itemsHtml = g.items.map((d) => {
+        const parentMeta = (d.parent || '').trim()
+          ? '<div class="cs-item-meta"><b>Draagt bij aan:</b> ' + escapeHtml(d.parent) + '</div>' : '';
+        const kpiMeta = (d.kpi || '').trim()
+          ? '<div class="cs-item-meta"><b>KPI:</b> ' + escapeHtml(d.kpi) + '</div>' : '';
+        const descHtml = (d.desc || '').trim()
+          ? '<p class="cs-item-desc">' + escapeHtml(d.desc) + '</p>' : '';
+        return '<div class="cs-item"><p class="cs-item-title"><span class="cs-item-code">' +
+          escapeHtml(d.code) + '</span>' + escapeHtml(d.name) + '</p>' + descHtml + parentMeta + kpiMeta + '</div>';
+      }).join('');
+      return '<div class="cs-group-card" style="border-top-color:' + (g.isOverig ? '#ccc' : col.color) + ';">' +
+        '<div class="cs-group-title"><span class="cs-group-name">' + escapeHtml(g.label) +
+        '</span><span class="cs-group-count">' + g.items.length + (g.items.length === 1 ? ' element' : ' elementen') +
+        '</span></div>' + itemsHtml + '</div>';
+    }).join('');
+
+    if (total === 0) {
+      return '<div class="cs-ribbon">' + ribbonHtml + '</div>' +
+        '<p class="cs-empty-note">Deze kolom bevat nog geen elementen.</p>';
+    }
+
+    return '<div class="cs-ribbon">' + ribbonHtml + '</div>' +
+      '<div class="cs-stats">' + statsHtml + '</div>' +
+      distributionHtml +
+      '<div class="cs-groups">' + groupsHtml + '</div>';
+  }
+
+  let lastColumnSummaryType = null;
+  const columnSummaryModalBackdrop = document.getElementById('column-summary-modal-backdrop');
+  const columnSummaryTitleEl = document.getElementById('column-summary-title');
+  const columnSummarySubtitleEl = document.getElementById('column-summary-subtitle');
+  const columnSummaryBodyEl = document.getElementById('column-summary-body');
+  const columnSummaryFooterEl = document.getElementById('column-summary-footer');
+  const columnSummaryExportBtn = document.getElementById('column-summary-export-btn');
+  const columnSummaryCloseBtn = document.getElementById('column-summary-close-btn');
+
+  function openColumnSummaryModal(typeName) {
+    const summary = computeColumnSummary(typeName);
+    if (!summary) return;
+    lastColumnSummaryType = typeName;
+    columnSummaryTitleEl.textContent = 'Samenvatting: ' + summary.col.title;
+    columnSummarySubtitleEl.textContent = summary.col.subtitle || '';
+    columnSummaryBodyEl.innerHTML = columnSummaryBodyHtml(summary);
+    columnSummaryFooterEl.textContent = columnSummaryStamp();
+    columnSummaryModalBackdrop.classList.add('visible');
+  }
+
+  function closeColumnSummaryModal() {
+    columnSummaryModalBackdrop.classList.remove('visible');
+  }
+
+  columnsEl.addEventListener('dblclick', (ev) => {
+    const header = ev.target.closest('.col-header');
+    if (!header) return;
+    if (ev.target.closest('.col-hide-btn')) return; // ✕-knop heeft zijn eigen (click-)gedrag, niet openen
+    const col = header.closest('.column');
+    if (!col) return;
+    openColumnSummaryModal(col.dataset.key);
+  });
+
+  if (columnSummaryCloseBtn) columnSummaryCloseBtn.addEventListener('click', closeColumnSummaryModal);
+  if (columnSummaryModalBackdrop) columnSummaryModalBackdrop.addEventListener('click', (ev) => {
+    if (ev.target === columnSummaryModalBackdrop) closeColumnSummaryModal();
+  });
+  if (columnSummaryExportBtn) columnSummaryExportBtn.addEventListener('click', () => {
+    if (!lastColumnSummaryType) return;
+    exportColumnSummaryHtml(lastColumnSummaryType);
+  });
+
+  // Zelfstandig, downloadbaar HTML-verslag van één kolom — zelfde
+  // Blob-downloadmechaniek als exportSVG()/exportStaticHtml() verderop in dit
+  // bestand, maar met een eigen, compacte <style> (i.p.v. de hele pagina-CSS
+  // meesturen: dit is een klein rapportbestand, geen werkende kopie van de
+  // boom-app zoals exportStaticHtml() dat wél maakt).
+  function exportColumnSummaryHtml(typeName) {
+    const summary = computeColumnSummary(typeName);
+    if (!summary) return;
+    const bodyHtml = columnSummaryBodyHtml(summary);
+    const stamp = columnSummaryStamp();
+    const docTitle = 'Samenvatting: ' + summary.col.title + ' — ' + lastTreeResponse.doelenboom.name;
+    const html = '<!DOCTYPE html>\n<html lang="nl">\n<head>\n<meta charset="UTF-8">\n' +
+      '<meta name="viewport" content="width=device-width, initial-scale=1">\n' +
+      '<title>' + escapeHtml(docTitle) + '</title>\n<style>' + CS_EXPORT_CSS + '</style>\n</head>\n<body>\n' +
+      '<div class="cs-modal">' +
+      '<div class="cs-modal-head"><div><h3 class="cs-modal-title">Samenvatting: ' + escapeHtml(summary.col.title) + '</h3>' +
+      '<p class="cs-modal-subtitle">' + escapeHtml(summary.col.subtitle || '') + '</p></div></div>' +
+      '<div class="cs-modal-body">' + bodyHtml + '</div>' +
+      '<p class="cs-modal-footer">' + escapeHtml(stamp) + '</p>' +
+      '</div>\n</body>\n</html>\n';
+
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const slug = (lastTreeResponse.doelenboom && lastTreeResponse.doelenboom.slug) || 'doelenboom';
+    const colSlug = typeName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    const dateStamp = new Date().toISOString().slice(0, 10);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'doelenboom_' + slug + '_' + colSlug + '_' + dateStamp + '.html';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
   }
 
   const RAG_COLORS = { 'rood': '#DC3545', 'oranje': '#FD7E14', 'groen': '#28A745' };
