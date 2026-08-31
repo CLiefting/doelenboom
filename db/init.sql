@@ -271,6 +271,31 @@ create table if not exists project_status (
   updated_by bigint references users(id) on delete set null
 );
 
+-- Volledige wijzigingshistorie van de projectstatus (before/after-waarden per
+-- veld, wie en wanneer) — zie db/migrations/0021_project_status_history.sql
+-- voor de volledige toelichting. Eén rij per PUT/touch/DELETE op
+-- project_status; voor altijd bewaard, geen opschoning.
+create table if not exists project_status_history (
+  id bigserial primary key,
+  element_id bigint not null references elements(id) on delete cascade,
+  changed_at timestamptz not null default now(),
+  changed_by bigint references users(id) on delete set null,
+  is_touch boolean not null default false,
+  prev_projectstatus text,
+  prev_rag text,
+  prev_toelichting text,
+  prev_gerapporteerd_op date,
+  prev_cluster_ppt text,
+  new_projectstatus text,
+  new_rag text,
+  new_toelichting text,
+  new_gerapporteerd_op date,
+  new_cluster_ppt text
+);
+
+create index if not exists idx_project_status_history_element
+  on project_status_history (element_id, changed_at desc);
+
 create table if not exists products (
   id bigserial primary key,
   element_id bigint not null references elements(id) on delete cascade,

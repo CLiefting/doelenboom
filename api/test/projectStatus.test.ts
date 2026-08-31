@@ -30,6 +30,9 @@ describe('project-status (PUT upsert + DELETE)', () => {
     await req('POST', `/api/doelenbomen/${doelenboomId}/elements`, {
       token: adminToken, body: { code: 'P1', type: 'Project', name: 'Project 1' },
     });
+    await req('POST', `/api/doelenbomen/${doelenboomId}/elements`, {
+      token: adminToken, body: { code: 'P2', type: 'Project', name: 'Project 2' },
+    });
   });
 
   after(async () => {
@@ -159,5 +162,80 @@ describe('project-status (PUT upsert + DELETE)', () => {
       token: bezoekerToken,
     });
     assert.equal(bezoeker.status, 403);
+  });
+
+  it('GET .../project-status/history: before/after per veld, nieuwste eerst, touch apart gelabeld', async () => {
+    // P2 is nog nooit aangeraakt -> eerste PUT heeft prev=null (nog geen rij).
+    const first = await req('PUT', `/api/doelenbomen/${doelenboomId}/elements/P2/project-status`, {
+      token: adminToken, body: { projectstatus: 'Actief', rag: 'Groen', toelichting: 'Start' },
+    });
+    assert.equal(first.status, 200);
+
+    const second = await req('PUT', `/api/doelenbomen/${doelenboomId}/elements/P2/project-status`, {
+      token: gebruikerToken, body: { projectstatus: 'On-hold', rag: 'Oranje', toelichting: 'Start' },
+    });
+    assert.equal(second.status, 200);
+
+    const touch = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P2/project-status/touch`, {
+      token: gebruikerToken,
+    });
+    assert.equal(touch.status, 200);
+
+    const del = await req('DELETE', `/api/doelenbomen/${doelenboomId}/elements/P2/project-status`, { token: adminToken });
+    assert.equal(del.status, 204);
+
+    const history = await req('GET', `/api/doelenbomen/${doelenboomId}/elements/P2/project-status/history`, {
+      token: adminToken,
+    });
+    assert.equal(history.status, 200);
+    assert.equal(history.body.length, 4, 'PUT + PUT + touch + DELETE = 4 historie-rijen');
+
+    // Nieuwste eerst: DELETE (index 0) ... eerste PUT (index 3).
+    const [delRow, touchRow, secondRow, firstRow] = history.body;
+
+    assert.equal(delRow.isTouch, false);
+    assert.equal(delRow.prevProjectstatus, 'On-hold', 'DELETE: prev = wat er stond vóór het wissen');
+    assert.equal(delRow.newProjectstatus, null, 'DELETE: new = null (gewist)');
+    assert.equal(delRow.changedByEmail, `${PREFIX}-admin@test.local`);
+
+    assert.equal(touchRow.isTouch, true);
+    assert.equal(touchRow.prevProjectstatus, 'On-hold');
+    assert.equal(touchRow.newProjectstatus, 'On-hold', 'touch: prev === new, inhoudelijk niets gewijzigd');
+    assert.equal(touchRow.changedByEmail, `${PREFIX}-gebruiker@test.local`);
+
+    assert.equal(secondRow.isTouch, false);
+    assert.equal(secondRow.prevProjectstatus, 'Actief');
+    assert.equal(secondRow.newProjectstatus, 'On-hold');
+    assert.equal(secondRow.prevRag, 'Groen');
+    assert.equal(secondRow.newRag, 'Oranje');
+
+    assert.equal(firstRow.isTouch, false);
+    assert.equal(firstRow.prevProjectstatus, null, 'eerste keer: nog geen rij, dus prev = null (niet leeg)');
+    assert.equal(firstRow.newProjectstatus, 'Actief');
+  });
+
+  it('een bezoeker ziet de historie wel, maar changedByEmail niet (zelfde privacy als GET .../tree)', async () => {
+    const asAdmin = await req('GET', `/api/doelenbomen/${doelenboomId}/elements/P2/project-status/history`, {
+      token: adminToken,
+    });
+    assert.equal(asAdmin.status, 200);
+    assert.ok(asAdmin.body.length > 0);
+    assert.ok(asAdmin.body[0].changedByEmail, 'admin ziet wie');
+
+    const asBezoeker = await req('GET', `/api/doelenbomen/${doelenboomId}/elements/P2/project-status/history`, {
+      token: bezoekerToken,
+    });
+    assert.equal(asBezoeker.status, 200);
+    assert.equal(asBezoeker.body.length, asAdmin.body.length);
+    assert.equal(asBezoeker.body[0].changedByEmail, undefined, 'bezoeker ziet wie niet');
+    assert.ok(asBezoeker.body[0].changedAt, 'bezoeker ziet wanneer wel');
+    assert.ok('newProjectstatus' in asBezoeker.body[0], 'bezoeker ziet wat er gewijzigd is wel');
+  });
+
+  it('GET .../project-status/history: onbekend element geeft 404', async () => {
+    const res = await req('GET', `/api/doelenbomen/${doelenboomId}/elements/GEENBESTAAND/project-status/history`, {
+      token: adminToken,
+    });
+    assert.equal(res.status, 404);
   });
 });

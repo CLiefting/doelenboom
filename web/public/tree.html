@@ -672,6 +672,20 @@
   .activities-toggle-label { display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
   .activities-chevron { display: inline-block; font-size: 9px; color: #aab0b8; transition: transform 0.15s; }
   .dp-activities-body { margin-bottom: 4px; }
+  /* Wijzigingshistorie van de projectstatus (before/after per veld, zie
+     GET .../project-status/history) — zelfde in-/uitklapmechaniek als
+     Activiteiten hierboven (.dp-activities-title/.activities-toggle-label/
+     .activities-chevron worden hier hergebruikt), maar met eigen body-opmaak
+     want dit is een lijst van los-tijd-momenten i.p.v. een Gantt. */
+  .dp-history-title { margin-top: 10px; }
+  .dp-history-body { margin-bottom: 4px; }
+  .dp-history-list { display: flex; flex-direction: column; gap: 8px; }
+  .dp-history-item { padding: 6px 8px; border-left: 2px solid #e3e6ea; font-size: 12px; }
+  .dp-history-meta { color: #8a8f98; font-size: 11px; margin-bottom: 2px; }
+  .dp-history-kind { color: #667; font-style: italic; }
+  .dp-history-diff { color: #333; line-height: 1.5; }
+  .dp-history-diff strong { font-weight: 600; }
+  .dp-history-diff em { color: #8a8f98; font-style: italic; }
   .activity-gantt-wrap { margin: 4px 0 4px; }
   /* De as (.activity-gantt-axis-track) en elke balk-track (.activity-row-track)
      zijn bewust GEEN kolom in een label|track|knoppen-grid meer (dat gaf een
@@ -3157,6 +3171,18 @@ function runApp(data) {
     return new Date(t).toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit', year: 'numeric' });
   }
 
+  // Datum + tijd (i.p.v. alleen datum, zie formatDateNL hierboven) — voor de
+  // wijzigingshistorie (project-status-history), waar meerdere wijzigingen op
+  // dezelfde dag kunnen voorkomen en het tijdstip dus onderscheidend is.
+  function formatDateTimeNL(iso) {
+    if (!iso) return '';
+    const t = parseDateFlexible(iso);
+    if (isNaN(t)) return iso;
+    return new Date(t).toLocaleString('nl-NL', {
+      day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
+    });
+  }
+
   // Business value-getallen met NL-duizendtalnotatie (punt i.p.v. komma) —
   // gebruikt op de tile-badge (productCardHtml) en in de BV-totaalregel
   // bovenaan "Producten / deliverables" (productsBvSummaryHtml).
@@ -4134,6 +4160,24 @@ function runApp(data) {
       html += '<div class="pp-header-note pp-header-note-muted">Laatst bijgewerkt: ' + escapeHtml(staleAgeLabel(id)) +
         (ps.updatedByEmail ? ' door ' + escapeHtml(ps.updatedByEmail) : '') +
       '</div>';
+    }
+
+    // Volledige wijzigingshistorie (before/after per veld) — vervolg-interview
+    // met Charles (31 augustus 2026, n.a.v. project "Sweepen"): de notitie
+    // hierboven laat alleen het laatste moment zien. Alleen in de levende app
+    // (apiUrl/authToken gezet, zie initActivityPing hierboven voor hetzelfde
+    // patroon) — een standalone/statische HTML-export heeft geen backend om de
+    // historie bij op te halen, dus daar verbergen i.p.v. een altijd-falende
+    // knop tonen. Bewust GEEN crud-only: ook een bezoeker mag de historie zien
+    // (net als 'Laatst bijgewerkt' hierboven) — alleen 'door wie' wordt
+    // server-side gestript voor die rol (zie GET .../project-status/history).
+    if (projectenActive && apiUrl && authToken) {
+      html += '<div class="dp-activities-title dp-history-title">' +
+        '<span class="activities-toggle-label project-history-toggle" data-code="' + escapeHtml(id) + '">' +
+          '<span class="activities-chevron">&#9656;</span> Historie' +
+        '</span>' +
+      '</div>';
+      html += '<div class="dp-activities-body dp-history-body" style="display:none" data-code="' + escapeHtml(id) + '"></div>';
     }
 
     return html;
@@ -7047,6 +7091,105 @@ function runApp(data) {
     }
   }
 
+  // ---- Wijzigingshistorie van de projectstatus (before/after per veld) ----
+  // Zie GET .../project-status/history (routes/projectStatus.ts) en het
+  // vervolg-interview met Charles (31 augustus 2026, n.a.v. project
+  // "Sweepen"): welk veld wanneer door wie van welke naar welke waarde is
+  // gewijzigd, inclusief "gecontroleerd, niets gewijzigd"-touch-acties.
+  const STATUS_FIELD_LABELS = {
+    projectstatus: 'Status', rag: 'RAG', toelichting: 'Toelichting',
+    gerapporteerdOp: 'Gerapporteerd op', clusterPpt: 'Cluster/PPT',
+  };
+  const STATUS_FIELD_KEYS = [
+    ['projectstatus', 'prevProjectstatus', 'newProjectstatus'],
+    ['rag', 'prevRag', 'newRag'],
+    ['toelichting', 'prevToelichting', 'newToelichting'],
+    ['gerapporteerdOp', 'prevGerapporteerdOp', 'newGerapporteerdOp'],
+    ['clusterPpt', 'prevClusterPpt', 'newClusterPpt'],
+  ];
+
+  // null/leeg allebei "geen waarde" voor de weergave — het onderscheid tussen
+  // "nog geen rij" (null) en "bewust leeg" ('') zit al verwerkt in isCreate/
+  // isDelete hieronder, hier gaat het puur om wat je aan tekst laat zien.
+  function historyValueLabel(field, value) {
+    if (value === null || value === undefined || value === '') return null;
+    if (field === 'gerapporteerdOp') return formatDateNL(value);
+    if (field === 'projectstatus' || field === 'rag') return titleCase(value);
+    return value;
+  }
+
+  // Eén regel per veld dat daadwerkelijk is gewijzigd (prev !== new) — velden
+  // die niet zijn aangeraakt blijven onvermeld, anders zou elke wijziging
+  // altijd alle 5 velden tonen. Bij een touch-actie (prev === new voor alle
+  // velden, zie insertHistoryRow in projectStatus.ts) levert dit dus bewust
+  // een lege lijst op.
+  function historyRowDiffLines(row) {
+    const isCreate = STATUS_FIELD_KEYS.every(([, pk]) => row[pk] === null);
+    const isDelete = STATUS_FIELD_KEYS.every(([, , nk]) => row[nk] === null);
+    const lines = [];
+    STATUS_FIELD_KEYS.forEach(([field, pk, nk]) => {
+      const prevVal = row[pk], newVal = row[nk];
+      if (prevVal === newVal) return;
+      const label = STATUS_FIELD_LABELS[field];
+      const prevLabel = historyValueLabel(field, prevVal);
+      const newLabel = historyValueLabel(field, newVal);
+      if (isCreate) {
+        if (newLabel !== null) lines.push('<strong>' + label + ':</strong> ' + escapeHtml(newLabel));
+      } else if (isDelete) {
+        if (prevLabel !== null) lines.push('<strong>' + label + ':</strong> ' + escapeHtml(prevLabel) + ' &rarr; <em>gewist</em>');
+      } else {
+        lines.push(
+          '<strong>' + label + ':</strong> ' +
+          (prevLabel !== null ? escapeHtml(prevLabel) : '<em>leeg</em>') + ' &rarr; ' +
+          (newLabel !== null ? escapeHtml(newLabel) : '<em>leeg</em>')
+        );
+      }
+    });
+    return lines;
+  }
+
+  function projectHistoryListHtml(rows) {
+    if (!rows || rows.length === 0) {
+      return '<div class="dp-empty-note">Nog geen wijzigingshistorie.</div>';
+    }
+    return '<div class="dp-history-list">' + rows.map((row) => {
+      const when = formatDateTimeNL(row.changedAt);
+      // changedByEmail ontbreekt voor de rol 'bezoeker' (server-side gestript,
+      // zie routes/projectStatus.ts) — zelfde patroon als updatedByEmail bij
+      // "Laatst bijgewerkt" hierboven.
+      const who = row.changedByEmail ? ' door ' + escapeHtml(row.changedByEmail) : '';
+      const diffLines = historyRowDiffLines(row);
+      const bodyHtml = row.isTouch
+        ? '<div class="dp-history-kind">Gecontroleerd, niets gewijzigd</div>'
+        : diffLines.length === 0
+          ? '<div class="dp-history-kind">Opgeslagen (geen inhoudelijke wijziging)</div>'
+          : '<div class="dp-history-diff">' + diffLines.join('<br>') + '</div>';
+      return '<div class="dp-history-item">' +
+        '<div class="dp-history-meta">' + escapeHtml(when) + who + '</div>' +
+        bodyHtml +
+      '</div>';
+    }).join('') + '</div>';
+  }
+
+  async function loadProjectHistory(code, bodyEl) {
+    bodyEl.innerHTML = '<div class="dp-empty-note">Laden&hellip;</div>';
+    try {
+      const url = apiUrl + '/api/doelenbomen/' + doelenboomId + '/elements/' +
+        encodeURIComponent(code) + '/project-status/history';
+      const res = await fetch(url, { headers: { Authorization: 'Bearer ' + authToken } });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || ('Historie ophalen mislukt (HTTP ' + res.status + ')'));
+      }
+      const rows = await res.json();
+      bodyEl.innerHTML = projectHistoryListHtml(rows);
+    } catch (err) {
+      bodyEl.innerHTML = '<div class="dp-empty-note">' +
+        escapeHtml(err && err.message ? err.message : 'Onbekende fout bij ophalen van de historie.') +
+      '</div>';
+    }
+  }
+
   // Eén gedeelde handler voor zowel het detail-paneel (alle elementtypen) als het
   // project-paneel eronder (dat voor Project-elementen dezelfde tags/org-chips
   // toont, zie projectSectionHtml) — anders werken de +Tag/+Organisatieonderdeel-
@@ -7058,6 +7201,25 @@ function runApp(data) {
     if (projectStatusEditBtn) { openProjectStatusModal(projectStatusEditBtn.dataset.code); return; }
     const projectStatusTouchBtn = ev.target.closest('.project-status-touch-btn');
     if (projectStatusTouchBtn) { touchProjectStatus(projectStatusTouchBtn.dataset.code); return; }
+    // Historie-toggle: hergebruikt dezelfde in-/uitklapklasses als de
+    // Activiteiten-sectie hieronder (.activities-toggle-label/.dp-activities-
+    // title/.activities-chevron, zie projectHeaderHtml) — vandaar hier vóór
+    // die generieke .activities-toggle-label-check afgehandeld, anders zou die
+    // 'm ook matchen maar dan zonder de fetch hieronder. Alleen bij het
+    // OPENEN opnieuw ophalen (niet bij elke toggle) — een gesloten sectie
+    // dichtklappen hoeft niet opnieuw te laden.
+    const historyToggle = ev.target.closest('.project-history-toggle');
+    if (historyToggle) {
+      const body = historyToggle.closest('.dp-history-title').nextElementSibling;
+      const chevron = historyToggle.querySelector('.activities-chevron');
+      if (body && body.classList.contains('dp-history-body')) {
+        const isOpen = body.style.display !== 'none';
+        body.style.display = isOpen ? 'none' : '';
+        if (chevron) chevron.innerHTML = isOpen ? '&#9656;' : '&#9662;';
+        if (!isOpen) loadProjectHistory(historyToggle.dataset.code, body);
+      }
+      return;
+    }
     const productAddBtn = ev.target.closest('.product-add-btn');
     if (productAddBtn) { openProductModal('create', productAddBtn.dataset.code); return; }
     const productEditBtn = ev.target.closest('.product-edit-btn');
