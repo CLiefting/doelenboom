@@ -1256,6 +1256,13 @@
           <button class="btn ghost btn-sm" id="filters-btn" type="button">Filters &#9662;</button>
           <div class="file-menu-dropdown filters-dropdown" id="filters-dropdown">
             <div class="tag-org-filter" id="tag-org-filter"></div>
+            <!-- Brug tussen de chip-filters hierboven (die alleen dimmen/markeren,
+                 zie applyTagFilter) en de boomfilter (die daadwerkelijk verbergt,
+                 zie filterApplyBtn/"Toon deze bomen") — anders moet je bij bv. 35
+                 verouderde projecten ze allemaal los Ctrl/Cmd-klikken om ze
+                 daadwerkelijk uit de boom te filteren. Alleen zichtbaar zolang er
+                 minstens één chip actief is (zie applyTagFilter). -->
+            <button class="btn ghost btn-sm" id="filter-chips-apply-btn" type="button" style="display:none; width:100%; margin-top:6px;"></button>
           </div>
         </div>
         <button class="btn ghost btn-sm admin-only" id="manage-tags-orgs-btn" type="button" title="Tags &amp; organisatieonderdelen beheren">Beheer</button>
@@ -2063,6 +2070,11 @@ function runApp(data) {
   const filterStatusTextEl = document.getElementById('filter-status-text');
   const filterApplyBtn = document.getElementById('filter-apply-btn');
   const filterClearBtn = document.getElementById('filter-clear-btn');
+  // Zie de toelichting bij #filter-chips-apply-btn hierboven — gevuld door
+  // applyTagFilter() met de elementen die de actieve tag/org/verouderd-chips
+  // matchen, zodat je die in één klik naar de echte boomfilter kunt overzetten.
+  const filterChipsApplyBtn = document.getElementById('filter-chips-apply-btn');
+  let lastChipFilterMatchIds = [];
   const SVG_NS = 'http://www.w3.org/2000/svg';
 
   function normalizeSearch(s) {
@@ -2235,7 +2247,11 @@ function runApp(data) {
     document.querySelectorAll('.node').forEach(n => n.classList.remove('tag-active', 'tag-dimmed'));
     document.querySelectorAll('.chip-filter').forEach(el => el.classList.remove('chip-filter-active'));
     filtersBtn.classList.toggle('filters-active', activeTagFilters.size > 0);
-    if (activeTagFilters.size === 0) return;
+    if (activeTagFilters.size === 0) {
+      lastChipFilterMatchIds = [];
+      filterChipsApplyBtn.style.display = 'none';
+      return;
+    }
 
     // Unie (OF) van de elementen die bij minstens één geselecteerde chip horen.
     const idSet = new Set();
@@ -2245,6 +2261,13 @@ function runApp(data) {
       const ids = kind === 'tag' ? elementsForTag(id) : kind === 'org' ? elementsForOrg(id) : elementsForStale();
       ids.forEach(elId => idSet.add(elId));
     });
+
+    // Zie #filter-chips-apply-btn hierboven: laat in één klik alle huidige
+    // chip-matches overzetten naar de boomfilter (die wél daadwerkelijk
+    // verbergt), i.p.v. elk element los te moeten Ctrl/Cmd-klikken.
+    lastChipFilterMatchIds = Array.from(idSet);
+    filterChipsApplyBtn.style.display = (focusId === null && idSet.size > 0) ? '' : 'none';
+    filterChipsApplyBtn.textContent = 'Toon alleen deze ' + idSet.size + ' in de boom';
 
     let changed = false;
     idSet.forEach(id => {
@@ -2687,6 +2710,13 @@ function runApp(data) {
     filterApplyBtn.disabled = pickCount === 0 || focusId !== null;
     filterApplyBtn.textContent = elementFilterActive ? 'Filter bijwerken' : 'Toon deze bomen';
     filterClearBtn.disabled = focusId !== null;
+    // Zelfde reden als filterApplyBtn/filterClearBtn hierboven: tijdens
+    // focusmodus doet "Toon deze bomen" toch niets (applyElementFilter
+    // negeert focusId !== null), dus knop tijdelijk verbergen i.p.v. een
+    // knop tonen die niet reageert.
+    if (lastChipFilterMatchIds.length > 0) {
+      filterChipsApplyBtn.style.display = focusId === null ? '' : 'none';
+    }
   }
 
   function applyElementFilter() {
@@ -2718,6 +2748,18 @@ function runApp(data) {
   filterClearBtn.addEventListener('click', clearElementFilter);
   filterFromSearchBtn.addEventListener('click', () => {
     lastSearchMatchIds.forEach(id => {
+      filterSelection.add(id);
+      const node = document.querySelector('.node[data-id="' + id + '"]');
+      if (node) node.classList.add('filter-picked');
+    });
+    updateFilterStatusUI();
+    applyElementFilter();
+  });
+  // Zie #filter-chips-apply-btn hierboven — zelfde mechanisme als
+  // filterFromSearchBtn hierboven, maar dan met de matches van de actieve
+  // tag/org/verouderd-chipfilters i.p.v. van de zoekbalk.
+  filterChipsApplyBtn.addEventListener('click', () => {
+    lastChipFilterMatchIds.forEach(id => {
       filterSelection.add(id);
       const node = document.querySelector('.node[data-id="' + id + '"]');
       if (node) node.classList.add('filter-picked');
