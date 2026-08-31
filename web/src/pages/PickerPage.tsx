@@ -62,7 +62,11 @@ export default function PickerPage({
       <main style={styles.main}>
         <header style={styles.header}>
           <h1 style={styles.h1}>Doelenboom</h1>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {/* flexWrap: 'wrap' zodat deze knoppenrij op een smal (mobiel) scherm
+              afbreekt i.p.v. van de rand af te lopen (bv. het e-mailadres in
+              UserMenu werd anders onbereikbaar buiten beeld geduwd) — zie
+              doelenboom_mobiele_analyse.md. */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
             {canManageUsers && (
               <button onClick={onTenantsRequest} style={pillStyle()}>
                 Tenantbeheer

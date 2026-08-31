@@ -373,7 +373,9 @@ function btnStyle(kind: 'primary' | 'ghost'): React.CSSProperties {
 
 const styles: Record<string, React.CSSProperties> = {
   main: { fontFamily: 'system-ui, sans-serif', padding: 'clamp(1.25rem, 4vw, 2.5rem)', maxWidth: 1100, margin: '0 auto' },
-  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.5rem' },
+  // flexWrap: 'wrap' zodat de titel/knoppen op een smal (mobiel) scherm onder
+  // elkaar komen i.p.v. van de rand af te lopen — zie doelenboom_mobiele_analyse.md.
+  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12, marginBottom: '1.5rem' },
   title: { margin: 0, color: '#203864', fontSize: 26 },
   subtitle: { margin: '4px 0 0', color: '#6c6f76', fontSize: 13.5 },
   muted: { color: '#9aa0a8', fontSize: 13.5 },
