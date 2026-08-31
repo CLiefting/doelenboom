@@ -15,7 +15,7 @@ treeRouter.use(requireAuth);
 // zodat beide altijd exact dezelfde data tonen/exporteren.
 export async function fetchTree(doelenboomId: string) {
   const doelenboomResult = await pool.query(
-    `select d.id, d.slug, d.name, d.read_only, t.id as tenant_id, t.slug as tenant_slug, t.name as tenant_name
+    `select d.id, d.slug, d.name, d.read_only, d.stale_after_days, t.id as tenant_id, t.slug as tenant_slug, t.name as tenant_name
      from doelenbomen d join tenants t on t.id = d.tenant_id
      where d.id = $1`,
     [doelenboomId]
@@ -39,9 +39,17 @@ export async function fetchTree(doelenboomId: string) {
     [doelenboomId]
   );
 
+  // left join users: updated_by mag null zijn (nog nooit bijgewerkt sinds
+  // deze functionaliteit bestaat, zie db/init.sql) of verwijzen naar een
+  // inmiddels verwijderd account (on delete set null) — in beide gevallen
+  // levert de left join dan gewoon updated_by_email = null op, geen rij die
+  // wegvalt.
   const projectStatusResult = await pool.query(
-    `select el.code, ps.projectstatus, ps.rag, ps.toelichting, ps.gerapporteerd_op, ps.cluster_ppt
-     from project_status ps join elements el on el.id = ps.element_id
+    `select el.code, ps.projectstatus, ps.rag, ps.toelichting, ps.gerapporteerd_op, ps.cluster_ppt,
+            ps.updated_at, u.email as updated_by_email
+     from project_status ps
+     join elements el on el.id = ps.element_id
+     left join users u on u.id = ps.updated_by
      where el.doelenboom_id = $1`,
     [doelenboomId]
   );
@@ -131,6 +139,12 @@ export async function fetchTree(doelenboomId: string) {
       toelichting: row.toelichting,
       gerapporteerdOp: row.gerapporteerd_op,
       clusterPpt: row.cluster_ppt,
+      // updatedByEmail wordt hieronder in de route-handler weer verwijderd
+      // voor de rol 'bezoeker' (zie isEditorRole) — fetchTree() zelf blijft
+      // bewust rol-agnostisch (wordt ook door de Excel-export gebruikt, zie
+      // routes/exports.ts, die dit veld toch niet in de xlsx-structuur opneemt).
+      updatedAt: row.updated_at,
+      updatedByEmail: row.updated_by_email,
     };
   }
 
@@ -232,6 +246,10 @@ export async function fetchTree(doelenboomId: string) {
       slug: doelenboomResult.rows[0].slug,
       name: doelenboomResult.rows[0].name,
       readOnly: doelenboomResult.rows[0].read_only,
+      // Altijd meegeven, ongeacht rol/module — ook een bezoeker moet de
+      // drempel kunnen zien om de 'verouderd'-markering op een projectvak te
+      // kunnen duiden (zie isStale() in tree.html). Geen gevoelige data.
+      staleAfterDays: doelenboomResult.rows[0].stale_after_days,
       tenant: {
         id: doelenboomResult.rows[0].tenant_id,
         slug: doelenboomResult.rows[0].tenant_slug,
@@ -290,6 +308,27 @@ treeRouter.get('/:id/tree', requireTenantRoleForDoelenboomParam('bezoeker', 'id'
   // tags/org-koppelingen op een element, projectstatus/producten) — nieuw,
   // ook waar voor de rol 'gebruiker'. Elke canWrite-gebruiker kan ook dit.
   const canWriteContent = (effectiveRole === 'admin' || effectiveRole === 'gebruiker') && !blocked;
+  // "Wie heeft dit project voor het laatst bijgewerkt" is alleen zichtbaar
+  // voor rollen die ook mogen bewerken (gebruiker/admin) — zie het interview
+  // met Charles (31 augustus 2026): het "wanneer" mag breed zichtbaar zijn
+  // (staat gewoon in projectStatus.updatedAt hieronder, altijd), maar het
+  // e-mailadres van de bijwerker niet voor een bezoeker. Bewust los van
+  // canWriteContent/blocked hierboven: dit is een privacy-vraag over wélke
+  // rol iemand heeft, geen schrijfrechten-vraag — een read-only-gezette boom
+  // mag voor een admin/gebruiker het e-mailadres gewoon blijven tonen.
+  const isEditorRole = effectiveRole === 'admin' || effectiveRole === 'gebruiker';
+  const projectStatus = isEditorRole
+    ? tree.projectStatus
+    : Object.fromEntries(
+        Object.entries(tree.projectStatus as Record<string, Record<string, unknown>>).map(([code, ps]) => {
+          const { updatedByEmail: _omit, ...rest } = ps;
+          return [code, rest];
+        })
+      );
 
-  res.json({ ...tree, doelenboom: { ...tree.doelenboom, effectiveRole, canWrite, canWriteContent } });
+  res.json({
+    ...tree,
+    projectStatus,
+    doelenboom: { ...tree.doelenboom, effectiveRole, canWrite, canWriteContent },
+  });
 });

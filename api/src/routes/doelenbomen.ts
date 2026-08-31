@@ -32,7 +32,9 @@ doelenbomenRouter.use(requireAuth);
 // archived_at (als "archivedAt"): zie license.ts — een gearchiveerde
 // doelenboom telt niet mee als "actieve" boom voor de tier-limiet (§5,
 // doelenboom_licentiemodel.md), maar blijft verder gewoon bestaan/leesbaar.
-const DOELENBOOM_FIELDS = 'd.id, d.slug, d.name, d.read_only, d.wipe_on_empty, d.archived_at as "archivedAt", d.created_at';
+const DOELENBOOM_FIELDS =
+  'd.id, d.slug, d.name, d.read_only, d.wipe_on_empty, d.stale_after_days as "staleAfterDays", ' +
+  'd.archived_at as "archivedAt", d.created_at';
 
 doelenbomenRouter.get('/doelenbomen', async (req: AuthedRequest, res) => {
   if (req.user!.isSysadmin) {
@@ -76,7 +78,8 @@ doelenbomenRouter.get(
   requireTenantRoleForTenantParam('bezoeker', 'tenantId'),
   async (req, res) => {
     const result = await pool.query(
-      'select id, slug, name, read_only, wipe_on_empty, archived_at as "archivedAt", created_at ' +
+      'select id, slug, name, read_only, wipe_on_empty, stale_after_days as "staleAfterDays", ' +
+        'archived_at as "archivedAt", created_at ' +
         'from doelenbomen where tenant_id = $1 order by name',
       [req.params.tenantId]
     );
@@ -130,7 +133,9 @@ doelenbomenRouter.post(
       const defaultWipeOnEmpty = tenantRow.rows[0]?.wipe_on_empty ?? false;
       const result = await client.query(
         `insert into doelenbomen (tenant_id, slug, name, wipe_on_empty)
-         values ($1, $2, $3, $4) returning id, slug, name, read_only, wipe_on_empty, archived_at as "archivedAt", created_at`,
+         values ($1, $2, $3, $4)
+         returning id, slug, name, read_only, wipe_on_empty, stale_after_days as "staleAfterDays",
+           archived_at as "archivedAt", created_at`,
         [req.params.tenantId, slug, name, defaultWipeOnEmpty]
       );
       if (templateId != null) {
@@ -201,16 +206,30 @@ doelenbomenRouter.put(
     const readOnly = typeof b.readOnly === 'boolean' ? b.readOnly : undefined;
     const wipeOnEmpty = typeof b.wipeOnEmpty === 'boolean' ? b.wipeOnEmpty : undefined;
     const archived = typeof b.archived === 'boolean' ? b.archived : undefined;
+    // staleAfterDays: drempel (in dagen) voor de 'verouderd'-markering op
+    // projectelementen — zie db/migrations/0020_project_status_review.sql.
+    // Zelfde check-constraint-grenzen als de database (1-3650), hier al
+    // gevalideerd voor een nette foutmelding i.p.v. een rauwe database-error.
+    const staleAfterDaysRaw = b.staleAfterDays;
+    const staleAfterDays =
+      typeof staleAfterDaysRaw === 'number' && Number.isInteger(staleAfterDaysRaw) ? staleAfterDaysRaw : undefined;
+    if (staleAfterDaysRaw !== undefined && staleAfterDays === undefined) {
+      return res.status(400).json({ error: 'staleAfterDays moet een geheel getal zijn.' });
+    }
+    if (staleAfterDays !== undefined && (staleAfterDays < 1 || staleAfterDays > 3650)) {
+      return res.status(400).json({ error: 'staleAfterDays moet tussen 1 en 3650 liggen.' });
+    }
     if (!name) return res.status(400).json({ error: 'Naam is verplicht.' });
 
     const current = await pool.query(
-      'select tenant_id, slug, read_only, wipe_on_empty, archived_at from doelenbomen where id = $1',
+      'select tenant_id, slug, read_only, wipe_on_empty, stale_after_days, archived_at from doelenbomen where id = $1',
       [req.params.id]
     );
     if (current.rows.length === 0) return res.status(404).json({ error: 'Doelenboom niet gevonden.' });
     const newSlug = slug || current.rows[0].slug;
     const newReadOnly = readOnly === undefined ? current.rows[0].read_only : readOnly;
     const newWipeOnEmpty = wipeOnEmpty === undefined ? current.rows[0].wipe_on_empty : wipeOnEmpty;
+    const newStaleAfterDays = staleAfterDays === undefined ? current.rows[0].stale_after_days : staleAfterDays;
     const wasArchived = current.rows[0].archived_at != null;
     const willBeArchived = archived === undefined ? wasArchived : archived;
 
@@ -228,11 +247,12 @@ doelenbomenRouter.put(
 
     try {
       const result = await pool.query(
-        `update doelenbomen set name = $1, slug = $2, read_only = $3, wipe_on_empty = $4,
-           archived_at = case when $5 then coalesce(archived_at, now()) else null end
-         where id = $6
-         returning id, slug, name, read_only, wipe_on_empty, archived_at as "archivedAt", created_at`,
-        [name, newSlug, newReadOnly, newWipeOnEmpty, willBeArchived, req.params.id]
+        `update doelenbomen set name = $1, slug = $2, read_only = $3, wipe_on_empty = $4, stale_after_days = $5,
+           archived_at = case when $6 then coalesce(archived_at, now()) else null end
+         where id = $7
+         returning id, slug, name, read_only, wipe_on_empty, stale_after_days as "staleAfterDays",
+           archived_at as "archivedAt", created_at`,
+        [name, newSlug, newReadOnly, newWipeOnEmpty, newStaleAfterDays, willBeArchived, req.params.id]
       );
       res.json(result.rows[0]);
     } catch (err) {
@@ -362,7 +382,7 @@ doelenbomenRouter.post('/doelenbomen/:id/duplicate', requireSysadmin, async (req
   try {
     await client.query('begin');
 
-    const source = await client.query('select tenant_id from doelenbomen where id = $1', [req.params.id]);
+    const source = await client.query('select tenant_id, stale_after_days from doelenbomen where id = $1', [req.params.id]);
     if (source.rows.length === 0) {
       await client.query('rollback');
       return res.status(404).json({ error: 'Bron-doelenboom niet gevonden.' });
@@ -378,9 +398,11 @@ doelenbomenRouter.post('/doelenbomen/:id/duplicate', requireSysadmin, async (req
     }
 
     const newDoelenboom = await client.query(
-      `insert into doelenbomen (tenant_id, slug, name)
-       values ($1, $2, $3) returning id, slug, name, read_only, wipe_on_empty, archived_at as "archivedAt", created_at`,
-      [resolvedTenantId, slug, name]
+      `insert into doelenbomen (tenant_id, slug, name, stale_after_days)
+       values ($1, $2, $3, $4)
+       returning id, slug, name, read_only, wipe_on_empty, stale_after_days as "staleAfterDays",
+         archived_at as "archivedAt", created_at`,
+      [resolvedTenantId, slug, name, source.rows[0].stale_after_days]
     );
     const newDoelenboomId = newDoelenboom.rows[0].id;
     // Sysadmin-only route (zie de rbac-check hierboven) — bewust géén
@@ -433,7 +455,7 @@ doelenbomenRouter.post('/doelenbomen/:id/duplicate', requireSysadmin, async (req
     }
 
     const psResult = await client.query(
-      `select element_id, projectstatus, rag, toelichting, gerapporteerd_op, cluster_ppt
+      `select element_id, projectstatus, rag, toelichting, gerapporteerd_op, cluster_ppt, updated_at, updated_by
        from project_status where element_id = any($1::bigint[])`,
       [sourceElementIds]
     );
@@ -441,9 +463,9 @@ doelenbomenRouter.post('/doelenbomen/:id/duplicate', requireSysadmin, async (req
       const newElementId = elementIdMap.get(ps.element_id);
       if (!newElementId) continue;
       await client.query(
-        `insert into project_status (element_id, projectstatus, rag, toelichting, gerapporteerd_op, cluster_ppt)
-         values ($1,$2,$3,$4,$5,$6)`,
-        [newElementId, ps.projectstatus, ps.rag, ps.toelichting, ps.gerapporteerd_op, ps.cluster_ppt]
+        `insert into project_status (element_id, projectstatus, rag, toelichting, gerapporteerd_op, cluster_ppt, updated_at, updated_by)
+         values ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [newElementId, ps.projectstatus, ps.rag, ps.toelichting, ps.gerapporteerd_op, ps.cluster_ppt, ps.updated_at, ps.updated_by]
       );
     }
 

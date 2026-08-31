@@ -800,13 +800,22 @@ function DoelenboomEditRow({
   const [slug, setSlug] = useState(doelenboom.slug);
   const [readOnly, setReadOnly] = useState(doelenboom.read_only);
   const [wipeOnEmpty, setWipeOnEmpty] = useState(doelenboom.wipe_on_empty);
+  // Getal als string in state (i.p.v. number) zodat een gebruiker het veld
+  // eerst kan leegmaken tijdens het intypen van een nieuwe waarde — bij
+  // opslaan valt een lege/ongeldige waarde terug op de huidige instelling.
+  const [staleAfterDaysInput, setStaleAfterDaysInput] = useState(String(doelenboom.staleAfterDays));
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      await api.updateDoelenboom(token, doelenboom.id, { name, slug, readOnly, wipeOnEmpty });
+      const parsedStaleAfterDays = parseInt(staleAfterDaysInput, 10);
+      const staleAfterDays =
+        Number.isInteger(parsedStaleAfterDays) && parsedStaleAfterDays > 0
+          ? parsedStaleAfterDays
+          : doelenboom.staleAfterDays;
+      await api.updateDoelenboom(token, doelenboom.id, { name, slug, readOnly, wipeOnEmpty, staleAfterDays });
       onSaved();
     } catch (err) {
       setError(errMsg(err));
@@ -828,6 +837,18 @@ function DoelenboomEditRow({
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5 }}>
         <input type="checkbox" checked={wipeOnEmpty} onChange={(e) => setWipeOnEmpty(e.target.checked)} />
         Automatisch leegmaken zodra niemand meer actief toegang heeft tot de tenant
+      </label>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5 }}>
+        Projecten tellen als 'verouderd' na
+        <input
+          type="number"
+          min={1}
+          max={3650}
+          value={staleAfterDaysInput}
+          onChange={(e) => setStaleAfterDaysInput(e.target.value)}
+          style={{ ...styles.input, width: 70 }}
+        />
+        dagen zonder update
       </label>
       <div style={{ display: 'flex', gap: 8 }}>
         <button type="button" onClick={onCancel} style={btnStyle('ghost')} disabled={busy}>

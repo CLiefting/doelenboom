@@ -102,4 +102,62 @@ describe('project-status (PUT upsert + DELETE)', () => {
     const tree = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: adminToken });
     assert.equal(tree.body.projectStatus['P1'], undefined);
   });
+
+  it('PUT zet automatisch updatedAt/updatedByEmail ("laatst bijgewerkt door wie, wanneer")', async () => {
+    const before = new Date();
+    const res = await req('PUT', `/api/doelenbomen/${doelenboomId}/elements/P1/project-status`, {
+      token: gebruikerToken, body: { projectstatus: 'Actief' },
+    });
+    assert.equal(res.status, 200);
+    assert.ok(res.body.updatedAt, 'updatedAt moet gezet zijn');
+    assert.ok(new Date(res.body.updatedAt).getTime() >= before.getTime() - 1000);
+    assert.equal(res.body.updatedByEmail, `${PREFIX}-gebruiker@test.local`);
+
+    const tree = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: adminToken });
+    assert.ok(tree.body.projectStatus['P1'].updatedAt);
+    assert.equal(tree.body.projectStatus['P1'].updatedByEmail, `${PREFIX}-gebruiker@test.local`);
+  });
+
+  it('een bezoeker ziet updatedAt wel, updatedByEmail niet (privacy, zie routes/tree.ts)', async () => {
+    await req('PUT', `/api/doelenbomen/${doelenboomId}/elements/P1/project-status`, {
+      token: adminToken, body: { projectstatus: 'Actief' },
+    });
+    const tree = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: bezoekerToken });
+    assert.ok(tree.body.projectStatus['P1'].updatedAt, 'wanneer mag bezoeker wel zien');
+    assert.equal(tree.body.projectStatus['P1'].updatedByEmail, undefined, 'wie mag bezoeker niet zien');
+    assert.ok(tree.body.doelenboom.staleAfterDays, 'drempel is geen gevoelige data, mag altijd mee');
+  });
+
+  it('POST .../project-status/touch zet alleen updatedAt/updatedByEmail bij, wijzigt verder niets', async () => {
+    const first = await req('PUT', `/api/doelenbomen/${doelenboomId}/elements/P1/project-status`, {
+      token: adminToken, body: { projectstatus: 'On-hold', rag: 'Oranje', toelichting: 'nog bezig' },
+    });
+    assert.equal(first.status, 200);
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const touch = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P1/project-status/touch`, {
+      token: gebruikerToken,
+    });
+    assert.equal(touch.status, 200);
+    assert.equal(touch.body.projectstatus, 'On-hold');
+    assert.equal(touch.body.rag, 'Oranje');
+    assert.equal(touch.body.toelichting, 'nog bezig');
+    assert.ok(new Date(touch.body.updatedAt).getTime() > new Date(first.body.updatedAt).getTime());
+    assert.equal(touch.body.updatedByEmail, `${PREFIX}-gebruiker@test.local`);
+  });
+
+  it('touch is ook een upsert (project zonder project_status-rij) en bezoeker/geen-module krijgen 403', async () => {
+    await req('DELETE', `/api/doelenbomen/${doelenboomId}/elements/P1/project-status`, { token: adminToken });
+    const touch = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P1/project-status/touch`, {
+      token: adminToken,
+    });
+    assert.equal(touch.status, 200);
+    assert.equal(touch.body.projectstatus, '');
+    assert.ok(touch.body.updatedAt);
+
+    const bezoeker = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P1/project-status/touch`, {
+      token: bezoekerToken,
+    });
+    assert.equal(bezoeker.status, 403);
+  });
 });

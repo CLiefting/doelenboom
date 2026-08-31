@@ -152,6 +152,42 @@ describe('doelenbomen', () => {
     assert.equal(unsetReadOnly.status, 200);
   });
 
+  it('staleAfterDays: default 60, instelbaar (1-3650), gevalideerd, en zichtbaar via GET tree', async () => {
+    const { tenantId, adminToken } = await makeTenantWithAdmin(sysadminToken, `${PREFIX}-t3b`, `${PREFIX}-t3b-admin@test.local`);
+    const boom = await req('POST', `/api/tenants/${tenantId}/doelenbomen`, {
+      token: adminToken, body: { slug: 'boom3b', name: 'Boom 3b' },
+    });
+    const doelenboomId = boom.body.id;
+    assert.equal(boom.body.staleAfterDays, 60, 'default drempel is 60 dagen');
+
+    const tooLow = await req('PUT', `/api/doelenbomen/${doelenboomId}`, {
+      token: adminToken, body: { name: 'Boom 3b', staleAfterDays: 0 },
+    });
+    assert.equal(tooLow.status, 400);
+    const notInteger = await req('PUT', `/api/doelenbomen/${doelenboomId}`, {
+      token: adminToken, body: { name: 'Boom 3b', staleAfterDays: 12.5 },
+    });
+    assert.equal(notInteger.status, 400);
+
+    const updated = await req('PUT', `/api/doelenbomen/${doelenboomId}`, {
+      token: adminToken, body: { name: 'Boom 3b', staleAfterDays: 30 },
+    });
+    assert.equal(updated.status, 200);
+    assert.equal(updated.body.staleAfterDays, 30);
+
+    const tree = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: adminToken });
+    assert.equal(tree.body.doelenboom.staleAfterDays, 30);
+
+    // Zonder staleAfterDays in de body blijft de huidige waarde staan (niet
+    // terugvallen op de default) — zelfde "omitted = ongewijzigd"-gedrag als
+    // readOnly/wipeOnEmpty hierboven.
+    const renameOnly = await req('PUT', `/api/doelenbomen/${doelenboomId}`, {
+      token: adminToken, body: { name: 'Boom 3b hernoemd' },
+    });
+    assert.equal(renameOnly.status, 200);
+    assert.equal(renameOnly.body.staleAfterDays, 30);
+  });
+
   it('member-roles: override overrult de tenant-rol binnen één doelenboom', async () => {
     const { tenantId, adminToken } = await makeTenantWithAdmin(sysadminToken, `${PREFIX}-t4`, `${PREFIX}-t4-admin@test.local`);
     const boom = await req('POST', `/api/tenants/${tenantId}/doelenbomen`, {

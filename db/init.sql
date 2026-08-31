@@ -106,6 +106,12 @@ create table if not exists doelenbomen (
   -- sinds een tenant meerdere doelenbomen kan hebben; bij het aanmaken wordt
   -- 'm standaard gevuld met tenants.wipe_on_empty.
   wipe_on_empty boolean not null default false,
+  -- Drempel (in dagen) voor de 'verouderd'-markering op projectelementen —
+  -- zie project_status.updated_at hieronder en isStale() in tree.html. Eén
+  -- vaste waarde per doelenboom, door een admin instelbaar (PUT
+  -- /api/doelenbomen/:id), zie db/migrations/0020_project_status_review.sql
+  -- voor de volledige toelichting.
+  stale_after_days integer not null default 60 check (stale_after_days between 1 and 3650),
   created_at timestamptz not null default now(),
   unique (tenant_id, slug)
 );
@@ -253,7 +259,16 @@ create table if not exists project_status (
   rag text not null default '' check (rag in ('', 'Rood', 'Oranje', 'Groen')),
   toelichting text not null default '',
   gerapporteerd_op date,
-  cluster_ppt text not null default ''
+  cluster_ppt text not null default '',
+  -- 'Laatst bijgewerkt' (door wie, wanneer) — ALLEEN door de server gezet
+  -- (now() + de ingelogde gebruiker), bij elke PUT en bij de losse
+  -- "markeer als gecontroleerd"-actie (POST .../project-status/touch, zie
+  -- api/src/routes/projectStatus.ts). Bewust een ander veld dan
+  -- gerapporteerd_op hierboven (dat is vrij invoerbaar door de gebruiker) —
+  -- zie db/migrations/0020_project_status_review.sql voor de volledige
+  -- toelichting, incl. waarom null hier meetelt als "verouderd".
+  updated_at timestamptz,
+  updated_by bigint references users(id) on delete set null
 );
 
 create table if not exists products (

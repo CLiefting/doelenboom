@@ -116,6 +116,10 @@ export type DoelenboomBase = {
   name: string;
   read_only: boolean;
   wipe_on_empty: boolean;
+  // Drempel (in dagen) voor de 'verouderd'-markering op projectelementen —
+  // zie db/migrations/0020_project_status_review.sql en isStale() in
+  // tree.html. Instelbaar via DoelenboomEditRow in TenantManagementPage.
+  staleAfterDays: number;
   // null = actief. Zie license.ts/doelenboom_licentiemodel.md §5 — een
   // gearchiveerde doelenboom telt niet mee voor de tier-limiet.
   archivedAt: string | null;

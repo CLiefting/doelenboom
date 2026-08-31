@@ -259,6 +259,8 @@
 
   .cs-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 22px; }
   .cs-stat-tile { border-radius: 10px; padding: 14px 16px; background: #f7f8fa; border: 1px solid #eee; }
+  .cs-stat-tile-warn { background: #fff8e6; border-color: #d9a520; }
+  .cs-stat-tile-warn .cs-stat-value { color: #8a6d00; }
   .cs-stat-value { font-size: 26px; font-weight: 700; color: var(--navy); line-height: 1.1; }
   .cs-stat-label { font-size: 11.5px; color: #777; margin-top: 4px; }
 
@@ -533,6 +535,13 @@
   }
   .pp-header-divider { width: 1px; align-self: stretch; background: #e5e7eb; min-height: 22px; }
   .pp-header-note { font-size: 12.5px; color: #555; line-height: 1.45; margin: 0 0 16px; }
+  .pp-header-note-muted { color: #999; font-size: 11.5px; margin: 0 0 16px; }
+     waarmee dit zou kunnen overlappen, dus geen ongewenst effect in dat geval.
+  .stale-badge {
+    display: inline-flex; align-items: center; gap: 4px; color: #8a6d00; background: #fff3cd;
+    border: 1px solid #d9a520; font-size: 11.5px; font-weight: 700; padding: 3px 10px 3px 8px;
+    border-radius: 999px; letter-spacing: 0.01em; white-space: nowrap;
+  }
   /* Excel-export/import-knop rechtsboven in de projectkaart — margin-left:
      auto duwt 'm binnen de flex-rij (.pp-header) naar het eind, ook als er
      minder Org./Tags-groepen zijn (bv. read-only, geen crud-knoppen). */
@@ -1033,6 +1042,16 @@
   .node-rag-dot {
     position: absolute; top: 3px; left: 3px; width: 8px; height: 8px; border-radius: 50%;
     border: 1px solid rgba(0,0,0,0.35); pointer-events: none; box-shadow: 0 0 0 1px rgba(255,255,255,0.6);
+  }
+  /* 'Verouderd'-markering (zie isStale() in runApp): rechtsonder i.p.v.
+     rechtsboven, want .node-tag-dot bezet die hoek al — zo blijven alle vier
+     de hoeken van een vak eenduidig (linksboven = RAG, rechtsboven = tags,
+     rechtsonder = verouderd, linksonder vrij). */
+  .node-stale-icon {
+    position: absolute; bottom: 2px; right: 2px; width: 11px; height: 11px; line-height: 10px;
+    text-align: center; font-size: 9px; font-weight: 700; border-radius: 50%;
+    background: #fff3cd; color: #8a6d00; border: 1px solid #d9a520; pointer-events: none;
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.7);
   }
   .node.tag-active { box-shadow: 0 0 0 3px #ffd166, 0 1px 2px rgba(0,0,0,0.15); }
   .node.tag-dimmed { opacity: 0.22; }
@@ -1907,6 +1926,8 @@ const CS_EXPORT_CSS = [
   '.cs-ribbon-arrow { color: #ccc; font-size: 11px; }',
   '.cs-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 22px; }',
   '.cs-stat-tile { border-radius: 10px; padding: 14px 16px; background: #f7f8fa; border: 1px solid #eee; }',
+  '.cs-stat-tile-warn { background: #fff8e6; border-color: #d9a520; }',
+  '.cs-stat-tile-warn .cs-stat-value { color: #8a6d00; }',
   '.cs-stat-value { font-size: 26px; font-weight: 700; color: var(--navy); line-height: 1.1; }',
   '.cs-stat-label { font-size: 11.5px; color: #777; margin-top: 4px; }',
   '.cs-dist-bar { display: flex; height: 14px; border-radius: 7px; overflow: hidden; margin-bottom: 8px; background: #eee; }',
@@ -2202,6 +2223,13 @@ function runApp(data) {
   function elementsForOrg(orgId) {
     return Object.keys(OB_ORG).filter(id => (OB_ORG[id] || []).some(r => r.org === orgId));
   }
+  // Zelfde vorm als elementsForTag/elementsForOrg hierboven, voor de
+  // 'Verouderd'-chip (zie buildTagOrgFilterHtml) — negeert het meegegeven id
+  // (er is maar één waarde, "1") en filtert simpelweg alle DETAILS-codes op
+  // isStale().
+  function elementsForStale() {
+    return Object.keys(DETAILS).filter(id => isStale(id));
+  }
 
   function applyTagFilter() {
     document.querySelectorAll('.node').forEach(n => n.classList.remove('tag-active', 'tag-dimmed'));
@@ -2214,7 +2242,7 @@ function runApp(data) {
     activeTagFilters.forEach(key => {
       const sep = key.indexOf(':');
       const kind = key.slice(0, sep), id = key.slice(sep + 1);
-      const ids = kind === 'tag' ? elementsForTag(id) : elementsForOrg(id);
+      const ids = kind === 'tag' ? elementsForTag(id) : kind === 'org' ? elementsForOrg(id) : elementsForStale();
       ids.forEach(elId => idSet.add(elId));
     });
 
@@ -2788,6 +2816,48 @@ function runApp(data) {
     return '';
   }
 
+  // ---- 'Verouderd'-markering op projectelementen (zie het interview met
+  // Charles, 31 augustus 2026) ----
+  // Eén vaste drempel per doelenboom (tree.doelenboom.staleAfterDays, zie
+  // routes/tree.ts), met 60 als fallback voor het geval een oudere/afwijkende
+  // API-respons het veld nog niet meestuurt.
+  const STALE_AFTER_DAYS = (lastTreeResponse.doelenboom && lastTreeResponse.doelenboom.staleAfterDays) || 60;
+
+  // Alleen projectelementen (de kolom met isProjectRole, zie PROJECT_ROLE_TYPE
+  // hierboven) tellen mee — sluit aan bij de scope-keuze uit het interview
+  // ("alleen projectelementen") en bij waar project_status sowieso al over
+  // gaat. staleAgeDays(code) geeft de leeftijd in dagen van de laatste
+  // automatische update terug, of Infinity als er nog nooit een is geweest
+  // (updatedAt null) — dat telt bewust altijd mee als verouderd, zie de
+  // toelichting bij project_status.updated_at in db/init.sql.
+  function staleAgeDays(code) {
+    const d = DETAILS[code];
+    if (!d || !PROJECT_ROLE_TYPE || d.type !== PROJECT_ROLE_TYPE) return null;
+    const ps = PROJECT_STATUS[code];
+    const updatedAt = ps && ps.updatedAt;
+    if (!updatedAt) return Infinity;
+    const t = parseDateFlexible(updatedAt);
+    if (isNaN(t)) return Infinity;
+    return (Date.now() - t) / (1000 * 60 * 60 * 24);
+  }
+
+  function isStale(code) {
+    const age = staleAgeDays(code);
+    return age !== null && age > STALE_AFTER_DAYS;
+  }
+
+  // "3 dagen geleden" / "vandaag" / "nooit bijgewerkt" — voor de projectkaart
+  // en de kolomsamenvatting-export (zie columnSummaryBodyHtml).
+  function staleAgeLabel(code) {
+    const age = staleAgeDays(code);
+    if (age === null) return '';
+    if (age === Infinity) return 'nooit bijgewerkt';
+    const days = Math.floor(age);
+    if (days <= 0) return 'vandaag bijgewerkt';
+    if (days === 1) return '1 dag geleden bijgewerkt';
+    return days + ' dagen geleden bijgewerkt';
+  }
+
   // ---- Kolomsamenvatting (dubbelklik op een kolomkop) ----
   const CS_OVERIG_LABEL = 'Overig (geen taakveld ingevuld)';
 
@@ -2825,6 +2895,11 @@ function runApp(data) {
 
     const metKpi = items.filter((d) => (d.kpi || '').trim().length > 0).length;
     const taakveldGroepen = groups.filter((g) => !g.isOverig).length;
+    // Alleen zinvol voor de kolom met de projectrol (isStale() geeft voor
+    // andere kolommen sowieso altijd false terug, zie STALE_AFTER_DAYS-sectie
+    // hierboven) — columnSummaryBodyHtml toont deze tegel dan ook alleen als
+    // col.isProjectRole.
+    const stale = col.isProjectRole ? items.filter((d) => isStale(d.code)).length : null;
 
     return {
       col,
@@ -2835,6 +2910,7 @@ function runApp(data) {
         totaal: items.length,
         taakveldGroepen,
         metKpi,
+        stale,
         schakels: CANONICAL_COL_ORDER.length,
       },
     };
@@ -2862,13 +2938,26 @@ function runApp(data) {
         escapeHtml(c.title) + '</span>' + arrow;
     }).join('');
 
-    const statsHtml = [
+    const statTiles = [
       { value: summary.stats.totaal, label: 'Elementen in deze kolom' },
       { value: summary.stats.taakveldGroepen, label: 'Taakvelden (gevuld)' },
       { value: summary.stats.metKpi, label: 'Met KPI / indicator' },
       { value: summary.stats.schakels, label: 'Schakels in de Golden Thread' },
-    ].map((s) => '<div class="cs-stat-tile"><div class="cs-stat-value">' + s.value +
-      '</div><div class="cs-stat-label">' + escapeHtml(s.label) + '</div></div>').join('');
+    ];
+    // Alleen op de projectrol-kolom (zie computeColumnSummary) — voor elke
+    // andere kolom zou deze tegel altijd 0 tonen en meer verwarren dan
+    // helpen.
+    if (col.isProjectRole) {
+      statTiles.push({
+        value: summary.stats.stale,
+        label: 'Verouderd (> ' + STALE_AFTER_DAYS + ' dagen)',
+        warn: summary.stats.stale > 0,
+      });
+    }
+    const statsHtml = statTiles.map((s) =>
+      '<div class="cs-stat-tile' + (s.warn ? ' cs-stat-tile-warn' : '') + '"><div class="cs-stat-value">' + s.value +
+      '</div><div class="cs-stat-label">' + escapeHtml(s.label) + '</div></div>'
+    ).join('');
 
     const total = summary.items.length;
     const segHtml = total === 0 ? '' : summary.groups.map((g) => {
@@ -3923,7 +4012,7 @@ function runApp(data) {
   // eronder — dat is vrije tekst en past niet netjes in de kopregel.
   function projectHeaderHtml(id, color) {
     const d = DETAILS[id];
-    const ps = PROJECT_STATUS[id] || { projectstatus: '', rag: '', toelichting: '', datum: '', clusterPpt: '' };
+    const ps = PROJECT_STATUS[id] || { projectstatus: '', rag: '', toelichting: '', datum: '', clusterPpt: '', updatedAt: null, updatedByEmail: null };
 
     let statusHtml = '';
     if (ps.projectstatus) {
@@ -3937,6 +4026,9 @@ function runApp(data) {
       statusHtml += '<span class="rag-badge" style="background:' + col + '">&#9679; ' + titleCase(ps.rag) + '</span>';
     }
     if (!statusHtml) statusHtml = '<span class="dp-empty-note-inline">geen status</span>';
+    if (isStale(id)) {
+      statusHtml += '<span class="stale-badge" title="Langer dan ' + STALE_AFTER_DAYS + ' dagen niet geactualiseerd">&#9888; Verouderd</span>';
+    }
 
     const tagsHtml = tagsChipsInlineHtml(id);
     const orgHtml = orgChipsInlineHtml(id);
@@ -3950,6 +4042,11 @@ function runApp(data) {
     const statusGroupHtml = projectenActive
       ? '<div class="pp-header-group">' + statusHtml +
           '<button type="button" class="btn ghost btn-xs project-status-edit-btn crud-only" data-code="' + escapeHtml(id) + '">Bewerken</button>' +
+          // "Vandaag gecontroleerd": zet alleen updated_at/updated_by, zonder
+          // het bewerkformulier te hoeven openen — voor als de inhoud nog
+          // klopt maar niemand iets hoefde te wijzigen (zie het interview met
+          // Charles, 31 augustus 2026, en POST .../project-status/touch).
+          '<button type="button" class="btn ghost btn-xs project-status-touch-btn crud-only" data-code="' + escapeHtml(id) + '" title="Zet de laatst-bijgewerkt-datum op vandaag, zonder verder iets te wijzigen">&#10003; Vandaag gecontroleerd</button>' +
         '</div>' +
         '<span class="pp-header-divider"></span>'
       : '';
@@ -3984,6 +4081,16 @@ function runApp(data) {
       html += '<div class="pp-header-note">' +
         (ps.toelichting ? escapeHtml(ps.toelichting) : '') +
         (ps.datum ? ' <span class="dp-status-date">(gerapporteerd op ' + formatDateNL(ps.datum) + ')</span>' : '') +
+      '</div>';
+    }
+
+    // "Laatst bijgewerkt": het 'wanneer' (staleAgeLabel) mag altijd getoond
+    // worden, het 'door wie' (updatedByEmail) alleen als de server 'm heeft
+    // meegestuurd — voor de rol 'bezoeker' is dat veld al server-side gestript
+    // (zie routes/tree.ts), dus dit hoeft hier niet nogmaals op rol te checken.
+    if (projectenActive) {
+      html += '<div class="pp-header-note pp-header-note-muted">Laatst bijgewerkt: ' + escapeHtml(staleAgeLabel(id)) +
+        (ps.updatedByEmail ? ' door ' + escapeHtml(ps.updatedByEmail) : '') +
       '</div>';
     }
 
@@ -4489,10 +4596,22 @@ function runApp(data) {
     n.appendChild(dot);
   });
 
+  // Klein waarschuwingsicoontje op elk verouderd projectvak (zie isStale()) —
+  // los van de RAG-stip hierboven, want een project kan én een geldige
+  // RAG-status hebben én toch te lang niet meer geactualiseerd zijn.
+  document.querySelectorAll('.node').forEach(n => {
+    if (!isStale(n.dataset.id)) return;
+    const icon = document.createElement('span');
+    icon.className = 'node-stale-icon';
+    icon.textContent = '!';
+    icon.title = 'Verouderd — ' + staleAgeLabel(n.dataset.id) + ' (drempel: ' + STALE_AFTER_DAYS + ' dagen)';
+    n.appendChild(icon);
+  });
+
   // ---- SVG-export van de volledige boom (huidige zichtbare stand) ----
   function nodeTextLines(node) {
     const clone = node.cloneNode(true);
-    clone.querySelectorAll('.node-tag-dot, .node-rag-dot').forEach(el => el.remove());
+    clone.querySelectorAll('.node-tag-dot, .node-rag-dot, .node-stale-icon').forEach(el => el.remove());
     clone.querySelectorAll('br').forEach(br => br.replaceWith('\n'));
     return clone.textContent.split('\n').map(s => s.trim());
   }
@@ -4728,6 +4847,20 @@ function runApp(data) {
         c.setAttribute('fill', '#ffd166');
         c.setAttribute('stroke', 'rgba(0,0,0,0.3)'); c.setAttribute('stroke-width', '1');
         g.appendChild(c);
+      }
+      const staleIcon = node.querySelector('.node-stale-icon');
+      if (staleIcon) {
+        const c = document.createElementNS(SVG_NS, 'circle');
+        c.setAttribute('cx', x + w - 6); c.setAttribute('cy', y + h - 6); c.setAttribute('r', 4.5);
+        c.setAttribute('fill', '#fff3cd');
+        c.setAttribute('stroke', '#d9a520'); c.setAttribute('stroke-width', '1');
+        g.appendChild(c);
+        const bang = document.createElementNS(SVG_NS, 'text');
+        bang.setAttribute('x', x + w - 6); bang.setAttribute('y', y + h - 3);
+        bang.setAttribute('text-anchor', 'middle'); bang.setAttribute('font-size', '7');
+        bang.setAttribute('font-weight', '700'); bang.setAttribute('fill', '#8a6d00');
+        bang.textContent = '!';
+        g.appendChild(bang);
       }
 
       content.appendChild(g);
@@ -6849,6 +6982,29 @@ function runApp(data) {
     }
   });
 
+  // "Vandaag gecontroleerd" (zie projectHeaderHtml/POST .../project-status/
+  // touch): geen modal, geen bevestigingsvraag — dit is een lichte, snel
+  // terug te draaien actie (gewoon nog een keer klikken, of de status
+  // sowieso bewerken zet 'm ook bij), dus geen showConfirm() zoals bij
+  // verwijderacties.
+  async function touchProjectStatus(code) {
+    try {
+      const url = apiUrl + '/api/doelenbomen/' + doelenboomId + '/elements/' +
+        encodeURIComponent(code) + '/project-status/touch';
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + authToken },
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || ('Markeren als gecontroleerd mislukt (HTTP ' + res.status + ')'));
+      }
+      reloadTreeKeepingFocus();
+    } catch (err) {
+      showToast(err && err.message ? err.message : 'Onbekende fout bij markeren als gecontroleerd.', 'error');
+    }
+  }
+
   // Eén gedeelde handler voor zowel het detail-paneel (alle elementtypen) als het
   // project-paneel eronder (dat voor Project-elementen dezelfde tags/org-chips
   // toont, zie projectSectionHtml) — anders werken de +Tag/+Organisatieonderdeel-
@@ -6858,6 +7014,8 @@ function runApp(data) {
     if (projectExcelOpenBtn) { openProjectExcelModal(projectExcelOpenBtn.dataset.code); return; }
     const projectStatusEditBtn = ev.target.closest('.project-status-edit-btn');
     if (projectStatusEditBtn) { openProjectStatusModal(projectStatusEditBtn.dataset.code); return; }
+    const projectStatusTouchBtn = ev.target.closest('.project-status-touch-btn');
+    if (projectStatusTouchBtn) { touchProjectStatus(projectStatusTouchBtn.dataset.code); return; }
     const productAddBtn = ev.target.closest('.product-add-btn');
     if (productAddBtn) { openProductModal('create', productAddBtn.dataset.code); return; }
     const productEditBtn = ev.target.closest('.product-edit-btn');
@@ -7675,8 +7833,17 @@ function buildLegendHtml(columns) {
   ).join('');
 }
 
-function buildTagOrgFilterHtml(tags, orgs) {
+function buildTagOrgFilterHtml(tags, orgs, projectenActive) {
   let html = '';
+  // 'Verouderd' als eigen filter-groep, vóór Tags/Organisatieonderdelen —
+  // net als die twee is dit een chip-toggle (zie applyTagFilter/
+  // elementsForStale), maar met precies één vaste waarde i.p.v. een lijst.
+  // Alleen relevant met de Projecten-module actief (staleness gaat alleen
+  // over projectelementen, zie isStale()).
+  if (projectenActive) {
+    html += '<span class="tof-label">Actualiteit</span>';
+    html += '<button class="chip-filter" type="button" data-kind="stale" data-value="1">&#9888; Verouderd</button>';
+  }
   const tagIds = Object.keys(tags);
   if (tagIds.length) {
     html += '<span class="tof-label">Tags</span>';
@@ -7720,6 +7887,15 @@ function adaptTreeResponse(tree) {
       projectstatus: ps.projectstatus || '', rag: ps.rag || '',
       toelichting: ps.toelichting || '', datum: ps.gerapporteerdOp || '',
       clusterPpt: ps.clusterPpt || '',
+      // updatedAt/updatedByEmail: automatisch "laatst bijgewerkt door wie,
+      // wanneer" (zie isStale() in runApp() en api/src/routes/tree.ts) — een
+      // ANDER veld dan het vrij invoerbare 'datum' hierboven. updatedAt kan
+      // null zijn (nog nooit bijgewerkt sinds deze functionaliteit bestaat);
+      // updatedByEmail ontbreekt voor de rol 'bezoeker' (server-side gestript,
+      // zie routes/tree.ts) — vandaar hier geen '' als default, dat zou
+      // "wel bijgewerkt maar door niemand" suggereren i.p.v. "onbekend".
+      updatedAt: ps.updatedAt || null,
+      updatedByEmail: ps.updatedByEmail || null,
     };
   });
 
@@ -7860,7 +8036,8 @@ function boot(tree) {
   const COL_ORDER = columnsReversed ? data.COLUMNS.slice().reverse() : data.COLUMNS.slice();
 
   document.querySelector('.legend').innerHTML = buildLegendHtml(COL_ORDER);
-  document.getElementById('tag-org-filter').innerHTML = buildTagOrgFilterHtml(data.TAGS, data.ORGS);
+  document.getElementById('tag-org-filter').innerHTML =
+    buildTagOrgFilterHtml(data.TAGS, data.ORGS, (data.ACTIVE_MODULES || []).indexOf('projecten') !== -1);
   document.getElementById('columns').innerHTML = buildColumnsHtml(data.DETAILS, COL_ORDER);
 
   const titleEl = document.getElementById('app-title');
