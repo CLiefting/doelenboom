@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { pool } from '../db.js';
 import { requireAuth, AuthedRequest } from '../auth.js';
 import { requireWritableDoelenboom, requireModule, requireTenantRoleForDoelenboomParam, getEffectiveRoleForDoelenboom } from '../rbac.js';
+import { diffFields, logProjectHistory } from '../projectHistory.js';
 
 // CRUD voor de projectstatus van een element (project_status, 1-op-1 via
 // element_id als primary key — zie db/init.sql). Tot nu toe alleen te vullen
@@ -33,10 +34,9 @@ async function findElementId(doelenboomId: string, code: string): Promise<number
   return r.rows[0]?.id ?? null;
 }
 
-// Huidige (vóór deze wijziging) waarden ophalen t.b.v. de before/after-rij in
-// project_status_history — null (geen rij) is bewust anders dan lege strings
-// (een bewust ingevulde "leeg"-waarde), zie de toelichting in
-// db/migrations/0021_project_status_history.sql.
+// Huidige (vóór deze wijziging) waarden ophalen t.b.v. de before/after-diff in
+// project_history — null (geen rij) betekent hier "nog geen status gezet",
+// zie diffFields() in projectHistory.ts voor hoe dat als aanmaak wordt gezien.
 type ProjectStatusFields = {
   projectstatus: string; rag: string; toelichting: string;
   gerapporteerdOp: string | null; clusterPpt: string;
@@ -49,28 +49,6 @@ async function findCurrentStatus(client: { query: typeof pool.query }, elementId
     [elementId]
   );
   return r.rows[0] ?? null;
-}
-
-async function insertHistoryRow(
-  client: { query: typeof pool.query },
-  elementId: number,
-  userId: number,
-  isTouch: boolean,
-  prev: ProjectStatusFields,
-  next: ProjectStatusFields
-) {
-  await client.query(
-    `insert into project_status_history
-       (element_id, changed_by, is_touch,
-        prev_projectstatus, prev_rag, prev_toelichting, prev_gerapporteerd_op, prev_cluster_ppt,
-        new_projectstatus, new_rag, new_toelichting, new_gerapporteerd_op, new_cluster_ppt)
-     values ($1,$2,$3, $4,$5,$6,$7,$8, $9,$10,$11,$12,$13)`,
-    [
-      elementId, userId, isTouch,
-      prev?.projectstatus ?? null, prev?.rag ?? null, prev?.toelichting ?? null, prev?.gerapporteerdOp ?? null, prev?.clusterPpt ?? null,
-      next?.projectstatus ?? null, next?.rag ?? null, next?.toelichting ?? null, next?.gerapporteerdOp ?? null, next?.clusterPpt ?? null,
-    ]
-  );
 }
 
 // PUT /api/doelenbomen/:id/elements/:code/project-status — upsert.
@@ -94,9 +72,9 @@ projectStatusRouter.put('/doelenbomen/:id/elements/:code/project-status', requir
   const elementId = await findElementId(req.params.id, req.params.code);
   if (!elementId) return res.status(404).json({ error: `Element "${req.params.code}" niet gevonden.` });
 
-  // Transactie: de upsert + de history-rij (before/after, zie
-  // project_status_history) moeten samen slagen of samen mislukken — anders
-  // kan de status wél wijzigen terwijl de historie het niet meekrijgt.
+  // Transactie: de upsert + de history-rij (before/after, zie project_history)
+  // moeten samen slagen of samen mislukken — anders kan de status wél
+  // wijzigen terwijl de historie het niet meekrijgt.
   const client = await pool.connect();
   try {
     await client.query('begin');
@@ -119,8 +97,13 @@ projectStatusRouter.put('/doelenbomen/:id/elements/:code/project-status', requir
        returning ${PROJECT_STATUS_SELECT_FIELDS}`,
       [elementId, projectstatus, rag, toelichting, gerapporteerdOp, clusterPpt, req.user!.id]
     );
-    await insertHistoryRow(client, elementId, req.user!.id, false, prev, {
-      projectstatus, rag, toelichting, gerapporteerdOp, clusterPpt,
+    const next = { projectstatus, rag, toelichting, gerapporteerdOp, clusterPpt };
+    await logProjectHistory(client, {
+      elementId,
+      userId: req.user!.id,
+      kind: 'status',
+      action: prev ? 'update' : 'create',
+      changes: diffFields(prev, next),
     });
     await client.query('commit');
     // Geen extra join/select nodig voor het e-mailadres: de opslaande
@@ -151,7 +134,6 @@ projectStatusRouter.post('/doelenbomen/:id/elements/:code/project-status/touch',
   const client = await pool.connect();
   try {
     await client.query('begin');
-    const prev = await findCurrentStatus(client, elementId);
     const result = await client.query(
       `insert into project_status (element_id, updated_at, updated_by)
        values ($1, now(), $2)
@@ -161,12 +143,17 @@ projectStatusRouter.post('/doelenbomen/:id/elements/:code/project-status/touch',
        returning ${PROJECT_STATUS_SELECT_FIELDS}`,
       [elementId, req.user!.id]
     );
-    // is_touch=true, prev===new: inhoudelijk verandert er niets, zie de
-    // toelichting bij project_status_history in db/init.sql — de rij dient
-    // puur om "op deze datum gecontroleerd, niets gewijzigd" te kunnen tonen
-    // in de historie (zie Charles' keuze in het interview).
-    const contentFields = prev ?? { projectstatus: '', rag: '', toelichting: '', gerapporteerdOp: null, clusterPpt: '' };
-    await insertHistoryRow(client, elementId, req.user!.id, true, contentFields, contentFields);
+    // action='touch', changes={}: inhoudelijk verandert er niets, zie de
+    // toelichting bij project_history in db/migrations/0022_project_history.sql
+    // — de rij dient puur om "op deze datum gecontroleerd, niets gewijzigd" te
+    // kunnen tonen in de historie (zie Charles' keuze in het interview).
+    await logProjectHistory(client, {
+      elementId,
+      userId: req.user!.id,
+      kind: 'status',
+      action: 'touch',
+      changes: {},
+    });
     await client.query('commit');
     res.json({ ...result.rows[0], updatedByEmail: req.user!.email });
   } catch (err) {
@@ -191,7 +178,13 @@ projectStatusRouter.delete('/doelenbomen/:id/elements/:code/project-status', req
     // Alleen loggen als er ook echt iets was om te wissen — anders (dubbele
     // DELETE, of nooit een status gehad) een lege/zinloze historie-rij.
     if (prev) {
-      await insertHistoryRow(client, elementId, req.user!.id, false, prev, null);
+      await logProjectHistory(client, {
+        elementId,
+        userId: req.user!.id,
+        kind: 'status',
+        action: 'delete',
+        changes: diffFields(prev, {}),
+      });
     }
     await client.query('commit');
     res.status(204).send();
@@ -203,15 +196,18 @@ projectStatusRouter.delete('/doelenbomen/:id/elements/:code/project-status', req
   }
 });
 
-// GET /api/doelenbomen/:id/elements/:code/project-status/history — volledige
-// wijzigingshistorie (before/after per veld, wie/wanneer, is_touch), nieuwste
-// eerst. Alleen-lezen: elke rol met toegang tot deze doelenboom mag 'm zien
-// ('bezoeker' incluis, zelfde ondergrens als GET .../tree) — maar 'wie' wordt
-// net als bij GET .../tree gestript voor de rol 'bezoeker' (zie isEditorRole
-// hieronder en de privacykeuze uit het eerdere interview: "wanneer"/"wat" mag
-// iedereen zien, "door wie" alleen beheerders/editors).
+// GET /api/doelenbomen/:id/elements/:code/history — volledige, gecombineerde
+// wijzigingshistorie (projectstatus + deliverables + activiteiten door
+// elkaar, nieuwste eerst) — zie het vervolg-interview met Charles: "in
+// dezelfde historie-lijst". Alleen-lezen: elke rol met toegang tot deze
+// doelenboom mag 'm zien ('bezoeker' incluis, zelfde ondergrens als GET
+// .../tree) — maar 'wie' wordt net als bij GET .../tree gestript voor de rol
+// 'bezoeker' (zie isEditorRole hieronder en de privacykeuze uit het eerdere
+// interview: "wanneer"/"wat" mag iedereen zien, "door wie" alleen
+// beheerders/editors). Hernoemd vanaf /project-status/history: dit endpoint
+// gaat inmiddels over meer dan alleen projectstatus.
 projectStatusRouter.get(
-  '/doelenbomen/:id/elements/:code/project-status/history',
+  '/doelenbomen/:id/elements/:code/history',
   requireTenantRoleForDoelenboomParam('bezoeker', 'id'),
   requireProjectenModule,
   async (req: AuthedRequest, res) => {
@@ -219,14 +215,9 @@ projectStatusRouter.get(
     if (!elementId) return res.status(404).json({ error: `Element "${req.params.code}" niet gevonden.` });
 
     const result = await pool.query(
-      `select h.id, h.changed_at as "changedAt", h.is_touch as "isTouch", u.email as "changedByEmail",
-              h.prev_projectstatus as "prevProjectstatus", h.prev_rag as "prevRag",
-              h.prev_toelichting as "prevToelichting", h.prev_gerapporteerd_op as "prevGerapporteerdOp",
-              h.prev_cluster_ppt as "prevClusterPpt",
-              h.new_projectstatus as "newProjectstatus", h.new_rag as "newRag",
-              h.new_toelichting as "newToelichting", h.new_gerapporteerd_op as "newGerapporteerdOp",
-              h.new_cluster_ppt as "newClusterPpt"
-       from project_status_history h
+      `select h.id, h.changed_at as "changedAt", h.kind, h.action, h.label, h.changes,
+              u.email as "changedByEmail"
+       from project_history h
        left join users u on u.id = h.changed_by
        where h.element_id = $1
        order by h.changed_at desc`,

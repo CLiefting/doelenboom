@@ -3,6 +3,7 @@ import multer from 'multer';
 import { pool } from '../db.js';
 import { requireAuth, AuthedRequest } from '../auth.js';
 import { requireWritableDoelenboom, requireModule } from '../rbac.js';
+import { diffFields, logProjectHistory, touchProjectStatusUpdated } from '../projectHistory.js';
 
 // CRUD voor de activiteiten-planning van een project-element — zelfde opzet
 // als products.ts, maar een activiteit beslaat een PERIODE (start- en
@@ -102,67 +103,156 @@ async function findElementId(doelenboomId: string, code: string): Promise<number
   return r.rows[0]?.id ?? null;
 }
 
+// id en mppUid uit een geselecteerde/geretourneerde rij weglaten vóór het
+// diffen: id verandert per definitie nooit tussen before/after bij een
+// update (dus zou daar toch nooit als wijziging verschijnen), maar bij een
+// create (before=null) of delete (after={}) komt het wél als "veld" in de
+// diff terecht — een zinloze "id: 26 → gewist"-regel in de historie. mppUid
+// is interne boekhouding voor de MS Project-koppeling (zie de toelichting
+// bij readActivityBody), geen gebruikersgerichte wijziging die in de
+// historie hoort — zonder dit zou elke import-run (die mpp_uid meestuurt)
+// een storende technische regel in de tijdlijn zetten.
+function omitFromHistory<T extends Record<string, unknown>>(row: T): Omit<T, 'id' | 'mppUid'> {
+  const { id: _omitId, mppUid: _omitMppUid, ...rest } = row;
+  return rest;
+}
+
 // POST /api/doelenbomen/:id/elements/:code/activities — nieuwe activiteit.
-activitiesRouter.post('/doelenbomen/:id/elements/:code/activities', requireEditor, requireProjectenModule, async (req, res) => {
+// Transactie: de insert + de "verouderd"-touch van het project + de
+// history-rij moeten samen slagen of samen mislukken — zie de toelichting in
+// api/src/projectHistory.ts.
+activitiesRouter.post('/doelenbomen/:id/elements/:code/activities', requireEditor, requireProjectenModule, async (req: AuthedRequest, res) => {
   const input = readActivityBody(req.body);
   if (input.errors.length) return res.status(400).json({ error: input.errors.join(' ') });
 
   const elementId = await findElementId(req.params.id, req.params.code);
   if (!elementId) return res.status(404).json({ error: `Element "${req.params.code}" niet gevonden.` });
 
-  const result = await pool.query(
-    `insert into activities (element_id, name, start_date, end_date, omschrijving, mpp_uid, is_milestone, wbs, is_summary)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-     returning ${ACTIVITY_SELECT_FIELDS}`,
-    [
-      elementId, input.name, input.startDate, input.endDate, input.omschrijving,
-      input.mppUid, input.isMilestone, input.wbs, input.isSummary,
-    ]
-  );
-  res.status(201).json(result.rows[0]);
+  const client = await pool.connect();
+  try {
+    await client.query('begin');
+    const result = await client.query(
+      `insert into activities (element_id, name, start_date, end_date, omschrijving, mpp_uid, is_milestone, wbs, is_summary)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       returning ${ACTIVITY_SELECT_FIELDS}`,
+      [
+        elementId, input.name, input.startDate, input.endDate, input.omschrijving,
+        input.mppUid, input.isMilestone, input.wbs, input.isSummary,
+      ]
+    );
+    const row = result.rows[0];
+    await touchProjectStatusUpdated(client, elementId, req.user!.id);
+    await logProjectHistory(client, {
+      elementId,
+      userId: req.user!.id,
+      kind: 'activity',
+      action: 'create',
+      label: row.name,
+      changes: diffFields(null, omitFromHistory(row)),
+    });
+    await client.query('commit');
+    res.status(201).json(row);
+  } catch (err) {
+    await client.query('rollback');
+    throw err;
+  } finally {
+    client.release();
+  }
 });
 
 // PUT /api/doelenbomen/:id/elements/:code/activities/:activityId — bijwerken.
-activitiesRouter.put('/doelenbomen/:id/elements/:code/activities/:activityId', requireEditor, requireProjectenModule, async (req, res) => {
+activitiesRouter.put('/doelenbomen/:id/elements/:code/activities/:activityId', requireEditor, requireProjectenModule, async (req: AuthedRequest, res) => {
   const input = readActivityBody(req.body);
   if (input.errors.length) return res.status(400).json({ error: input.errors.join(' ') });
 
   const elementId = await findElementId(req.params.id, req.params.code);
   if (!elementId) return res.status(404).json({ error: `Element "${req.params.code}" niet gevonden.` });
 
-  // coalesce: een gewone edit via het formulier (tree.html: openActivityModal)
-  // stuurt geen mppUid mee — dat mag het bestaande mpp_uid (indien aanwezig,
-  // dus door MS Project geïmporteerd) niet wissen, anders verliest een
-  // handmatig bewerkte, ooit geïmporteerde activiteit haar koppeling en zou
-  // een volgende herimport 'm ten onrechte als "niet meer in het plan"
-  // (dus te verwijderen) aanmerken. Alleen de import-flow zelf stuurt hier
-  // bewust een waarde voor mee.
-  const result = await pool.query(
-    `update activities
-     set name = $1, start_date = $2, end_date = $3, omschrijving = $4, mpp_uid = coalesce($5, mpp_uid),
-         is_milestone = $6, wbs = coalesce($7, wbs), is_summary = $8
-     where id = $9 and element_id = $10
-     returning ${ACTIVITY_SELECT_FIELDS}`,
-    [
-      input.name, input.startDate, input.endDate, input.omschrijving, input.mppUid,
-      input.isMilestone, input.wbs, input.isSummary, req.params.activityId, elementId,
-    ]
-  );
-  if (result.rows.length === 0) return res.status(404).json({ error: 'Activiteit niet gevonden.' });
-  res.json(result.rows[0]);
+  const client = await pool.connect();
+  try {
+    await client.query('begin');
+    const before = await client.query(`select ${ACTIVITY_SELECT_FIELDS} from activities where id = $1 and element_id = $2`, [
+      req.params.activityId,
+      elementId,
+    ]);
+    if (before.rows.length === 0) {
+      await client.query('rollback');
+      return res.status(404).json({ error: 'Activiteit niet gevonden.' });
+    }
+    // coalesce: een gewone edit via het formulier (tree.html: openActivityModal)
+    // stuurt geen mppUid mee — dat mag het bestaande mpp_uid (indien aanwezig,
+    // dus door MS Project geïmporteerd) niet wissen, anders verliest een
+    // handmatig bewerkte, ooit geïmporteerde activiteit haar koppeling en zou
+    // een volgende herimport 'm ten onrechte als "niet meer in het plan"
+    // (dus te verwijderen) aanmerken. Alleen de import-flow zelf stuurt hier
+    // bewust een waarde voor mee. Voor de diff hieronder wordt daarom niet het
+    // ruwe input.wbs gebruikt, maar de daadwerkelijk opgeslagen (na-coalesce)
+    // waarde uit de teruggegeven rij.
+    const result = await client.query(
+      `update activities
+       set name = $1, start_date = $2, end_date = $3, omschrijving = $4, mpp_uid = coalesce($5, mpp_uid),
+           is_milestone = $6, wbs = coalesce($7, wbs), is_summary = $8
+       where id = $9 and element_id = $10
+       returning ${ACTIVITY_SELECT_FIELDS}`,
+      [
+        input.name, input.startDate, input.endDate, input.omschrijving, input.mppUid,
+        input.isMilestone, input.wbs, input.isSummary, req.params.activityId, elementId,
+      ]
+    );
+    const row = result.rows[0];
+    await touchProjectStatusUpdated(client, elementId, req.user!.id);
+    await logProjectHistory(client, {
+      elementId,
+      userId: req.user!.id,
+      kind: 'activity',
+      action: 'update',
+      label: row.name,
+      changes: diffFields(omitFromHistory(before.rows[0]), omitFromHistory(row)),
+    });
+    await client.query('commit');
+    res.json(row);
+  } catch (err) {
+    await client.query('rollback');
+    throw err;
+  } finally {
+    client.release();
+  }
 });
 
 // DELETE /api/doelenbomen/:id/elements/:code/activities/:activityId
-activitiesRouter.delete('/doelenbomen/:id/elements/:code/activities/:activityId', requireEditor, requireProjectenModule, async (req, res) => {
+activitiesRouter.delete('/doelenbomen/:id/elements/:code/activities/:activityId', requireEditor, requireProjectenModule, async (req: AuthedRequest, res) => {
   const elementId = await findElementId(req.params.id, req.params.code);
   if (!elementId) return res.status(404).json({ error: `Element "${req.params.code}" niet gevonden.` });
 
-  const result = await pool.query('delete from activities where id = $1 and element_id = $2 returning id', [
-    req.params.activityId,
-    elementId,
-  ]);
-  if (result.rowCount === 0) return res.status(404).json({ error: 'Activiteit niet gevonden.' });
-  res.status(204).send();
+  const client = await pool.connect();
+  try {
+    await client.query('begin');
+    const before = await client.query(`select ${ACTIVITY_SELECT_FIELDS} from activities where id = $1 and element_id = $2`, [
+      req.params.activityId,
+      elementId,
+    ]);
+    if (before.rows.length === 0) {
+      await client.query('rollback');
+      return res.status(404).json({ error: 'Activiteit niet gevonden.' });
+    }
+    await client.query('delete from activities where id = $1 and element_id = $2', [req.params.activityId, elementId]);
+    await touchProjectStatusUpdated(client, elementId, req.user!.id);
+    await logProjectHistory(client, {
+      elementId,
+      userId: req.user!.id,
+      kind: 'activity',
+      action: 'delete',
+      label: before.rows[0].name,
+      changes: diffFields(omitFromHistory(before.rows[0]), {}),
+    });
+    await client.query('commit');
+    res.status(204).send();
+  } catch (err) {
+    await client.query('rollback');
+    throw err;
+  } finally {
+    client.release();
+  }
 });
 
 // DELETE /api/doelenbomen/:id/elements/:code/activities — wist in één keer ALLE
@@ -171,13 +261,39 @@ activitiesRouter.delete('/doelenbomen/:id/elements/:code/activities/:activityId'
 // frontend één voor één te laten verwijderen (tree.html: deleteAllActivities
 // + de "Alles wissen"-knop in activitiesSectionHtml) — geeft ook meteen een
 // betrouwbaar aantal terug voor de bevestigingsmelding, en voorkomt een
-// gedeeltelijk resultaat als één los verzoek zou mislukken.
-activitiesRouter.delete('/doelenbomen/:id/elements/:code/activities', requireEditor, requireProjectenModule, async (req, res) => {
+// gedeeltelijk resultaat als één los verzoek zou mislukken. Per verwijderde
+// activiteit één history-rij (i.p.v. één samengevatte rij) — zo blijft de
+// tijdlijn per activiteit consistent met een losse DELETE hierboven.
+activitiesRouter.delete('/doelenbomen/:id/elements/:code/activities', requireEditor, requireProjectenModule, async (req: AuthedRequest, res) => {
   const elementId = await findElementId(req.params.id, req.params.code);
   if (!elementId) return res.status(404).json({ error: `Element "${req.params.code}" niet gevonden.` });
 
-  const result = await pool.query('delete from activities where element_id = $1 returning id', [elementId]);
-  res.json({ deletedCount: result.rowCount });
+  const client = await pool.connect();
+  try {
+    await client.query('begin');
+    const before = await client.query(`select ${ACTIVITY_SELECT_FIELDS} from activities where element_id = $1`, [elementId]);
+    await client.query('delete from activities where element_id = $1', [elementId]);
+    if (before.rows.length > 0) {
+      await touchProjectStatusUpdated(client, elementId, req.user!.id);
+      for (const row of before.rows) {
+        await logProjectHistory(client, {
+          elementId,
+          userId: req.user!.id,
+          kind: 'activity',
+          action: 'delete',
+          label: row.name,
+          changes: diffFields(omitFromHistory(row), {}),
+        });
+      }
+    }
+    await client.query('commit');
+    res.json({ deletedCount: before.rows.length });
+  } catch (err) {
+    await client.query('rollback');
+    throw err;
+  } finally {
+    client.release();
+  }
 });
 
 // ---- Afhankelijkheden tussen activiteiten (dependencies) ----

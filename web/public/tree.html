@@ -672,11 +672,12 @@
   .activities-toggle-label { display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
   .activities-chevron { display: inline-block; font-size: 9px; color: #aab0b8; transition: transform 0.15s; }
   .dp-activities-body { margin-bottom: 4px; }
-  /* Wijzigingshistorie van de projectstatus (before/after per veld, zie
-     GET .../project-status/history) — zelfde in-/uitklapmechaniek als
-     Activiteiten hierboven (.dp-activities-title/.activities-toggle-label/
-     .activities-chevron worden hier hergebruikt), maar met eigen body-opmaak
-     want dit is een lijst van los-tijd-momenten i.p.v. een Gantt. */
+  /* Wijzigingshistorie van het project (status + deliverables + activiteiten
+     door elkaar, before/after per veld, zie GET .../elements/:code/history) —
+     zelfde in-/uitklapmechaniek als Activiteiten hierboven
+     (.dp-activities-title/.activities-toggle-label/.activities-chevron worden
+     hier hergebruikt), maar met eigen body-opmaak want dit is een lijst van
+     los-tijd-momenten i.p.v. een Gantt. */
   .dp-history-title { margin-top: 10px; }
   .dp-history-body { margin-bottom: 4px; }
   .dp-history-list { display: flex; flex-direction: column; gap: 8px; }
@@ -4162,15 +4163,16 @@ function runApp(data) {
       '</div>';
     }
 
-    // Volledige wijzigingshistorie (before/after per veld) — vervolg-interview
-    // met Charles (31 augustus 2026, n.a.v. project "Sweepen"): de notitie
-    // hierboven laat alleen het laatste moment zien. Alleen in de levende app
-    // (apiUrl/authToken gezet, zie initActivityPing hierboven voor hetzelfde
-    // patroon) — een standalone/statische HTML-export heeft geen backend om de
+    // Volledige wijzigingshistorie (status + deliverables + activiteiten door
+    // elkaar, before/after per veld) — vervolg-interview met Charles
+    // (31 augustus 2026, n.a.v. project "Sweepen"): de notitie hierboven laat
+    // alleen het laatste moment zien. Alleen in de levende app (apiUrl/
+    // authToken gezet, zie initActivityPing hierboven voor hetzelfde patroon)
+    // — een standalone/statische HTML-export heeft geen backend om de
     // historie bij op te halen, dus daar verbergen i.p.v. een altijd-falende
     // knop tonen. Bewust GEEN crud-only: ook een bezoeker mag de historie zien
     // (net als 'Laatst bijgewerkt' hierboven) — alleen 'door wie' wordt
-    // server-side gestript voor die rol (zie GET .../project-status/history).
+    // server-side gestript voor die rol (zie GET .../elements/:code/history).
     if (projectenActive && apiUrl && authToken) {
       html += '<div class="dp-activities-title dp-history-title">' +
         '<span class="activities-toggle-label project-history-toggle" data-code="' + escapeHtml(id) + '">' +
@@ -7091,57 +7093,70 @@ function runApp(data) {
     }
   }
 
-  // ---- Wijzigingshistorie van de projectstatus (before/after per veld) ----
-  // Zie GET .../project-status/history (routes/projectStatus.ts) en het
+  // ---- Wijzigingshistorie van het project (status + deliverables + ----
+  // ---- activiteiten door elkaar, nieuwste eerst) ----
+  // Zie GET .../elements/:code/history (routes/projectStatus.ts) en het
   // vervolg-interview met Charles (31 augustus 2026, n.a.v. project
-  // "Sweepen"): welk veld wanneer door wie van welke naar welke waarde is
-  // gewijzigd, inclusief "gecontroleerd, niets gewijzigd"-touch-acties.
+  // "Sweepen"): eerst alleen projectstatus-wijzigingen, daarna uitgebreid
+  // ("Ja, deliverables én activiteiten") naar ook deliverable-/activiteiten-
+  // wijzigingen, in dezelfde tijdlijn ("Ja, in dezelfde historie-lijst"). Elke
+  // rij heeft een kind ('status'/'product'/'activity'), een action
+  // ('create'/'update'/'delete'/'touch'), een label (naam van het product/de
+  // activiteit — leeg voor 'status') en changes ({veldnaam: {from, to}} met
+  // alleen de daadwerkelijk gewijzigde velden) — zie api/src/projectHistory.ts.
   const STATUS_FIELD_LABELS = {
     projectstatus: 'Status', rag: 'RAG', toelichting: 'Toelichting',
     gerapporteerdOp: 'Gerapporteerd op', clusterPpt: 'Cluster/PPT',
   };
-  const STATUS_FIELD_KEYS = [
-    ['projectstatus', 'prevProjectstatus', 'newProjectstatus'],
-    ['rag', 'prevRag', 'newRag'],
-    ['toelichting', 'prevToelichting', 'newToelichting'],
-    ['gerapporteerdOp', 'prevGerapporteerdOp', 'newGerapporteerdOp'],
-    ['clusterPpt', 'prevClusterPpt', 'newClusterPpt'],
-  ];
+  const PRODUCT_FIELD_LABELS = {
+    code: 'Code', name: 'Naam', type: 'Type', omschrijving: 'Omschrijving', pctGereed: '% gereed',
+    verwachteDatum: 'Verwachte datum', werkelijkeDatum: 'Werkelijke datum', opmerking: 'Opmerking',
+    duur: 'Duur', duurEenheid: 'Eenheid', businessValue: 'Business value', deadline: 'Deadline',
+  };
+  const ACTIVITY_FIELD_LABELS = {
+    name: 'Naam', startDate: 'Startdatum', endDate: 'Einddatum', omschrijving: 'Omschrijving',
+    isMilestone: 'Mijlpaal', wbs: 'WBS', isSummary: 'Samenvattend',
+  };
+  const HISTORY_FIELD_LABELS_BY_KIND = { status: STATUS_FIELD_LABELS, product: PRODUCT_FIELD_LABELS, activity: ACTIVITY_FIELD_LABELS };
+  const HISTORY_KIND_LABELS = { status: 'Projectstatus', product: 'Deliverable', activity: 'Activiteit' };
+  const HISTORY_DATE_FIELDS = new Set([
+    'gerapporteerdOp', 'verwachteDatum', 'werkelijkeDatum', 'deadline', 'startDate', 'endDate',
+  ]);
+  const HISTORY_BOOLEAN_FIELDS = new Set(['isMilestone', 'isSummary']);
 
-  // null/leeg allebei "geen waarde" voor de weergave — het onderscheid tussen
-  // "nog geen rij" (null) en "bewust leeg" ('') zit al verwerkt in isCreate/
-  // isDelete hieronder, hier gaat het puur om wat je aan tekst laat zien.
-  function historyValueLabel(field, value) {
+  // null/leeg allebei "geen waarde" voor de weergave.
+  function historyValueLabel(kind, field, value) {
     if (value === null || value === undefined || value === '') return null;
-    if (field === 'gerapporteerdOp') return formatDateNL(value);
-    if (field === 'projectstatus' || field === 'rag') return titleCase(value);
+    if (HISTORY_DATE_FIELDS.has(field)) return formatDateNL(value);
+    if (HISTORY_BOOLEAN_FIELDS.has(field)) return value === true || value === 'true' ? 'Ja' : 'Nee';
+    if (field === 'duurEenheid') return DUUR_EENHEID_LABELS[value] || value;
+    if (kind === 'status' && (field === 'projectstatus' || field === 'rag')) return titleCase(value);
+    if (kind === 'product' && field === 'type') return titleCase(value);
     return value;
   }
 
-  // Eén regel per veld dat daadwerkelijk is gewijzigd (prev !== new) — velden
-  // die niet zijn aangeraakt blijven onvermeld, anders zou elke wijziging
-  // altijd alle 5 velden tonen. Bij een touch-actie (prev === new voor alle
-  // velden, zie insertHistoryRow in projectStatus.ts) levert dit dus bewust
-  // een lege lijst op.
+  // Eén regel per veld dat daadwerkelijk is gewijzigd — row.changes bevat al
+  // alléén de gewijzigde velden (zie diffFields in api/src/projectHistory.ts),
+  // dus hier is geen aparte create/update/delete-afleiding meer nodig zoals
+  // vroeger: de action-kolom van de rij zelf zegt dat al.
   function historyRowDiffLines(row) {
-    const isCreate = STATUS_FIELD_KEYS.every(([, pk]) => row[pk] === null);
-    const isDelete = STATUS_FIELD_KEYS.every(([, , nk]) => row[nk] === null);
+    const labels = HISTORY_FIELD_LABELS_BY_KIND[row.kind] || {};
+    const changes = row.changes || {};
     const lines = [];
-    STATUS_FIELD_KEYS.forEach(([field, pk, nk]) => {
-      const prevVal = row[pk], newVal = row[nk];
-      if (prevVal === newVal) return;
-      const label = STATUS_FIELD_LABELS[field];
-      const prevLabel = historyValueLabel(field, prevVal);
-      const newLabel = historyValueLabel(field, newVal);
-      if (isCreate) {
-        if (newLabel !== null) lines.push('<strong>' + label + ':</strong> ' + escapeHtml(newLabel));
-      } else if (isDelete) {
-        if (prevLabel !== null) lines.push('<strong>' + label + ':</strong> ' + escapeHtml(prevLabel) + ' &rarr; <em>gewist</em>');
+    Object.keys(changes).forEach((field) => {
+      const label = labels[field] || field;
+      const { from, to } = changes[field];
+      const fromLabel = historyValueLabel(row.kind, field, from);
+      const toLabel = historyValueLabel(row.kind, field, to);
+      if (row.action === 'create') {
+        if (toLabel !== null) lines.push('<strong>' + label + ':</strong> ' + escapeHtml(toLabel));
+      } else if (row.action === 'delete') {
+        if (fromLabel !== null) lines.push('<strong>' + label + ':</strong> ' + escapeHtml(fromLabel) + ' &rarr; <em>gewist</em>');
       } else {
         lines.push(
           '<strong>' + label + ':</strong> ' +
-          (prevLabel !== null ? escapeHtml(prevLabel) : '<em>leeg</em>') + ' &rarr; ' +
-          (newLabel !== null ? escapeHtml(newLabel) : '<em>leeg</em>')
+          (fromLabel !== null ? escapeHtml(fromLabel) : '<em>leeg</em>') + ' &rarr; ' +
+          (toLabel !== null ? escapeHtml(toLabel) : '<em>leeg</em>')
         );
       }
     });
@@ -7158,14 +7173,22 @@ function runApp(data) {
       // zie routes/projectStatus.ts) — zelfde patroon als updatedByEmail bij
       // "Laatst bijgewerkt" hierboven.
       const who = row.changedByEmail ? ' door ' + escapeHtml(row.changedByEmail) : '';
+      // kind/label als contextregel — voor 'status' is er geen apart label
+      // nodig (de wijzigingen zelf geven al voldoende context, zie
+      // db/migrations/0022_project_history.sql), voor product/activity wél
+      // ("Deliverable · Ontwerp opgeleverd").
+      const kindLabel = HISTORY_KIND_LABELS[row.kind] || row.kind;
+      const context = row.label
+        ? kindLabel + ' &middot; ' + escapeHtml(row.label)
+        : kindLabel;
       const diffLines = historyRowDiffLines(row);
-      const bodyHtml = row.isTouch
+      const bodyHtml = row.action === 'touch'
         ? '<div class="dp-history-kind">Gecontroleerd, niets gewijzigd</div>'
         : diffLines.length === 0
           ? '<div class="dp-history-kind">Opgeslagen (geen inhoudelijke wijziging)</div>'
           : '<div class="dp-history-diff">' + diffLines.join('<br>') + '</div>';
       return '<div class="dp-history-item">' +
-        '<div class="dp-history-meta">' + escapeHtml(when) + who + '</div>' +
+        '<div class="dp-history-meta">' + escapeHtml(when) + who + ' &middot; ' + context + '</div>' +
         bodyHtml +
       '</div>';
     }).join('') + '</div>';
@@ -7175,7 +7198,7 @@ function runApp(data) {
     bodyEl.innerHTML = '<div class="dp-empty-note">Laden&hellip;</div>';
     try {
       const url = apiUrl + '/api/doelenbomen/' + doelenboomId + '/elements/' +
-        encodeURIComponent(code) + '/project-status/history';
+        encodeURIComponent(code) + '/history';
       const res = await fetch(url, { headers: { Authorization: 'Bearer ' + authToken } });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));

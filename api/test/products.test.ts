@@ -175,6 +175,52 @@ describe('products (planning items) CRUD', () => {
     assert.equal(updated.body.deadline, '2027-01-01');
   });
 
+  // Vervolg-interview met Charles (31 augustus 2026, n.a.v. project "Sweepen"):
+  // een deliverable-wijziging moet ook meetellen voor de 'verouderd'-markering
+  // van het PROJECT (project_status.updatedAt) en in dezelfde historie-lijst
+  // verschijnen als projectstatus-wijzigingen (zie GET .../elements/:code/history,
+  // routes/projectStatus.ts, en de gedeelde helpers in api/src/projectHistory.ts).
+  it('een product-wijziging bumpt project_status.updatedAt en komt in de gecombineerde historie terecht', async () => {
+    const before = new Date();
+    const created = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P1/products`, {
+      token: gebruikerToken, body: { name: 'Historie-deliverable' },
+    });
+    assert.equal(created.status, 201);
+    const productId = created.body.id;
+
+    const treeAfterCreate = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: adminToken });
+    assert.ok(treeAfterCreate.body.projectStatus['P1'].updatedAt, 'aanmaken van een deliverable zet project_status.updatedAt');
+    assert.ok(new Date(treeAfterCreate.body.projectStatus['P1'].updatedAt).getTime() >= before.getTime() - 1000);
+    assert.equal(treeAfterCreate.body.projectStatus['P1'].updatedByEmail, `${PREFIX}-gebruiker@test.local`);
+
+    await req('PUT', `/api/doelenbomen/${doelenboomId}/elements/P1/products/${productId}`, {
+      token: adminToken, body: { name: 'Historie-deliverable', pctGereed: 40 },
+    });
+    await req('DELETE', `/api/doelenbomen/${doelenboomId}/elements/P1/products/${productId}`, { token: adminToken });
+
+    const history = await req('GET', `/api/doelenbomen/${doelenboomId}/elements/P1/history`, { token: adminToken });
+    assert.equal(history.status, 200);
+    const [delRow, updateRow, createRow] = history.body;
+
+    assert.equal(delRow.kind, 'product');
+    assert.equal(delRow.action, 'delete');
+    assert.equal(delRow.label, 'Historie-deliverable');
+    assert.equal(delRow.changes.name.from, 'Historie-deliverable');
+    assert.equal(delRow.changes.name.to, null);
+
+    assert.equal(updateRow.kind, 'product');
+    assert.equal(updateRow.action, 'update');
+    assert.equal(updateRow.changes.pctGereed.from, 0);
+    assert.equal(updateRow.changes.pctGereed.to, 40);
+    assert.ok(!('name' in updateRow.changes), 'ongewijzigde naam blijft onvermeld');
+
+    assert.equal(createRow.kind, 'product');
+    assert.equal(createRow.action, 'create');
+    assert.equal(createRow.label, 'Historie-deliverable');
+    assert.equal(createRow.changes.name.from, null);
+    assert.equal(createRow.changes.name.to, 'Historie-deliverable');
+  });
+
   // Afhankelijkheden tussen planning items (product_dependencies) — simpeler
   // dan activities/dependencies (geen type/lagDays, zie api/src/routes/
   // products.ts). Eigen element (P2) + eigen products, geneste describe net

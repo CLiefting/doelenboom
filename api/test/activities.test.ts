@@ -451,6 +451,85 @@ describe('activities (activiteiten-planning) CRUD', () => {
     });
   });
 
+  // Vervolg-interview met Charles (31 augustus 2026, n.a.v. project "Sweepen"):
+  // een activiteiten-wijziging moet ook meetellen voor de 'verouderd'-markering
+  // van het PROJECT (project_status.updatedAt) en in dezelfde historie-lijst
+  // verschijnen als projectstatus-/deliverable-wijzigingen (zie GET
+  // .../elements/:code/history). mppUid blijft buiten de gelogde changes
+  // (interne boekhouding, geen gebruikersgerichte wijziging, zie omitMppUid in
+  // routes/activities.ts) — anders zou elke MS Project-herimport een storende
+  // technische regel in de tijdlijn zetten.
+  describe('wijzigingshistorie (project_status.updatedAt-bump + GET .../history)', () => {
+    before(async () => {
+      await req('POST', `/api/doelenbomen/${doelenboomId}/elements`, {
+        token: adminToken, body: { code: 'P5', type: 'Project', name: 'Project 5' },
+      });
+    });
+
+    it('aanmaken/wijzigen/verwijderen bumpt project_status.updatedAt en komt in de gecombineerde historie terecht', async () => {
+      const before = new Date();
+      const created = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P5/activities`, {
+        token: gebruikerToken,
+        body: { name: 'Historie-activiteit', startDate: '2026-09-01', endDate: '2026-09-05', mppUid: 'task-historie' },
+      });
+      assert.equal(created.status, 201);
+      const activityId = created.body.id;
+
+      const treeAfterCreate = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: adminToken });
+      assert.ok(treeAfterCreate.body.projectStatus['P5'].updatedAt, 'aanmaken van een activiteit zet project_status.updatedAt');
+      assert.ok(new Date(treeAfterCreate.body.projectStatus['P5'].updatedAt).getTime() >= before.getTime() - 1000);
+      assert.equal(treeAfterCreate.body.projectStatus['P5'].updatedByEmail, `${PREFIX}-gebruiker@test.local`);
+
+      await req('PUT', `/api/doelenbomen/${doelenboomId}/elements/P5/activities/${activityId}`, {
+        token: adminToken,
+        body: { name: 'Historie-activiteit', startDate: '2026-09-02', endDate: '2026-09-05' },
+      });
+      await req('DELETE', `/api/doelenbomen/${doelenboomId}/elements/P5/activities/${activityId}`, { token: adminToken });
+
+      const history = await req('GET', `/api/doelenbomen/${doelenboomId}/elements/P5/history`, { token: adminToken });
+      assert.equal(history.status, 200);
+      const [delRow, updateRow, createRow] = history.body;
+
+      assert.equal(delRow.kind, 'activity');
+      assert.equal(delRow.action, 'delete');
+      assert.equal(delRow.label, 'Historie-activiteit');
+      assert.equal(delRow.changes.startDate.from, '2026-09-02');
+      assert.equal(delRow.changes.startDate.to, null);
+      assert.ok(!('mppUid' in delRow.changes), 'mppUid is interne boekhouding, hoort niet in de historie');
+
+      assert.equal(updateRow.kind, 'activity');
+      assert.equal(updateRow.action, 'update');
+      assert.equal(updateRow.changes.startDate.from, '2026-09-01');
+      assert.equal(updateRow.changes.startDate.to, '2026-09-02');
+      assert.ok(!('name' in updateRow.changes), 'ongewijzigde naam blijft onvermeld');
+      assert.ok(!('mppUid' in updateRow.changes), 'mppUid (coalesce, ongewijzigd) hoort niet in de historie');
+
+      assert.equal(createRow.kind, 'activity');
+      assert.equal(createRow.action, 'create');
+      assert.equal(createRow.label, 'Historie-activiteit');
+      assert.equal(createRow.changes.name.from, null);
+      assert.equal(createRow.changes.name.to, 'Historie-activiteit');
+      assert.ok(!('mppUid' in createRow.changes), 'mppUid hoort ook bij aanmaken niet in de historie');
+    });
+
+    it('"Alles wissen" logt één history-rij per verwijderde activiteit', async () => {
+      await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P5/activities`, {
+        token: adminToken, body: { name: 'Bulk A', startDate: '2026-10-01', endDate: '2026-10-02' },
+      });
+      await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P5/activities`, {
+        token: adminToken, body: { name: 'Bulk B', startDate: '2026-10-03', endDate: '2026-10-04' },
+      });
+
+      const del = await req('DELETE', `/api/doelenbomen/${doelenboomId}/elements/P5/activities`, { token: adminToken });
+      assert.equal(del.status, 200);
+      assert.equal(del.body.deletedCount, 2);
+
+      const history = await req('GET', `/api/doelenbomen/${doelenboomId}/elements/P5/history`, { token: adminToken });
+      const bulkDeleteRows = history.body.filter((r: any) => r.kind === 'activity' && r.action === 'delete' && r.label.startsWith('Bulk '));
+      assert.equal(bulkDeleteRows.length, 2, 'één history-rij per verwijderde activiteit, niet één samengevatte rij');
+    });
+  });
+
   // POST .../activities/import-mpp — zet een geüpload .mpp-bestand om naar MS
   // Project XML via excel-service en geeft die XML terug (schrijft zelf niets
   // naar activities, zie de toelichting bovenaan activities.ts). De permissie-/

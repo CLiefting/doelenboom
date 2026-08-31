@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { pool } from '../db.js';
-import { requireAuth } from '../auth.js';
+import { requireAuth, AuthedRequest } from '../auth.js';
 import { requireWritableDoelenboom, requireModule } from '../rbac.js';
+import { diffFields, logProjectHistory, touchProjectStatusUpdated } from '../projectHistory.js';
 
 // CRUD voor producten/deliverables ("planning items") van een element — tot nu
 // toe alleen te vullen via Excel-import (routes/imports.ts); dit hier is de
@@ -106,67 +107,152 @@ async function findElementId(doelenboomId: string, code: string): Promise<number
   return r.rows[0]?.id ?? null;
 }
 
+// id uit een geselecteerde/geretourneerde rij weglaten vóór het diffen: id
+// verandert per definitie nooit tussen before/after bij een update (dus zou
+// daar toch nooit als wijziging verschijnen), maar bij een create (before=
+// null) of delete (after={}) komt het wél als "veld" in de diff terecht —
+// een zinloze "id: 20 → gewist"-regel in de historie.
+function omitId<T extends Record<string, unknown>>(row: T): Omit<T, 'id'> {
+  const { id: _omit, ...rest } = row;
+  return rest;
+}
+
 // POST /api/doelenbomen/:id/elements/:code/products — nieuw planning item.
-productsRouter.post('/doelenbomen/:id/elements/:code/products', requireEditor, requireProjectenModule, async (req, res) => {
+// Transactie: de insert + de "verouderd"-touch van het project + de
+// history-rij moeten samen slagen of samen mislukken — zie de toelichting in
+// api/src/projectHistory.ts (vervolg-interview met Charles: een
+// deliverable-wijziging telt ook mee voor de 'verouderd'-markering van het
+// PROJECT, niet alleen een directe projectstatus-wijziging).
+productsRouter.post('/doelenbomen/:id/elements/:code/products', requireEditor, requireProjectenModule, async (req: AuthedRequest, res) => {
   const input = readProductBody(req.body);
   if (input.errors.length) return res.status(400).json({ error: input.errors.join(' ') });
 
   const elementId = await findElementId(req.params.id, req.params.code);
   if (!elementId) return res.status(404).json({ error: `Element "${req.params.code}" niet gevonden.` });
 
-  const result = await pool.query(
-    `insert into products (
-       element_id, code, name, type, omschrijving, pct_gereed, verwachte_datum, werkelijke_datum, opmerking,
-       duur, duur_eenheid, business_value, deadline
-     )
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-     returning ${PRODUCT_SELECT_FIELDS}`,
-    [
-      elementId, input.code, input.name, input.type, input.omschrijving,
-      input.pctGereed, input.verwachteDatum, input.werkelijkeDatum, input.opmerking,
-      input.duur, input.duurEenheid, input.businessValue, input.deadline,
-    ]
-  );
-  res.status(201).json(result.rows[0]);
+  const client = await pool.connect();
+  try {
+    await client.query('begin');
+    const result = await client.query(
+      `insert into products (
+         element_id, code, name, type, omschrijving, pct_gereed, verwachte_datum, werkelijke_datum, opmerking,
+         duur, duur_eenheid, business_value, deadline
+       )
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+       returning ${PRODUCT_SELECT_FIELDS}`,
+      [
+        elementId, input.code, input.name, input.type, input.omschrijving,
+        input.pctGereed, input.verwachteDatum, input.werkelijkeDatum, input.opmerking,
+        input.duur, input.duurEenheid, input.businessValue, input.deadline,
+      ]
+    );
+    const row = result.rows[0];
+    await touchProjectStatusUpdated(client, elementId, req.user!.id);
+    await logProjectHistory(client, {
+      elementId,
+      userId: req.user!.id,
+      kind: 'product',
+      action: 'create',
+      label: row.name,
+      changes: diffFields(null, omitId(row)),
+    });
+    await client.query('commit');
+    res.status(201).json(row);
+  } catch (err) {
+    await client.query('rollback');
+    throw err;
+  } finally {
+    client.release();
+  }
 });
 
 // PUT /api/doelenbomen/:id/elements/:code/products/:productId — bijwerken.
-productsRouter.put('/doelenbomen/:id/elements/:code/products/:productId', requireEditor, requireProjectenModule, async (req, res) => {
+productsRouter.put('/doelenbomen/:id/elements/:code/products/:productId', requireEditor, requireProjectenModule, async (req: AuthedRequest, res) => {
   const input = readProductBody(req.body);
   if (input.errors.length) return res.status(400).json({ error: input.errors.join(' ') });
 
   const elementId = await findElementId(req.params.id, req.params.code);
   if (!elementId) return res.status(404).json({ error: `Element "${req.params.code}" niet gevonden.` });
 
-  const result = await pool.query(
-    `update products
-     set code = $1, name = $2, type = $3, omschrijving = $4, pct_gereed = $5,
-         verwachte_datum = $6, werkelijke_datum = $7, opmerking = $8,
-         duur = $9, duur_eenheid = $10, business_value = $11, deadline = $12
-     where id = $13 and element_id = $14
-     returning ${PRODUCT_SELECT_FIELDS}`,
-    [
-      input.code, input.name, input.type, input.omschrijving, input.pctGereed,
-      input.verwachteDatum, input.werkelijkeDatum, input.opmerking,
-      input.duur, input.duurEenheid, input.businessValue, input.deadline,
-      req.params.productId, elementId,
-    ]
-  );
-  if (result.rows.length === 0) return res.status(404).json({ error: 'Planning item niet gevonden.' });
-  res.json(result.rows[0]);
+  const client = await pool.connect();
+  try {
+    await client.query('begin');
+    const before = await client.query(`select ${PRODUCT_SELECT_FIELDS} from products where id = $1 and element_id = $2`, [
+      req.params.productId,
+      elementId,
+    ]);
+    if (before.rows.length === 0) {
+      await client.query('rollback');
+      return res.status(404).json({ error: 'Planning item niet gevonden.' });
+    }
+    const result = await client.query(
+      `update products
+       set code = $1, name = $2, type = $3, omschrijving = $4, pct_gereed = $5,
+           verwachte_datum = $6, werkelijke_datum = $7, opmerking = $8,
+           duur = $9, duur_eenheid = $10, business_value = $11, deadline = $12
+       where id = $13 and element_id = $14
+       returning ${PRODUCT_SELECT_FIELDS}`,
+      [
+        input.code, input.name, input.type, input.omschrijving, input.pctGereed,
+        input.verwachteDatum, input.werkelijkeDatum, input.opmerking,
+        input.duur, input.duurEenheid, input.businessValue, input.deadline,
+        req.params.productId, elementId,
+      ]
+    );
+    const row = result.rows[0];
+    await touchProjectStatusUpdated(client, elementId, req.user!.id);
+    await logProjectHistory(client, {
+      elementId,
+      userId: req.user!.id,
+      kind: 'product',
+      action: 'update',
+      label: row.name,
+      changes: diffFields(omitId(before.rows[0]), omitId(row)),
+    });
+    await client.query('commit');
+    res.json(row);
+  } catch (err) {
+    await client.query('rollback');
+    throw err;
+  } finally {
+    client.release();
+  }
 });
 
 // DELETE /api/doelenbomen/:id/elements/:code/products/:productId
-productsRouter.delete('/doelenbomen/:id/elements/:code/products/:productId', requireEditor, requireProjectenModule, async (req, res) => {
+productsRouter.delete('/doelenbomen/:id/elements/:code/products/:productId', requireEditor, requireProjectenModule, async (req: AuthedRequest, res) => {
   const elementId = await findElementId(req.params.id, req.params.code);
   if (!elementId) return res.status(404).json({ error: `Element "${req.params.code}" niet gevonden.` });
 
-  const result = await pool.query('delete from products where id = $1 and element_id = $2 returning id', [
-    req.params.productId,
-    elementId,
-  ]);
-  if (result.rowCount === 0) return res.status(404).json({ error: 'Planning item niet gevonden.' });
-  res.status(204).send();
+  const client = await pool.connect();
+  try {
+    await client.query('begin');
+    const before = await client.query(`select ${PRODUCT_SELECT_FIELDS} from products where id = $1 and element_id = $2`, [
+      req.params.productId,
+      elementId,
+    ]);
+    if (before.rows.length === 0) {
+      await client.query('rollback');
+      return res.status(404).json({ error: 'Planning item niet gevonden.' });
+    }
+    await client.query('delete from products where id = $1 and element_id = $2', [req.params.productId, elementId]);
+    await touchProjectStatusUpdated(client, elementId, req.user!.id);
+    await logProjectHistory(client, {
+      elementId,
+      userId: req.user!.id,
+      kind: 'product',
+      action: 'delete',
+      label: before.rows[0].name,
+      changes: diffFields(omitId(before.rows[0]), {}),
+    });
+    await client.query('commit');
+    res.status(204).send();
+  } catch (err) {
+    await client.query('rollback');
+    throw err;
+  } finally {
+    client.release();
+  }
 });
 
 // ---- Afhankelijkheden tussen planning items (product_dependencies) ----
