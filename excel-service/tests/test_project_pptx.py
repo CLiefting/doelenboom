@@ -62,6 +62,42 @@ class TestBuildProjectPptx:
         assert 'PID' not in text
         assert '1 van 3 opgeleverd' in text
 
+    def test_slide_2_toont_projecttijdlijn_met_markers_en_legenda(self):
+        # make_data()'s producten hebben allemaal een verwachte/werkelijke
+        # datum of deadline, dus hoort de tijdlijn (as + 'vandaag'-lijn +
+        # legenda) getekend te worden -- geteld via de vorm van de shapes
+        # (cirkel/ruit/driehoek), niet via tekst (die staat alleen in de
+        # legenda-labels en maandkoppen, niet los per marker).
+        from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+        content = build_project_pptx(make_data(), make_meta())
+        prs = Presentation(io.BytesIO(content))
+        slide = prs.slides[1]
+        text = all_text(slide)
+        assert 'vandaag' in text
+        assert 'Deliverable · verwacht' in text
+        assert 'Deliverable · opgeleverd' in text
+        assert 'Mijlpaal · gehaald' in text
+        assert 'Deadline' in text
+        assert 'Sep 2026' in text or 'Okt 2026' in text  # maandkoppen onder de as
+
+        auto_shapes = [s for s in slide.shapes if s.shape_type == MSO_SHAPE_TYPE.AUTO_SHAPE]
+        assert len(auto_shapes) > 5  # as-lijn, vandaag-lijn, markers, legenda-iconen
+
+    def test_geen_gedateerde_producten_geeft_geen_tijdlijn(self):
+        data = make_data()
+        for p in data['products']:
+            p['verwachteDatum'] = None
+            p['werkelijkeDatum'] = None
+            p['deadline'] = None
+        content = build_project_pptx(data, make_meta())
+        prs = Presentation(io.BytesIO(content))
+        text = all_text(prs.slides[1])
+        assert 'vandaag' not in text
+        # De tabel moet dan gewoon op zijn oorspronkelijke, hogere positie
+        # blijven staan -- geen lege ruimte waar de tijdlijn had gestaan.
+        assert 'GO/NO-GO' in text
+
     def test_slide_3_toont_activiteiten_in_de_juiste_categorie(self):
         # make_data()'s activiteiten (2026-08-01 t/m 2026-08-11) liggen beide
         # vóór meta.exportedAt (2026-08-27) -- horen dus in "recent afgerond"
