@@ -18,11 +18,13 @@ from fastapi.responses import JSONResponse, Response
 from .exporter import build_data_workbook, build_template_workbook, is_standard_columns
 from .mpp_converter import MppConversionError, mpp_to_mspdi_xml
 from .parser import parse_workbook
+from .project_pptx import build_project_pptx
 from .project_workbook import build_project_workbook, parse_project_workbook
 
 app = FastAPI(title='doelenboom-excel-service', version='0.1.0')
 
 XLSX_MEDIA_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+PPTX_MEDIA_TYPE = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
 MSPDI_MEDIA_TYPE = 'application/xml'
 
 
@@ -127,6 +129,25 @@ async def project_export(body: dict[str, Any] = Body(...)):
     return Response(
         content=content,
         media_type=XLSX_MEDIA_TYPE,
+        headers={'Content-Disposition': f'attachment; filename="{filename}"'},
+    )
+
+
+@app.post('/project-pptx')
+async def project_pptx(body: dict[str, Any] = Body(...)):
+    """Bouwt een PowerPoint-rapportage (4 slides: status, voortgang,
+    activiteiten, aandachtspunten) voor één project (zie project_pptx.py) --
+    aangeroepen door api/src/routes/projectExcel.ts
+    (GET .../elements/:code/project-pptx), dat dezelfde 'data'/'meta'-vorm
+    aanlevert als /project-export hierboven. Puur export, geen import."""
+    data = body.get('data') or {}
+    meta = body.get('meta') or {}
+    content = build_project_pptx(data, meta)
+    project_code = (data.get('project') or {}).get('code') or 'project'
+    filename = f'Project_{project_code}.pptx'
+    return Response(
+        content=content,
+        media_type=PPTX_MEDIA_TYPE,
         headers={'Content-Disposition': f'attachment; filename="{filename}"'},
     )
 

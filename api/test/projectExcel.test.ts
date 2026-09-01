@@ -121,6 +121,32 @@ describe('project-export/project-import-parse (Excel voor één project)', () =>
     assert.ok(buf.byteLength > 0);
   });
 
+  it('GET project-pptx geeft een .pptx-bestand terug', async (t) => {
+    if (!excelServiceReachable) return t.skip('excel-service niet bereikbaar — zie EXCEL_SERVICE_URL');
+    const res = await rawReq('GET', `/api/doelenbomen/${doelenboomId}/elements/P1/project-pptx`, { token: adminToken });
+    assert.equal(res.status, 200);
+    assert.equal(
+      res.headers.get('content-type'),
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+    );
+    const disposition = res.headers.get('content-disposition') ?? '';
+    assert.match(disposition, /filename="Project_P1_Project_1_\d{4}-\d{2}-\d{2}\.pptx"/);
+    assert.match(res.headers.get('access-control-expose-headers') ?? '', /Content-Disposition/i);
+    const buf = await res.arrayBuffer();
+    assert.ok(buf.byteLength > 0);
+  });
+
+  it('GET project-pptx zonder toegang -> 401', async () => {
+    const res = await rawReq('GET', `/api/doelenbomen/${doelenboomId}/elements/P1/project-pptx`, {});
+    assert.equal(res.status, 401);
+  });
+
+  it('GET project-pptx voor onbekend project-element -> 404', async (t) => {
+    if (!excelServiceReachable) return t.skip('excel-service niet bereikbaar — zie EXCEL_SERVICE_URL');
+    const res = await rawReq('GET', `/api/doelenbomen/${doelenboomId}/elements/DOESNOTEXIST/project-pptx`, { token: adminToken });
+    assert.equal(res.status, 404);
+  });
+
   it('bezoeker mag exporteren maar niet importeren', async (t) => {
     if (!excelServiceReachable) return t.skip('excel-service niet bereikbaar — zie EXCEL_SERVICE_URL');
     const exportRes = await rawReq('GET', `/api/doelenbomen/${doelenboomId}/elements/P1/project-export`, { token: bezoekerToken });

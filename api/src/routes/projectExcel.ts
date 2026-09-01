@@ -28,6 +28,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 
 
 const EXCEL_SERVICE_URL = process.env.EXCEL_SERVICE_URL ?? 'http://excel-service:8000';
 const XLSX_MEDIA_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+const PPTX_MEDIA_TYPE = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
 
 // Lezen mag iedereen die toegang heeft tot de doelenboom (bezoeker); uploaden
 // (een stap richting schrijven, ook al schrijft déze route zelf niets) vereist
@@ -80,54 +81,84 @@ function buildProjectExportData(tree: FetchedTree, code: string) {
 
 const sanitizeForFilename = (s: string) => s.replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
 
+// Gedeeld door de project-export- (.xlsx) en project-pptx-route (.pptx)
+// hieronder: beide bouwen dezelfde 'data' (buildProjectExportData) + 'meta',
+// posten die naar een excel-service-endpoint, en sturen het resultaat terug
+// als download — alleen het upstream-pad/mediatype/extensie verschilt.
+async function downloadProjectDocument(
+  req: AuthedRequest,
+  res: import('express').Response,
+  opts: { upstreamPath: string; mediaType: string; extension: string }
+): Promise<void> {
+  const tree = await fetchTree(req.params.id);
+  if (!tree) return void res.status(404).json({ error: 'Doelenboom niet gevonden' });
+
+  const data = buildProjectExportData(tree, req.params.code);
+  if (!data) return void res.status(404).json({ error: 'Project niet gevonden' });
+
+  const exportedAt = new Date();
+  const meta = {
+    doelenboom: tree.doelenboom.name,
+    tenant: tree.doelenboom.tenant.name,
+    exportedAt: exportedAt.toISOString(),
+    exportedBy: req.user?.email ?? 'onbekend',
+  };
+
+  let upstream: Response;
+  try {
+    upstream = await fetch(`${EXCEL_SERVICE_URL}${opts.upstreamPath}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data, meta }),
+    });
+  } catch (err) {
+    return void res.status(502).json({ error: 'Excel-service niet bereikbaar', detail: (err as Error).message });
+  }
+  if (!upstream.ok) {
+    const text = await upstream.text();
+    return void res.status(502).json({ error: 'Excel-service gaf een fout terug', detail: text });
+  }
+
+  const arrayBuffer = await upstream.arrayBuffer();
+  // Bestandsnaam: code + titel (projectnaam) + datum, bv.
+  // "Project_NP37_Sweepen_2026-08-27.xlsx" — leesbaar in Downloads/e-mail,
+  // in tegenstelling tot de eerdere kale "Project_NP37_260827.xlsx".
+  const isoDate =
+    String(exportedAt.getFullYear()) + '-' +
+    String(exportedAt.getMonth() + 1).padStart(2, '0') + '-' +
+    String(exportedAt.getDate()).padStart(2, '0');
+  const titlePart = sanitizeForFilename(String(data.project.name || ''));
+  const filename = `Project_${sanitizeForFilename(req.params.code)}` +
+    (titlePart ? `_${titlePart}` : '') + `_${isoDate}.${opts.extension}`;
+  res.setHeader('Content-Type', opts.mediaType);
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.send(Buffer.from(arrayBuffer));
+}
+
 projectExcelRouter.get(
   '/doelenbomen/:id/elements/:code/project-export',
   requireViewer,
   requireProjectenModule,
   async (req: AuthedRequest, res) => {
-    const tree = await fetchTree(req.params.id);
-    if (!tree) return res.status(404).json({ error: 'Doelenboom niet gevonden' });
+    await downloadProjectDocument(req, res, {
+      upstreamPath: '/project-export', mediaType: XLSX_MEDIA_TYPE, extension: 'xlsx',
+    });
+  }
+);
 
-    const data = buildProjectExportData(tree, req.params.code);
-    if (!data) return res.status(404).json({ error: 'Project niet gevonden' });
-
-    const exportedAt = new Date();
-    const meta = {
-      doelenboom: tree.doelenboom.name,
-      tenant: tree.doelenboom.tenant.name,
-      exportedAt: exportedAt.toISOString(),
-      exportedBy: req.user?.email ?? 'onbekend',
-    };
-
-    let upstream: Response;
-    try {
-      upstream = await fetch(`${EXCEL_SERVICE_URL}/project-export`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data, meta }),
-      });
-    } catch (err) {
-      return res.status(502).json({ error: 'Excel-service niet bereikbaar', detail: (err as Error).message });
-    }
-    if (!upstream.ok) {
-      const text = await upstream.text();
-      return res.status(502).json({ error: 'Excel-service gaf een fout terug', detail: text });
-    }
-
-    const arrayBuffer = await upstream.arrayBuffer();
-    // Bestandsnaam: code + titel (projectnaam) + datum, bv.
-    // "Project_NP37_Sweepen_2026-08-27.xlsx" — leesbaar in Downloads/e-mail,
-    // in tegenstelling tot de eerdere kale "Project_NP37_260827.xlsx".
-    const isoDate =
-      String(exportedAt.getFullYear()) + '-' +
-      String(exportedAt.getMonth() + 1).padStart(2, '0') + '-' +
-      String(exportedAt.getDate()).padStart(2, '0');
-    const titlePart = sanitizeForFilename(String(data.project.name || ''));
-    const filename = `Project_${sanitizeForFilename(req.params.code)}` +
-      (titlePart ? `_${titlePart}` : '') + `_${isoDate}.xlsx`;
-    res.setHeader('Content-Type', XLSX_MEDIA_TYPE);
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.send(Buffer.from(arrayBuffer));
+// PowerPoint-rapportage van één project (status/RAG, voortgang/deliverables,
+// activiteiten, aandachtspunten) — zie excel-service/app/project_pptx.py
+// voor de opmaak van de 4 slides. Puur export, geen import (in tegenstelling
+// tot project-export hierboven): dit is een kant-en-klaar eindresultaat voor
+// buiten de applicatie (bv. een klant/stakeholder), geen brondocument.
+projectExcelRouter.get(
+  '/doelenbomen/:id/elements/:code/project-pptx',
+  requireViewer,
+  requireProjectenModule,
+  async (req: AuthedRequest, res) => {
+    await downloadProjectDocument(req, res, {
+      upstreamPath: '/project-pptx', mediaType: PPTX_MEDIA_TYPE, extension: 'pptx',
+    });
   }
 );
 

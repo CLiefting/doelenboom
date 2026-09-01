@@ -4144,6 +4144,15 @@ function runApp(data) {
         ? '<button type="button" class="btn ghost btn-xs pp-header-excel-btn project-excel-open-btn" data-code="' +
             escapeHtml(id) + '" title="Project-gegevens exporteren/importeren als Excel">&#8646; Excel</button>'
         : '') +
+      // Eén-klik download van een kant-en-klare PowerPoint-rapportage (4
+      // slides: status, voortgang/deliverables, activiteiten, aandacht-
+      // spunten) — geen modal zoals bij Excel, dit is puur export (geen
+      // import/round-trip), zie downloadProjectPptx hieronder en
+      // excel-service/app/project_pptx.py voor de opmaak.
+      (projectenActive
+        ? '<button type="button" class="btn ghost btn-xs pp-header-pptx-btn project-pptx-btn" data-code="' +
+            escapeHtml(id) + '" title="Statusrapportage van dit project downloaden als PowerPoint">&#8659; PPT</button>'
+        : '') +
     '</div>';
 
     if (ps.toelichting || ps.datum) {
@@ -6417,6 +6426,44 @@ function runApp(data) {
     projectExcelImportStatusEl.style.color = kind === 'ok' ? '#2E7D5B' : kind === 'busy' ? '#777' : '#DC3545';
   }
 
+  // Eén-klik download van de PowerPoint-rapportage van dit project (zie
+  // GET .../elements/:code/project-pptx, api/src/routes/projectExcel.ts) —
+  // zelfde fetch+blob+download-patroon als downloadExport() hierboven, maar
+  // zonder modal/statusregel: dit is puur export, dus rechtstreeks een
+  // download-knop i.p.v. eerst een dialoog open te laten gaan (in
+  // tegenstelling tot de Excel-knop hiernaast, die ook importeren kan).
+  async function downloadProjectPptx(code, btn) {
+    const originalLabel = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Bezig…'; }
+    try {
+      const res = await fetch(
+        apiUrl + '/api/doelenbomen/' + doelenboomId + '/elements/' + encodeURIComponent(code) + '/project-pptx',
+        { headers: { Authorization: 'Bearer ' + authToken } }
+      );
+      if (!res.ok) {
+        let detail = '';
+        try { detail = (await res.json()).error || ''; } catch (e) { /* geen JSON-body */ }
+        throw new Error(detail || ('PowerPoint genereren mislukt (HTTP ' + res.status + ')'));
+      }
+      const blob = await res.blob();
+      const disposition = res.headers.get('Content-Disposition') || '';
+      const match = disposition.match(/filename="([^"]+)"/);
+      const filename = match ? match[1] : ('Project_' + code + '.pptx');
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    } catch (err) {
+      showToast(err && err.message ? err.message : 'Onbekende fout bij genereren van de PowerPoint.', 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = originalLabel; }
+    }
+  }
+
   function openProjectExcelModal(code) {
     projectExcelModalCode = code;
     projectExcelPlan = null;
@@ -7220,6 +7267,8 @@ function runApp(data) {
   function onDetailAreaClick(ev) {
     const projectExcelOpenBtn = ev.target.closest('.project-excel-open-btn');
     if (projectExcelOpenBtn) { openProjectExcelModal(projectExcelOpenBtn.dataset.code); return; }
+    const projectPptxBtn = ev.target.closest('.project-pptx-btn');
+    if (projectPptxBtn) { downloadProjectPptx(projectPptxBtn.dataset.code, projectPptxBtn); return; }
     const projectStatusEditBtn = ev.target.closest('.project-status-edit-btn');
     if (projectStatusEditBtn) { openProjectStatusModal(projectStatusEditBtn.dataset.code); return; }
     const projectStatusTouchBtn = ev.target.closest('.project-status-touch-btn');
