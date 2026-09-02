@@ -4,6 +4,7 @@ import {
   startTestServer, stopTestServer, closePool, req, rawReq, unique, createSysadminUser, login, cleanupByPrefix,
   setupWritableDoelenboom, getBaseUrl,
 } from './helpers.js';
+import { pool } from '../src/db.js';
 
 const PREFIX = unique('impexp');
 const EXCEL_SERVICE_URL = process.env.EXCEL_SERVICE_URL ?? 'http://localhost:8000';
@@ -119,6 +120,27 @@ describe('imports/exports (Excel round-trip via excel-service)', () => {
     await cleanupByPrefix(PREFIX);
     await stopTestServer();
     await closePool();
+  });
+
+  // Regressietest voor een incident: excel_imports.status stond alleen
+  // 'warnings' (meervoud) toe in de check-constraint, terwijl excel-service
+  // altijd 'warning' (enkelvoud) teruggeeft (app/parser.py/project_workbook.py)
+  // — élke upload van een bestand met waarschuwingen (bijna elk "echt"
+  // bestand) crashte daardoor op deze insert, en omdat die niet in een
+  // try/catch zat (nu wel, zie routes/imports.ts), trok dat de hele
+  // Node-container mee onderuit voor alle tenants tegelijk. Toetst rechtstreeks
+  // tegen de db (i.p.v. via een volledige, warning-opleverende Excel-rondgang
+  // te forceren) omdat de constraint zélf het kapotte onderdeel was — zie
+  // db/migrations/0024_fix_excel_imports_status_check.sql.
+  it('excel_imports.status accepteert "warning" (enkelvoud) — precies wat excel-service teruggeeft', async () => {
+    const r = await pool.query(
+      `insert into excel_imports (doelenboom_id, uploaded_by, filename, status, report_json, parsed_json)
+       values ($1, $2, $3, 'warning', '{}'::jsonb, '{}'::jsonb)
+       returning id, status`,
+      [doelenboomId, null, 'regressie-warning.xlsx']
+    );
+    assert.equal(r.rows[0].status, 'warning');
+    await pool.query('delete from excel_imports where id = $1', [r.rows[0].id]);
   });
 
   // Bulk Excel-import blijft admin-only, ook al mag de rol 'gebruiker' inmiddels

@@ -66,21 +66,32 @@ importsRouter.post(
       return res.status(502).json({ error: 'Excel-service niet bereikbaar', detail: (err as Error).message });
     }
 
-    const insertResult = await pool.query(
-      `insert into excel_imports (doelenboom_id, uploaded_by, filename, status, report_json, parsed_json)
-       values ($1, $2, $3, $4, $5, $6)
-       returning id, filename, uploaded_at, status, report_json`,
-      [
-        req.params.doelenboomId,
-        req.user!.id,
-        req.file.originalname,
-        parseResult.status,
-        JSON.stringify(parseResult.report),
-        JSON.stringify(parseResult.parsed),
-      ]
-    );
-
-    res.status(201).json(insertResult.rows[0]);
+    // In een try/catch: excel-service is een los, door ons niet volledig
+    // gecontroleerd stuk software (en deze insert leunt op een check-
+    // constraint op status, zie db/init.sql) — een db-fout hier mag nooit het
+    // hele Node-proces meeslepen (onafgevangen in een async route handler
+    // crasht zonder dit heel de API-container, zoals hier ooit is gebeurd
+    // door een mismatch tussen 'warning'/'warnings', zie db/migrations/
+    // 0024_fix_excel_imports_status_check.sql), alleen déze ene upload mag
+    // falen.
+    try {
+      const insertResult = await pool.query(
+        `insert into excel_imports (doelenboom_id, uploaded_by, filename, status, report_json, parsed_json)
+         values ($1, $2, $3, $4, $5, $6)
+         returning id, filename, uploaded_at, status, report_json`,
+        [
+          req.params.doelenboomId,
+          req.user!.id,
+          req.file.originalname,
+          parseResult.status,
+          JSON.stringify(parseResult.report),
+          JSON.stringify(parseResult.parsed),
+        ]
+      );
+      res.status(201).json(insertResult.rows[0]);
+    } catch (err) {
+      res.status(500).json({ error: 'Opslaan van de import is mislukt', detail: (err as Error).message });
+    }
   }
 );
 

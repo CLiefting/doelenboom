@@ -2,6 +2,27 @@ import { createApp } from './app.js';
 import { sweepIdleTenants } from './tenantWipe.js';
 import { sweepAccountRetention } from './accountRetention.js';
 
+// Laatste vangnet: een onafgevangen fout in een async route-handler (een
+// await die afwijst zonder eigen try/catch) crasht in Node.js standaard het
+// hele proces — en dus, in deze v1-opzet met één API-container zonder
+// automatisch herstart bij zo'n crash (zie db/migrations/
+// 0024_fix_excel_imports_status_check.sql voor het incident dat dit
+// blootlegde: één upload met een db-constraint-mismatch legde de hele site
+// voor alle tenants plat, tot een handmatige `docker compose restart api`),
+// de hele applicatie voor iedereen tegelijk. Loggen i.p.v. laten crashen is
+// hier bewust de keuze boven "fail fast en laat de procesmanager herstarten"
+// (de gebruikelijke Node-aanbeveling) — er ís hier geen procesmanager die dat
+// betrouwbaar doet (zie het incident). Dit is geen vervanging voor een eigen
+// try/catch in een route die weet wat er kan misgaan (zie bv. routes/
+// imports.ts) — alleen de achtervang voor wat daar toch doorheen glipt, zodat
+// hooguit dát ene verzoek vastloopt/blijft hangen i.p.v. de héle site.
+process.on('unhandledRejection', (reason) => {
+  console.error('Onafgevangen promise-rejection (proces blijft draaien):', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('Onafgevangen fout (proces blijft draaien):', err);
+});
+
 const app = createApp();
 
 const PORT = Number(process.env.PORT ?? 4000);

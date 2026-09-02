@@ -459,7 +459,12 @@ create table if not exists excel_imports (
   uploaded_by bigint references users(id) on delete set null,
   filename text not null,
   uploaded_at timestamptz not null default now(),
-  status text not null default 'pending' check (status in ('pending', 'ok', 'warnings', 'failed', 'published')),
+  -- 'warning' (enkelvoud, niet 'warnings'!) omdat dat exact is wat
+  -- excel-service teruggeeft (app/parser.py/project_workbook.py: status =
+  -- 'ok' | 'warning' | 'failed') en wat routes/imports.ts ongewijzigd
+  -- doorzet naar deze kolom — zie db/migrations/0024_fix_excel_imports_status_check.sql
+  -- voor de toelichting bij de mismatch die hier zat (en bestaande db's moeten bijwerken).
+  status text not null default 'pending' check (status in ('pending', 'ok', 'warning', 'failed', 'published')),
   report_json jsonb not null default '{}'::jsonb,
   parsed_json jsonb not null default '{}'::jsonb,
   published_at timestamptz
