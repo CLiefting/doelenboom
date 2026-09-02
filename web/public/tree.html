@@ -823,6 +823,20 @@
   .activity-dep-seg.product { background: #2F5597; }
   .activity-dep-arrowhead.product.right { border-left-color: #2F5597; }
   .activity-dep-arrowhead.product.left { border-right-color: #2F5597; }
+  /* Afhankelijkheid-badge op een deliverable/mijlpaal-tegel in de Activiteiten-
+     Gantt (productDependencyBadgeIcon) — puur een hint-icoontje, de tooltip
+     (title, zie productDependencyHint) draagt de eigenlijke info (met wie en
+     welk soort afhankelijkheid). */
+  .activity-dep-badge { display: inline-flex; align-items: center; vertical-align: -2px; margin-left: 4px; cursor: default; }
+  /* Rij van een deliverable/mijlpaal ZONDER duur die alleen zichtbaar is
+     omdat 'm in een afhankelijkheid zit (zie deliverableRenderable) — een
+     fijne stippellijn i.p.v. het gestreepte balkje van .activity-deliverable-bar
+     laat zien dat hier geen doorlooptijd bekend is, ook als er geen enkele
+     punt-marker te tekenen valt (geen verwachte/werkelijke datum). */
+  .activity-deliverable-row-nodate .activity-row-track { position: relative; }
+  .activity-deliverable-row-nodate .activity-row-track::before {
+    content: ''; position: absolute; left: 0; right: 0; top: 50%; border-top: 1px dashed #d8dce3;
+  }
   /* Vertraging-veld (bedrag + eenheid) in het "Afhankelijkheid toevoegen"-
      modal van een product, zie product-dep-link-modal-backdrop. */
   .product-dep-lag-row { display: flex; gap: 6px; }
@@ -3489,6 +3503,79 @@ function runApp(data) {
     };
   }
 
+  // Vertaling van de EB/BB/EE/BE-relatietypes naar leesbare tekst voor de
+  // afhankelijkheid-hint hieronder (productDependencyHint) — de API staat
+  // vooralsnog alleen 'FS' toe (zie PRODUCT_DEPENDENCY_TYPES in
+  // api/src/routes/products.ts), maar de kolom is schema-compleet, dus de
+  // overige drie zijn hier alvast meegenomen.
+  const PRODUCT_DEP_TYPE_LABELS = { FS: 'Einde-na-begin', SS: 'Begin-na-begin', FF: 'Einde-na-einde', SF: 'Begin-na-einde' };
+
+  // Klein "schakel"-icoontje (twee ineengehaakte lussen) voor op een
+  // deliverable/mijlpaal-tegel die deelneemt aan een afhankelijkheid — zelfde
+  // blauw als de deliverable-markers (timelineLegendIcon) zodat het bij die
+  // visuele taal aansluit. Puur decoratief; de eigenlijke info staat in de
+  // title-tooltip van de omliggende span (zie productDependencyHint).
+  function productDependencyBadgeIcon() {
+    const color = '#2F5597';
+    return '<svg width="11" height="11" viewBox="0 0 16 16" class="activity-dep-badge-icon">' +
+      '<g fill="none" stroke="' + color + '" stroke-width="1.7" stroke-linecap="round">' +
+        '<path d="M6.6 9.4a2.7 2.7 0 0 1 0-3.8l1.6-1.6a2.7 2.7 0 0 1 3.8 3.8l-.9.9"></path>' +
+        '<path d="M9.4 6.6a2.7 2.7 0 0 1 0 3.8l-1.6 1.6a2.7 2.7 0 0 1-3.8-3.8l.9-.9"></path>' +
+      '</g>' +
+    '</svg>';
+  }
+
+  // Groepeert product_dependencies per betrokken product-dbId, ongeacht of
+  // dat product de voorganger of de opvolger is — een tegel kan in
+  // theorie in meerdere afhankelijkheden tegelijk voorkomen (aan beide
+  // kanten), vandaar een array per product i.p.v. één relatie. Gebruikt door
+  // deliverableRenderable hieronder om óók producten zonder duur (dus zonder
+  // eigen balkje) een rij te geven zodra ze ergens aan hangen, en door
+  // productDependencyHint voor de tooltip-tekst op het badge-icoontje.
+  function buildProductDepIndex(productDependencies) {
+    const index = new Map();
+    (productDependencies || []).forEach((d) => {
+      const predKey = String(d.predecessorId);
+      const succKey = String(d.successorId);
+      const forPred = index.get(predKey) || [];
+      forPred.push({ role: 'predecessor', otherId: d.successorId, type: d.type || 'FS', lagAmount: d.lagAmount || 0, lagEenheid: d.lagEenheid || 'd' });
+      index.set(predKey, forPred);
+      const forSucc = index.get(succKey) || [];
+      forSucc.push({ role: 'successor', otherId: d.predecessorId, type: d.type || 'FS', lagAmount: d.lagAmount || 0, lagEenheid: d.lagEenheid || 'd' });
+      index.set(succKey, forSucc);
+    });
+    return index;
+  }
+
+  // Bouwt de meerregelige title-tooltip van het afhankelijkheid-badge op een
+  // Gantt-tegel — één regel per relatie waar dit product bij betrokken is,
+  // met wie (naam) en welk soort ("Hangt af van" als dit product de
+  // opvolger is, "Is voorganger van" als dit product de voorganger is),
+  // inclusief de vertraging (zelfde eenheid als ingevoerd) indien die er is.
+  function productDependencyHint(entries, nameByDbId) {
+    return entries.map((e) => {
+      const otherName = nameByDbId.get(String(e.otherId)) || '?';
+      const typeLabel = PRODUCT_DEP_TYPE_LABELS[e.type] || e.type;
+      const lagSuffix = e.lagAmount
+        ? ', vertraging ' + (e.lagAmount > 0 ? '+' : '') + e.lagAmount + ' ' + (DUUR_EENHEID_LABELS[e.lagEenheid] || e.lagEenheid)
+        : '';
+      return (e.role === 'successor' ? 'Hangt af van: ' : 'Is voorganger van: ') + otherName + ' (' + typeLabel + lagSuffix + ')';
+    }).join('\n');
+  }
+
+  // Fallback-positie voor een product zonder duur (dus zonder balkje, zie
+  // productDeliverableBarInfo hierboven) dat toch een rij krijgt omdat het
+  // in een afhankelijkheid zit: één punt-marker op de werkelijke datum
+  // (voorrang, net als overal elders) of anders de verwachte datum — null
+  // als geen van beide is ingevuld, dan blijft de rij zonder marker (puur
+  // de naam + het badge-icoontje zijn dan zichtbaar).
+  function productSinglePointT(p) {
+    const dateStr = p.werkelijk || p.verwacht;
+    if (!dateStr) return null;
+    const t = parseDateFlexible(dateStr);
+    return isNaN(t) ? null : t;
+  }
+
   // ---- Activiteiten: inklapbare planning met start-/einddatum per project ----
   // Anders dan producten/mijlpalen (één los moment) beslaat een activiteit een
   // periode, dus een lichte Gantt-achtige balk per activiteit i.p.v. een punt-
@@ -3706,72 +3793,112 @@ function runApp(data) {
     // begin — dat is de opleverdatum (verwacht/werkelijk), het begin is puur
     // afgeleid uit de duur en heeft geen eigen betekenisvol "moment". Ze
     // hebben geen bewerk-/verwijderknop (dat blijft het product-formulier).
-    // Vooraf filteren (i.p.v. .map + .filter(Boolean) achteraf, zoals
-    // voorheen) zodat de rij-INDEX hieronder (renderable.length + dIdx, dus
-    // ná alle echte activiteiten) overeenkomt met de daadwerkelijk
-    // gerenderde volgorde — nodig om ze net als activiteiten in
-    // layoutByDbId te zetten, voor de PRODUCT_DEPENDENCIES-pijlen hieronder
-    // (dependencyArrowsHtml). Een product zonder duur (dus zonder balkje
-    // hier) kan wél een afhankelijkheid hebben, maar krijgt dan simpelweg
-    // geen pijl getekend — precies zoals een afhankelijkheid tussen
-    // activiteiten zonder geldige datum al stilzwijgend wordt overgeslagen.
+    // Een product ZONDER duur (dus zonder productDeliverableBarInfo) krijgt
+    // hier óók een rij zodra het ergens in een afhankelijkheid zit
+    // (depEntries, via buildProductDepIndex) — anders zou zo'n koppeling
+    // stilzwijgend onzichtbaar zijn in de Activiteiten-Gantt, terwijl 'm wel
+    // in het product-formulier staat. Vooraf filteren+mappen (i.p.v. .map +
+    // .filter(Boolean) achteraf) zodat de rij-INDEX hieronder
+    // (renderable.length + dIdx, dus ná alle echte activiteiten) overeenkomt
+    // met de daadwerkelijk gerenderde volgorde — nodig om ze net als
+    // activiteiten in layoutByDbId te zetten, voor de PRODUCT_DEPENDENCIES-
+    // pijlen hieronder (dependencyArrowsHtml).
+    const productDepIndex = buildProductDepIndex(productDependencies);
+    const productNameByDbId = new Map((deliverableProducts || []).map((p) => [String(p.dbId), p.name]));
     const deliverableRenderable = (deliverableProducts || [])
-      .map((p) => ({ p: p, info: productDeliverableBarInfo(p) }))
-      .filter((x) => x.info);
+      .map((p) => ({ p: p, info: productDeliverableBarInfo(p), depEntries: productDepIndex.get(String(p.dbId)) || null }))
+      .filter((x) => x.info || x.depEntries);
 
-    const deliverableRowsHtml = deliverableRenderable.map(({ p, info }, dIdx) => {
-      const left = Math.min(Math.max(pctFor(info.startT), 0), 100);
-      const right = Math.min(Math.max(pctFor(info.endT), 0), 100);
-      const width = Math.max(right - left, 1.5);
-      layoutByDbId.set('p' + p.dbId, { rowIndex: renderable.length + dIdx, left: left, right: right });
-      const statusClass = activityStatusClass(info.startT, info.endT);
-      const kindLabel = info.type === 'mijlpaal' ? 'mijlpaal' : 'deliverable';
-      const title = escapeHtml(p.name) + ' — ' + kindLabel + ', duur ' + info.durationLabel +
-        (info.verwachtLabel ? ' — verwacht: ' + info.verwachtLabel : '') +
-        (info.werkelijkLabel ? ' — opgeleverd: ' + info.werkelijkLabel : '') +
-        (info.deadlineLabel ? ' — deadline: ' + info.deadlineLabel : '');
-      // Twee markers, exact zoals de projecttijdlijn hierboven (buildTimeline-
-      // Markers): een open marker op de verwachte opleverdatum én — indien
-      // ingevuld — een gevulde marker op de werkelijke opleverdatum, elk op
-      // hun EIGEN positie (die best uiteen kunnen liggen: te vroeg/te laat
-      // t.o.v. de planning). Geen marker aan het BEGIN van het balkje — dat
-      // blijft puur een afgeleid punt uit de duur, geen eigen datum.
-      let markersHtml = '';
-      if (info.verwachtT !== null) {
-        const vLeft = Math.min(Math.max(pctFor(info.verwachtT), 0), 100);
-        markersHtml += '<span class="activity-deliverable-end-marker" style="left:' + vLeft + '%" title="' +
-          escapeHtml(p.name) + ' — verwacht: ' + info.verwachtLabel + '">' +
-          timelineLegendIcon(info.type, false) + '</span>';
+    const deliverableRowsHtml = deliverableRenderable.map(({ p, info, depEntries }, dIdx) => {
+      const rowIndex = renderable.length + dIdx;
+      // Badge-icoontje + tooltip, ongeacht of dit een volwaardige balk-rij
+      // (info) of een "lite" rij zonder duur is — een tegel kan beide hebben
+      // (wél duur, mét afhankelijkheid).
+      const badgeHtml = depEntries
+        ? '<span class="activity-dep-badge" title="' + escapeHtml(productDependencyHint(depEntries, productNameByDbId)) + '">' +
+            productDependencyBadgeIcon() +
+          '</span>'
+        : '';
+      if (info) {
+        const left = Math.min(Math.max(pctFor(info.startT), 0), 100);
+        const right = Math.min(Math.max(pctFor(info.endT), 0), 100);
+        const width = Math.max(right - left, 1.5);
+        layoutByDbId.set('p' + p.dbId, { rowIndex: rowIndex, left: left, right: right });
+        const statusClass = activityStatusClass(info.startT, info.endT);
+        const kindLabel = info.type === 'mijlpaal' ? 'mijlpaal' : 'deliverable';
+        const title = escapeHtml(p.name) + ' — ' + kindLabel + ', duur ' + info.durationLabel +
+          (info.verwachtLabel ? ' — verwacht: ' + info.verwachtLabel : '') +
+          (info.werkelijkLabel ? ' — opgeleverd: ' + info.werkelijkLabel : '') +
+          (info.deadlineLabel ? ' — deadline: ' + info.deadlineLabel : '');
+        // Twee markers, exact zoals de projecttijdlijn hierboven (buildTimeline-
+        // Markers): een open marker op de verwachte opleverdatum én — indien
+        // ingevuld — een gevulde marker op de werkelijke opleverdatum, elk op
+        // hun EIGEN positie (die best uiteen kunnen liggen: te vroeg/te laat
+        // t.o.v. de planning). Geen marker aan het BEGIN van het balkje — dat
+        // blijft puur een afgeleid punt uit de duur, geen eigen datum.
+        let markersHtml = '';
+        if (info.verwachtT !== null) {
+          const vLeft = Math.min(Math.max(pctFor(info.verwachtT), 0), 100);
+          markersHtml += '<span class="activity-deliverable-end-marker" style="left:' + vLeft + '%" title="' +
+            escapeHtml(p.name) + ' — verwacht: ' + info.verwachtLabel + '">' +
+            timelineLegendIcon(info.type, false) + '</span>';
+        }
+        if (info.werkelijkT !== null) {
+          const wLeft = Math.min(Math.max(pctFor(info.werkelijkT), 0), 100);
+          markersHtml += '<span class="activity-deliverable-end-marker" style="left:' + wLeft + '%" title="' +
+            escapeHtml(p.name) + ' — opgeleverd: ' + info.werkelijkLabel + '">' +
+            timelineLegendIcon(info.type, true) + '</span>';
+        }
+        // Deadline — apart, opvallend teken (zie timelineDeadlineIcon), los van
+        // verwacht/werkelijk: dit is de as die ook al mee is gaan tellen in het
+        // bereik van de hele Gantt (buildTimelineMarkers/computeProjectTimeline-
+        // Bounds), dus als hij verder in de toekomst ligt is hij hier ook echt
+        // zichtbaar i.p.v. dat de as stilzwijgend doorloopt naar lege ruimte.
+        if (info.deadlineT !== null) {
+          const dLeft = Math.min(Math.max(pctFor(info.deadlineT), 0), 100);
+          markersHtml += '<span class="activity-deliverable-end-marker" style="left:' + dLeft + '%" title="' +
+            escapeHtml(p.name) + ' — deadline: ' + info.deadlineLabel + '">' +
+            timelineDeadlineIcon() + '</span>';
+        }
+        const track = '<div class="activity-deliverable-bar ' + statusClass + '" style="left:' + left + '%;width:' + width + '%" title="' + title + '"></div>' +
+          markersHtml;
+        const filled = !!info.werkelijkT;
+        return '<div class="activity-gantt-row activity-deliverable-row">' +
+          '<div class="activity-row-head">' +
+            '<span class="activity-row-label activity-deliverable-row-label" title="' + escapeHtml(p.name) + '">' +
+              timelineLegendIcon(info.type, filled) + ' ' + escapeHtml(p.name) +
+            '</span>' + badgeHtml +
+          '</div>' +
+          '<div class="activity-row-track">' + track + '</div>' +
+        '</div>';
       }
-      if (info.werkelijkT !== null) {
-        const wLeft = Math.min(Math.max(pctFor(info.werkelijkT), 0), 100);
-        markersHtml += '<span class="activity-deliverable-end-marker" style="left:' + wLeft + '%" title="' +
-          escapeHtml(p.name) + ' — opgeleverd: ' + info.werkelijkLabel + '">' +
-          timelineLegendIcon(info.type, true) + '</span>';
+      // "Lite" rij: geen duur (dus geen balkje af te leiden), maar wel een
+      // afhankelijkheid — anders zou deze deliverable/mijlpaal hier
+      // stilzwijgend ontbreken zodra iemand er een koppeling aan legt. Toont
+      // hooguit een enkele punt-marker op de werkelijke/verwachte datum
+      // (productSinglePointT) als fallback-positie voor de pijl hieronder;
+      // zonder een van beide blijft de track leeg (dan is er ook geen zinnig
+      // punt om de pijl aan te verankeren — die wordt dan net als bij een
+      // activiteit zonder geldige datum stilzwijgend overgeslagen).
+      const pointT = productSinglePointT(p);
+      let track = '';
+      if (pointT !== null) {
+        const left = Math.min(Math.max(pctFor(pointT), 0), 100);
+        layoutByDbId.set('p' + p.dbId, { rowIndex: rowIndex, left: left, right: left });
+        const filled = !!p.werkelijk;
+        const momentLabel = (p.werkelijk ? 'opgeleverd: ' : 'verwacht: ') + formatDateNL(p.werkelijk || p.verwacht);
+        track = '<span class="activity-deliverable-end-marker" style="left:' + left + '%" title="' +
+          escapeHtml(p.name) + ' — ' + momentLabel + '">' + timelineLegendIcon(p.type, filled) + '</span>';
       }
-      // Deadline — apart, opvallend teken (zie timelineDeadlineIcon), los van
-      // verwacht/werkelijk: dit is de as die ook al mee is gaan tellen in het
-      // bereik van de hele Gantt (buildTimelineMarkers/computeProjectTimeline-
-      // Bounds), dus als hij verder in de toekomst ligt is hij hier ook echt
-      // zichtbaar i.p.v. dat de as stilzwijgend doorloopt naar lege ruimte.
-      if (info.deadlineT !== null) {
-        const dLeft = Math.min(Math.max(pctFor(info.deadlineT), 0), 100);
-        markersHtml += '<span class="activity-deliverable-end-marker" style="left:' + dLeft + '%" title="' +
-          escapeHtml(p.name) + ' — deadline: ' + info.deadlineLabel + '">' +
-          timelineDeadlineIcon() + '</span>';
-      }
-      const track = '<div class="activity-deliverable-bar ' + statusClass + '" style="left:' + left + '%;width:' + width + '%" title="' + title + '"></div>' +
-        markersHtml;
-      const filled = !!info.werkelijkT;
-      return '<div class="activity-gantt-row activity-deliverable-row">' +
+      return '<div class="activity-gantt-row activity-deliverable-row activity-deliverable-row-nodate">' +
         '<div class="activity-row-head">' +
           '<span class="activity-row-label activity-deliverable-row-label" title="' + escapeHtml(p.name) + '">' +
-            timelineLegendIcon(info.type, filled) + ' ' + escapeHtml(p.name) +
-          '</span>' +
+            timelineLegendIcon(p.type, false) + ' ' + escapeHtml(p.name) +
+          '</span>' + badgeHtml +
         '</div>' +
         '<div class="activity-row-track">' + track + '</div>' +
       '</div>';
-    }).filter(Boolean).join('');
+    }).join('');
 
     // Beide soorten afhankelijkheden in dezelfde overlay: activiteiten
     // (dependencies, kind 'activity') en producten (productDependencies,
@@ -3798,10 +3925,11 @@ function runApp(data) {
   // (dezelfde as als de balkjes), Y-posities zijn vaste pixels uit de rij-
   // index (ACTIVITY_ROW_STRIDE/ACTIVITY_ROW_TRACK_MID_Y hierboven). Een
   // afhankelijkheid waarvan de voorganger en/of opvolger niet in deze
-  // (gefilterde) rijenlijst voorkomt (ongeldige datum, of bij een
-  // product-afhankelijkheid: geen van beide/één van beide heeft een
-  // ingevulde duur, dus geen balkje — zie deliverableRenderable hierboven)
-  // wordt stilzwijgend overgeslagen. dep.kind ('activity' of 'product', zie
+  // (gefilterde) rijenlijst voorkomt (ongeldige datum bij een activiteit,
+  // of bij een product-afhankelijkheid: het product heeft geen duur ÉN geen
+  // werkelijke/verwachte datum om een punt-marker aan te verankeren — zie
+  // deliverableRenderable/productSinglePointT hierboven) wordt stilzwijgend
+  // overgeslagen. dep.kind ('activity' of 'product', zie
   // combinedDependencies hierboven) bepaalt zowel welke laag van
   // layoutByDbId (prefix 'a'/'p') geraadpleegd wordt als de kleur (CSS:
   // .activity-dep-seg.product/.activity-dep-arrowhead.product).
