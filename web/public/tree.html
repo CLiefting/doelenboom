@@ -611,6 +611,12 @@
     padding: 2px 7px; border-radius: 999px; margin-bottom: 5px; white-space: nowrap;
     background: #e3f3ea; color: #1f7a4d;
   }
+  /* Rechtergroep van .product-badges-row: BV-badge + het afhankelijkheid-
+     schakel-icoontje (zie depBadgeHtml in productCardHtml) samen, zodat
+     .product-badges-row met z'n justify-content:space-between nog altijd
+     maar twee groepen ziet (links/rechts) ook als er een derde badge
+     bijkomt. */
+  .product-badges-right { display: inline-flex; align-items: center; gap: 6px; }
   .product-name { font-size: 13px; font-weight: 700; color: #222; margin-bottom: 2px; }
   .product-desc { font-size: 12px; color: #555; margin-bottom: 6px; line-height: 1.4; }
   .product-progress-wrap { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
@@ -823,10 +829,31 @@
   .activity-dep-seg.product { background: #2F5597; }
   .activity-dep-arrowhead.product.right { border-left-color: #2F5597; }
   .activity-dep-arrowhead.product.left { border-right-color: #2F5597; }
-  /* Afhankelijkheid-badge op een deliverable/mijlpaal-tegel in de Activiteiten-
-     Gantt (productDependencyBadgeIcon) — puur een hint-icoontje, de tooltip
+  /* Planningsconflict op een product-afhankelijkheid (dep.violated, zie
+     productDependencyViolated): de opvolger start vóór het einde + de
+     vertraging van de voorganger — de pijl kleurt rood i.p.v. het
+     gebruikelijke blauw (.violated ná .product, dus wint 'm op bronvolgorde
+     bij gelijke specificiteit) en krijgt een waarschuwing-driehoekje
+     (.activity-dep-warning) op het elleboogpunt. pointer-events:auto
+     doorbreekt bewust de pointer-events:none van de omliggende
+     .activity-dependency-overlay, puur voor dit ene element, zodat de
+     title-tooltip er wél op hover werkt. */
+  .activity-dep-seg.violated { background: #DC3545; }
+  .activity-dep-arrowhead.violated.right { border-left-color: #DC3545; }
+  .activity-dep-arrowhead.violated.left { border-right-color: #DC3545; }
+  .activity-dep-warning {
+    position: absolute; pointer-events: auto; cursor: help; font-size: 13px; line-height: 1;
+    color: #DC3545; text-shadow: 0 0 2px #fff, 0 0 2px #fff, 0 0 2px #fff;
+  }
+  /* Afhankelijkheid-badge op een deliverable/mijlpaal-tegel — zowel in de
+     Activiteiten-Gantt als op de producten-tile hieronder
+     (productDependencyBadgeIcon) — puur een hint-icoontje, de tooltip
      (title, zie productDependencyHint) draagt de eigenlijke info (met wie en
-     welk soort afhankelijkheid). */
+     welk soort afhankelijkheid, plus een waarschuwing bij een conflict). Het
+     icoontje zelf kleurt al rood bij een conflict (productDependencyBadgeIcon
+     regelt dat via de svg-stroke-kleur, niet via deze class); .violated hier
+     is puur een haakje voor toekomstige extra nadruk.
+  */
   .activity-dep-badge { display: inline-flex; align-items: center; vertical-align: -2px; margin-left: 4px; cursor: default; }
   /* Rij van een deliverable/mijlpaal ZONDER duur die alleen zichtbaar is
      omdat 'm in een afhankelijkheid zit (zie deliverableRenderable) — een
@@ -3511,12 +3538,15 @@ function runApp(data) {
   const PRODUCT_DEP_TYPE_LABELS = { FS: 'Einde-na-begin', SS: 'Begin-na-begin', FF: 'Einde-na-einde', SF: 'Begin-na-einde' };
 
   // Klein "schakel"-icoontje (twee ineengehaakte lussen) voor op een
-  // deliverable/mijlpaal-tegel die deelneemt aan een afhankelijkheid — zelfde
-  // blauw als de deliverable-markers (timelineLegendIcon) zodat het bij die
-  // visuele taal aansluit. Puur decoratief; de eigenlijke info staat in de
+  // deliverable/mijlpaal-tegel/-tile die deelneemt aan een afhankelijkheid —
+  // zelfde blauw als de deliverable-markers (timelineLegendIcon) zodat het
+  // bij die visuele taal aansluit. violated=true (zie productDependencyViolated
+  // hieronder) kleurt 'm rood i.p.v. blauw — hetzelfde rood als een "Te laat"-
+  // badge/product-item-overdue elders, zodat een planningsconflict in één
+  // oogopslag opvalt. Puur decoratief; de eigenlijke info staat in de
   // title-tooltip van de omliggende span (zie productDependencyHint).
-  function productDependencyBadgeIcon() {
-    const color = '#2F5597';
+  function productDependencyBadgeIcon(violated) {
+    const color = violated ? '#DC3545' : '#2F5597';
     return '<svg width="11" height="11" viewBox="0 0 16 16" class="activity-dep-badge-icon">' +
       '<g fill="none" stroke="' + color + '" stroke-width="1.7" stroke-linecap="round">' +
         '<path d="M6.6 9.4a2.7 2.7 0 0 1 0-3.8l1.6-1.6a2.7 2.7 0 0 1 3.8 3.8l-.9.9"></path>' +
@@ -3525,33 +3555,89 @@ function runApp(data) {
     '</svg>';
   }
 
+  // Toetst één EB/FS-afhankelijkheid (vooralsnog het enige toegestane type,
+  // zie PRODUCT_DEP_TYPE_LABELS) op een planningsconflict: de opvolger mag
+  // niet beginnen vóórdat de voorganger is afgerond + de vertraging. Puur
+  // een controle op de PLANNING-data zelf (geen scheduling-engine die iets
+  // herberekent) — net als de rest van de planning in deze app.
+  //
+  // "Einde" van een planning item is altijd het enkele moment (werkelijk
+  // opgeleverd, anders verwacht — zie productSinglePointT hieronder): duur
+  // bepaalt alleen het AFGELEIDE beginpunt van een balkje (productDeliverable-
+  // BarInfo), nooit het eindpunt. Voor de opvolger geldt dus: heeft die zelf
+  // een duur, dan is zijn "start" dat afgeleide beginpunt; zonder duur is er
+  // geen apart beginpunt, dan geldt zijn eigen enkele moment als (impliciete,
+  // ogenblikkelijke) start.
+  //
+  // Retourneert null (niet: false) zodra een van beide kanten geen bruikbare
+  // datum heeft — onvolledige planningsdata is geen conflict, alleen een
+  // AANTOONBAAR te vroege planning telt als waarschuwing.
+  function productDependencyViolated(pred, succ, dep) {
+    const predEndT = productSinglePointT(pred);
+    if (predEndT === null) return null;
+    const lagDays = (dep.lagAmount || 0) * (DUUR_EENHEID_DAYS[dep.lagEenheid] || 1);
+    const requiredT = predEndT + lagDays * 86400000;
+    const succInfo = productDeliverableBarInfo(succ);
+    const succStartT = succInfo ? succInfo.startT : productSinglePointT(succ);
+    if (succStartT === null) return null;
+    return succStartT < requiredT;
+  }
+
+  // Toetst alle product_dependencies van één project in één keer
+  // (productDependencyViolated hierboven, per dependency-rij), geïndexeerd op
+  // de eigen dbId van de afhankelijkheid — zowel buildProductDepIndex
+  // (badge/tooltip per product) als de dependency-pijlen in de Activiteiten-
+  // Gantt (dependencyArrowsHtml) lezen 'm zo terug zonder dezelfde toetsing
+  // twee keer te hoeven uitvoeren. productsByDbId: Map van String(dbId) naar
+  // het product-object (zie productsByDbIdMap hieronder).
+  function computeProductDependencyViolations(productDependencies, productsByDbId) {
+    const result = new Map();
+    (productDependencies || []).forEach((d) => {
+      const pred = productsByDbId ? productsByDbId.get(String(d.predecessorId)) : null;
+      const succ = productsByDbId ? productsByDbId.get(String(d.successorId)) : null;
+      result.set(String(d.dbId), (pred && succ) ? productDependencyViolated(pred, succ, d) : null);
+    });
+    return result;
+  }
+
+  function productsByDbIdMap(products) {
+    return new Map((products || []).map((p) => [String(p.dbId), p]));
+  }
+
   // Groepeert product_dependencies per betrokken product-dbId, ongeacht of
   // dat product de voorganger of de opvolger is — een tegel kan in
   // theorie in meerdere afhankelijkheden tegelijk voorkomen (aan beide
   // kanten), vandaar een array per product i.p.v. één relatie. Gebruikt door
   // deliverableRenderable hieronder om óók producten zonder duur (dus zonder
-  // eigen balkje) een rij te geven zodra ze ergens aan hangen, en door
-  // productDependencyHint voor de tooltip-tekst op het badge-icoontje.
-  function buildProductDepIndex(productDependencies) {
+  // eigen balkje) een rij te geven zodra ze ergens aan hangen, door
+  // productCardHtml voor het badge-icoontje op de producten-tile, en door
+  // productDependencyHint voor de tooltip-tekst erop. violationsByDepId
+  // (computeProductDependencyViolations hierboven) is optioneel — zonder
+  // blijft violated overal null (geen waarschuwing getoond, niet: geen
+  // conflict aangenomen).
+  function buildProductDepIndex(productDependencies, violationsByDepId) {
     const index = new Map();
     (productDependencies || []).forEach((d) => {
+      const violated = violationsByDepId ? violationsByDepId.get(String(d.dbId)) : null;
       const predKey = String(d.predecessorId);
       const succKey = String(d.successorId);
       const forPred = index.get(predKey) || [];
-      forPred.push({ role: 'predecessor', otherId: d.successorId, type: d.type || 'FS', lagAmount: d.lagAmount || 0, lagEenheid: d.lagEenheid || 'd' });
+      forPred.push({ role: 'predecessor', otherId: d.successorId, type: d.type || 'FS', lagAmount: d.lagAmount || 0, lagEenheid: d.lagEenheid || 'd', violated: violated });
       index.set(predKey, forPred);
       const forSucc = index.get(succKey) || [];
-      forSucc.push({ role: 'successor', otherId: d.predecessorId, type: d.type || 'FS', lagAmount: d.lagAmount || 0, lagEenheid: d.lagEenheid || 'd' });
+      forSucc.push({ role: 'successor', otherId: d.predecessorId, type: d.type || 'FS', lagAmount: d.lagAmount || 0, lagEenheid: d.lagEenheid || 'd', violated: violated });
       index.set(succKey, forSucc);
     });
     return index;
   }
 
   // Bouwt de meerregelige title-tooltip van het afhankelijkheid-badge op een
-  // Gantt-tegel — één regel per relatie waar dit product bij betrokken is,
-  // met wie (naam) en welk soort ("Hangt af van" als dit product de
-  // opvolger is, "Is voorganger van" als dit product de voorganger is),
-  // inclusief de vertraging (zelfde eenheid als ingevoerd) indien die er is.
+  // Gantt-rij of producten-tile — één regel per relatie waar dit product bij
+  // betrokken is, met wie (naam) en welk soort ("Hangt af van" als dit
+  // product de opvolger is, "Is voorganger van" als dit product de
+  // voorganger is), inclusief de vertraging (zelfde eenheid als ingevoerd)
+  // indien die er is, en een waarschuwingsregel als deze ene relatie een
+  // planningsconflict heeft (entry.violated, zie productDependencyViolated).
   function productDependencyHint(entries, nameByDbId) {
     return entries.map((e) => {
       const otherName = nameByDbId.get(String(e.otherId)) || '?';
@@ -3559,7 +3645,10 @@ function runApp(data) {
       const lagSuffix = e.lagAmount
         ? ', vertraging ' + (e.lagAmount > 0 ? '+' : '') + e.lagAmount + ' ' + (DUUR_EENHEID_LABELS[e.lagEenheid] || e.lagEenheid)
         : '';
-      return (e.role === 'successor' ? 'Hangt af van: ' : 'Is voorganger van: ') + otherName + ' (' + typeLabel + lagSuffix + ')';
+      const warnSuffix = e.violated
+        ? (e.role === 'successor' ? ' — ⚠ start te vroeg (vóór einde + vertraging van de voorganger)' : ' — ⚠ opvolger start te vroeg')
+        : '';
+      return (e.role === 'successor' ? 'Hangt af van: ' : 'Is voorganger van: ') + otherName + ' (' + typeLabel + lagSuffix + ')' + warnSuffix;
     }).join('\n');
   }
 
@@ -3803,7 +3892,9 @@ function runApp(data) {
     // met de daadwerkelijk gerenderde volgorde — nodig om ze net als
     // activiteiten in layoutByDbId te zetten, voor de PRODUCT_DEPENDENCIES-
     // pijlen hieronder (dependencyArrowsHtml).
-    const productDepIndex = buildProductDepIndex(productDependencies);
+    const productByDbId = productsByDbIdMap(deliverableProducts);
+    const productViolations = computeProductDependencyViolations(productDependencies, productByDbId);
+    const productDepIndex = buildProductDepIndex(productDependencies, productViolations);
     const productNameByDbId = new Map((deliverableProducts || []).map((p) => [String(p.dbId), p.name]));
     const deliverableRenderable = (deliverableProducts || [])
       .map((p) => ({ p: p, info: productDeliverableBarInfo(p), depEntries: productDepIndex.get(String(p.dbId)) || null }))
@@ -3813,10 +3904,15 @@ function runApp(data) {
       const rowIndex = renderable.length + dIdx;
       // Badge-icoontje + tooltip, ongeacht of dit een volwaardige balk-rij
       // (info) of een "lite" rij zonder duur is — een tegel kan beide hebben
-      // (wél duur, mét afhankelijkheid).
+      // (wél duur, mét afhankelijkheid). Rood (i.p.v. het gebruikelijke blauw)
+      // zodra ÉÉN van de relaties op deze tegel een planningsconflict heeft
+      // (entry.violated, zie productDependencyViolated) — ook als de andere
+      // relaties op dezelfde tegel prima kloppen, telt één conflict al als
+      // reden om de aandacht te trekken.
+      const anyViolated = !!(depEntries && depEntries.some((e) => e.violated));
       const badgeHtml = depEntries
-        ? '<span class="activity-dep-badge" title="' + escapeHtml(productDependencyHint(depEntries, productNameByDbId)) + '">' +
-            productDependencyBadgeIcon() +
+        ? '<span class="activity-dep-badge' + (anyViolated ? ' violated' : '') + '" title="' + escapeHtml(productDependencyHint(depEntries, productNameByDbId)) + '">' +
+            productDependencyBadgeIcon(anyViolated) +
           '</span>'
         : '';
       if (info) {
@@ -3906,9 +4002,20 @@ function runApp(data) {
     // PRODUCT_DEPENDENCY_TYPES in api/src/routes/products.ts). 'kind' bepaalt
     // in dependencyArrowsHtml welke laag van layoutByDbId (prefix 'a'/'p')
     // wordt geraadpleegd en geeft de pijl zijn eigen kleur (CSS: .product).
+    // violated/predName/succName (alleen voor product-afhankelijkheden, zie
+    // productViolations/productNameByDbId hierboven) laten dependencyArrows-
+    // Html de pijl rood tekenen mét een waarschuwing-icoontje zodra deze ene
+    // relatie een planningsconflict heeft.
     const combinedDependencies =
       (dependencies || []).map((d) => ({ ...d, kind: 'activity' }))
-        .concat((productDependencies || []).map((d) => ({ ...d, kind: 'product', type: d.type || 'FS' })));
+        .concat((productDependencies || []).map((d) => ({
+          ...d,
+          kind: 'product',
+          type: d.type || 'FS',
+          violated: !!productViolations.get(String(d.dbId)),
+          predName: productNameByDbId.get(String(d.predecessorId)) || '?',
+          succName: productNameByDbId.get(String(d.successorId)) || '?',
+        })));
     const depsHtml = dependencyArrowsHtml(combinedDependencies, layoutByDbId);
 
     return '<div class="activity-gantt-wrap">' +
@@ -3932,13 +4039,20 @@ function runApp(data) {
   // overgeslagen. dep.kind ('activity' of 'product', zie
   // combinedDependencies hierboven) bepaalt zowel welke laag van
   // layoutByDbId (prefix 'a'/'p') geraadpleegd wordt als de kleur (CSS:
-  // .activity-dep-seg.product/.activity-dep-arrowhead.product).
+  // .activity-dep-seg.product/.activity-dep-arrowhead.product). dep.violated
+  // (alleen gezet voor product-afhankelijkheden, zie productViolations in
+  // activityGanttHtml) kleurt de pijl rood i.p.v. de gebruikelijke kleur en
+  // zet er een waarschuwing-driehoekje bij (.activity-dep-warning) met een
+  // eigen tooltip — zie productDependencyViolated voor wat er precies
+  // getoetst wordt.
   function dependencyArrowsHtml(dependencies, layoutByDbId) {
     if (!dependencies || !dependencies.length) return '';
     const STUB_PCT = 1.5;
     return dependencies.map((dep) => {
       const prefix = dep.kind === 'product' ? 'p' : 'a';
       const kindClass = dep.kind === 'product' ? ' product' : '';
+      const violated = dep.kind === 'product' && !!dep.violated;
+      const violatedClass = violated ? ' violated' : '';
       const pred = layoutByDbId.get(prefix + dep.predecessorId);
       const succ = layoutByDbId.get(prefix + dep.successorId);
       if (!pred || !succ) return '';
@@ -3949,11 +4063,11 @@ function runApp(data) {
       const y2 = succ.rowIndex * ACTIVITY_ROW_STRIDE + ACTIVITY_ROW_TRACK_MID_Y;
       const dir = succX >= predX ? 1 : -1;
       const midX = predX + STUB_PCT * dir;
-      const segA = '<div class="activity-dep-seg h' + kindClass + '" style="left:' + Math.min(predX, midX) + '%;width:' +
+      const segA = '<div class="activity-dep-seg h' + kindClass + violatedClass + '" style="left:' + Math.min(predX, midX) + '%;width:' +
         Math.abs(midX - predX) + '%;top:' + (y1 - 1) + 'px"></div>';
-      const segV = '<div class="activity-dep-seg v' + kindClass + '" style="left:' + midX + '%;top:' + Math.min(y1, y2) +
+      const segV = '<div class="activity-dep-seg v' + kindClass + violatedClass + '" style="left:' + midX + '%;top:' + Math.min(y1, y2) +
         'px;height:' + Math.abs(y2 - y1) + 'px"></div>';
-      const segB = '<div class="activity-dep-seg h' + kindClass + '" style="left:' + Math.min(midX, succX) + '%;width:' +
+      const segB = '<div class="activity-dep-seg h' + kindClass + violatedClass + '" style="left:' + Math.min(midX, succX) + '%;width:' +
         Math.abs(succX - midX) + '%;top:' + (y2 - 1) + 'px"></div>';
       // Pijlpuntje op succX, wijzend in de richting waaruit segment B nadert
       // — "right" (border-left-driehoek) heeft z'n tip 6px RECHTS van de
@@ -3964,9 +4078,23 @@ function runApp(data) {
       const arrowLeftCss = arrowDir === 'right'
         ? 'calc(' + succX + '% - 6px)'
         : 'calc(' + succX + '% + 6px)';
-      const arrowhead = '<div class="activity-dep-arrowhead ' + arrowDir + kindClass + '" style="left:' + arrowLeftCss +
+      const arrowhead = '<div class="activity-dep-arrowhead ' + arrowDir + kindClass + violatedClass + '" style="left:' + arrowLeftCss +
         ';top:' + (y2 - 4) + 'px"></div>';
-      return segA + segV + segB + arrowhead;
+      // Waarschuwing-driehoekje bij het elleboogpunt (midX/top van de
+      // verticale segment) — enige plek die altijd binnen het gespannen
+      // vlak van de pijl valt, ongeacht de richting. pointer-events:auto
+      // (CSS) doorbreekt bewust de pointer-events:none van de omliggende
+      // .activity-dependency-overlay, zodat de title-tooltip hier wél op
+      // hover werkt zonder de klikbaarheid van rijen/knoppen elders aan te
+      // tasten.
+      let warningHtml = '';
+      if (violated) {
+        const lagLabel = dep.lagAmount ? ' (+' + dep.lagAmount + (dep.lagEenheid || 'd') + ')' : '';
+        const warnTitle = 'Planningsconflict: "' + dep.succName + '" start te vroeg t.o.v. het einde van "' + dep.predName + '"' + lagLabel + '.';
+        warningHtml = '<span class="activity-dep-warning" style="left:calc(' + midX + '% - 6px);top:' + (Math.min(y1, y2) - 3) +
+          'px" title="' + escapeHtml(warnTitle) + '">&#9888;</span>';
+      }
+      return segA + segV + segB + arrowhead + warningHtml;
     }).join('');
   }
 
@@ -4409,6 +4537,16 @@ function runApp(data) {
     if (products.length === 0) {
       html += '<div class="dp-empty-note">Nog geen producten gekoppeld aan dit project.</div>';
     } else {
+      // Afhankelijkheid-badge ook op de producten-tile zelf (niet alleen in
+      // de Activiteiten-Gantt, zie activityGanttHtml) — dezelfde index/
+      // toetsing, alleen hier op basis van de volledige productenlijst van
+      // dit project i.p.v. deliverableProducts uit de Gantt-aanroep (in de
+      // praktijk dezelfde lijst, maar deze sectie bouwt 'm onafhankelijk op).
+      const tileProductsByDbId = productsByDbIdMap(products);
+      const tileProductViolations = computeProductDependencyViolations(PRODUCT_DEPENDENCIES[id] || [], tileProductsByDbId);
+      const tileProductDepIndex = buildProductDepIndex(PRODUCT_DEPENDENCIES[id] || [], tileProductViolations);
+      const tileProductNameByDbId = new Map(products.map((pp) => [String(pp.dbId), pp.name]));
+
       function productCardHtml(p) {
         const pct = Math.max(0, Math.min(100, Number(p.pct) || 0));
         const isMijlpaal = p.type === 'mijlpaal';
@@ -4425,6 +4563,19 @@ function runApp(data) {
         const hasBv = p.businessValue !== null && p.businessValue !== undefined;
         const bvBadgeHtml = hasBv
           ? '<span class="product-bv-badge" title="Business value">BV ' + formatNumberNL(p.businessValue) + '</span>'
+          : '';
+        // Afhankelijkheid-badge (schakel-icoontje) zodra dit product ergens
+        // in een product_dependencies-koppeling zit — zelfde badge/tooltip-
+        // opzet als in de Activiteiten-Gantt (productDependencyBadgeIcon/
+        // productDependencyHint), rood zodra één van de relaties een
+        // planningsconflict heeft (productDependencyViolated).
+        const depEntries = tileProductDepIndex.get(String(p.dbId)) || null;
+        const depAnyViolated = !!(depEntries && depEntries.some((e) => e.violated));
+        const depBadgeHtml = depEntries
+          ? '<span class="activity-dep-badge' + (depAnyViolated ? ' violated' : '') + '" title="' +
+              escapeHtml(productDependencyHint(depEntries, tileProductNameByDbId)) + '">' +
+              productDependencyBadgeIcon(depAnyViolated) +
+            '</span>'
           : '';
         // Duur/deadline — compacte extra regel, alleen de velden tonen die
         // ook echt ingevuld zijn (anders twee keer "onbekend" op elke kaart,
@@ -4444,7 +4595,7 @@ function runApp(data) {
               '</span>' +
               (overdue ? '<span class="product-overdue-badge">Te laat</span>' : '') +
             '</span>' +
-            bvBadgeHtml +
+            '<span class="product-badges-right">' + bvBadgeHtml + depBadgeHtml + '</span>' +
           '</div>' +
           '<div class="product-name">' + escapeHtml(p.name || p.code || '') + '</div>' +
           (p.omschrijving ? '<div class="product-desc">' + escapeHtml(p.omschrijving) + '</div>' : '') +
