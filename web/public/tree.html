@@ -587,6 +587,18 @@
      verwachte datum, zie productCardHtml), dus nooit allebei tegelijk. */
   .product-item-nodate { border-color: var(--accent); }
   .product-dates-unknown { color: var(--accent); font-weight: 600; }
+  /* Planningsconflict op een afhankelijkheid (productDependencyViolated) —
+     kleurt de hele tile oranje (var(--accent), zelfde attentiekleur als
+     .product-item-nodate hierboven, met een vergelijkbare lichte
+     achtergrondtint als .product-item-overdue) i.p.v. alleen het badge-
+     icoontje in de hoek, zodat zo'n tile tussen de rest opvalt — zie de
+     prioriteitsafweging in productCardHtml (overdue wint als beide
+     tegelijk gelden). */
+  .product-item-dep-conflict { border-color: var(--accent); background: #fff4ee; }
+  .product-dep-conflict-badge {
+    display: inline-block; font-size: 10px; font-weight: 700; color: var(--accent);
+    margin-left: 6px; vertical-align: middle;
+  }
   .products-separator {
     grid-column: 1 / -1; display: flex; align-items: center; gap: 10px;
     font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;
@@ -4601,7 +4613,19 @@ function runApp(data) {
           extraParts.push('Duur: ' + p.duur + ' ' + (DUUR_EENHEID_LABELS[p.duurEenheid] || p.duurEenheid));
         }
         const extraMetaHtml = extraParts.length ? '<div class="product-extra-meta">' + extraParts.join(' &middot; ') + '</div>' : '';
-        return '<div class="product-item' + (overdue ? ' product-item-overdue' : noDate ? ' product-item-nodate' : '') +
+        // Kleur de hele tile oranje (net als .product-item-nodate) zodra dit
+        // product een planningsconflict heeft — niet alleen het badge-
+        // icoontje in de hoek, zodat zo'n item tussen alle andere tiles
+        // meteen opvalt, net als "Te laat" dat al deed. Overdue (rood) blijft
+        // de ernstigste kleur en wint hier bewust: die twee kunnen wél samen
+        // voorkomen (te laat opgeleverd én een afhankelijkheidsconflict), en
+        // dan is "helemaal te laat" het dringendste signaal. Nodate en een
+        // conflict komen in de praktijk nooit samen voor (een dateloos
+        // product levert nooit genoeg data op om zelf als conflict te
+        // gelden, zie productDependencyViolated), dus die twee botsen niet.
+        const depConflictCard = !overdue && depAnyViolated;
+        const cardStateClass = overdue ? ' product-item-overdue' : depConflictCard ? ' product-item-dep-conflict' : noDate ? ' product-item-nodate' : '';
+        return '<div class="product-item' + cardStateClass +
             '" data-code="' + escapeHtml(id) + '" data-id="' + escapeHtml(String(p.dbId)) + '">' +
           '<div class="product-badges-row">' +
             '<span>' +
@@ -4609,6 +4633,7 @@ function runApp(data) {
                 (isMijlpaal ? 'Mijlpaal' : 'Deliverable') +
               '</span>' +
               (overdue ? '<span class="product-overdue-badge">Te laat</span>' : '') +
+              (depConflictCard ? '<span class="product-dep-conflict-badge">Afhankelijkheidsconflict</span>' : '') +
             '</span>' +
             '<span class="product-badges-right">' + bvBadgeHtml + depBadgeHtml + '</span>' +
           '</div>' +
