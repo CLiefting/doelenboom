@@ -849,12 +849,14 @@
      Activiteiten-Gantt als op de producten-tile hieronder
      (productDependencyBadgeIcon) — puur een hint-icoontje, de tooltip
      (title, zie productDependencyHint) draagt de eigenlijke info (met wie en
-     welk soort afhankelijkheid, plus een waarschuwing bij een conflict). Het
-     icoontje zelf kleurt al rood bij een conflict (productDependencyBadgeIcon
-     regelt dat via de svg-stroke-kleur, niet via deze class); .violated hier
-     is puur een haakje voor toekomstige extra nadruk.
-  */
-  .activity-dep-badge { display: inline-flex; align-items: center; vertical-align: -2px; margin-left: 4px; cursor: default; }
+     welk soort afhankelijkheid, plus een waarschuwing bij een conflict). Bij
+     een conflict is het icoontje zelf al een heel ander, veel opvallender
+     teken (rode waarschuwing-driehoek i.p.v. het kleine blauwe schakeltje —
+     zie productDependencyBadgeIcon); .violated hier regelt alleen de
+     negatieve marge, zodat dat grotere icoon niet extra inspringt t.o.v. de
+     gewone variant. */
+  .activity-dep-badge { display: inline-flex; align-items: center; vertical-align: -3px; margin-left: 4px; cursor: default; }
+  .activity-dep-badge.violated { margin-left: 2px; }
   /* Rij van een deliverable/mijlpaal ZONDER duur die alleen zichtbaar is
      omdat 'm in een afhankelijkheid zit (zie deliverableRenderable) — een
      fijne stippellijn i.p.v. het gestreepte balkje van .activity-deliverable-bar
@@ -3540,15 +3542,28 @@ function runApp(data) {
   // Klein "schakel"-icoontje (twee ineengehaakte lussen) voor op een
   // deliverable/mijlpaal-tegel/-tile die deelneemt aan een afhankelijkheid —
   // zelfde blauw als de deliverable-markers (timelineLegendIcon) zodat het
-  // bij die visuele taal aansluit. violated=true (zie productDependencyViolated
-  // hieronder) kleurt 'm rood i.p.v. blauw — hetzelfde rood als een "Te laat"-
-  // badge/product-item-overdue elders, zodat een planningsconflict in één
-  // oogopslag opvalt. Puur decoratief; de eigenlijke info staat in de
-  // title-tooltip van de omliggende span (zie productDependencyHint).
+  // bij die visuele taal aansluit. Puur decoratief; de eigenlijke info staat
+  // in de title-tooltip van de omliggende span (zie productDependencyHint).
+  //
+  // violated=true (zie productDependencyViolated hieronder) tekent bewust
+  // een heel ander icoon i.p.v. alleen een kleurtje: een gevulde rode
+  // waarschuwing-driehoek mét het schakel-icoontje erin (wit, uitgespaard),
+  // en flink groter dan de gewone blauwe variant — Charles gaf expliciet aan
+  // dat de eerdere rode-maar-verder-identieke variant niet genoeg opviel.
+  // De driehoek-vorm alleen (zonder schakeltje) zou het "dit is een
+  // afhankelijkheid"-signaal verliezen; dit combineert beide in één icoon.
   function productDependencyBadgeIcon(violated) {
-    const color = violated ? '#DC3545' : '#2F5597';
+    if (violated) {
+      return '<svg width="18" height="18" viewBox="0 0 22 20" class="activity-dep-badge-icon activity-dep-badge-icon-violated">' +
+        '<path d="M11 1.4 L20.4 18.2 L1.6 18.2 Z" fill="#DC3545" stroke="#A82333" stroke-width="0.7" stroke-linejoin="round"></path>' +
+        '<g fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" transform="translate(4.6 8.6) scale(0.68)">' +
+          '<path d="M6.6 9.4a2.7 2.7 0 0 1 0-3.8l1.6-1.6a2.7 2.7 0 0 1 3.8 3.8l-.9.9"></path>' +
+          '<path d="M9.4 6.6a2.7 2.7 0 0 1 0 3.8l-1.6 1.6a2.7 2.7 0 0 1-3.8-3.8l.9-.9"></path>' +
+        '</g>' +
+      '</svg>';
+    }
     return '<svg width="11" height="11" viewBox="0 0 16 16" class="activity-dep-badge-icon">' +
-      '<g fill="none" stroke="' + color + '" stroke-width="1.7" stroke-linecap="round">' +
+      '<g fill="none" stroke="#2F5597" stroke-width="1.7" stroke-linecap="round">' +
         '<path d="M6.6 9.4a2.7 2.7 0 0 1 0-3.8l1.6-1.6a2.7 2.7 0 0 1 3.8 3.8l-.9.9"></path>' +
         '<path d="M9.4 6.6a2.7 2.7 0 0 1 0 3.8l-1.6 1.6a2.7 2.7 0 0 1-3.8-3.8l.9-.9"></path>' +
       '</g>' +
