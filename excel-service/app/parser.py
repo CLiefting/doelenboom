@@ -123,6 +123,26 @@ def read_sheet(wb, sheet_name: str, field_aliases: dict[str, tuple[str, ...]]):
     return rows, True
 
 
+def read_config_value(wb, sheet_name: str, key: str) -> str | None:
+    """Leest één waarde uit een 'Sleutel'/'Waarde'-tabblad zoals de
+    Configuratie-tab (exporter.py) of Info-tab (project_workbook.py) — o.a.
+    gebruikt om de export-formaatversie terug te lezen (zie
+    excel_format_version.py). Geeft None als het tabblad of de sleutel
+    ontbreekt, i.p.v. te falen — oudere bestanden van vóór de versie-kolom
+    moeten gewoon blijven werken, alleen dan zonder versie in het rapport."""
+    if sheet_name not in wb.sheetnames:
+        return None
+    ws = wb[sheet_name]
+    for raw_row in ws.iter_rows(values_only=True):
+        if not raw_row or len(raw_row) < 2:
+            continue
+        cell_key = raw_row[0]
+        if cell_key is not None and norm(str(cell_key)) == norm(key):
+            value = raw_row[1]
+            return str(value).strip() if value not in (None, '') else None
+    return None
+
+
 def parse_workbook(
     content: bytes, filename: str = '', valid_types: list[str] | None = None
 ) -> tuple[str, dict, dict | None]:
@@ -658,6 +678,7 @@ def parse_workbook(
     report = {
         'filename': filename,
         'format': detected_format,
+        'formatVersion': read_config_value(wb, 'Configuratie', 'Export-formaatversie'),
         'sheetsFound': sheets_found,
         'sheetsMissing': sheets_missing,
         'counts': counts,

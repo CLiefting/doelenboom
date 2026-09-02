@@ -7038,8 +7038,8 @@ function runApp(data) {
     const metaParts = [];
     if (!isDelete) {
       metaParts.push(item.row.verwachteDatum ? 'Verwacht: ' + formatDateNL(item.row.verwachteDatum) : 'Verwachte datum onbekend');
-      if (item.row.dependsOnNames && item.row.dependsOnNames.length) {
-        metaParts.push('hangt af van: ' + item.row.dependsOnNames.map(escapeHtml).join(', '));
+      if (item.row.dependsOn && item.row.dependsOn.length) {
+        metaParts.push('hangt af van: ' + item.row.dependsOn.map((d) => escapeHtml(d.name)).join(', '));
       }
     }
     const checked = item.action !== 'unchanged';
@@ -7301,32 +7301,45 @@ function runApp(data) {
       // 3. Afhankelijkheden tussen producten — pas hierna zinvol (nieuwe items
       // hebben dan pas een id). Alleen voor aangevinkte, niet-verwijderde
       // rijen; een verwijderd product neemt zijn afhankelijkheden vanzelf mee
-      // (on delete cascade, zie db/init.sql).
+      // (on delete cascade, zie db/init.sql). Analoog aan stap 5 (activiteiten)
+      // hieronder, maar zonder 'type': de API dwingt voor producten altijd FS
+      // af (PRODUCT_DEPENDENCY_TYPES in api/src/routes/products.ts), dus daar
+      // hoeft niets voor gestuurd of vergeleken te worden — alleen lagAmount/
+      // lagEenheid bepalen of een bestaande afhankelijkheid vervangen moet
+      // worden.
       for (let i = 0; i < plan.productPlan.length; i++) {
         if (!checkedProductIdx.has(i)) continue;
         const item = plan.productPlan[i];
         if (item.action === 'delete') continue;
         const productId = productIdByName.get(item.row.name);
         if (!productId) continue;
-        const desiredIds = new Set();
-        (item.row.dependsOnNames || []).forEach((predName) => {
-          const pid = productIdByName.get(predName);
-          if (pid) desiredIds.add(String(pid));
-          else warnings.push('Kan afhankelijkheid niet leggen voor "' + item.row.name + '": "' + predName + '" niet gevonden.');
+        const desired = new Map();
+        (item.row.dependsOn || []).forEach((dep) => {
+          const pid = productIdByName.get(dep.name);
+          if (pid) desired.set(String(pid), { lagAmount: dep.lagAmount || 0, lagEenheid: dep.lagEenheid || 'd' });
+          else warnings.push('Kan afhankelijkheid niet leggen voor "' + item.row.name + '": "' + dep.name + '" niet gevonden.');
         });
         const currentDeps = (PRODUCT_DEPENDENCIES[code] || []).filter((d) => String(d.successorId) === String(productId));
-        const currentIds = new Set(currentDeps.map((d) => String(d.predecessorId)));
-        for (const pid of desiredIds) {
-          if (currentIds.has(pid)) continue;
+        const currentByPred = new Map(currentDeps.map((d) => [String(d.predecessorId), d]));
+        for (const [pid, wantedDep] of desired) {
+          const existingDep = currentByPred.get(pid);
+          if (existingDep && (existingDep.lagAmount || 0) === wantedDep.lagAmount && (existingDep.lagEenheid || 'd') === wantedDep.lagEenheid) continue;
+          if (existingDep) {
+            try {
+              const res = await fetch(base + '/products/dependencies/' + existingDep.dbId, { method: 'DELETE', headers: authHeader });
+              if (!res.ok && res.status !== 404) throw new Error('HTTP ' + res.status);
+            } catch (err) { /* val terug op gewoon opnieuw toevoegen hieronder */ }
+          }
           try {
             const res = await fetch(base + '/products/dependencies', {
-              method: 'POST', headers: jsonHeaders, body: JSON.stringify({ predecessorId: Number(pid), successorId: Number(productId) }),
+              method: 'POST', headers: jsonHeaders,
+              body: JSON.stringify({ predecessorId: Number(pid), successorId: Number(productId), lagAmount: wantedDep.lagAmount, lagEenheid: wantedDep.lagEenheid }),
             });
             if (!res.ok && res.status !== 409) throw new Error('HTTP ' + res.status);
           } catch (err) { warnings.push('Afhankelijkheid toevoegen mislukt voor "' + item.row.name + '".'); }
         }
         for (const d of currentDeps) {
-          if (desiredIds.has(String(d.predecessorId))) continue;
+          if (desired.has(String(d.predecessorId))) continue;
           try {
             const res = await fetch(base + '/products/dependencies/' + d.dbId, { method: 'DELETE', headers: authHeader });
             if (!res.ok && res.status !== 404) throw new Error('HTTP ' + res.status);

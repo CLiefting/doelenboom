@@ -14,12 +14,13 @@ Twee formaten:
   bevat geen statuskolommen meer (die staan alleen nog op Projecten) en krijgt
   een expliciete Volgorde- en Actief-kolom; plus een _Validatielijsten-tab met
   dropdown-brondata en bijbehorende Data Validation op alle gesloten-lijstvelden.
-  Dit formaat kan nog niet terug ingelezen worden door parser.py — dat is een
-  vervolgstap zodra het geëxporteerde bestand is gecontroleerd.
+  parser.py detecteert dit formaat automatisch (aanwezigheid van de
+  Relaties-tab) en kan het net als "oud" weer inlezen.
 
 Beide formaten krijgen een Configuratie-tab (doelenboom, tenant, formaat, modus,
-geëxporteerd op/door) — nuttig om te kunnen zien waar een bestand vandaan komt,
-ook als het los rondgestuurd wordt — en een Kolommen-tab met de volledige
+export-formaatversie, geëxporteerd op/door) — nuttig om te kunnen zien waar een
+bestand vandaan komt, ook als het los rondgestuurd wordt — en een Kolommen-tab
+met de volledige
 kolomconfiguratie (volgorde, type, titel, ondertitel, kleur, smal, projectrol,
 relatielabel, lettergrootte) van déze doelenboom op het moment van exporteren.
 
@@ -37,6 +38,8 @@ from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.worksheet.worksheet import Worksheet
+
+from .excel_format_version import TREE_EXPORT_FORMAT_VERSION
 
 CONFIG_SHEET_NAME = 'Configuratie'
 VALIDATIELIJSTEN_SHEET_NAME = '_Validatielijsten'
@@ -172,6 +175,7 @@ def _write_configuratie(wb: Workbook, meta: dict[str, Any], format_label: str, m
         ('Tenant', meta.get('tenant', '')),
         ('Formaat', format_label),
         ('Modus', mode_label),
+        ('Export-formaatversie', TREE_EXPORT_FORMAT_VERSION),
         ('Geëxporteerd op', meta.get('exportedAt', '')),
         ('Geëxporteerd door', meta.get('exportedBy', '')),
         ('Bron', 'Doelenboom platform'),

@@ -35,8 +35,9 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.worksheet.worksheet import Worksheet
 
 from .cleaning import clean_date, clean_pct, clean_text, norm
+from .excel_format_version import PROJECT_EXPORT_FORMAT_VERSION
 from .exporter import VALIDATIELIJSTEN
-from .parser import read_sheet
+from .parser import read_config_value, read_sheet
 
 INFO_SHEET = 'Info'
 PROJECT_SHEET = 'Project'
@@ -104,6 +105,21 @@ def _format_dependency(name: str, dep_type: str | None, lag_days: int | None) ->
     return f'{name} ({dep_type}{lag_part})'
 
 
+def _format_product_dependency(name: str, lag_amount: int | float | None, lag_eenheid: str | None) -> str:
+    """Zelfde idee als _format_dependency, maar voor productafhankelijkheden:
+    die zijn altijd FS (zie PRODUCT_DEPENDENCY_TYPES in
+    api/src/routes/products.ts, de API dwingt dit server-side af — een type
+    hoeft hier dus niet opgeslagen te worden) en gebruiken lag_amount +
+    lag_eenheid (d/w/m) i.p.v. een vlakke lag_days zoals activiteiten. 'Taak A'
+    (geen vertraging) blijft kaal; anders bv. 'Taak B (+2w)'. Zie
+    _parse_product_dependency_entry hieronder voor de inverse."""
+    lag_amount = lag_amount or 0
+    lag_eenheid = lag_eenheid or 'd'
+    if lag_amount == 0:
+        return name
+    return f'{name} ({lag_amount:+g}{lag_eenheid})'
+
+
 def build_project_workbook(data: dict[str, Any], meta: dict[str, Any]) -> bytes:
     project = data.get('project') or {}
     products = data.get('products') or []
@@ -114,11 +130,13 @@ def build_project_workbook(data: dict[str, Any], meta: dict[str, Any]) -> bytes:
     product_name_by_id = {p.get('id'): p.get('name', '') for p in products}
     activity_name_by_id = {a.get('id'): a.get('name', '') for a in activities}
 
-    product_preds: dict[Any, list[str]] = {}
+    product_preds: dict[Any, list[tuple[str, int, str]]] = {}
     for d in product_deps:
-        product_preds.setdefault(d.get('successorId'), []).append(
-            product_name_by_id.get(d.get('predecessorId'), '?')
-        )
+        product_preds.setdefault(d.get('successorId'), []).append((
+            product_name_by_id.get(d.get('predecessorId'), '?'),
+            d.get('lagAmount') or 0,
+            d.get('lagEenheid') or 'd',
+        ))
     activity_preds: dict[Any, list[tuple[str, str, int]]] = {}
     for d in activity_deps:
         activity_preds.setdefault(d.get('successorId'), []).append(
@@ -137,6 +155,7 @@ def build_project_workbook(data: dict[str, Any], meta: dict[str, Any]) -> bytes:
         ('Projectcode', project.get('code', '')),
         ('Doelenboom', meta.get('doelenboom', '')),
         ('Tenant', meta.get('tenant', '')),
+        ('Export-formaatversie', PROJECT_EXPORT_FORMAT_VERSION),
         ('Geëxporteerd op', meta.get('exportedAt', '')),
         ('Geëxporteerd door', meta.get('exportedBy', '')),
     ]:
@@ -173,7 +192,7 @@ def build_project_workbook(data: dict[str, Any], meta: dict[str, Any]) -> bytes:
             p.get('duurEenheid') or 'd',
             p.get('businessValue') if p.get('businessValue') is not None else '',
             p.get('opmerking', ''),
-            '; '.join(product_preds.get(p.get('id'), [])),
+            '; '.join(_format_product_dependency(n, a, e) for (n, a, e) in product_preds.get(p.get('id'), [])),
         ])
     _add_dropdown(prod_ws, ['Deliverable', 'Mijlpaal'], 'C2:C10000')
     _add_dropdown(prod_ws, ['d', 'w', 'm', 'y'], 'J2:J10000')
@@ -224,6 +243,36 @@ def _parse_dependency_entry(entry: str) -> tuple[str, str, int]:
     lag_raw = m.group('lag')
     lag_days = int(lag_raw) if lag_raw else 0
     return name, dep_type, lag_days
+
+
+_PRODUCT_DEP_RE = re.compile(r'^(?P<name>.*?)(?:\s*\((?P<lag>[+-]?\d+(?:\.\d+)?)(?P<unit>[dwm])?\))?\s*$')
+
+
+def _parse_product_dependency_entry(entry: str) -> tuple[str, int | float, str]:
+    """Inverse van _format_product_dependency: 'Taak A' -> ('Taak A', 0, 'd');
+    'Taak B (+2w)' -> ('Taak B', 2, 'w'). Ondersteunt ook kale oudere bestanden
+    van vóór deze wijziging die alleen de naam bevatten (dan is er geen match
+    op de haakjes-groep en valt lag/unit terug op 0/'d' — geen dataverlies
+    t.o.v. het gedrag hiervoor, alleen geen extra informatie). Een ontbrekende
+    eenheid-letter (bv. handmatig '(+2)' ingetypt) valt terug op 'd', dezelfde
+    default als de API (zie PRODUCT_DEPENDENCY_LAG_EENHEDEN in
+    api/src/routes/products.ts)."""
+    m = _PRODUCT_DEP_RE.match(entry.strip())
+    if not m:
+        return entry.strip(), 0, 'd'
+    name = (m.group('name') or '').strip()
+    lag_raw = m.group('lag')
+    unit_raw = (m.group('unit') or 'd').lower()
+    if unit_raw not in ('d', 'w', 'm'):
+        unit_raw = 'd'
+    if not lag_raw:
+        return name, 0, 'd'
+    try:
+        lag = float(lag_raw)
+        lag_amount: int | float = int(lag) if lag == int(lag) else lag
+    except ValueError:
+        lag_amount = 0
+    return name, lag_amount, unit_raw
 
 
 def _split_entries(value: object) -> list[str]:
@@ -344,6 +393,11 @@ def parse_project_workbook(content: bytes) -> tuple[str, dict, dict | None]:
                 business_value = float(bv_raw)
             except (TypeError, ValueError):
                 warnings.append(f'Producten: ongeldige BV "{bv_raw}" bij "{naam}" — leeggelaten.')
+        depends_on = []
+        for entry in _split_entries(row.get('hangt_af_van')):
+            dep_name, lag_amount, lag_eenheid = _parse_product_dependency_entry(entry)
+            if dep_name:
+                depends_on.append({'name': dep_name, 'lagAmount': lag_amount, 'lagEenheid': lag_eenheid})
         products.append({
             'id': _parse_id(row.get('id')),
             'name': naam,
@@ -357,7 +411,7 @@ def parse_project_workbook(content: bytes) -> tuple[str, dict, dict | None]:
             'duurEenheid': eenheid,
             'businessValue': business_value,
             'opmerking': clean_text(row.get('opmerking')),
-            'dependsOnNames': _split_entries(row.get('hangt_af_van')),
+            'dependsOn': depends_on,
         })
 
     activity_rows, _ = read_sheet(wb, ACTIVITIES_SHEET, {
@@ -400,6 +454,7 @@ def parse_project_workbook(content: bytes) -> tuple[str, dict, dict | None]:
     report = {
         'errors': errors, 'warnings': warnings, 'counts': counts,
         'sheetsFound': sheets_found, 'sheetsMissing': sheets_missing,
+        'formatVersion': read_config_value(wb, INFO_SHEET, 'Export-formaatversie'),
     }
     parsed = {'project': project, 'products': products, 'activities': activities}
     return status, report, (parsed if status != 'failed' else None)

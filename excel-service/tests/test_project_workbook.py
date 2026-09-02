@@ -5,8 +5,9 @@ onderdelen) round-trip-veilig zijn."""
 from __future__ import annotations
 
 from app.project_workbook import (
-    ACTIVITIES_SHEET, PRODUCTS_SHEET, PROJECT_SHEET,
+    ACTIVITIES_SHEET, INFO_SHEET, PRODUCTS_SHEET, PROJECT_SHEET,
     _format_dependency, _parse_dependency_entry,
+    _format_product_dependency, _parse_product_dependency_entry,
     build_project_workbook, parse_project_workbook,
 )
 
@@ -41,7 +42,7 @@ def make_data():
         ],
         'productDependencies': [
             {'id': 11, 'predecessorId': 1, 'successorId': 2},
-            {'id': 12, 'predecessorId': 2, 'successorId': 3},
+            {'id': 12, 'predecessorId': 2, 'successorId': 3, 'lagAmount': 2, 'lagEenheid': 'w'},
         ],
         'activities': [
             {'id': 101, 'name': 'Taak A', 'startDate': '2026-08-01', 'endDate': '2026-08-10',
@@ -78,7 +79,7 @@ class TestBuildProjectWorkbook:
         idx = header.index('Hangt af van')
         by_name = {r[1]: r[idx] for r in rows[1:]}
         assert by_name['Adviesrapport'] == 'PID'
-        assert by_name['GO/NO-GO'] == 'Adviesrapport'
+        assert by_name['GO/NO-GO'] == 'Adviesrapport (+2w)'
         # openpyxl geeft een lege cel terug als None, niet als '' (ook al is
         # '' geschreven) — build_project_workbook schrijft hier terecht een
         # lege string (zie _split_entries/clean_text die dat ook zo verwachten).
@@ -114,6 +115,26 @@ class TestDependencyFormatting:
             assert (parsed_name, parsed_type, parsed_lag) == (name, dep_type, lag)
 
 
+class TestProductDependencyFormatting:
+    def test_geen_vertraging_blijft_kaal(self):
+        assert _format_product_dependency('Taak A', 0, 'd') == 'Taak A'
+        assert _format_product_dependency('Taak A', None, None) == 'Taak A'
+
+    def test_vertraging_krijgt_suffix_met_eenheid(self):
+        assert _format_product_dependency('Taak B', 2, 'w') == 'Taak B (+2w)'
+        assert _format_product_dependency('Taak C', -1, 'd') == 'Taak C (-1d)'
+
+    def test_parse_is_inverse_van_format(self):
+        for name, lag, unit in [('Taak A', 0, 'd'), ('Taak B', 2, 'w'), ('Taak C', -1, 'd'), ('Taak D', 3, 'm')]:
+            formatted = _format_product_dependency(name, lag, unit)
+            parsed_name, parsed_lag, parsed_unit = _parse_product_dependency_entry(formatted)
+            assert (parsed_name, parsed_lag, parsed_unit) == (name, lag, unit)
+
+    def test_kale_naam_zonder_haakjes_blijft_werken(self):
+        # Bestanden van vóór deze wijziging bevatten alleen namen, geen lag/eenheid.
+        assert _parse_product_dependency_entry('Taak A') == ('Taak A', 0, 'd')
+
+
 class TestRoundTrip:
     def test_volledige_roundtrip(self):
         content = build_project_workbook(make_data(), make_meta())
@@ -121,6 +142,7 @@ class TestRoundTrip:
         assert status == 'ok', report
         assert not report['errors']
         assert not report['warnings']
+        assert report['formatVersion']  # Info-tab-versie wordt teruggelezen
 
         assert parsed['project']['code'] == 'NP37'
         assert parsed['project']['name'] == 'Sweepen'
@@ -144,10 +166,14 @@ class TestRoundTrip:
         assert by_name['Adviesrapport']['duurEenheid'] == 'm'
         assert by_name['Adviesrapport']['businessValue'] == 100
         assert by_name['Adviesrapport']['deadline'] == '2026-10-01'
-        assert by_name['Adviesrapport']['dependsOnNames'] == ['PID']
+        assert by_name['Adviesrapport']['dependsOn'] == [
+            {'name': 'PID', 'lagAmount': 0, 'lagEenheid': 'd'},
+        ]
         assert by_name['GO/NO-GO']['type'] == 'mijlpaal'
-        assert by_name['GO/NO-GO']['dependsOnNames'] == ['Adviesrapport']
-        assert by_name['PID']['dependsOnNames'] == []
+        assert by_name['GO/NO-GO']['dependsOn'] == [
+            {'name': 'Adviesrapport', 'lagAmount': 2, 'lagEenheid': 'w'},
+        ]
+        assert by_name['PID']['dependsOn'] == []
 
         assert len(parsed['activities']) == 2
         act_by_name = {a['name']: a for a in parsed['activities']}
@@ -192,6 +218,25 @@ class TestRoundTrip:
         assert status == 'failed'
         assert parsed is None
         assert report['sheetsMissing'] == [PROJECT_SHEET, PRODUCTS_SHEET, ACTIVITIES_SHEET]
+
+    def test_ontbrekende_versie_regel_blokkeert_niet(self):
+        # Simuleert een bestand van vóór de versie-kolom (geen "Export-
+        # formaatversie"-rij op Info): moet gewoon blijven werken, alleen
+        # zonder waarde voor formatVersion i.p.v. te falen.
+        from openpyxl import load_workbook
+        import io
+        content = build_project_workbook(make_data(), make_meta())
+        wb = load_workbook(io.BytesIO(content))
+        ws = wb[INFO_SHEET]
+        for row in ws.iter_rows(min_row=2):
+            if row[0].value == 'Export-formaatversie':
+                row[0].value = None
+                row[1].value = None
+        bio = io.BytesIO()
+        wb.save(bio)
+        status, report, parsed = parse_project_workbook(bio.getvalue())
+        assert status == 'ok', report
+        assert report['formatVersion'] is None
 
     def test_onbekende_projectstatus_geeft_warning(self):
         data = make_data()

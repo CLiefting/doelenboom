@@ -27,6 +27,7 @@ def test_volledige_rondgang(format_):
     status, report, parsed = parse_workbook(xlsx)
 
     assert status == 'ok', report['warnings']
+    assert report['formatVersion']  # Configuratie-tab-versie wordt teruggelezen
 
     assert {(e['code'], e['type'], e['name']) for e in parsed['elements']} == {
         ('OB1', 'Operationele benefit', 'OB 1'),

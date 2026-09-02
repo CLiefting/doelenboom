@@ -77,7 +77,7 @@ describe('project-export/project-import-parse (Excel voor één project)', () =>
       },
     });
     await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P1/products/dependencies`, {
-      token: adminToken, body: { predecessorId: p1.body.id, successorId: p2.body.id },
+      token: adminToken, body: { predecessorId: p1.body.id, successorId: p2.body.id, lagAmount: 2, lagEenheid: 'w' },
     });
 
     const a1 = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P1/activities`, {
@@ -188,7 +188,7 @@ describe('project-export/project-import-parse (Excel voor één project)', () =>
     assert.equal(advies.duur, 10);
     assert.equal(advies.duurEenheid, 'm');
     assert.equal(advies.businessValue, 100);
-    assert.deepEqual(advies.dependsOnNames, ['PID']);
+    assert.deepEqual(advies.dependsOn, [{ name: 'PID', lagAmount: 2, lagEenheid: 'w' }]);
     assert.ok(typeof advies.id === 'number');
 
     assert.equal(p.activities.length, 2);

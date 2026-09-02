@@ -49,6 +49,7 @@ class TestTemplateWorkbook:
         assert rows['Tenant'] == 'Mijn tenant'
         assert rows['Formaat'] == 'Oud'
         assert rows['Modus'] == 'Lege template'
+        assert rows['Export-formaatversie']
 
 
 class TestDataWorkbookOud:
