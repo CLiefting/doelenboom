@@ -136,6 +136,11 @@ importsRouter.post(
     edges: Array<{ source: string; target: string; weight: string | null; toelichting: string }>;
     projectStatus: Record<string, { projectstatus: string; rag: string; toelichting: string; gerapporteerdOp: string | null; clusterPpt?: string }>;
     products: Record<string, Array<{ code: string; name: string; type?: string; omschrijving: string; pctGereed: number; verwachteDatum: string | null; werkelijkeDatum: string | null; opmerking: string }>>;
+    activities: Record<string, Array<{
+      name: string; startDate: string; endDate: string; omschrijving: string;
+      isMilestone: boolean; isSummary: boolean;
+      predecessors: Array<{ name: string; type: string; lagDays: number }>;
+    }>>;
     tags: Array<{ code: string; name: string; categorie: string; omschrijving: string }>;
     elementTags: Record<string, string[]>;
     orgUnits: Array<{ code: string; name: string; omschrijving: string }>;
@@ -203,6 +208,47 @@ importsRouter.post(
              values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
             [elementId, p.code ?? '', p.name, p.type ?? 'deliverable', p.omschrijving ?? '', p.pctGereed ?? 0, p.verwachteDatum || null, p.werkelijkeDatum || null, p.opmerking ?? '']
           );
+        }
+      }
+
+      // Activiteiten + hun onderlinge afhankelijkheden — zelfde tweetraps-
+      // aanpak als elements/edges hierboven: eerst alle activiteiten van dit
+      // project aanmaken (ids ontstaan pas nu, deze import kende nog geen
+      // db-ids), dan pas de voorgangers erbij, die per activiteit naar een
+      // NAAM binnen hetzelfde project verwijzen (zie parser.py Activiteiten-
+      // tab/dependency_format.py) — opgelost via nameToId hieronder. Een
+      // voorganger die niet herleid kan worden (dubbele naam, tikfout) wordt
+      // stil overgeslagen: de rest van de activiteit blijft gewoon staan,
+      // net als bij edges hierboven ("defensief... niet vertrouwen").
+      for (const [code, acts] of Object.entries(parsed.activities ?? {})) {
+        const elementId = elementIdByCode.get(code);
+        if (!elementId) continue;
+        const nameToId = new Map<string, number>();
+        for (const a of acts) {
+          const r = await client.query(
+            `insert into activities (element_id, name, start_date, end_date, omschrijving, is_milestone, is_summary)
+             values ($1,$2,$3,$4,$5,$6,$7) returning id`,
+            [elementId, a.name, a.startDate, a.endDate, a.omschrijving ?? '', !!a.isMilestone, !!a.isSummary]
+          );
+          // Bij een dubbele activiteitnaam binnen hetzelfde project wint de
+          // laatste rij (net zoals dubbele elementcodes elders in dit bestand
+          // stil de eerdere overschrijven) — voorgangers die naar de eerdere
+          // rij verwezen landen dan op de latere, wat onschuldig is: het zijn
+          // toch dezelfde naam, dus niet te onderscheiden vanuit de Excel.
+          nameToId.set(a.name, r.rows[0].id);
+        }
+        for (const a of acts) {
+          const successorId = nameToId.get(a.name);
+          if (!successorId) continue;
+          for (const pred of a.predecessors ?? []) {
+            const predecessorId = nameToId.get(pred.name);
+            if (!predecessorId || predecessorId === successorId) continue;
+            await client.query(
+              `insert into activity_dependencies (predecessor_id, successor_id, type, lag_days)
+               values ($1,$2,$3,$4) on conflict do nothing`,
+              [predecessorId, successorId, pred.type || 'FS', pred.lagDays || 0]
+            );
+          }
         }
       }
     }

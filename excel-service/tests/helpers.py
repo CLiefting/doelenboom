@@ -68,6 +68,21 @@ def make_tree(**overrides: Any) -> dict[str, Any]:
                 },
             ],
         },
+        'activities': {
+            'P1': [
+                {
+                    'id': 901, 'name': 'Taak A', 'startDate': '2026-08-01', 'endDate': '2026-08-10',
+                    'omschrijving': 'Eerste taak', 'isMilestone': False, 'isSummary': False,
+                },
+                {
+                    'id': 902, 'name': 'Taak B', 'startDate': '2026-08-11', 'endDate': '2026-08-11',
+                    'omschrijving': '', 'isMilestone': True, 'isSummary': False,
+                },
+            ],
+        },
+        'dependencies': {
+            'P1': [{'id': 91, 'predecessorId': 901, 'successorId': 902, 'type': 'FS', 'lagDays': 2}],
+        },
         'tags': [
             {'code': 'T1', 'name': 'Tag 1', 'categorie': 'Categorie A', 'omschrijving': ''},
         ],

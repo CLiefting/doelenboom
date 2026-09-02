@@ -59,6 +59,13 @@ def test_volledige_rondgang(format_):
     assert parsed['obOrg']['OB1'][0]['org'] == 'O1'
     assert parsed['obOrg']['OB1'][0]['status'] == 'Gevalideerd'
 
+    activities_by_name = {a['name']: a for a in parsed['activities']['P1']}
+    assert activities_by_name['Taak A']['startDate'] == '2026-08-01'
+    assert activities_by_name['Taak A']['endDate'] == '2026-08-10'
+    assert activities_by_name['Taak A']['predecessors'] == []
+    assert activities_by_name['Taak B']['isMilestone'] is True
+    assert activities_by_name['Taak B']['predecessors'] == [{'name': 'Taak A', 'type': 'FS', 'lagDays': 2}]
+
 
 @pytest.mark.parametrize('format_', ['oud', 'nieuw'])
 def test_rondgang_zonder_warnings_of_errors(format_):
@@ -88,7 +95,7 @@ def test_rondgang_met_volledig_eigen_kolomconfiguratie():
              'kpi': '', 'taakveld': '', 'subtaakveld': '', 'sort_order': 3},
         ],
         edges=[{'source': 'I1', 'target': 'V1', 'weight': None, 'toelichting': ''}],
-        projectStatus={}, products={}, tags=[], elementTags={}, orgUnits=[], obOrg={},
+        projectStatus={}, products={}, activities={}, dependencies={}, tags=[], elementTags={}, orgUnits=[], obOrg={},
     )
     xlsx = build_data_workbook('nieuw', tree)
     status, report, parsed = parse_workbook(xlsx, valid_types=['Initiatief', 'Vermogen', 'Ambitie'])
@@ -99,7 +106,10 @@ def test_rondgang_met_volledig_eigen_kolomconfiguratie():
 
 
 def test_lege_boom_exporteert_en_importeert_zonder_te_crashen():
-    tree = make_tree(elements=[], edges=[], projectStatus={}, products={}, tags=[], elementTags={}, orgUnits=[], obOrg={})
+    tree = make_tree(
+        elements=[], edges=[], projectStatus={}, products={}, activities={}, dependencies={},
+        tags=[], elementTags={}, orgUnits=[], obOrg={},
+    )
     for format_ in ('oud', 'nieuw'):
         xlsx = build_data_workbook(format_, tree)
         status, report, parsed = parse_workbook(xlsx)

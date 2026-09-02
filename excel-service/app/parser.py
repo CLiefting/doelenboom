@@ -41,7 +41,8 @@ from typing import Any
 
 from openpyxl import load_workbook
 
-from .cleaning import clean_date, clean_pct, clean_text, norm
+from .cleaning import clean_date, clean_pct, clean_text, norm, split_entries
+from .dependency_format import parse_dependency_entry
 
 # --- Type-normalisatie (Referentietabel "Type"-kolom -> canonieke DB-waarde) ---
 # De canonieke set komt uit de check-constraint in db/init.sql.
@@ -548,6 +549,58 @@ def parse_workbook(
             'opmerking': clean_text(row.get('opmerking')),
         })
 
+    # --- Activiteiten ---
+    # Ontbreekt de tab (een export van vóór deze tab bestond), dan blijft
+    # 'activities' gewoon leeg — net als bij Producten hierboven is dit geen
+    # verplicht tabblad (zie REQUIRED_SHEETS-achtige check, die alleen op
+    # Referentietabel let), dus geen enkele oudere upload breekt hierop.
+    # Voorgangers verwijzen naar activiteitnamen BINNEN hetzelfde project (zie
+    # dependency_format.parse_dependency_entry) — net als bij Producten/
+    # elementen wordt de eigenlijke db-id pas bij publiceren toegekend
+    # (routes/imports.ts: volledige vervanging), dus namen zijn hier de enige
+    # zinvolle sleutel; de aanroeper lost 'name' op naar de nieuwe id ná
+    # het aanmaken van alle activiteiten van dat project.
+    act_rows, act_found = read_sheet(wb, 'Activiteiten', {
+        'project_id': ('project-id',),
+        'naam': ('activiteit', 'naam'),
+        'start': ('startdatum',),
+        'eind': ('einddatum',),
+        'omschrijving': ('omschrijving',),
+        'mijlpaal': ('mijlpaal',),
+        'fase': ('fase/samenvattend', 'fase', 'samenvattend'),
+        'voorgangers': ('voorgangers',),
+    })
+    track('Activiteiten', act_found)
+
+    activities: dict[str, list[dict]] = defaultdict(list)
+    for row in act_rows:
+        project_code = clean_text(row.get('project_id'))
+        naam = clean_text(row.get('naam'))
+        start = clean_date(row.get('start'))
+        eind = clean_date(row.get('eind'))
+        if not project_code or not naam:
+            continue
+        if project_code not in code_set:
+            warnings.append(f'Activiteiten: activiteit "{naam}" verwijst naar onbekend Project-ID "{project_code}" — overgeslagen.')
+            continue
+        if not start or not eind:
+            warnings.append(f'Activiteiten: activiteit "{naam}" mist een start- en/of einddatum — overgeslagen.')
+            continue
+        predecessors = []
+        for entry in split_entries(row.get('voorgangers')):
+            pred_name, dep_type, lag_days = parse_dependency_entry(entry)
+            if pred_name:
+                predecessors.append({'name': pred_name, 'type': dep_type, 'lagDays': lag_days})
+        activities[project_code].append({
+            'name': naam,
+            'startDate': start,
+            'endDate': eind,
+            'omschrijving': clean_text(row.get('omschrijving')),
+            'isMilestone': norm(clean_text(row.get('mijlpaal'))) == 'ja',
+            'isSummary': norm(clean_text(row.get('fase'))) == 'ja',
+            'predecessors': predecessors,
+        })
+
     # --- Tags + Element-Tag relaties ---
     tag_rows, tags_found = read_sheet(wb, 'Tags', {
         'id': ('tag-id', 'id'),
@@ -648,6 +701,7 @@ def parse_workbook(
         'edges': len(edges),
         'projectStatus': len(project_status),
         'products': sum(len(v) for v in products.values()),
+        'activities': sum(len(v) for v in activities.values()),
         'tags': len(tags),
         'elementTags': sum(len(v) for v in element_tags.values()),
         'orgUnits': len(org_units),
@@ -662,6 +716,7 @@ def parse_workbook(
         'edges': edges,
         'projectStatus': project_status,
         'products': dict(products),
+        'activities': dict(activities),
         'tags': tags,
         'elementTags': dict(element_tags),
         'orgUnits': org_units,

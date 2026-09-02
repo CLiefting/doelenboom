@@ -39,6 +39,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.worksheet.worksheet import Worksheet
 
+from .dependency_format import format_dependency
 from .excel_format_version import TREE_EXPORT_FORMAT_VERSION
 
 CONFIG_SHEET_NAME = 'Configuratie'
@@ -64,6 +65,10 @@ OUD_SHEET_HEADERS: dict[str, list[str]] = {
         'Product-ID', 'Project-ID', 'Project', 'Product / deliverable', 'Type', 'Omschrijving',
         '% gereed', 'Verwachte opleverdatum', 'Werkelijke opleverdatum', 'Opmerking',
     ],
+    'Activiteiten': [
+        'Activiteit-ID', 'Project-ID', 'Project', 'Activiteit', 'Startdatum', 'Einddatum',
+        'Omschrijving', 'Mijlpaal', 'Fase/samenvattend', 'Voorgangers',
+    ],
     'Tags': ['Tag-ID', 'Tag', 'Categorie', 'Omschrijving'],
     'Element-Tag relaties': ['Element-ID', 'Type', 'Element', 'Tag-ID', 'Tag', 'Toelichting'],
     'Organisatieonderdelen': ['Org-ID', 'Organisatieonderdeel', 'Omschrijving'],
@@ -87,6 +92,10 @@ NIEUW_SHEET_HEADERS: dict[str, list[str]] = {
     'Producten': [
         'Product-ID', 'Project-ID', 'Project', 'Product / deliverable', 'Type', 'Omschrijving',
         'Voortgang (0-100)', 'Verwachte opleverdatum', 'Werkelijke opleverdatum', 'Opmerking',
+    ],
+    'Activiteiten': [
+        'Activiteit-ID', 'Project-ID', 'Project', 'Activiteit', 'Startdatum', 'Einddatum',
+        'Omschrijving', 'Mijlpaal', 'Fase/samenvattend', 'Voorgangers',
     ],
     'Tags': ['Tag-ID', 'Tag', 'Categorie', 'Omschrijving'],
     'Element-Tag relaties': ['Element-ID', 'Type', 'Element', 'Tag-ID', 'Tag', 'Toelichting'],
@@ -271,6 +280,10 @@ def _apply_data_validation(sheets: dict[str, Worksheet], ranges: dict[str, str])
     prod_ws = sheets['Producten']
     _add_dropdown(prod_ws, ranges['Product-type'], 'E2:E10000')
 
+    act_ws = sheets['Activiteiten']
+    _add_dropdown(act_ws, ranges['Actief'], 'H2:H10000')
+    _add_dropdown(act_ws, ranges['Actief'], 'I2:I10000')
+
     obo_ws = sheets['OB-Organisatie relaties']
     _add_dropdown(obo_ws, ranges['Relatietype'], 'E2:E10000')
     _add_dropdown(obo_ws, ranges['Org-relatie status'], 'G2:G10000')
@@ -298,6 +311,46 @@ def build_template_workbook(
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
+
+
+def _fill_activities(sheets: dict[str, Worksheet], tree: dict[str, Any], by_code: dict[str, Any]) -> None:
+    """Vult de Activiteiten-tab — identiek voor 'oud' en 'nieuw' (net als
+    Producten hierboven), daarom hier één keer, aangeroepen door zowel
+    _fill_oud als _fill_nieuw. tree['activities']/tree['dependencies'] komen
+    rechtstreeks uit fetchTree() (api/src/routes/tree.ts), al per projectcode
+    gegroepeerd — zelfde vorm als tree['products']/tree['productDependencies']
+    hierboven. Vóór deze functie ontbrak een Activiteiten-tab in de volledige-
+    boom-export volledig: activiteiten waren dan alleen via de aparte
+    één-project-export (project_workbook.py) terug te halen, dus een
+    "boom leegmaken + uit Excel reconstrueren"-scenario zou ze kwijtraken als
+    niet ook voor elk project apart geëxporteerd was."""
+    act_ws = sheets['Activiteiten']
+    activity_name_by_id: dict[Any, str] = {}
+    for acts in (tree.get('activities', {}) or {}).values():
+        for a in acts:
+            activity_name_by_id[a.get('id')] = a.get('name', '')
+
+    activity_preds: dict[Any, list[tuple[str, str, int]]] = {}
+    for deps in (tree.get('dependencies', {}) or {}).values():
+        for d in deps:
+            activity_preds.setdefault(d.get('successorId'), []).append((
+                activity_name_by_id.get(d.get('predecessorId'), '?'),
+                d.get('type') or 'FS',
+                d.get('lagDays') or 0,
+            ))
+
+    for project_code, acts in (tree.get('activities', {}) or {}).items():
+        project_el = by_code.get(project_code)
+        project_name = project_el['name'] if project_el else ''
+        for a in acts:
+            preds = activity_preds.get(a.get('id'), [])
+            act_ws.append([
+                a.get('id'), project_code, project_name, a.get('name', ''),
+                a.get('startDate') or '', a.get('endDate') or '', a.get('omschrijving', ''),
+                'Ja' if a.get('isMilestone') else 'Nee',
+                'Ja' if a.get('isSummary') else 'Nee',
+                '; '.join(format_dependency(n, t, l) for (n, t, l) in preds),
+            ])
 
 
 def _fill_oud(sheets: dict[str, Worksheet], tree: dict[str, Any]) -> None:
@@ -351,6 +404,8 @@ def _fill_oud(sheets: dict[str, Worksheet], tree: dict[str, Any]) -> None:
                 p.get('type', 'deliverable'), p.get('omschrijving', ''), p.get('pctGereed', 0),
                 p.get('verwachteDatum') or '', p.get('werkelijkeDatum') or '', p.get('opmerking', ''),
             ])
+
+    _fill_activities(sheets, tree, by_code)
 
     tags_ws = sheets['Tags']
     for t in tree.get('tags', []):
@@ -425,6 +480,8 @@ def _fill_nieuw(sheets: dict[str, Worksheet], tree: dict[str, Any]) -> None:
                 p.get('type', 'deliverable'), p.get('omschrijving', ''), p.get('pctGereed', 0),
                 p.get('verwachteDatum') or '', p.get('werkelijkeDatum') or '', p.get('opmerking', ''),
             ])
+
+    _fill_activities(sheets, tree, by_code)
 
     tags_ws = sheets['Tags']
     for t in tree.get('tags', []):

@@ -12,7 +12,7 @@ from app.parser import parse_workbook
 from tests.helpers import build_workbook_bytes
 
 
-def oud_workbook(ref_rows=(), cap_ob_rows=(), proj_cap_rows=(), proj_rows=(), prod_rows=(),
+def oud_workbook(ref_rows=(), cap_ob_rows=(), proj_cap_rows=(), proj_rows=(), prod_rows=(), act_rows=(),
                   tag_rows=(), et_rows=(), org_rows=(), obo_rows=()):
     return build_workbook_bytes({
         'Referentietabel': [OUD_SHEET_HEADERS['Referentietabel'], *ref_rows],
@@ -20,6 +20,7 @@ def oud_workbook(ref_rows=(), cap_ob_rows=(), proj_cap_rows=(), proj_rows=(), pr
         'Project-Capability relaties': [OUD_SHEET_HEADERS['Project-Capability relaties'], *proj_cap_rows],
         'Projecten': [OUD_SHEET_HEADERS['Projecten'], *proj_rows],
         'Producten': [OUD_SHEET_HEADERS['Producten'], *prod_rows],
+        'Activiteiten': [OUD_SHEET_HEADERS['Activiteiten'], *act_rows],
         'Tags': [OUD_SHEET_HEADERS['Tags'], *tag_rows],
         'Element-Tag relaties': [OUD_SHEET_HEADERS['Element-Tag relaties'], *et_rows],
         'Organisatieonderdelen': [OUD_SHEET_HEADERS['Organisatieonderdelen'], *org_rows],
@@ -27,13 +28,14 @@ def oud_workbook(ref_rows=(), cap_ob_rows=(), proj_cap_rows=(), proj_rows=(), pr
     })
 
 
-def nieuw_workbook(ref_rows=(), rel_rows=(), proj_rows=(), prod_rows=(),
+def nieuw_workbook(ref_rows=(), rel_rows=(), proj_rows=(), prod_rows=(), act_rows=(),
                     tag_rows=(), et_rows=(), org_rows=(), obo_rows=()):
     return build_workbook_bytes({
         'Referentietabel': [NIEUW_SHEET_HEADERS['Referentietabel'], *ref_rows],
         'Relaties': [NIEUW_SHEET_HEADERS['Relaties'], *rel_rows],
         'Projecten': [NIEUW_SHEET_HEADERS['Projecten'], *proj_rows],
         'Producten': [NIEUW_SHEET_HEADERS['Producten'], *prod_rows],
+        'Activiteiten': [NIEUW_SHEET_HEADERS['Activiteiten'], *act_rows],
         'Tags': [NIEUW_SHEET_HEADERS['Tags'], *tag_rows],
         'Element-Tag relaties': [NIEUW_SHEET_HEADERS['Element-Tag relaties'], *et_rows],
         'Organisatieonderdelen': [NIEUW_SHEET_HEADERS['Organisatieonderdelen'], *org_rows],
@@ -296,6 +298,65 @@ class TestProducten:
         _, _, parsed = parse_workbook(content)
         pct_by_name = {p['name']: p['pctGereed'] for p in parsed['products']['P1']}
         assert pct_by_name == {'A': 50, 'B': 80}
+
+
+class TestActiviteiten:
+    def test_voorgangers_met_type_en_vertraging_worden_geparsed(self):
+        content = oud_workbook(
+            ref_rows=[['P1', 'Project', 'Project 1', '', '', '', '', '', '', '', '', '']],
+            act_rows=[
+                [901, 'P1', 'Project 1', 'Taak A', '2026-08-01', '2026-08-10', '', 'Nee', 'Nee', ''],
+                [902, 'P1', 'Project 1', 'Taak B', '2026-08-11', '2026-08-14', '', 'Ja', 'Nee', 'Taak A (SS+2)'],
+            ],
+        )
+        _, report, parsed = parse_workbook(content)
+        assert report['warnings'] == []
+        acts_by_name = {a['name']: a for a in parsed['activities']['P1']}
+        assert acts_by_name['Taak A']['predecessors'] == []
+        assert acts_by_name['Taak B']['isMilestone'] is True
+        assert acts_by_name['Taak B']['predecessors'] == [{'name': 'Taak A', 'type': 'SS', 'lagDays': 2}]
+
+    def test_activiteit_met_onbekend_project_id_wordt_overgeslagen(self):
+        content = oud_workbook(
+            ref_rows=[['P1', 'Project', 'Project 1', '', '', '', '', '', '', '', '', '']],
+            act_rows=[[1, 'ONBEKEND', '', 'Taak X', '2026-08-01', '2026-08-10', '', 'Nee', 'Nee', '']],
+        )
+        _, report, parsed = parse_workbook(content)
+        assert parsed['activities'] == {}
+        assert any('onbekend Project-ID' in w for w in report['warnings'])
+
+    def test_activiteit_zonder_start_of_einddatum_wordt_overgeslagen_met_warning(self):
+        content = oud_workbook(
+            ref_rows=[['P1', 'Project', 'Project 1', '', '', '', '', '', '', '', '', '']],
+            act_rows=[[1, 'P1', 'Project 1', 'Taak zonder datum', '', '', '', 'Nee', 'Nee', '']],
+        )
+        _, report, parsed = parse_workbook(content)
+        assert parsed['activities'] == {}
+        assert any('start- en/of einddatum' in w for w in report['warnings'])
+
+    def test_ontbrekende_activiteiten_tab_blijft_backward_compatible(self):
+        # Simuleert een export van vóór de Activiteiten-tab bestond: geen
+        # crash, geen error, gewoon een lege 'activities' — zie het
+        # commentaar bij REQUIRED_SHEETS-achtige track()-aanroepen in parser.py.
+        content = build_workbook_bytes({
+            'Referentietabel': [
+                OUD_SHEET_HEADERS['Referentietabel'],
+                ['P1', 'Project', 'Project 1', '', '', '', '', '', '', '', '', ''],
+            ],
+        })
+        status, report, parsed = parse_workbook(content)
+        assert status == 'ok'
+        assert 'Activiteiten' in report['sheetsMissing']
+        assert parsed['activities'] == {}
+
+    def test_nieuw_formaat_activiteiten_werken_hetzelfde(self):
+        content = nieuw_workbook(
+            ref_rows=[['P1', 'Project', 'Project 1', '', '', '', '', 1, 'Ja']],
+            act_rows=[[1, 'P1', 'Project 1', 'Taak A', '2026-08-01', '2026-08-10', '', 'Nee', 'Nee', '']],
+        )
+        _, report, parsed = parse_workbook(content)
+        assert report['errors'] == []
+        assert parsed['activities']['P1'][0]['name'] == 'Taak A'
 
 
 class TestTagsEnOrganisatie:

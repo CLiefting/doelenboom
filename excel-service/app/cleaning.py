@@ -78,3 +78,16 @@ def norm(s: object) -> str:
     if s is None:
         return ''
     return re.sub(r'\s+', ' ', str(s)).strip().lower()
+
+
+def split_entries(value: object) -> list[str]:
+    """Splitst een ';'/','-gescheiden celwaarde (bv. Tags, Voorgangers, Hangt
+    af van) op in losse, getrimde items — lege items (dubbele scheiding,
+    trailing komma) worden overgeslagen. Gedeeld door parser.py (Activiteiten-
+    tab van de volledige-boom-export) en project_workbook.py (Producten-/
+    Activiteiten-tab van de één-project-export), was vóór deze functie hier
+    stond alleen een eigen kopie in project_workbook.py."""
+    text = clean_text(value)
+    if not text:
+        return []
+    return [p.strip() for p in re.split(r'[;,]', text) if p.strip()]

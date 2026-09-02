@@ -34,7 +34,9 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.worksheet.worksheet import Worksheet
 
-from .cleaning import clean_date, clean_pct, clean_text, norm
+from .cleaning import clean_date, clean_pct, clean_text, norm, split_entries as _split_entries
+from .dependency_format import format_dependency as _format_dependency
+from .dependency_format import parse_dependency_entry as _parse_dependency_entry
 from .excel_format_version import PROJECT_EXPORT_FORMAT_VERSION
 from .exporter import VALIDATIELIJSTEN
 from .parser import read_config_value, read_sheet
@@ -91,18 +93,6 @@ def _add_dropdown(ws: Worksheet, values: list[str], cell_range: str) -> None:
     dv.errorTitle = 'Ongeldige waarde'
     ws.add_data_validation(dv)
     dv.add(cell_range)
-
-
-def _format_dependency(name: str, dep_type: str | None, lag_days: int | None) -> str:
-    """'Taak A' (FS, geen vertraging — de default) blijft kaal; alles anders
-    krijgt een suffix, bv. 'Taak B (SS)' of 'Taak C (FS+2)'. Zie
-    _parse_dependency_entry hieronder voor de inverse."""
-    dep_type = dep_type or 'FS'
-    lag_days = lag_days or 0
-    if dep_type == 'FS' and lag_days == 0:
-        return name
-    lag_part = f'{lag_days:+d}' if lag_days else ''
-    return f'{name} ({dep_type}{lag_part})'
 
 
 def _format_product_dependency(name: str, lag_amount: int | float | None, lag_eenheid: str | None) -> str:
@@ -223,28 +213,6 @@ def build_project_workbook(data: dict[str, Any], meta: dict[str, Any]) -> bytes:
 # parse_workbook in parser.py.
 # ---------------------------------------------------------------------------
 
-_DEP_RE = re.compile(r'^(?P<name>.*?)(?:\s*\((?P<type>[A-Za-z]{2})\s*(?P<lag>[+-]\d+)?\))?\s*$')
-_VALID_DEP_TYPES = {'FS', 'SS', 'FF', 'SF'}
-
-
-def _parse_dependency_entry(entry: str) -> tuple[str, str, int]:
-    """Inverse van _format_dependency: 'Taak A' -> ('Taak A', 'FS', 0);
-    'Taak B (SS)' -> ('Taak B', 'SS', 0); 'Taak C (FS+2)' -> ('Taak C', 'FS', 2).
-    Een onherkend of ontbrekend type valt terug op 'FS' (dezelfde default als
-    bij het aanmaken van een afhankelijkheid via de UI, zie
-    api/src/routes/activities.ts)."""
-    m = _DEP_RE.match(entry.strip())
-    if not m:
-        return entry.strip(), 'FS', 0
-    name = (m.group('name') or '').strip()
-    dep_type = (m.group('type') or 'FS').upper()
-    if dep_type not in _VALID_DEP_TYPES:
-        dep_type = 'FS'
-    lag_raw = m.group('lag')
-    lag_days = int(lag_raw) if lag_raw else 0
-    return name, dep_type, lag_days
-
-
 _PRODUCT_DEP_RE = re.compile(r'^(?P<name>.*?)(?:\s*\((?P<lag>[+-]?\d+(?:\.\d+)?)(?P<unit>[dwm])?\))?\s*$')
 
 
@@ -273,13 +241,6 @@ def _parse_product_dependency_entry(entry: str) -> tuple[str, int | float, str]:
     except ValueError:
         lag_amount = 0
     return name, lag_amount, unit_raw
-
-
-def _split_entries(value: object) -> list[str]:
-    text = clean_text(value)
-    if not text:
-        return []
-    return [p.strip() for p in re.split(r'[;,]', text) if p.strip()]
 
 
 def _parse_id(value: object) -> int | None:

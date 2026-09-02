@@ -88,6 +88,20 @@ describe('imports/exports (Excel round-trip via excel-service)', () => {
     await req('PUT', `/api/doelenbomen/${doelenboomId}/elements/P1/project-status`, {
       token: adminToken, body: { projectstatus: 'Actief', rag: 'Groen' },
     });
+
+    // Twee activiteiten + een afhankelijkheid ertussen, om te controleren dat
+    // ook die (nieuw: zie exporter.py/parser.py Activiteiten-tab) een volledige
+    // export->import->publiceer-rondgang overleven — vóór die tab bestond,
+    // waren activiteiten helemaal niet onderdeel van deze export/import.
+    const taakA = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P1/activities`, {
+      token: adminToken, body: { name: 'Taak A', startDate: '2026-08-01', endDate: '2026-08-10' },
+    });
+    const taakB = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P1/activities`, {
+      token: adminToken, body: { name: 'Taak B', startDate: '2026-08-11', endDate: '2026-08-14', isMilestone: false },
+    });
+    await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P1/activities/dependencies`, {
+      token: adminToken, body: { predecessorId: taakA.body.id, successorId: taakB.body.id, type: 'FS', lagDays: 2 },
+    });
   });
 
   after(async () => {
@@ -190,5 +204,23 @@ describe('imports/exports (Excel round-trip via excel-service)', () => {
     assert.equal(importedTree.body.products['P1'][0].type, 'deliverable');
     assert.equal(importedTree.body.projectStatus['P1'].projectstatus, 'Actief');
     assert.equal(importedTree.body.projectStatus['P1'].rag, 'Groen');
+
+    assert.equal(importedTree.body.activities['P1']?.length, originalTree.body.activities['P1']?.length);
+    const importedActByName = Object.fromEntries(
+      (importedTree.body.activities['P1'] as Array<{ name: string; startDate: string; endDate: string; isMilestone: boolean }>).map(
+        (a) => [a.name, a]
+      )
+    );
+    assert.equal(importedActByName['Taak A'].startDate, '2026-08-01');
+    assert.equal(importedActByName['Taak B'].endDate, '2026-08-14');
+
+    assert.equal(importedTree.body.dependencies['P1']?.length, originalTree.body.dependencies['P1']?.length);
+    const importedDep = (importedTree.body.dependencies['P1'] as Array<{ predecessorId: number; successorId: number; type: string; lagDays: number }>)[0];
+    const importedTaakAId = importedActByName['Taak A'].id;
+    const importedTaakBId = importedActByName['Taak B'].id;
+    assert.equal(importedDep.predecessorId, importedTaakAId);
+    assert.equal(importedDep.successorId, importedTaakBId);
+    assert.equal(importedDep.type, 'FS');
+    assert.equal(importedDep.lagDays, 2);
   });
 });

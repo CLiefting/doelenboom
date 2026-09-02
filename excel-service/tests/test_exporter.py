@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import io
 
+import pytest
 from openpyxl import load_workbook
 
 from app.exporter import (
@@ -110,6 +111,36 @@ class TestDataWorkbookNieuw:
         assert headers == NIEUW_SHEET_HEADERS['Referentietabel']
         row = next(wb['Referentietabel'].iter_rows(min_row=2, values_only=True))
         assert row[-1] == 'Ja'  # Actief
+
+
+class TestActiviteitenTab:
+    """De Activiteiten-tab is identiek gevuld voor beide formaten (net als
+    Producten, zie _fill_activities in exporter.py) — daarom hier één
+    testklasse i.p.v. losse oud/nieuw-varianten."""
+
+    @pytest.mark.parametrize('format_', ['oud', 'nieuw'])
+    def test_activiteiten_tab_bevat_projectkoppeling_en_voorgangers(self, format_):
+        tree = make_tree()
+        wb = load(build_data_workbook(format_, tree))
+        rows = {row[3]: row for row in wb['Activiteiten'].iter_rows(min_row=2, values_only=True)}
+        assert rows['Taak A'][1:3] == ('P1', 'Project 1')  # Project-ID, Project
+        assert rows['Taak A'][4] == '2026-08-01'  # Startdatum
+        assert rows['Taak A'][7] == 'Nee'  # Mijlpaal
+        assert rows['Taak A'][9] is None  # Voorgangers (geen)
+        assert rows['Taak B'][7] == 'Ja'  # Mijlpaal
+        assert rows['Taak B'][9] == 'Taak A (FS+2)'  # Voorgangers, met type+vertraging
+
+    @pytest.mark.parametrize('format_', ['oud', 'nieuw'])
+    def test_activiteiten_tab_headers(self, format_):
+        tree = make_tree()
+        wb = load(build_data_workbook(format_, tree))
+        headers_map = OUD_SHEET_HEADERS if format_ == 'oud' else NIEUW_SHEET_HEADERS
+        assert [c.value for c in wb['Activiteiten'][1]] == headers_map['Activiteiten']
+
+    def test_lege_activiteiten_geeft_lege_tab(self):
+        tree = make_tree(activities={}, dependencies={})
+        wb = load(build_data_workbook('oud', tree))
+        assert wb['Activiteiten'].max_row == 1  # alleen de headerrij
 
 
 class TestDynamischeTypeLijst:

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import datetime
 
-from app.cleaning import clean_date, clean_pct, clean_text, norm
+from app.cleaning import clean_date, clean_pct, clean_text, norm, split_entries
 
 
 class TestCleanText:
@@ -72,3 +72,15 @@ class TestNorm:
 
     def test_none_wordt_lege_string(self):
         assert norm(None) == ''
+
+
+class TestSplitEntries:
+    def test_splitst_op_puntkomma_en_komma(self):
+        assert split_entries('A; B, C') == ['A', 'B', 'C']
+
+    def test_dubbele_scheiding_en_trailing_komma_geven_geen_lege_items(self):
+        assert split_entries('A;; B,') == ['A', 'B']
+
+    def test_none_en_leeg_geven_lege_lijst(self):
+        assert split_entries(None) == []
+        assert split_entries('') == []
