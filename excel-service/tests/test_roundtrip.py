@@ -50,7 +50,11 @@ def test_volledige_rondgang(format_):
     assert products_by_name['Deliverable 1']['type'] == 'deliverable'
     assert products_by_name['Deliverable 1']['pctGereed'] == 40
     assert products_by_name['Deliverable 1']['verwachteDatum'] == '2026-09-01'
+    assert products_by_name['Deliverable 1']['dependsOn'] == []
     assert products_by_name['Mijlpaal 1']['type'] == 'mijlpaal'
+    assert products_by_name['Mijlpaal 1']['dependsOn'] == [
+        {'name': 'Deliverable 1', 'lagAmount': 2, 'lagEenheid': 'w'}
+    ]
 
     assert parsed['tags'] == [{'code': 'T1', 'name': 'Tag 1', 'categorie': 'Categorie A', 'omschrijving': ''}]
     assert parsed['elementTags']['P1'] == ['T1']
@@ -95,7 +99,8 @@ def test_rondgang_met_volledig_eigen_kolomconfiguratie():
              'kpi': '', 'taakveld': '', 'subtaakveld': '', 'sort_order': 3},
         ],
         edges=[{'source': 'I1', 'target': 'V1', 'weight': None, 'toelichting': ''}],
-        projectStatus={}, products={}, activities={}, dependencies={}, tags=[], elementTags={}, orgUnits=[], obOrg={},
+        projectStatus={}, products={}, productDependencies={}, activities={}, dependencies={},
+        tags=[], elementTags={}, orgUnits=[], obOrg={},
     )
     xlsx = build_data_workbook('nieuw', tree)
     status, report, parsed = parse_workbook(xlsx, valid_types=['Initiatief', 'Vermogen', 'Ambitie'])
@@ -107,7 +112,7 @@ def test_rondgang_met_volledig_eigen_kolomconfiguratie():
 
 def test_lege_boom_exporteert_en_importeert_zonder_te_crashen():
     tree = make_tree(
-        elements=[], edges=[], projectStatus={}, products={}, activities={}, dependencies={},
+        elements=[], edges=[], projectStatus={}, products={}, productDependencies={}, activities={}, dependencies={},
         tags=[], elementTags={}, orgUnits=[], obOrg={},
     )
     for format_ in ('oud', 'nieuw'):

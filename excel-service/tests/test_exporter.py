@@ -113,6 +113,34 @@ class TestDataWorkbookNieuw:
         assert row[-1] == 'Ja'  # Actief
 
 
+class TestProductenHangtAfVan:
+    """De 'Hangt af van'-kolom op de Producten-tab is identiek gevuld voor
+    beide formaten (net als Activiteiten/Voorgangers, zie _fill_products in
+    exporter.py) — daarom hier één testklasse i.p.v. losse oud/nieuw-varianten."""
+
+    @pytest.mark.parametrize('format_', ['oud', 'nieuw'])
+    def test_producten_tab_bevat_hangt_af_van(self, format_):
+        tree = make_tree()
+        wb = load(build_data_workbook(format_, tree))
+        rows = {row[3]: row for row in wb['Producten'].iter_rows(min_row=2, values_only=True)}
+        assert rows['Deliverable 1'][-1] is None  # Hangt af van (geen)
+        assert rows['Mijlpaal 1'][-1] == 'Deliverable 1 (+2w)'  # Hangt af van, met vertraging
+
+    @pytest.mark.parametrize('format_', ['oud', 'nieuw'])
+    def test_producten_tab_headers_eindigen_op_hangt_af_van(self, format_):
+        tree = make_tree()
+        wb = load(build_data_workbook(format_, tree))
+        headers_map = OUD_SHEET_HEADERS if format_ == 'oud' else NIEUW_SHEET_HEADERS
+        assert [c.value for c in wb['Producten'][1]] == headers_map['Producten']
+        assert headers_map['Producten'][-1] == 'Hangt af van'
+
+    def test_producten_zonder_afhankelijkheden_geeft_lege_kolom(self):
+        tree = make_tree(productDependencies={})
+        wb = load(build_data_workbook('oud', tree))
+        rows = [row for row in wb['Producten'].iter_rows(min_row=2, values_only=True)]
+        assert all(row[-1] is None for row in rows)
+
+
 class TestActiviteitenTab:
     """De Activiteiten-tab is identiek gevuld voor beide formaten (net als
     Producten, zie _fill_activities in exporter.py) — daarom hier één

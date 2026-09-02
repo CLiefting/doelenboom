@@ -42,7 +42,7 @@ from typing import Any
 from openpyxl import load_workbook
 
 from .cleaning import clean_date, clean_pct, clean_text, norm, split_entries
-from .dependency_format import parse_dependency_entry
+from .dependency_format import parse_dependency_entry, parse_product_dependency_entry
 
 # --- Type-normalisatie (Referentietabel "Type"-kolom -> canonieke DB-waarde) ---
 # De canonieke set komt uit de check-constraint in db/init.sql.
@@ -518,6 +518,7 @@ def parse_workbook(
         'verwacht': ('verwachte opleverdatum', 'verwachte datum'),
         'werkelijk': ('werkelijke opleverdatum', 'werkelijke datum'),
         'opmerking': ('opmerking',),
+        'hangt_af_van': ('hangt af van',),
     })
     track('Producten', prod_found)
 
@@ -538,6 +539,11 @@ def parse_workbook(
             if type_key:
                 warnings.append(f'Producten: onbekend Type "{type_raw}" bij "{naam}" — gebruikt "deliverable".')
             product_type = 'deliverable'
+        depends_on = []
+        for entry in split_entries(row.get('hangt_af_van')):
+            pred_name, lag_amount, lag_eenheid = parse_product_dependency_entry(entry)
+            if pred_name:
+                depends_on.append({'name': pred_name, 'lagAmount': lag_amount, 'lagEenheid': lag_eenheid})
         products[project_code].append({
             'code': clean_text(row.get('id')),
             'name': naam,
@@ -547,6 +553,7 @@ def parse_workbook(
             'verwachteDatum': clean_date(row.get('verwacht')),
             'werkelijkeDatum': clean_date(row.get('werkelijk')),
             'opmerking': clean_text(row.get('opmerking')),
+            'dependsOn': depends_on,
         })
 
     # --- Activiteiten ---

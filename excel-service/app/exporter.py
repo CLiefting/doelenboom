@@ -39,7 +39,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.worksheet.worksheet import Worksheet
 
-from .dependency_format import format_dependency
+from .dependency_format import format_dependency, format_product_dependency
 from .excel_format_version import TREE_EXPORT_FORMAT_VERSION
 
 CONFIG_SHEET_NAME = 'Configuratie'
@@ -63,7 +63,7 @@ OUD_SHEET_HEADERS: dict[str, list[str]] = {
     ],
     'Producten': [
         'Product-ID', 'Project-ID', 'Project', 'Product / deliverable', 'Type', 'Omschrijving',
-        '% gereed', 'Verwachte opleverdatum', 'Werkelijke opleverdatum', 'Opmerking',
+        '% gereed', 'Verwachte opleverdatum', 'Werkelijke opleverdatum', 'Opmerking', 'Hangt af van',
     ],
     'Activiteiten': [
         'Activiteit-ID', 'Project-ID', 'Project', 'Activiteit', 'Startdatum', 'Einddatum',
@@ -91,7 +91,7 @@ NIEUW_SHEET_HEADERS: dict[str, list[str]] = {
     ],
     'Producten': [
         'Product-ID', 'Project-ID', 'Project', 'Product / deliverable', 'Type', 'Omschrijving',
-        'Voortgang (0-100)', 'Verwachte opleverdatum', 'Werkelijke opleverdatum', 'Opmerking',
+        'Voortgang (0-100)', 'Verwachte opleverdatum', 'Werkelijke opleverdatum', 'Opmerking', 'Hangt af van',
     ],
     'Activiteiten': [
         'Activiteit-ID', 'Project-ID', 'Project', 'Activiteit', 'Startdatum', 'Einddatum',
@@ -313,6 +313,44 @@ def build_template_workbook(
     return buf.getvalue()
 
 
+def _fill_products(sheets: dict[str, Worksheet], tree: dict[str, Any], by_code: dict[str, Any]) -> None:
+    """Vult de Producten-tab — identiek voor 'oud' en 'nieuw', daarom hier één
+    keer, aangeroepen door zowel _fill_oud als _fill_nieuw (mirroring
+    _fill_activities hieronder). tree['products']/tree['productDependencies']
+    komen rechtstreeks uit fetchTree() (api/src/routes/tree.ts), al per
+    projectcode gegroepeerd. Vóór deze functie had de Producten-tab geen
+    'Hangt af van'-kolom: productafhankelijkheden gingen dus verloren bij een
+    "boom leegmaken + uit de volledige-boom-Excel reconstrueren"-scenario,
+    ook al exporteerde/importeerde de aparte één-project-export
+    (project_workbook.py) ze wel correct."""
+    prod_ws = sheets['Producten']
+    product_name_by_id: dict[Any, str] = {}
+    for products in (tree.get('products', {}) or {}).values():
+        for p in products:
+            product_name_by_id[p.get('id')] = p.get('name', '')
+
+    product_preds: dict[Any, list[tuple[str, int | float, str]]] = {}
+    for deps in (tree.get('productDependencies', {}) or {}).values():
+        for d in deps:
+            product_preds.setdefault(d.get('successorId'), []).append((
+                product_name_by_id.get(d.get('predecessorId'), '?'),
+                d.get('lagAmount') or 0,
+                d.get('lagEenheid') or 'd',
+            ))
+
+    for project_code, products in (tree.get('products', {}) or {}).items():
+        project_el = by_code.get(project_code)
+        project_name = project_el['name'] if project_el else ''
+        for p in products:
+            preds = product_preds.get(p.get('id'), [])
+            prod_ws.append([
+                p.get('code', ''), project_code, project_name, p.get('name', ''),
+                p.get('type', 'deliverable'), p.get('omschrijving', ''), p.get('pctGereed', 0),
+                p.get('verwachteDatum') or '', p.get('werkelijkeDatum') or '', p.get('opmerking', ''),
+                '; '.join(format_product_dependency(n, la, le) for (n, la, le) in preds),
+            ])
+
+
 def _fill_activities(sheets: dict[str, Worksheet], tree: dict[str, Any], by_code: dict[str, Any]) -> None:
     """Vult de Activiteiten-tab — identiek voor 'oud' en 'nieuw' (net als
     Producten hierboven), daarom hier één keer, aangeroepen door zowel
@@ -394,17 +432,7 @@ def _fill_oud(sheets: dict[str, Worksheet], tree: dict[str, Any]) -> None:
             ps.get('rag', ''), ps.get('toelichting', ''), ps.get('gerapporteerdOp') or '', el.get('description', ''),
         ])
 
-    prod_ws = sheets['Producten']
-    for project_code, products in (tree.get('products', {}) or {}).items():
-        project_el = by_code.get(project_code)
-        project_name = project_el['name'] if project_el else ''
-        for p in products:
-            prod_ws.append([
-                p.get('code', ''), project_code, project_name, p.get('name', ''),
-                p.get('type', 'deliverable'), p.get('omschrijving', ''), p.get('pctGereed', 0),
-                p.get('verwachteDatum') or '', p.get('werkelijkeDatum') or '', p.get('opmerking', ''),
-            ])
-
+    _fill_products(sheets, tree, by_code)
     _fill_activities(sheets, tree, by_code)
 
     tags_ws = sheets['Tags']
@@ -470,17 +498,7 @@ def _fill_nieuw(sheets: dict[str, Worksheet], tree: dict[str, Any]) -> None:
             ps.get('rag', ''), ps.get('toelichting', ''), ps.get('gerapporteerdOp') or '', el.get('description', ''),
         ])
 
-    prod_ws = sheets['Producten']
-    for project_code, products in (tree.get('products', {}) or {}).items():
-        project_el = by_code.get(project_code)
-        project_name = project_el['name'] if project_el else ''
-        for p in products:
-            prod_ws.append([
-                p.get('code', ''), project_code, project_name, p.get('name', ''),
-                p.get('type', 'deliverable'), p.get('omschrijving', ''), p.get('pctGereed', 0),
-                p.get('verwachteDatum') or '', p.get('werkelijkeDatum') or '', p.get('opmerking', ''),
-            ])
-
+    _fill_products(sheets, tree, by_code)
     _fill_activities(sheets, tree, by_code)
 
     tags_ws = sheets['Tags']

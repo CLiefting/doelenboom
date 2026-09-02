@@ -135,7 +135,11 @@ importsRouter.post(
     }>;
     edges: Array<{ source: string; target: string; weight: string | null; toelichting: string }>;
     projectStatus: Record<string, { projectstatus: string; rag: string; toelichting: string; gerapporteerdOp: string | null; clusterPpt?: string }>;
-    products: Record<string, Array<{ code: string; name: string; type?: string; omschrijving: string; pctGereed: number; verwachteDatum: string | null; werkelijkeDatum: string | null; opmerking: string }>>;
+    products: Record<string, Array<{
+      code: string; name: string; type?: string; omschrijving: string; pctGereed: number;
+      verwachteDatum: string | null; werkelijkeDatum: string | null; opmerking: string;
+      dependsOn?: Array<{ name: string; lagAmount: number; lagEenheid: string }>;
+    }>>;
     activities: Record<string, Array<{
       name: string; startDate: string; endDate: string; omschrijving: string;
       isMilestone: boolean; isSummary: boolean;
@@ -199,15 +203,38 @@ importsRouter.post(
         );
       }
 
+      // Producten + hun onderlinge afhankelijkheden — zelfde tweetraps-aanpak
+      // als bij Activiteiten hieronder: eerst alle producten van dit project
+      // aanmaken (ids ontstaan pas nu), dan pas "Hangt af van" erbij, dat per
+      // product naar een NAAM binnen hetzelfde project verwijst (zie
+      // parser.py Producten-tab/dependency_format.py) — opgelost via
+      // nameToId. Type staat hier altijd vast op 'FS', net als bij het
+      // rechtstreeks aanmaken via de UI (zie PRODUCT_DEPENDENCY_TYPES in
+      // routes/products.ts) — er is dus geen apart veld voor in de Excel.
       for (const [code, prods] of Object.entries(parsed.products ?? {})) {
         const elementId = elementIdByCode.get(code);
         if (!elementId) continue;
+        const nameToId = new Map<string, number>();
         for (const p of prods) {
-          await client.query(
+          const r = await client.query(
             `insert into products (element_id, code, name, type, omschrijving, pct_gereed, verwachte_datum, werkelijke_datum, opmerking)
-             values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+             values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning id`,
             [elementId, p.code ?? '', p.name, p.type ?? 'deliverable', p.omschrijving ?? '', p.pctGereed ?? 0, p.verwachteDatum || null, p.werkelijkeDatum || null, p.opmerking ?? '']
           );
+          nameToId.set(p.name, r.rows[0].id);
+        }
+        for (const p of prods) {
+          const successorId = nameToId.get(p.name);
+          if (!successorId) continue;
+          for (const dep of p.dependsOn ?? []) {
+            const predecessorId = nameToId.get(dep.name);
+            if (!predecessorId || predecessorId === successorId) continue;
+            await client.query(
+              `insert into product_dependencies (predecessor_id, successor_id, type, lag_amount, lag_eenheid)
+               values ($1,$2,'FS',$3,$4) on conflict do nothing`,
+              [predecessorId, successorId, dep.lagAmount || 0, dep.lagEenheid || 'd']
+            );
+          }
         }
       }
 

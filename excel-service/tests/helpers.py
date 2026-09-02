@@ -57,16 +57,19 @@ def make_tree(**overrides: Any) -> dict[str, Any]:
         'products': {
             'P1': [
                 {
-                    'code': 'PR1', 'name': 'Deliverable 1', 'type': 'deliverable',
+                    'id': 801, 'code': 'PR1', 'name': 'Deliverable 1', 'type': 'deliverable',
                     'omschrijving': 'Omschrijving', 'pctGereed': 40,
                     'verwachteDatum': '2026-09-01', 'werkelijkeDatum': None, 'opmerking': '',
                 },
                 {
-                    'code': 'PR2', 'name': 'Mijlpaal 1', 'type': 'mijlpaal',
+                    'id': 802, 'code': 'PR2', 'name': 'Mijlpaal 1', 'type': 'mijlpaal',
                     'omschrijving': '', 'pctGereed': 0,
                     'verwachteDatum': '2026-12-01', 'werkelijkeDatum': None, 'opmerking': '',
                 },
             ],
+        },
+        'productDependencies': {
+            'P1': [{'id': 71, 'predecessorId': 801, 'successorId': 802, 'type': 'FS', 'lagAmount': 2, 'lagEenheid': 'w'}],
         },
         'activities': {
             'P1': [

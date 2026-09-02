@@ -82,8 +82,19 @@ describe('imports/exports (Excel round-trip via excel-service)', () => {
     await req('POST', `/api/doelenbomen/${doelenboomId}/edges`, {
       token: adminToken, body: { source: 'P1', target: 'C1', weight: 'ondersteunend' },
     });
-    await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P1/products`, {
+    const deliverable1 = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P1/products`, {
       token: adminToken, body: { name: 'Deliverable 1', type: 'deliverable', pctGereed: 40, verwachteDatum: '2026-09-01' },
+    });
+    const deliverable2 = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P1/products`, {
+      token: adminToken, body: { name: 'Deliverable 2', type: 'deliverable', pctGereed: 0 },
+    });
+    // Een productafhankelijkheid, om te controleren dat ook die (nieuw: zie
+    // exporter.py/parser.py Producten-tab "Hangt af van") een volledige
+    // export->import->publiceer-rondgang overleeft — vóór die kolom bestond,
+    // ging deze afhankelijkheid bij zo'n rondgang verloren (het bugrapport
+    // waar deze fix een antwoord op is).
+    await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P1/products/dependencies`, {
+      token: adminToken, body: { predecessorId: deliverable1.body.id, successorId: deliverable2.body.id, lagAmount: 2, lagEenheid: 'w' },
     });
     await req('PUT', `/api/doelenbomen/${doelenboomId}/elements/P1/project-status`, {
       token: adminToken, body: { projectstatus: 'Actief', rag: 'Groen' },
@@ -204,6 +215,19 @@ describe('imports/exports (Excel round-trip via excel-service)', () => {
     assert.equal(importedTree.body.products['P1'][0].type, 'deliverable');
     assert.equal(importedTree.body.projectStatus['P1'].projectstatus, 'Actief');
     assert.equal(importedTree.body.projectStatus['P1'].rag, 'Groen');
+
+    assert.equal(importedTree.body.productDependencies['P1']?.length, originalTree.body.productDependencies['P1']?.length);
+    const importedProdByName = Object.fromEntries(
+      (importedTree.body.products['P1'] as Array<{ id: number; name: string }>).map((p) => [p.name, p])
+    );
+    const importedProdDep = (
+      importedTree.body.productDependencies['P1'] as Array<{ predecessorId: number; successorId: number; type: string; lagAmount: number; lagEenheid: string }>
+    )[0];
+    assert.equal(importedProdDep.predecessorId, importedProdByName['Deliverable 1'].id);
+    assert.equal(importedProdDep.successorId, importedProdByName['Deliverable 2'].id);
+    assert.equal(importedProdDep.type, 'FS');
+    assert.equal(importedProdDep.lagAmount, 2);
+    assert.equal(importedProdDep.lagEenheid, 'w');
 
     assert.equal(importedTree.body.activities['P1']?.length, originalTree.body.activities['P1']?.length);
     const importedActByName = Object.fromEntries(

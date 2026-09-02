@@ -36,7 +36,9 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from .cleaning import clean_date, clean_pct, clean_text, norm, split_entries as _split_entries
 from .dependency_format import format_dependency as _format_dependency
+from .dependency_format import format_product_dependency as _format_product_dependency
 from .dependency_format import parse_dependency_entry as _parse_dependency_entry
+from .dependency_format import parse_product_dependency_entry as _parse_product_dependency_entry
 from .excel_format_version import PROJECT_EXPORT_FORMAT_VERSION
 from .exporter import VALIDATIELIJSTEN
 from .parser import read_config_value, read_sheet
@@ -93,21 +95,6 @@ def _add_dropdown(ws: Worksheet, values: list[str], cell_range: str) -> None:
     dv.errorTitle = 'Ongeldige waarde'
     ws.add_data_validation(dv)
     dv.add(cell_range)
-
-
-def _format_product_dependency(name: str, lag_amount: int | float | None, lag_eenheid: str | None) -> str:
-    """Zelfde idee als _format_dependency, maar voor productafhankelijkheden:
-    die zijn altijd FS (zie PRODUCT_DEPENDENCY_TYPES in
-    api/src/routes/products.ts, de API dwingt dit server-side af — een type
-    hoeft hier dus niet opgeslagen te worden) en gebruiken lag_amount +
-    lag_eenheid (d/w/m) i.p.v. een vlakke lag_days zoals activiteiten. 'Taak A'
-    (geen vertraging) blijft kaal; anders bv. 'Taak B (+2w)'. Zie
-    _parse_product_dependency_entry hieronder voor de inverse."""
-    lag_amount = lag_amount or 0
-    lag_eenheid = lag_eenheid or 'd'
-    if lag_amount == 0:
-        return name
-    return f'{name} ({lag_amount:+g}{lag_eenheid})'
 
 
 def build_project_workbook(data: dict[str, Any], meta: dict[str, Any]) -> bytes:
@@ -212,36 +199,6 @@ def build_project_workbook(data: dict[str, Any], meta: dict[str, Any]) -> bytes:
 # Parsen (import) — geeft (status, report, parsed) terug, zelfde contract als
 # parse_workbook in parser.py.
 # ---------------------------------------------------------------------------
-
-_PRODUCT_DEP_RE = re.compile(r'^(?P<name>.*?)(?:\s*\((?P<lag>[+-]?\d+(?:\.\d+)?)(?P<unit>[dwm])?\))?\s*$')
-
-
-def _parse_product_dependency_entry(entry: str) -> tuple[str, int | float, str]:
-    """Inverse van _format_product_dependency: 'Taak A' -> ('Taak A', 0, 'd');
-    'Taak B (+2w)' -> ('Taak B', 2, 'w'). Ondersteunt ook kale oudere bestanden
-    van vóór deze wijziging die alleen de naam bevatten (dan is er geen match
-    op de haakjes-groep en valt lag/unit terug op 0/'d' — geen dataverlies
-    t.o.v. het gedrag hiervoor, alleen geen extra informatie). Een ontbrekende
-    eenheid-letter (bv. handmatig '(+2)' ingetypt) valt terug op 'd', dezelfde
-    default als de API (zie PRODUCT_DEPENDENCY_LAG_EENHEDEN in
-    api/src/routes/products.ts)."""
-    m = _PRODUCT_DEP_RE.match(entry.strip())
-    if not m:
-        return entry.strip(), 0, 'd'
-    name = (m.group('name') or '').strip()
-    lag_raw = m.group('lag')
-    unit_raw = (m.group('unit') or 'd').lower()
-    if unit_raw not in ('d', 'w', 'm'):
-        unit_raw = 'd'
-    if not lag_raw:
-        return name, 0, 'd'
-    try:
-        lag = float(lag_raw)
-        lag_amount: int | float = int(lag) if lag == int(lag) else lag
-    except ValueError:
-        lag_amount = 0
-    return name, lag_amount, unit_raw
-
 
 def _parse_id(value: object) -> int | None:
     if value is None or value == '':

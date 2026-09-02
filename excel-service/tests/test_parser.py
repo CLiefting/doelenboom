@@ -299,6 +299,40 @@ class TestProducten:
         pct_by_name = {p['name']: p['pctGereed'] for p in parsed['products']['P1']}
         assert pct_by_name == {'A': 50, 'B': 80}
 
+    def test_hangt_af_van_met_en_zonder_vertraging_wordt_geparsed(self):
+        # Vóór deze kolom bestond gingen productafhankelijkheden verloren bij
+        # een export/import via de volledige boom (zie de sessie-samenvatting
+        # bij dit bugrapport) — dit dekt de parse-kant van de fix.
+        content = oud_workbook(
+            ref_rows=[['P1', 'Project', 'Project 1', '', '', '', '', '', '', '', '', '']],
+            prod_rows=[
+                ['PR1', 'P1', 'Project 1', 'A', 'deliverable', '', 0, '', '', '', ''],
+                ['PR2', 'P1', 'Project 1', 'B', 'deliverable', '', 0, '', '', '', 'A (+2w)'],
+                ['PR3', 'P1', 'Project 1', 'C', 'deliverable', '', 0, '', '', '', 'A; B (-1d)'],
+            ],
+        )
+        _, report, parsed = parse_workbook(content)
+        assert report['warnings'] == []
+        products_by_name = {p['name']: p for p in parsed['products']['P1']}
+        assert products_by_name['A']['dependsOn'] == []
+        assert products_by_name['B']['dependsOn'] == [{'name': 'A', 'lagAmount': 2, 'lagEenheid': 'w'}]
+        assert products_by_name['C']['dependsOn'] == [
+            {'name': 'A', 'lagAmount': 0, 'lagEenheid': 'd'},
+            {'name': 'B', 'lagAmount': -1, 'lagEenheid': 'd'},
+        ]
+
+    def test_producten_zonder_hangt_af_van_kolom_blijft_backward_compatible(self):
+        # Simuleert een export van vóór deze kolom bestond: geen crash, gewoon
+        # een lege dependsOn — net als bij het ontbreken van de Activiteiten-
+        # tab hierboven.
+        content = oud_workbook(
+            ref_rows=[['P1', 'Project', 'Project 1', '', '', '', '', '', '', '', '', '']],
+            prod_rows=[['PR1', 'P1', 'Project 1', 'A', 'deliverable', '', 0, '', '', '']],
+        )
+        _, report, parsed = parse_workbook(content)
+        assert report['warnings'] == []
+        assert parsed['products']['P1'][0]['dependsOn'] == []
+
 
 class TestActiviteiten:
     def test_voorgangers_met_type_en_vertraging_worden_geparsed(self):
