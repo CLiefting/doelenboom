@@ -815,6 +815,19 @@
   }
   .activity-dep-arrowhead.right { border-left: 6px solid #8a93a6; }
   .activity-dep-arrowhead.left { border-right: 6px solid #8a93a6; }
+  /* Afhankelijkheden tussen PRODUCTEN (deliverables/mijlpalen, product_dependencies)
+     krijgen in dezelfde Gantt-overlay een eigen kleur (zelfde blauw als de
+     projecttijdlijn/timelineLegendIcon hierboven) i.p.v. het neutrale grijs
+     van activiteit-afhankelijkheden — zo is in één oogopslag te zien welke
+     pijl bij welk soort relatie hoort, zie dependencyArrowsHtml. */
+  .activity-dep-seg.product { background: #2F5597; }
+  .activity-dep-arrowhead.product.right { border-left-color: #2F5597; }
+  .activity-dep-arrowhead.product.left { border-right-color: #2F5597; }
+  /* Vertraging-veld (bedrag + eenheid) in het "Afhankelijkheid toevoegen"-
+     modal van een product, zie product-dep-link-modal-backdrop. */
+  .product-dep-lag-row { display: flex; gap: 6px; }
+  .product-dep-lag-row input[type="number"] { width: 70px; flex: none; }
+  .product-dep-lag-row select { flex: 1; }
   /* Afhankelijkheden-sectie in het activiteiten-formulier (niet in de Gantt-
      rij zelf, zie het commentaar bij ACTIVITY_ROW_STRIDE hierboven) —
      voorganger-chips ("Volgt op: <naam> (FS)"), hergebruikt .dp-chip/
@@ -1518,16 +1531,27 @@
 
   <!-- Voorganger toevoegen aan het product dat in het product-formulier
        hierboven wordt bewerkt (productDepLinkSuccessorId/productDepLinkProjectCode)
-       — zelfde opzet als dep-link-modal-backdrop (activiteiten), maar zonder
-       type/vertraging: een planning item heeft geen startdatum, dus is dat
-       hier niet van toepassing (zie product_dependencies in db/init.sql). -->
+       — zelfde opzet als dep-link-modal-backdrop (activiteiten). Het type is
+       vooralsnog vast op Einde-na-begin (FS) — vandaar geen type-select zoals
+       bij activiteiten, wel een vertraging (in dagen/weken/maanden i.p.v.
+       kaal in dagen, zie product_dependencies in db/init.sql). -->
   <div class="element-modal-backdrop" id="product-dep-link-modal-backdrop">
     <div class="element-modal">
       <h3>Afhankelijkheid toevoegen</h3>
-      <p class="element-modal-hint"><span id="product-dep-link-successor-name"></span> hangt af van het gekozen planning item.</p>
+      <p class="element-modal-hint"><span id="product-dep-link-successor-name"></span> volgt op het gekozen planning item (Einde-na-begin): pas nadat dat item is opgeleverd, plus een eventuele vertraging.</p>
       <form id="product-dep-link-form">
         <label>Hangt af van <span class="req-mark">*</span>
           <select id="product-dep-link-field-predecessor"></select>
+        </label>
+        <label>Vertraging
+          <div class="product-dep-lag-row">
+            <input type="number" id="product-dep-link-field-lag-amount" value="0" step="1">
+            <select id="product-dep-link-field-lag-eenheid">
+              <option value="d">dagen</option>
+              <option value="w">weken</option>
+              <option value="m">maanden</option>
+            </select>
+          </div>
         </label>
         <p class="element-modal-status" id="product-dep-link-modal-status"></p>
         <div class="element-modal-actions">
@@ -3483,7 +3507,7 @@ function runApp(data) {
   const ACTIVITY_ROW_STRIDE = 24 + 3 + 14 + 10;
   const ACTIVITY_ROW_TRACK_MID_Y = 24 + 3 + 14 / 2;
 
-  function activityGanttHtml(id, activities, projectBounds, dependencies, deliverableProducts) {
+  function activityGanttHtml(id, activities, projectBounds, dependencies, deliverableProducts, productDependencies) {
     let boundsInfo = projectBounds || null;
     if (!boundsInfo) {
       let minT = Infinity, maxT = -Infinity;
@@ -3592,7 +3616,11 @@ function runApp(data) {
     // afhankelijkheidstype het juiste ankerpunt: FS/FF vanaf het einde van de
     // voorganger, SS/SF vanaf het begin; FS/SS naar het begin van de
     // opvolger, FF/SF naar het einde — zie readDependencyBody-commentaar in
-    // activities.ts voor de typebetekenis).
+    // activities.ts voor de typebetekenis). Keys dragen een 'a'/'p'-prefix
+    // (activiteit resp. product) — activity.id en product.id komen uit twee
+    // losse DB-sequences en kunnen dus toevallig dezelfde waarde hebben; zie
+    // dependencyArrowsHtml hieronder, die zowel DEPENDENCIES (activiteiten)
+    // als PRODUCT_DEPENDENCIES in dezelfde overlay tekent.
     const layoutByDbId = new Map();
 
     const rowsHtml = renderable.map((a, rowIndex) => {
@@ -3606,7 +3634,7 @@ function runApp(data) {
       const left = Math.min(Math.max(pctFor(s), 0), 100);
       const right = Math.min(Math.max(pctFor(e), 0), 100);
       const width = Math.max(right - left, 1.5);
-      layoutByDbId.set(String(a.dbId), { rowIndex: rowIndex, left: left, right: right });
+      layoutByDbId.set('a' + a.dbId, { rowIndex: rowIndex, left: left, right: right });
       const dateLabel = a.isMilestone ? formatDateNL(a.startDate) : formatDateNL(a.startDate) + ' t/m ' + formatDateNL(a.endDate);
       const kindLabel = a.isMilestone ? 'mijlpaal ' : a.isSummary ? 'fase ' : '';
       const title = escapeHtml(a.name) + ' — ' + kindLabel + dateLabel +
@@ -3677,17 +3705,25 @@ function runApp(data) {
     // die uitsluitend op het EIND van het balkje staat, niet ook aan het
     // begin — dat is de opleverdatum (verwacht/werkelijk), het begin is puur
     // afgeleid uit de duur en heeft geen eigen betekenisvol "moment". Ze
-    // hebben geen bewerk-/verwijderknop (dat blijft het product-formulier)
-    // en tellen niet mee in de rij-index van layoutByDbId hierboven —
-    // ze staan altijd ná alle echte activiteiten, dus de bestaande
-    // afhankelijkheid-pijlen (die alleen tussen activiteiten lopen) blijven
-    // op hun eigen, ongewijzigde rij-index staan.
-    const deliverableRowsHtml = (deliverableProducts || []).map((p) => {
-      const info = productDeliverableBarInfo(p);
-      if (!info) return null;
+    // hebben geen bewerk-/verwijderknop (dat blijft het product-formulier).
+    // Vooraf filteren (i.p.v. .map + .filter(Boolean) achteraf, zoals
+    // voorheen) zodat de rij-INDEX hieronder (renderable.length + dIdx, dus
+    // ná alle echte activiteiten) overeenkomt met de daadwerkelijk
+    // gerenderde volgorde — nodig om ze net als activiteiten in
+    // layoutByDbId te zetten, voor de PRODUCT_DEPENDENCIES-pijlen hieronder
+    // (dependencyArrowsHtml). Een product zonder duur (dus zonder balkje
+    // hier) kan wél een afhankelijkheid hebben, maar krijgt dan simpelweg
+    // geen pijl getekend — precies zoals een afhankelijkheid tussen
+    // activiteiten zonder geldige datum al stilzwijgend wordt overgeslagen.
+    const deliverableRenderable = (deliverableProducts || [])
+      .map((p) => ({ p: p, info: productDeliverableBarInfo(p) }))
+      .filter((x) => x.info);
+
+    const deliverableRowsHtml = deliverableRenderable.map(({ p, info }, dIdx) => {
       const left = Math.min(Math.max(pctFor(info.startT), 0), 100);
       const right = Math.min(Math.max(pctFor(info.endT), 0), 100);
       const width = Math.max(right - left, 1.5);
+      layoutByDbId.set('p' + p.dbId, { rowIndex: renderable.length + dIdx, left: left, right: right });
       const statusClass = activityStatusClass(info.startT, info.endT);
       const kindLabel = info.type === 'mijlpaal' ? 'mijlpaal' : 'deliverable';
       const title = escapeHtml(p.name) + ' — ' + kindLabel + ', duur ' + info.durationLabel +
@@ -3737,7 +3773,16 @@ function runApp(data) {
       '</div>';
     }).filter(Boolean).join('');
 
-    const depsHtml = dependencyArrowsHtml(dependencies, layoutByDbId);
+    // Beide soorten afhankelijkheden in dezelfde overlay: activiteiten
+    // (dependencies, kind 'activity') en producten (productDependencies,
+    // kind 'product' — type ligt daar altijd op 'FS', zie
+    // PRODUCT_DEPENDENCY_TYPES in api/src/routes/products.ts). 'kind' bepaalt
+    // in dependencyArrowsHtml welke laag van layoutByDbId (prefix 'a'/'p')
+    // wordt geraadpleegd en geeft de pijl zijn eigen kleur (CSS: .product).
+    const combinedDependencies =
+      (dependencies || []).map((d) => ({ ...d, kind: 'activity' }))
+        .concat((productDependencies || []).map((d) => ({ ...d, kind: 'product', type: d.type || 'FS' })));
+    const depsHtml = dependencyArrowsHtml(combinedDependencies, layoutByDbId);
 
     return '<div class="activity-gantt-wrap">' +
       '<div class="activity-gantt-axis-track">' + ticksHtml + labelsHtml + todayHtml + '</div>' +
@@ -3753,14 +3798,21 @@ function runApp(data) {
   // (dezelfde as als de balkjes), Y-posities zijn vaste pixels uit de rij-
   // index (ACTIVITY_ROW_STRIDE/ACTIVITY_ROW_TRACK_MID_Y hierboven). Een
   // afhankelijkheid waarvan de voorganger en/of opvolger niet in deze
-  // (gefilterde) rijenlijst voorkomt (ongeldige datum, of — zou niet moeten
-  // voorkomen — een andere activiteit) wordt stilzwijgend overgeslagen.
+  // (gefilterde) rijenlijst voorkomt (ongeldige datum, of bij een
+  // product-afhankelijkheid: geen van beide/één van beide heeft een
+  // ingevulde duur, dus geen balkje — zie deliverableRenderable hierboven)
+  // wordt stilzwijgend overgeslagen. dep.kind ('activity' of 'product', zie
+  // combinedDependencies hierboven) bepaalt zowel welke laag van
+  // layoutByDbId (prefix 'a'/'p') geraadpleegd wordt als de kleur (CSS:
+  // .activity-dep-seg.product/.activity-dep-arrowhead.product).
   function dependencyArrowsHtml(dependencies, layoutByDbId) {
     if (!dependencies || !dependencies.length) return '';
     const STUB_PCT = 1.5;
     return dependencies.map((dep) => {
-      const pred = layoutByDbId.get(String(dep.predecessorId));
-      const succ = layoutByDbId.get(String(dep.successorId));
+      const prefix = dep.kind === 'product' ? 'p' : 'a';
+      const kindClass = dep.kind === 'product' ? ' product' : '';
+      const pred = layoutByDbId.get(prefix + dep.predecessorId);
+      const succ = layoutByDbId.get(prefix + dep.successorId);
       if (!pred || !succ) return '';
       const type = dep.type || 'FS';
       const predX = (type === 'SS' || type === 'SF') ? pred.left : pred.right;
@@ -3769,11 +3821,11 @@ function runApp(data) {
       const y2 = succ.rowIndex * ACTIVITY_ROW_STRIDE + ACTIVITY_ROW_TRACK_MID_Y;
       const dir = succX >= predX ? 1 : -1;
       const midX = predX + STUB_PCT * dir;
-      const segA = '<div class="activity-dep-seg h" style="left:' + Math.min(predX, midX) + '%;width:' +
+      const segA = '<div class="activity-dep-seg h' + kindClass + '" style="left:' + Math.min(predX, midX) + '%;width:' +
         Math.abs(midX - predX) + '%;top:' + (y1 - 1) + 'px"></div>';
-      const segV = '<div class="activity-dep-seg v" style="left:' + midX + '%;top:' + Math.min(y1, y2) +
+      const segV = '<div class="activity-dep-seg v' + kindClass + '" style="left:' + midX + '%;top:' + Math.min(y1, y2) +
         'px;height:' + Math.abs(y2 - y1) + 'px"></div>';
-      const segB = '<div class="activity-dep-seg h" style="left:' + Math.min(midX, succX) + '%;width:' +
+      const segB = '<div class="activity-dep-seg h' + kindClass + '" style="left:' + Math.min(midX, succX) + '%;width:' +
         Math.abs(succX - midX) + '%;top:' + (y2 - 1) + 'px"></div>';
       // Pijlpuntje op succX, wijzend in de richting waaruit segment B nadert
       // — "right" (border-left-driehoek) heeft z'n tip 6px RECHTS van de
@@ -3784,7 +3836,7 @@ function runApp(data) {
       const arrowLeftCss = arrowDir === 'right'
         ? 'calc(' + succX + '% - 6px)'
         : 'calc(' + succX + '% + 6px)';
-      const arrowhead = '<div class="activity-dep-arrowhead ' + arrowDir + '" style="left:' + arrowLeftCss +
+      const arrowhead = '<div class="activity-dep-arrowhead ' + arrowDir + kindClass + '" style="left:' + arrowLeftCss +
         ';top:' + (y2 - 4) + 'px"></div>';
       return segA + segV + segB + arrowhead;
     }).join('');
@@ -3812,7 +3864,7 @@ function runApp(data) {
     const activities = ACTIVITIES[projectCode] || [];
     const products = PRODUCTS[projectCode] || [];
     const bounds = computeProjectTimelineBounds(products);
-    wrapEl.outerHTML = activityGanttHtml(projectCode, activities, bounds, DEPENDENCIES[projectCode] || [], products);
+    wrapEl.outerHTML = activityGanttHtml(projectCode, activities, bounds, DEPENDENCIES[projectCode] || [], products, PRODUCT_DEPENDENCIES[projectCode] || []);
   }
 
   // Titel + inklapbare body ("Activiteiten") onder de tijdlijn van een project
@@ -3836,7 +3888,7 @@ function runApp(data) {
     html += '<div class="dp-activities-body" style="display:none">';
     html += (activities.length === 0 && deliverableCount === 0)
       ? '<div class="dp-empty-note">Nog geen activiteiten gepland voor dit project.</div>'
-      : activityGanttHtml(id, activities, projectBounds, DEPENDENCIES[id] || [], products);
+      : activityGanttHtml(id, activities, projectBounds, DEPENDENCIES[id] || [], products, PRODUCT_DEPENDENCIES[id] || []);
     // "+ Activiteit" staat bewust ONDER de lijst (i.p.v. in de titelbalk erboven,
     // zoals bij Producten) — bij meerdere activiteiten is dat de plek waar de
     // blik na het lezen van de laatste rij toch al staat. "Importeren uit MS
@@ -5480,9 +5532,9 @@ function runApp(data) {
 
   // Bouwt de "hangt af van"-chips + "+ Afhankelijkheid"-knop voor het product
   // dat nu in het formulier open staat (productModalProjectCode/productModalProductId)
-  // — zelfde opzet als renderActivityDepsSection, maar zonder type/vertraging
-  // (zie product_dependencies in db/init.sql: een planning item heeft alleen
-  // een enkel datumpunt, geen start-/einddatum).
+  // — zelfde opzet als renderActivityDepsSection, inclusief vertraging-suffix
+  // in de chip; alleen het type (vast op FS) tonen we niet apart, dat staat
+  // al in de hint-tekst van het toevoegen-modal (zie product-dep-link-modal-backdrop).
   function renderProductDepsSection() {
     if (!productDepsList) return;
     const deps = (PRODUCT_DEPENDENCIES[productModalProjectCode] || [])
@@ -5490,7 +5542,9 @@ function runApp(data) {
     const nameByDbId = new Map((PRODUCTS[productModalProjectCode] || []).map((p) => [String(p.dbId), p.name]));
     productDepsList.innerHTML = deps.map((d) => {
       const predName = nameByDbId.get(String(d.predecessorId)) || '?';
-      return '<span class="dp-chip">Hangt af van: <b>' + escapeHtml(predName) + '</b>' +
+      const lagSuffix = d.lagAmount ? ' <span class="activity-dep-chip-type">(' +
+        (d.lagAmount > 0 ? '+' : '') + d.lagAmount + (d.lagEenheid || 'd') + ')</span>' : '';
+      return '<span class="dp-chip">Hangt af van: <b>' + escapeHtml(predName) + '</b>' + lagSuffix +
         '<button type="button" class="dp-chip-remove crud-only product-dep-remove-btn" data-code="' + escapeHtml(productModalProjectCode) +
           '" data-dep-id="' + escapeHtml(String(d.dbId)) + '" title="Afhankelijkheid verwijderen">&times;</button></span>';
     }).join('') +
@@ -5614,16 +5668,18 @@ function runApp(data) {
   }
 
   // ---- Afhankelijkheden tussen producten/planning items (product_dependencies) ----
-  // Simpeler dan activiteit-afhankelijkheden hierboven: alleen "hangt af van",
-  // geen type (FS/SS/FF/SF) en geen vertraging — een planning item heeft maar
-  // één datumpunt (verwachte/werkelijke datum), geen start-/einddatum om zo'n
-  // relatie tegen af te zetten. Beheer gebeurt via de "Afhankelijkheden"-sectie
-  // in het productformulier hierboven (renderProductDepsSection); dit hier is
-  // het losse "afhankelijkheid toevoegen"-modal (zelfde opzet als
+  // Zelfde relatie-idee als bij activiteiten ("hangt af van"), maar het type
+  // ligt vooralsnog vast op Einde-na-begin (FS) — zie PRODUCT_DEPENDENCY_TYPES
+  // in api/src/routes/products.ts. Wél een vertraging, in dagen/weken/
+  // maanden (lagAmount/lagEenheid). Beheer gebeurt via de "Afhankelijkheden"-
+  // sectie in het productformulier hierboven (renderProductDepsSection); dit
+  // hier is het losse "afhankelijkheid toevoegen"-modal (zelfde opzet als
   // dep-link-modal-backdrop) en de verwijder-actie.
   const productDepLinkModalBackdrop = document.getElementById('product-dep-link-modal-backdrop');
   const productDepLinkForm = document.getElementById('product-dep-link-form');
   const productDepLinkFieldPredecessor = document.getElementById('product-dep-link-field-predecessor');
+  const productDepLinkFieldLagAmount = document.getElementById('product-dep-link-field-lag-amount');
+  const productDepLinkFieldLagEenheid = document.getElementById('product-dep-link-field-lag-eenheid');
   const productDepLinkModalStatus = document.getElementById('product-dep-link-modal-status');
   const productDepLinkModalCancelBtn = document.getElementById('product-dep-link-modal-cancel');
   const productDepLinkSuccessorNameEl = document.getElementById('product-dep-link-successor-name');
@@ -5638,6 +5694,8 @@ function runApp(data) {
   function openProductDepLinkModal(projectCode, successorId) {
     productDepLinkProjectCode = projectCode;
     productDepLinkSuccessorId = successorId;
+    if (productDepLinkFieldLagAmount) productDepLinkFieldLagAmount.value = '0';
+    if (productDepLinkFieldLagEenheid) productDepLinkFieldLagEenheid.value = 'd';
     const products = PRODUCTS[projectCode] || [];
     const successor = products.find((p) => String(p.dbId) === String(successorId));
     productDepLinkSuccessorNameEl.textContent = successor ? successor.name : 'Dit planning item';
@@ -5680,6 +5738,8 @@ function runApp(data) {
           body: JSON.stringify({
             predecessorId: Number(predecessorId),
             successorId: Number(productDepLinkSuccessorId),
+            lagAmount: Number(productDepLinkFieldLagAmount.value) || 0,
+            lagEenheid: productDepLinkFieldLagEenheid.value || 'd',
           }),
         }
       );
@@ -8189,14 +8249,18 @@ function adaptTreeResponse(tree) {
   });
 
   // Afhankelijkheden tussen planning items (denk aan "hangt af van") —
-  // predecessorId/successorId verwijzen naar Product.dbId hierboven. Simpeler
-  // dan DEPENDENCIES (activiteiten) hieronder: geen type/lagDays, want een
-  // planning item heeft geen startdatum. Zie api/src/routes/products.ts en de
-  // "Afhankelijkheden"-sectie in het product-formulier (renderProductDepsSection).
+  // predecessorId/successorId verwijzen naar Product.dbId hierboven. Het type
+  // ligt vooralsnog altijd op 'FS' (zie PRODUCT_DEPENDENCY_TYPES in
+  // api/src/routes/products.ts); lagAmount/lagEenheid is de vertraging in de
+  // eenheid waarin 'm is ingevoerd (dagen/weken/maanden). Zie
+  // api/src/routes/products.ts en de "Afhankelijkheden"-sectie in het
+  // product-formulier (renderProductDepsSection), en de dependency-pijlen in
+  // de Activiteiten-Gantt (activityGanttHtml).
   const PRODUCT_DEPENDENCIES = {};
   Object.keys(tree.productDependencies || {}).forEach((id) => {
     PRODUCT_DEPENDENCIES[id] = (tree.productDependencies[id] || []).map((d) => ({
       dbId: d.id, predecessorId: d.predecessorId, successorId: d.successorId,
+      type: d.type || 'FS', lagAmount: d.lagAmount || 0, lagEenheid: d.lagEenheid || 'd',
     }));
   });
 

@@ -256,20 +256,38 @@ productsRouter.delete('/doelenbomen/:id/elements/:code/products/:productId', req
 });
 
 // ---- Afhankelijkheden tussen planning items (product_dependencies) ----
-// Simpeler dan de afhankelijkheden tussen activiteiten (activities.ts): een
-// planning item heeft geen startdatum (alleen een verwachte/werkelijke
-// opleverdatum, één moment), dus een FS/SS/FF/SF-type zoals bij activiteiten
-// heeft hier geen betekenis — puur "successor hangt af van predecessor",
-// zonder type of vertraging. Puur informatief (geen scheduling-engine).
+// Analoog aan de afhankelijkheden tussen activiteiten (activities.ts): sinds
+// producten/mijlpalen met een ingevulde 'duur' ook als balkje in de
+// Activiteiten-Gantt kunnen verschijnen (productDeliverableBarInfo in
+// tree.html) hebben ze daar wel degelijk een begin én eind, dus is een
+// type/vertraging hier zinvol geworden. PRODUCT_DEPENDENCY_TYPES bevat
+// vooralsnog alleen 'FS' (Einde-na-begin) — Charles wil dit initieel beperkt
+// houden; de kolom staat al klaar voor SS/FF/SF (zie db/init.sql), dus een
+// latere uitbreiding is alleen deze lijst oprekken, geen nieuwe migratie.
+//
+// lag_amount/lag_eenheid i.p.v. het kale lag_days bij activiteiten: de
+// vertraging blijft in de eenheid staan waarin 'm is ingevoerd (dagen/weken/
+// maanden) i.p.v. altijd omgerekend naar dagen — zelfde opzet als duur/
+// duurEenheid op products zelf. Puur informatief (geen scheduling-engine):
+// de dependency-pijl in de Gantt (tree.html: activityGanttHtml) verandert
+// niet van positie op basis hiervan.
 //
 // Beide planning items moeten bij hetzelfde project-element (:code) horen —
 // afgedwongen hieronder vóór het inserten, net als bij activity-
 // afhankelijkheden. Bij verwijderen van een planning item verdwijnen
 // bijbehorende afhankelijkheden vanzelf (on delete cascade, zie db/init.sql).
+// Geen PUT-route (in tegenstelling tot activities.ts): er is geen MS
+// Project-herimport voor producten die een bestaande afhankelijkheid zou
+// moeten kunnen bijwerken, dus is verwijderen + opnieuw aanmaken voldoende.
+const PRODUCT_DEPENDENCY_TYPES = ['FS'];
+const PRODUCT_DEPENDENCY_LAG_EENHEDEN = ['d', 'w', 'm'];
 const PRODUCT_DEPENDENCY_SELECT_FIELDS =
-  'id, predecessor_id as "predecessorId", successor_id as "successorId"';
+  'id, predecessor_id as "predecessorId", successor_id as "successorId", type, ' +
+  'lag_amount as "lagAmount", lag_eenheid as "lagEenheid"';
 
-// POST .../products/dependencies — { predecessorId, successorId }
+// POST .../products/dependencies — { predecessorId, successorId, lagAmount?, lagEenheid? }
+// (type wordt niet van de client overgenomen: er is nu maar één toegestane
+// waarde, zie PRODUCT_DEPENDENCY_TYPES hierboven.)
 productsRouter.post(
   '/doelenbomen/:id/elements/:code/products/dependencies',
   requireEditor,
@@ -284,6 +302,20 @@ productsRouter.post(
     if (Number.isInteger(predecessorId) && Number.isInteger(successorId) && predecessorId === successorId) {
       errors.push('Een planning item kan niet van zichzelf afhangen.');
     }
+
+    let lagAmount = 0;
+    if (b.lagAmount !== undefined && b.lagAmount !== null && b.lagAmount !== '') {
+      const n = Number(b.lagAmount);
+      if (!Number.isFinite(n) || !Number.isInteger(n)) errors.push('Vertraging moet een geheel getal zijn.');
+      else lagAmount = n;
+    }
+    const rawLagEenheid = typeof b.lagEenheid === 'string' && b.lagEenheid.trim() ? b.lagEenheid.trim() : 'd';
+    if (!PRODUCT_DEPENDENCY_LAG_EENHEDEN.includes(rawLagEenheid)) {
+      errors.push(`Eenheid voor vertraging moet één van de volgende zijn: ${PRODUCT_DEPENDENCY_LAG_EENHEDEN.join(', ')}.`);
+    }
+    const lagEenheid = PRODUCT_DEPENDENCY_LAG_EENHEDEN.includes(rawLagEenheid) ? rawLagEenheid : 'd';
+    const type = PRODUCT_DEPENDENCY_TYPES[0];
+
     if (errors.length) return res.status(400).json({ error: errors.join(' ') });
 
     const elementId = await findElementId(req.params.id, req.params.code);
@@ -303,10 +335,10 @@ productsRouter.post(
 
     try {
       const result = await pool.query(
-        `insert into product_dependencies (predecessor_id, successor_id)
-         values ($1,$2)
+        `insert into product_dependencies (predecessor_id, successor_id, type, lag_amount, lag_eenheid)
+         values ($1,$2,$3,$4,$5)
          returning ${PRODUCT_DEPENDENCY_SELECT_FIELDS}`,
-        [predecessorId, successorId]
+        [predecessorId, successorId, type, lagAmount, lagEenheid]
       );
       res.status(201).json(result.rows[0]);
     } catch (err) {

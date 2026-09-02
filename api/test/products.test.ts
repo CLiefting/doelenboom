@@ -301,6 +301,11 @@ describe('products (planning items) CRUD', () => {
       assert.equal(created.status, 201);
       assert.equal(created.body.predecessorId, deliverableA);
       assert.equal(created.body.successorId, mijlpaalC);
+      // Zonder type/lagAmount/lagEenheid meegegeven: default type 'FS',
+      // vertraging 0 dagen (zie PRODUCT_DEPENDENCY_TYPES in products.ts).
+      assert.equal(created.body.type, 'FS');
+      assert.equal(created.body.lagAmount, 0);
+      assert.equal(created.body.lagEenheid, 'd');
 
       const tree = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: adminToken });
       assert.ok(tree.body.productDependencies['P2'].some((d: any) => d.id === created.body.id));
@@ -309,6 +314,53 @@ describe('products (planning items) CRUD', () => {
         token: adminToken, body: { predecessorId: deliverableA, successorId: mijlpaalC },
       });
       assert.equal(dup.status, 409);
+    });
+
+    it('vertraging: bewaart lagAmount/lagEenheid (weken/maanden), ook negatief', async () => {
+      const d = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P2/products`, {
+        token: adminToken, body: { name: 'Deliverable met vertraging' },
+      });
+      const created = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P2/products/dependencies`, {
+        token: adminToken,
+        body: { predecessorId: deliverableB, successorId: d.body.id, lagAmount: 2, lagEenheid: 'w' },
+      });
+      assert.equal(created.status, 201);
+      assert.equal(created.body.lagAmount, 2);
+      assert.equal(created.body.lagEenheid, 'w');
+
+      const tree = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: adminToken });
+      const row = tree.body.productDependencies['P2'].find((x: any) => x.id === created.body.id);
+      assert.equal(row.lagAmount, 2);
+      assert.equal(row.lagEenheid, 'w');
+
+      // Negatief mag ook (vroeger/overlap, zelfde als bij activiteiten).
+      const d2 = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P2/products`, {
+        token: adminToken, body: { name: 'Deliverable met negatieve vertraging' },
+      });
+      const negatief = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P2/products/dependencies`, {
+        token: adminToken,
+        body: { predecessorId: deliverableB, successorId: d2.body.id, lagAmount: -1, lagEenheid: 'm' },
+      });
+      assert.equal(negatief.status, 201);
+      assert.equal(negatief.body.lagAmount, -1);
+      assert.equal(negatief.body.lagEenheid, 'm');
+    });
+
+    it('vertraging: valideert lagAmount (geheel getal) en lagEenheid (d/w/m)', async () => {
+      const d = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P2/products`, {
+        token: adminToken, body: { name: 'Deliverable voor validatie' },
+      });
+      const nietGeheel = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P2/products/dependencies`, {
+        token: adminToken,
+        body: { predecessorId: deliverableB, successorId: d.body.id, lagAmount: 1.5 },
+      });
+      assert.equal(nietGeheel.status, 400);
+
+      const onbekendeEenheid = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P2/products/dependencies`, {
+        token: adminToken,
+        body: { predecessorId: deliverableB, successorId: d.body.id, lagAmount: 1, lagEenheid: 'y' },
+      });
+      assert.equal(onbekendeEenheid.status, 400);
     });
 
     it('DELETE verwijdert een afhankelijkheid', async () => {

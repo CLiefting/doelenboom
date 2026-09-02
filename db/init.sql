@@ -323,18 +323,32 @@ create table if not exists products (
 create index if not exists idx_products_element on products(element_id);
 
 -- Afhankelijkheden tussen planning items (deliverables/mijlpalen) binnen
--- hetzelfde project — simpeler dan activity_dependencies hieronder: een
--- planning item heeft geen startdatum (alleen een verwachte/werkelijke
--- opleverdatum, één moment in de tijd), dus een FS/SS/FF/SF-type zoals bij
--- activiteiten heeft hier geen betekenis — puur "successor hangt af van
--- predecessor", zonder type of vertraging. Puur informatief (geen
--- scheduling-engine). Beide planning items moeten bij hetzelfde
--- project-element horen — afgedwongen in de API (routes/products.ts), niet
--- in dit schema (zou een extra join in de check vereisen).
+-- hetzelfde project — analoog aan activity_dependencies hieronder (type +
+-- vertraging), maar de API staat vooralsnog alleen 'FS' toe (zie
+-- routes/products.ts: "initieel alleen een EB/FS-relatie", Charles kan dit
+-- later oprekken naar SS/FF/SF zonder nieuwe migratie omdat de kolom er al
+-- klaar voor staat). Puur informatief (geen scheduling-engine, net als
+-- activity_dependencies) — de pijl in de Activiteiten-Gantt (tree.html:
+-- activityGanttHtml) is puur het passieve visuele resultaat, lag_amount/
+-- lag_eenheid beïnvloeden de positie van die pijl niet.
+--
+-- lag_amount/lag_eenheid i.p.v. het kale lag_days van activity_dependencies:
+-- Charles wilde de vertraging expliciet in dagen/weken/maanden kunnen
+-- opgeven en zo ook weer terugzien (i.p.v. alles omgerekend naar dagen) —
+-- zelfde opzet als duur/duur_eenheid op products hierboven, alleen zonder
+-- 'y' (jaren): voor een vertraging tussen twee planning items binnen één
+-- project is dat een onrealistische eenheid.
+--
+-- Beide planning items moeten bij hetzelfde project-element horen —
+-- afgedwongen in de API (routes/products.ts), niet in dit schema (zou een
+-- extra join in de check vereisen).
 create table if not exists product_dependencies (
   id bigserial primary key,
   predecessor_id bigint not null references products(id) on delete cascade,
   successor_id bigint not null references products(id) on delete cascade,
+  type text not null default 'FS' check (type in ('FS', 'SS', 'FF', 'SF')),
+  lag_amount integer not null default 0,
+  lag_eenheid text not null default 'd' check (lag_eenheid in ('d', 'w', 'm')),
   check (predecessor_id <> successor_id),
   unique (predecessor_id, successor_id)
 );

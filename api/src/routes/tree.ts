@@ -70,7 +70,7 @@ export async function fetchTree(doelenboomId: string) {
   // frontend ze net als products hierboven direct per projectcode ontvangt
   // (tree.html: PRODUCT_DEPENDENCIES[code]).
   const productDependenciesResult = await pool.query(
-    `select el.code as element_code, d.id, d.predecessor_id, d.successor_id
+    `select el.code as element_code, d.id, d.predecessor_id, d.successor_id, d.type, d.lag_amount, d.lag_eenheid
      from product_dependencies d
      join products pp on pp.id = d.predecessor_id
      join elements el on el.id = pp.element_id
@@ -173,6 +173,9 @@ export async function fetchTree(doelenboomId: string) {
       id: row.id,
       predecessorId: row.predecessor_id,
       successorId: row.successor_id,
+      type: row.type,
+      lagAmount: row.lag_amount,
+      lagEenheid: row.lag_eenheid,
     });
   }
 
