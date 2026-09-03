@@ -120,6 +120,56 @@ describe('tenants', () => {
     assert.equal(uit.body.entry_popup_message, 'Let op: dit is testdata.');
   });
 
+  it('PUT /api/tenants/:id: name/slug wijzigen is sysadmin-only', async () => {
+    const slug = `${PREFIX}-t10`;
+    const created = await req('POST', '/api/tenants', { token: sysadminToken, body: { slug, name: 'Voor de rename' } });
+    const tenantId = created.body.id;
+
+    const adminEmail = `${PREFIX}-t10-admin@test.local`;
+    await req('POST', `/api/tenants/${tenantId}/members`, {
+      token: sysadminToken, body: { email: adminEmail, password: 'wachtwoord123', role: 'admin' },
+    });
+    const tenantAdminToken = await login(adminEmail, 'wachtwoord123');
+
+    // Een tenant-admin mag de instellingen wél wijzigen, maar niet de naam/slug.
+    const alsAdmin = await req('PUT', `/api/tenants/${tenantId}`, {
+      token: tenantAdminToken, body: { name: 'Stiekem hernoemd' },
+    });
+    assert.equal(alsAdmin.status, 403);
+
+    const nieuweSlug = `${PREFIX}-t10-nieuw`;
+    const hernoemd = await req('PUT', `/api/tenants/${tenantId}`, {
+      token: sysadminToken, body: { name: 'Na de rename', slug: nieuweSlug },
+    });
+    assert.equal(hernoemd.status, 200);
+    assert.equal(hernoemd.body.name, 'Na de rename');
+    assert.equal(hernoemd.body.slug, nieuweSlug);
+
+    // Andere instellingen wijzigen zonder name/slug mee te sturen laat de
+    // net gezette naam/slug ongemoeid.
+    const alleenTimeout = await req('PUT', `/api/tenants/${tenantId}`, {
+      token: sysadminToken, body: { sessionTimeoutMinutes: 60 },
+    });
+    assert.equal(alleenTimeout.status, 200);
+    assert.equal(alleenTimeout.body.name, 'Na de rename');
+    assert.equal(alleenTimeout.body.slug, nieuweSlug);
+
+    // Lege naam/slug worden geweigerd.
+    const legeNaam = await req('PUT', `/api/tenants/${tenantId}`, {
+      token: sysadminToken, body: { name: '   ' },
+    });
+    assert.equal(legeNaam.status, 400);
+
+    // Een slug die al bij een andere tenant hoort geeft een nette 409.
+    const anderTenant = await req('POST', '/api/tenants', {
+      token: sysadminToken, body: { slug: `${PREFIX}-t10-ander`, name: 'Ander tenant' },
+    });
+    const conflict = await req('PUT', `/api/tenants/${tenantId}`, {
+      token: sysadminToken, body: { slug: anderTenant.body.slug },
+    });
+    assert.equal(conflict.status, 409);
+  });
+
   it('POST /api/tenants valideert verplichte velden', async () => {
     const res = await req('POST', '/api/tenants', { token: sysadminToken, body: { slug: '' } });
     assert.equal(res.status, 400);

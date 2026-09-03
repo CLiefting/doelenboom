@@ -231,6 +231,10 @@ export const api = {
       // aanroep een niet-lege tekst zijn — zie PUT /api/tenants/:id.
       entryPopupEnabled?: boolean;
       entryPopupMessage?: string;
+      // Sysadmin-only (server geeft 403 terug als een tenant-admin dit
+      // meestuurt) — zie PUT /api/tenants/:id.
+      name?: string;
+      slug?: string;
     }
   ) =>
     request<import('./types').TenantSummary>(`/api/tenants/${tenantId}`, {

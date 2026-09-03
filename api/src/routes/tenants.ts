@@ -8,6 +8,10 @@ import { assertCanAddAdmin, computeDefaultLicenseEndDate, LicenseLimitError } fr
 export const tenantsRouter = Router();
 tenantsRouter.use(requireAuth);
 
+function isUniqueViolation(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { code?: string }).code === '23505';
+}
+
 const TENANT_SELECT_FIELDS =
   'id, slug, name, wipe_on_empty, session_timeout_minutes, nightly_export_enabled, open_access_role, ' +
   'entry_popup_enabled, entry_popup_message, created_at';
@@ -83,9 +87,12 @@ tenantsRouter.post('/', requireSysadmin, async (req, res) => {
 });
 
 // PUT /api/tenants/:id — wipeOnEmpty/sessionTimeoutMinutes/openAccessRole/
-// entryPopupEnabled/entryPopupMessage aanpassen. Toegestaan voor sysadmins en
-// tenant-admins van déze tenant (dat valt onder "wijzigen in tenant").
-// Slug/naam wijzigen kan hier bewust niet.
+// entryPopupEnabled/entryPopupMessage/name/slug aanpassen. De eerste groep is
+// toegestaan voor sysadmins én tenant-admins van déze tenant (dat valt onder
+// "wijzigen in tenant"). name/slug zijn bewust sysadmin-only (zie de check
+// hieronder) — een hernoeming raakt hoe een tenant voor de HELE app
+// (picker, andere sysadmins, back-up-bestandspaden die de slug gebruiken)
+// herkenbaar is, geen zelfbedieningsactie voor een individuele tenant-admin.
 //
 // openAccessRole is nullable (null = open toegang uit), dus coalesce() zoals
 // bij wipeOnEmpty/sessionTimeoutMinutes hierboven volstaat niet — dat zou
@@ -93,7 +100,7 @@ tenantsRouter.post('/', requireSysadmin, async (req, res) => {
 // meegestuurd" (allebei worden null in JS/SQL). In plaats daarvan: alleen
 // wijzigen als de key 'openAccessRole' ÜBERHAUPT in de request-body zit
 // ('in b'), ongeacht of de waarde zelf null of een rol is.
-tenantsRouter.put('/:id', requireTenantRoleForTenantParam('admin', 'id'), async (req, res) => {
+tenantsRouter.put('/:id', requireTenantRoleForTenantParam('admin', 'id'), async (req: AuthedRequest, res) => {
   const b = (req.body ?? {}) as Record<string, unknown>;
   const { wipeOnEmpty, sessionTimeoutMinutes, nightlyExportEnabled } = b;
   const hasOpenAccessRole = 'openAccessRole' in b;
@@ -102,18 +109,28 @@ tenantsRouter.put('/:id', requireTenantRoleForTenantParam('admin', 'id'), async 
   const entryPopupEnabled = b.entryPopupEnabled as boolean | undefined;
   const hasEntryPopupMessage = typeof b.entryPopupMessage === 'string';
   const entryPopupMessage = hasEntryPopupMessage ? (b.entryPopupMessage as string).trim() : undefined;
+  const hasName = typeof b.name === 'string';
+  const name = hasName ? (b.name as string).trim() : undefined;
+  const hasSlug = typeof b.slug === 'string';
+  const slug = hasSlug ? (b.slug as string).trim() : undefined;
+
+  if ((hasName || hasSlug) && !req.user!.isSysadmin) {
+    return res.status(403).json({ error: 'Alleen een sysadmin mag de naam of slug van een tenant wijzigen.' });
+  }
   if (
     typeof wipeOnEmpty !== 'boolean' &&
     sessionTimeoutMinutes === undefined &&
     typeof nightlyExportEnabled !== 'boolean' &&
     !hasOpenAccessRole &&
     !hasEntryPopupEnabled &&
-    !hasEntryPopupMessage
+    !hasEntryPopupMessage &&
+    !hasName &&
+    !hasSlug
   ) {
     return res.status(400).json({
       error:
         'Geef wipeOnEmpty, sessionTimeoutMinutes, nightlyExportEnabled, openAccessRole, ' +
-        'entryPopupEnabled en/of entryPopupMessage mee.',
+        'entryPopupEnabled, entryPopupMessage, name en/of slug mee.',
     });
   }
   if (
@@ -139,29 +156,46 @@ tenantsRouter.put('/:id', requireTenantRoleForTenantParam('admin', 'id'), async 
   if (entryPopupEnabled === true && !entryPopupMessage) {
     return res.status(400).json({ error: 'Bij een actieve popup-melding is een tekst (entryPopupMessage) verplicht.' });
   }
-  const result = await pool.query(
-    `update tenants set
-       wipe_on_empty = coalesce($1, wipe_on_empty),
-       session_timeout_minutes = coalesce($2, session_timeout_minutes),
-       nightly_export_enabled = coalesce($3, nightly_export_enabled),
-       open_access_role = case when $4 then $5 else open_access_role end,
-       entry_popup_enabled = coalesce($6, entry_popup_enabled),
-       entry_popup_message = coalesce($7, entry_popup_message)
-     where id = $8
-     returning ${TENANT_SELECT_FIELDS}, ${LICENSE_END_DATE_SELECT}`,
-    [
-      typeof wipeOnEmpty === 'boolean' ? wipeOnEmpty : null,
-      sessionTimeoutMinutes ?? null,
-      typeof nightlyExportEnabled === 'boolean' ? nightlyExportEnabled : null,
-      hasOpenAccessRole,
-      openAccessRole ?? null,
-      hasEntryPopupEnabled ? entryPopupEnabled : null,
-      hasEntryPopupMessage ? entryPopupMessage : null,
-      req.params.id,
-    ]
-  );
-  if (result.rows.length === 0) return res.status(404).json({ error: 'Tenant niet gevonden' });
-  res.json(result.rows[0]);
+  if (hasName && !name) {
+    return res.status(400).json({ error: 'name mag niet leeg zijn.' });
+  }
+  if (hasSlug && !slug) {
+    return res.status(400).json({ error: 'slug mag niet leeg zijn.' });
+  }
+  try {
+    const result = await pool.query(
+      `update tenants set
+         wipe_on_empty = coalesce($1, wipe_on_empty),
+         session_timeout_minutes = coalesce($2, session_timeout_minutes),
+         nightly_export_enabled = coalesce($3, nightly_export_enabled),
+         open_access_role = case when $4 then $5 else open_access_role end,
+         entry_popup_enabled = coalesce($6, entry_popup_enabled),
+         entry_popup_message = coalesce($7, entry_popup_message),
+         name = coalesce($8, name),
+         slug = coalesce($9, slug)
+       where id = $10
+       returning ${TENANT_SELECT_FIELDS}, ${LICENSE_END_DATE_SELECT}`,
+      [
+        typeof wipeOnEmpty === 'boolean' ? wipeOnEmpty : null,
+        sessionTimeoutMinutes ?? null,
+        typeof nightlyExportEnabled === 'boolean' ? nightlyExportEnabled : null,
+        hasOpenAccessRole,
+        openAccessRole ?? null,
+        hasEntryPopupEnabled ? entryPopupEnabled : null,
+        hasEntryPopupMessage ? entryPopupMessage : null,
+        name ?? null,
+        slug ?? null,
+        req.params.id,
+      ]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Tenant niet gevonden' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    if (isUniqueViolation(err)) {
+      return res.status(409).json({ error: 'Er bestaat al een tenant met deze slug.' });
+    }
+    throw err;
+  }
 });
 
 // DELETE /api/tenants/:id — sysadmin-only. Cascade (db/init.sql) ruimt

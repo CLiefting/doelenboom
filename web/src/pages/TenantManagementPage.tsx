@@ -211,6 +211,7 @@ export default function TenantManagementPage({
                 <TenantSettingsForm
                   token={token}
                   tenant={t}
+                  isSysadmin={user.isSysadmin}
                   busy={busy}
                   setBusy={setBusy}
                   setError={setError}
@@ -1283,6 +1284,7 @@ function SaveAsTemplateForm({
 function TenantSettingsForm({
   token,
   tenant,
+  isSysadmin,
   busy,
   setBusy,
   setError,
@@ -1290,11 +1292,17 @@ function TenantSettingsForm({
 }: {
   token: string;
   tenant: TenantSummary;
+  // Naam/slug wijzigen is sysadmin-only (zie PUT /api/tenants/:id) — een
+  // tenant-admin krijgt deze velden dus niet eens te zien, i.p.v. ze wel te
+  // tonen en dan een 403 te laten terugkomen bij het opslaan.
+  isSysadmin: boolean;
   busy: boolean;
   setBusy: (b: boolean) => void;
   setError: (e: string | null) => void;
   onSaved: () => void;
 }) {
+  const [name, setName] = useState(tenant.name);
+  const [slug, setSlug] = useState(tenant.slug);
   const [wipeOnEmpty, setWipeOnEmpty] = useState(tenant.wipe_on_empty);
   const [timeoutMinutes, setTimeoutMinutes] = useState(String(tenant.session_timeout_minutes));
   const [nightlyExportEnabled, setNightlyExportEnabled] = useState(tenant.nightly_export_enabled);
@@ -1306,6 +1314,8 @@ function TenantSettingsForm({
   // Als de gebruiker een andere tenant selecteert moet het formulier de
   // waarden van díe tenant tonen, niet de vorige selectie blijven vasthouden.
   useEffect(() => {
+    setName(tenant.name);
+    setSlug(tenant.slug);
     setWipeOnEmpty(tenant.wipe_on_empty);
     setTimeoutMinutes(String(tenant.session_timeout_minutes));
     setNightlyExportEnabled(tenant.nightly_export_enabled);
@@ -1318,6 +1328,14 @@ function TenantSettingsForm({
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (isSysadmin && !name.trim()) {
+      setError('Naam mag niet leeg zijn.');
+      return;
+    }
+    if (isSysadmin && !slug.trim()) {
+      setError('Slug mag niet leeg zijn.');
+      return;
+    }
     const minutes = Number(timeoutMinutes);
     if (!Number.isFinite(minutes) || minutes <= 0) {
       setError('Aantal minuten moet een positief getal zijn.');
@@ -1332,6 +1350,7 @@ function TenantSettingsForm({
     setSaved(false);
     try {
       await api.updateTenantSettings(token, tenant.id, {
+        ...(isSysadmin ? { name: name.trim(), slug: slug.trim() } : {}),
         wipeOnEmpty,
         sessionTimeoutMinutes: minutes,
         nightlyExportEnabled,
@@ -1350,6 +1369,33 @@ function TenantSettingsForm({
 
   return (
     <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {isSysadmin && (
+        <>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5 }}>
+            Naam
+            <input
+              style={{ ...styles.input, flex: 1 }}
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5 }}>
+            Slug
+            <input
+              style={{ ...styles.input, flex: 1 }}
+              type="text"
+              value={slug}
+              onChange={(e) => setSlug(e.target.value)}
+            />
+          </label>
+          <p style={{ margin: '-4px 0 0 0', fontSize: 12, color: '#9aa0a8' }}>
+            Naam en slug zijn alleen voor sysadmins wijzigbaar. De slug moet uniek zijn over alle tenants; een
+            wijziging verandert niets aan bestaande doelenbomen of leden, maar nachtelijke Excel-back-ups die al
+            op de VPS staan blijven wel onder de oude slug-map staan.
+          </p>
+        </>
+      )}
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5 }}>
         <input type="checkbox" checked={wipeOnEmpty} onChange={(e) => setWipeOnEmpty(e.target.checked)} />
         Standaardinstelling voor nieuwe doelenbomen in deze tenant: automatisch leegmaken zodra niemand meer
