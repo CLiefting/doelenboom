@@ -30,6 +30,14 @@ create table if not exists users (
   -- tijdstip waarop de blokkade weer vervalt.
   failed_login_count integer not null default 0,
   locked_until timestamptz,
+  -- Tweestapsverificatie (MFA, CISO-aandachtspunt) — een 6-tekens-code per
+  -- e-mail naar het eigen e-mailadres van dit account, zie mfa_challenges hieronder
+  -- en api/src/mfa.ts. Voor een sysadmin-account (is_sysadmin = true) is MFA
+  -- ALTIJD verplicht ongeacht deze kolom (zie auth.ts: mfaRequired =
+  -- isSysadmin || mfaEnabled) — mfa_enabled is dus puur de eigen, vrijwillige
+  -- aan/uit-schakelaar voor niet-sysadmin-accounts (zie doelenboom_mfa_
+  -- ontwerp.md in het project voor het volledige ontwerp).
+  mfa_enabled boolean not null default false,
   created_at timestamptz not null default now()
 );
 
@@ -602,7 +610,9 @@ alter table tenants add column if not exists entry_popup_message text not null d
 -- met zich meetrekken.
 create table if not exists audit_log (
   id bigserial primary key,
-  event_type text not null check (event_type in ('doelenboom_view', 'tenant_settings_changed')),
+  event_type text not null check (event_type in (
+    'doelenboom_view', 'tenant_settings_changed', 'mfa_verified', 'mfa_failed'
+  )),
   user_id bigint references users(id) on delete set null,
   tenant_id bigint references tenants(id) on delete set null,
   doelenboom_id bigint references doelenbomen(id) on delete set null,
@@ -616,6 +626,30 @@ create index if not exists idx_audit_log_created on audit_log(created_at desc);
 create index if not exists idx_audit_log_user on audit_log(user_id, created_at desc);
 create index if not exists idx_audit_log_doelenboom on audit_log(doelenboom_id, created_at desc);
 create index if not exists idx_audit_log_tenant on audit_log(tenant_id, created_at desc);
+
+-- Tweestapsverificatie (MFA) — losse tabel per "inlogpoging die op een code
+-- wacht" (zie api/src/mfa.ts), niet vermengd met sessions (dat is pas NA een
+-- geslaagde MFA-verificatie relevant, zie het ontwerp: er bestaat nog geen
+-- sessie/JWT zolang deze rij niet geverifieerd is). id is een ondoorzichtige,
+-- willekeurige token (het "challengeId" dat de frontend teruggeeft) — geen
+-- bigserial, want die zou voorspelbaar zijn en verder geen enkel doel dient
+-- (er wordt nooit op user_id+volgnummer gezocht, alleen op id zelf).
+create table if not exists mfa_challenges (
+  id text primary key,
+  user_id bigint not null references users(id) on delete cascade,
+  -- Zelfde crypt()/pgcrypto-hashpatroon als users.password_hash — een code
+  -- leeft weliswaar maar 10 minuten, maar hoort net zomin als een wachtwoord
+  -- in leesbare vorm in de database te staan.
+  code_hash text not null,
+  attempts integer not null default 0,
+  resend_count integer not null default 0,
+  expires_at timestamptz not null,
+  -- Gezet zodra succesvol geverifieerd — voorkomt hergebruik van dezelfde
+  -- (nog niet verlopen) code voor een tweede sessie.
+  consumed_at timestamptz,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_mfa_challenges_user on mfa_challenges(user_id, created_at desc);
 
 alter table doelenbomen add column if not exists archived_at timestamptz;
 create index if not exists idx_doelenbomen_tenant_active

@@ -11,6 +11,7 @@ import SubscriptionOverviewPage from './pages/SubscriptionOverviewPage';
 import AccountManagementPage from './pages/AccountManagementPage';
 import LicenseCatalogPage from './pages/LicenseCatalogPage';
 import ChangePasswordPage from './pages/ChangePasswordPage';
+import MySecurityPage from './pages/MySecurityPage';
 import HelpPage from './pages/HelpPage';
 import AboutPage from './pages/AboutPage';
 import LegalPage from './pages/LegalPage';
@@ -69,6 +70,7 @@ type View =
   | { name: 'accounts' }
   | { name: 'licenses' }
   | { name: 'password' }
+  | { name: 'my-security' }
   // 'from' onthoudt vanaf welk scherm Help geopend is (picker of tree), zodat
   // "Terug" daar weer naartoe kan — Help is vanuit beide bereikbaar.
   | { name: 'help'; from: 'picker' | 'tree' };
@@ -296,6 +298,15 @@ export default function App() {
         onCancel={() => setView({ name: 'picker' })}
       />
     );
+  } else if (view.name === 'my-security') {
+    content = (
+      <MySecurityPage
+        token={session.token}
+        user={session.user}
+        onDone={(user) => setSession({ ...session, user })}
+        onCancel={() => setView({ name: 'picker' })}
+      />
+    );
   } else if (view.name === 'picker' || !doelenboom) {
     content = (
       <PickerPage
@@ -317,6 +328,7 @@ export default function App() {
         onLicensesRequest={() => setView({ name: 'licenses' })}
         onHelpRequest={() => setView({ name: 'help', from: 'picker' })}
         onChangePasswordRequest={() => setView({ name: 'password' })}
+        onMySecurityRequest={() => setView({ name: 'my-security' })}
       />
     );
   } else if (view.name === 'import') {

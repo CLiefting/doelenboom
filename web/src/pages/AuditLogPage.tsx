@@ -36,8 +36,15 @@ function formatTimestamp(value: string): string {
   return new Date(value).toLocaleString('nl-NL');
 }
 
+const EVENT_LABELS: Record<AuditLogEntry['eventType'], string> = {
+  doelenboom_view: 'Boom bekeken',
+  tenant_settings_changed: 'Tenant-instellingen gewijzigd',
+  mfa_verified: 'MFA geverifieerd (login)',
+  mfa_failed: 'MFA-poging mislukt',
+};
+
 function eventLabel(eventType: AuditLogEntry['eventType']): string {
-  return eventType === 'doelenboom_view' ? 'Boom bekeken' : 'Tenant-instellingen gewijzigd';
+  return EVENT_LABELS[eventType];
 }
 
 function formatDetail(entry: AuditLogEntry): string {
@@ -45,6 +52,10 @@ function formatDetail(entry: AuditLogEntry): string {
     const changes = (entry.detail as { changes?: Record<string, { from: unknown; to: unknown }> }).changes ?? {};
     const parts = Object.entries(changes).map(([field, { from, to }]) => `${field}: ${JSON.stringify(from)} → ${JSON.stringify(to)}`);
     return parts.join(', ');
+  }
+  if (entry.eventType === 'mfa_failed') {
+    const reason = (entry.detail as { reason?: string }).reason;
+    return reason ? `reden: ${reason}` : '';
   }
   return '';
 }
@@ -117,6 +128,12 @@ function AuditLogContent({ token }: { token: string }) {
           </button>
           <button onClick={() => setFilter('tenant_settings_changed')} style={filter === 'tenant_settings_changed' ? styles.toggleBtnActive : styles.toggleBtn}>
             Tenant-instellingen
+          </button>
+          <button onClick={() => setFilter('mfa_verified')} style={filter === 'mfa_verified' ? styles.toggleBtnActive : styles.toggleBtn}>
+            MFA geverifieerd
+          </button>
+          <button onClick={() => setFilter('mfa_failed')} style={filter === 'mfa_failed' ? styles.toggleBtnActive : styles.toggleBtn}>
+            MFA mislukt
           </button>
         </div>
       )}

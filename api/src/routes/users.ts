@@ -15,7 +15,7 @@ function isUniqueViolation(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { code?: string }).code === '23505';
 }
 
-const USER_SELECT_FIELDS = 'id, email, is_sysadmin, must_change_password, created_at';
+const USER_SELECT_FIELDS = 'id, email, is_sysadmin, must_change_password, mfa_enabled, created_at';
 
 async function attachTenantRoles<T extends { id: number }>(users: T[]) {
   if (users.length === 0) return users.map((u) => ({ ...u, tenantRoles: [] }));
@@ -80,16 +80,22 @@ usersRouter.post('/', async (req, res) => {
   }
 });
 
-// PUT /api/users/:id — e-mail/wachtwoord/sysadmin-vlag wijzigen. Alleen
+// PUT /api/users/:id — e-mail/wachtwoord/sysadmin-vlag/mfa-vlag wijzigen. Alleen
 // meegegeven velden worden aangepast. Wordt hier een nieuw wachtwoord gezet
 // (= een sysadmin die reset namens de gebruiker), dan gaat must_change_password
 // standaard aan — tenzij expliciet mustChangePassword: false wordt meegegeven.
+// mfaEnabled hier is tevens het herstelpad voor een vergrendelde niet-sysadmin
+// (code niet ontvangen/bereikbaar, zie doelenboom_mfa_ontwerp.md §6): een
+// sysadmin zet 'm hier uit, net zoals nu al een wachtwoord gereset wordt. Voor
+// een vergrendelde sysadmin is er bewust geen weg via de app (mandatory blijft
+// mandatory) — zie deploy/README.md voor het handmatige herstelcommando.
 usersRouter.put('/:id', async (req: AuthedRequest, res) => {
   const b = (req.body ?? {}) as Record<string, unknown>;
   const userId = req.params.id;
   const email = typeof b.email === 'string' ? b.email.trim().toLowerCase() : undefined;
   const password = typeof b.password === 'string' && b.password ? b.password : undefined;
   const isSysadmin = typeof b.isSysadmin === 'boolean' ? b.isSysadmin : undefined;
+  const mfaEnabled = typeof b.mfaEnabled === 'boolean' ? b.mfaEnabled : undefined;
   const mustChangePassword = password !== undefined ? b.mustChangePassword !== false : undefined;
 
   if (password !== undefined && password.length < 8) {
@@ -113,10 +119,11 @@ usersRouter.put('/:id', async (req: AuthedRequest, res) => {
          email = coalesce($1, email),
          password_hash = case when $2::text is null then password_hash else crypt($2, gen_salt('bf')) end,
          is_sysadmin = coalesce($3, is_sysadmin),
-         must_change_password = coalesce($4, must_change_password)
-       where id = $5
+         must_change_password = coalesce($4, must_change_password),
+         mfa_enabled = coalesce($5, mfa_enabled)
+       where id = $6
        returning ${USER_SELECT_FIELDS}`,
-      [email ?? null, password ?? null, isSysadmin ?? null, mustChangePassword ?? null, userId]
+      [email ?? null, password ?? null, isSysadmin ?? null, mustChangePassword ?? null, mfaEnabled ?? null, userId]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Gebruiker niet gevonden.' });
     res.json((await attachTenantRoles(result.rows))[0]);

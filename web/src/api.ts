@@ -65,10 +65,30 @@ async function request<T>(path: string, options: RequestInit = {}, token?: strin
 
 export const api = {
   login: (email: string, password: string) =>
-    request<{ token: string; user: import('./types').User }>('/api/auth/login', {
+    request<import('./types').LoginResult>('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     }),
+
+  // --- MFA (tweestapsverificatie) — zie doelenboom_mfa_ontwerp.md §2/§6 ---
+  verifyMfa: (challengeId: string, code: string) =>
+    request<{ token: string; user: import('./types').User }>('/api/auth/mfa/verify', {
+      method: 'POST',
+      body: JSON.stringify({ challengeId, code }),
+    }),
+
+  resendMfa: (challengeId: string) =>
+    request<{ expiresInSeconds: number }>('/api/auth/mfa/resend', {
+      method: 'POST',
+      body: JSON.stringify({ challengeId }),
+    }),
+
+  // Zelfbedieningsschakelaar (niet-sysadmins, zie MySecurityPage.tsx).
+  updateMyMfaSetting: (token: string, enabled: boolean) =>
+    request<{ mfaEnabled: boolean }>('/api/auth/mfa-enabled', {
+      method: 'PUT',
+      body: JSON.stringify({ enabled }),
+    }, token),
 
   doelenbomen: (token: string) => request<import('./types').DoelenboomSummary[]>('/api/doelenbomen', {}, token),
 
@@ -275,7 +295,7 @@ export const api = {
   updateUser: (
     token: string,
     userId: number,
-    body: { email?: string; password?: string; isSysadmin?: boolean; mustChangePassword?: boolean }
+    body: { email?: string; password?: string; isSysadmin?: boolean; mustChangePassword?: boolean; mfaEnabled?: boolean }
   ) => request<import('./types').UserSummary>(`/api/users/${userId}`, { method: 'PUT', body: JSON.stringify(body) }, token),
 
   deleteUser: (token: string, userId: number) =>

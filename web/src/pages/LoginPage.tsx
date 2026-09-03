@@ -63,6 +63,18 @@ export default function LoginPage({
   const [busy, setBusy] = useState(false);
   const emailRef = useRef<HTMLInputElement>(null);
 
+  // MFA-tweede-stap (zie doelenboom_mfa_ontwerp.md §2/§7) — een interne
+  // toestandswisseling in dit ene formulier, geen aparte pagina/route: zo
+  // krijgt elke plek die LoginPage hergebruikt (App.tsx, SessionsPage,
+  // DbStatPage, AuditLogPage) dit gratis mee, zonder zelf iets te hoeven weten
+  // over een tweede stap — na een geslaagde /mfa/verify gaat gewoon dezelfde
+  // onLoggedIn-callback af als bij een directe login.
+  const [mfaChallenge, setMfaChallenge] = useState<{ challengeId: string; expiresAt: number } | null>(null);
+  const [code, setCode] = useState('');
+  const [resendBusy, setResendBusy] = useState(false);
+  const [resendNotice, setResendNotice] = useState<string | null>(null);
+  const codeRef = useRef<HTMLInputElement>(null);
+
   // Focus zonder scroll i.p.v. de JSX-autoFocus-prop: het inlogformulier zit
   // in App.tsx's contentAreaStyle-wrapper (flex:1, overflow:'auto') — een
   // eigen, in hoogte begrensd scrollvak i.p.v. de gewone paginascroll (zo kan
@@ -79,6 +91,23 @@ export default function LoginPage({
     emailRef.current?.focus({ preventScroll: true });
   }, []);
 
+  useEffect(() => {
+    if (mfaChallenge) codeRef.current?.focus({ preventScroll: true });
+  }, [mfaChallenge]);
+
+  // Aftelindicatie voor de code-geldigheid (zie §2 in het ontwerp) — puur
+  // visueel (de server is en blijft de bron van waarheid over verlopen/niet),
+  // 1x/seconde een her-render zolang er een openstaande challenge is.
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    if (!mfaChallenge) return;
+    const id = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [mfaChallenge]);
+  const secondsLeft = mfaChallenge ? Math.max(0, Math.round((mfaChallenge.expiresAt - nowTick) / 1000)) : 0;
+  const minutesPart = Math.floor(secondsLeft / 60);
+  const secondsPart = String(secondsLeft % 60).padStart(2, '0');
+
   const noticeText =
     notice === 'idle_timeout'
       ? 'Je bent automatisch uitgelogd wegens 15 minuten inactiviteit (beveiliging).'
@@ -91,13 +120,67 @@ export default function LoginPage({
     setError(null);
     setBusy(true);
     try {
-      const { token, user } = await api.login(email, password);
-      onLoggedIn(token, user);
+      const result = await api.login(email, password);
+      if ('mfaRequired' in result) {
+        setMfaChallenge({ challengeId: result.challengeId, expiresAt: Date.now() + result.expiresInSeconds * 1000 });
+        setCode('');
+      } else {
+        onLoggedIn(result.token, result.user);
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Inloggen mislukt');
     } finally {
       setBusy(false);
     }
+  }
+
+  async function handleVerify(e: FormEvent) {
+    e.preventDefault();
+    if (!mfaChallenge) return;
+    setError(null);
+    setBusy(true);
+    try {
+      const { token, user } = await api.verifyMfa(mfaChallenge.challengeId, code);
+      onLoggedIn(token, user);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Verificatie mislukt');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleResend() {
+    if (!mfaChallenge) return;
+    setError(null);
+    setResendNotice(null);
+    setResendBusy(true);
+    try {
+      const { expiresInSeconds } = await api.resendMfa(mfaChallenge.challengeId);
+      setMfaChallenge({ ...mfaChallenge, expiresAt: Date.now() + expiresInSeconds * 1000 });
+      setCode('');
+      setResendNotice('Er is een nieuwe code verstuurd.');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Opnieuw versturen mislukt');
+    } finally {
+      setResendBusy(false);
+    }
+  }
+
+  function handleBackToPassword() {
+    setMfaChallenge(null);
+    setCode('');
+    setError(null);
+    setResendNotice(null);
+  }
+
+  // Gemaskeerd e-mailadres voor in de codestap ("we hebben een code gestuurd
+  // naar j***@voorbeeld.nl") — puur cosmetisch, geen beveiligingsmaatregel
+  // (de gebruiker heeft het adres net zelf ingetypt), maar voorkomt dat het
+  // volledige adres nog een keer prominent op het scherm staat.
+  function maskEmail(value: string): string {
+    const at = value.indexOf('@');
+    if (at <= 1) return value;
+    return `${value[0]}${'*'.repeat(at - 1)}${value.slice(at)}`;
   }
 
   return (
@@ -182,6 +265,7 @@ export default function LoginPage({
       </div>
 
       <div className="login-form-panel" style={styles.formPanel}>
+        {!mfaChallenge ? (
         <form onSubmit={handleSubmit} style={styles.card}>
           <h1 style={styles.title}>Doelenboom</h1>
           <p style={styles.subtitle}>Log in om verder te gaan.</p>
@@ -228,6 +312,38 @@ export default function LoginPage({
             </div>
           )}
         </form>
+        ) : (
+        <form onSubmit={handleVerify} style={styles.card}>
+          <h1 style={styles.title}>Verificatiecode</h1>
+          <p style={styles.subtitle}>
+            We hebben een code gestuurd naar {maskEmail(email)}. Deze is {minutesPart}:{secondsPart} geldig.
+          </p>
+          <label style={styles.label}>
+            Code
+            <input
+              ref={codeRef}
+              style={{ ...styles.input, letterSpacing: 3, fontFamily: 'monospace', textTransform: 'uppercase' }}
+              type="text"
+              required
+              autoComplete="one-time-code"
+              maxLength={6}
+              value={code}
+              onChange={(e) => setCode(e.target.value.toUpperCase())}
+            />
+          </label>
+          {error && <p style={styles.error}>{error}</p>}
+          {resendNotice && !error && <p style={styles.notice}>{resendNotice}</p>}
+          <button style={styles.button} type="submit" disabled={busy || code.length === 0}>
+            {busy ? 'Bezig…' : 'Bevestigen'}
+          </button>
+          <button type="button" onClick={handleResend} disabled={resendBusy} style={styles.signupLink}>
+            {resendBusy ? 'Bezig…' : 'Geen code ontvangen? Opnieuw versturen'}
+          </button>
+          <button type="button" onClick={handleBackToPassword} style={styles.legalLink}>
+            ← Terug naar inloggen
+          </button>
+        </form>
+        )}
       </div>
       </div>
     </div>

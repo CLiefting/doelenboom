@@ -4,6 +4,7 @@ import { pool } from './db.js';
 import { previewOrCommitWipe } from './tenantWipe.js';
 import { needsTermsAcceptance } from './legal.js';
 import { getAppSettings } from './appSettings.js';
+import { createMfaChallenge, verifyMfaChallenge, resendMfaChallenge } from './mfa.js';
 
 const JWT_SECRET = process.env.JWT_SECRET ?? 'dev-secret-change-me';
 
@@ -125,7 +126,7 @@ authRouter.post('/login', async (req, res) => {
   // voorkomt dat we verklappen of een e-mailadres bestaat).
   const result = await pool.query(
     `select id, email, is_sysadmin, must_change_password, scheduled_deletion_at,
-            failed_login_count, locked_until,
+            failed_login_count, locked_until, mfa_enabled,
             (password_hash = crypt($2, password_hash)) as password_ok
      from users
      where email = $1`,
@@ -195,6 +196,40 @@ authRouter.post('/login', async (req, res) => {
     );
   }
 
+  // MFA-poort (CISO-aandachtspunt, zie doelenboom_mfa_ontwerp.md in het
+  // project en mfa.ts) — verplicht voor sysadmins (ongeacht mfa_enabled),
+  // optioneel voor de rest (zelf aan/uit te zetten, zie mfa_enabled hierboven).
+  // Bewust GEEN sessie/token hier als MFA vereist is: die worden pas
+  // aangemaakt in completeLogin() ná een geslaagde /mfa/verify — vóór dat punt
+  // bestaat er dus geen enkel bruikbaar token voor deze inlogpoging, anders
+  // dan bij mustChangePassword (dat al wél meteen een geldig token geeft en
+  // alleen de frontend-UI blokkeert) zou een kaal token vóór MFA de bedoelde
+  // bescherming juist omzeilbaar maken.
+  const mfaRequired = user.is_sysadmin || user.mfa_enabled;
+  if (mfaRequired) {
+    const challenge = await createMfaChallenge(user.id, user.email);
+    return res.json({
+      mfaRequired: true,
+      challengeId: challenge.challengeId,
+      expiresInSeconds: challenge.expiresInSeconds,
+    });
+  }
+
+  res.json(await completeLogin(user.id));
+});
+
+// Rondt een inlogpoging daadwerkelijk af: maakt de sessies-rij en het JWT aan
+// en bouwt de /me-achtige gebruikersrespons op. Hergebruikt door zowel de
+// MFA-vrije tak hierboven als POST /mfa/verify hieronder (die roept dit pas
+// aan ná een geslaagde codecontrole) — zo bestaat er precies één plek die
+// ooit daadwerkelijk een sessie/token uitgeeft.
+async function completeLogin(userId: number) {
+  const userResult = await pool.query(
+    'select id, email, is_sysadmin, must_change_password, mfa_enabled from users where id = $1',
+    [userId]
+  );
+  const user = userResult.rows[0];
+
   const sessionResult = await pool.query(
     'insert into sessions (user_id) values ($1) returning id',
     [user.id]
@@ -208,17 +243,70 @@ authRouter.post('/login', async (req, res) => {
   );
   const tenantRoles = await fetchTenantRoles(user.id);
   const termsAcceptanceRequired = await needsTermsAcceptance(user.id);
-  res.json({
+  return {
     token,
     user: {
       id: user.id,
       email: user.email,
       isSysadmin: user.is_sysadmin,
       mustChangePassword: user.must_change_password,
+      mfaEnabled: user.mfa_enabled,
       termsAcceptanceRequired,
       tenantRoles,
     },
-  });
+  };
+}
+
+// POST /api/auth/mfa/verify — tweede stap van de inlogflow zodra /login
+// { mfaRequired: true, challengeId, ... } teruggaf. Geen requireAuth (er is
+// immers nog geen sessie): de challengeId zelf (ondoorzichtig, willekeurig,
+// zie mfa.ts) plus de gemailde code zijn hier de enige verificatie.
+authRouter.post('/mfa/verify', async (req, res) => {
+  const { challengeId, code } = req.body ?? {};
+  if (!challengeId || !code) {
+    return res.status(400).json({ error: 'challengeId en code zijn verplicht' });
+  }
+
+  const result = await verifyMfaChallenge(String(challengeId), String(code));
+  if (!result.ok) {
+    const messages: Record<typeof result.reason, string> = {
+      not_found: 'Ongeldige of verlopen aanmeldpoging. Log opnieuw in.',
+      expired: 'Deze code is verlopen. Vraag een nieuwe code aan.',
+      already_used: 'Deze aanmeldpoging is al afgerond of verlopen. Log opnieuw in.',
+      too_many_attempts: 'Te veel foutieve pogingen. Vraag een nieuwe code aan of log opnieuw in.',
+      wrong_code: 'Onjuiste code.',
+    };
+    const status = result.reason === 'too_many_attempts' ? 429 : result.reason === 'not_found' ? 400 : 401;
+    return res.status(status).json({ error: messages[result.reason], reason: result.reason });
+  }
+
+  res.json(await completeLogin(result.userId));
+});
+
+// POST /api/auth/mfa/resend — vervangt de code IN dezelfde challenge (zie
+// resendMfaChallenge in mfa.ts), zodat de frontend dezelfde challengeId
+// blijft gebruiken. Ook hier geen requireAuth, om dezelfde reden als hierboven.
+authRouter.post('/mfa/resend', async (req, res) => {
+  const { challengeId } = req.body ?? {};
+  if (!challengeId) {
+    return res.status(400).json({ error: 'challengeId is verplicht' });
+  }
+
+  const result = await resendMfaChallenge(String(challengeId));
+  if (!result.ok) {
+    const messages: Record<typeof result.reason, string> = {
+      not_found: 'Ongeldige of verlopen aanmeldpoging. Log opnieuw in.',
+      already_used: 'Deze aanmeldpoging is al afgerond of verlopen. Log opnieuw in.',
+      cooldown: 'Wacht nog even voordat je een nieuwe code aanvraagt.',
+      too_many_resends: 'Je hebt het maximaal aantal keer een nieuwe code opgevraagd. Log opnieuw in om het nogmaals te proberen.',
+    };
+    const status = result.reason === 'cooldown' || result.reason === 'too_many_resends' ? 429 : result.reason === 'not_found' ? 400 : 401;
+    return res
+      .status(status)
+      .json({ error: messages[result.reason], reason: result.reason, retryAfterSeconds: result.retryAfterSeconds });
+  }
+
+  res.json({ expiresInSeconds: result.expiresInSeconds });
 });
 
 // Tenants waar deze gebruiker toegang toe heeft: expliciete tenant_users-
@@ -247,12 +335,13 @@ async function fetchTenantRoles(userId: number) {
 
 authRouter.get('/me', requireAuth, async (req: AuthedRequest, res) => {
   const tenantRoles = req.user!.isSysadmin ? [] : await fetchTenantRoles(req.user!.id);
-  const mcp = await pool.query('select must_change_password from users where id = $1', [req.user!.id]);
+  const mcp = await pool.query('select must_change_password, mfa_enabled from users where id = $1', [req.user!.id]);
   const termsAcceptanceRequired = await needsTermsAcceptance(req.user!.id);
   res.json({
     user: {
       ...req.user,
       mustChangePassword: mcp.rows[0]?.must_change_password ?? false,
+      mfaEnabled: mcp.rows[0]?.mfa_enabled ?? false,
       termsAcceptanceRequired,
       tenantRoles,
     },
@@ -290,6 +379,24 @@ authRouter.post('/change-password', requireAuth, async (req: AuthedRequest, res)
   const tenantRoles = req.user!.isSysadmin ? [] : await fetchTenantRoles(req.user!.id);
   const termsAcceptanceRequired = await needsTermsAcceptance(req.user!.id);
   res.json({ user: { ...req.user, mustChangePassword: false, termsAcceptanceRequired, tenantRoles } });
+});
+
+// PUT /api/auth/mfa-enabled — zelfbediening: elke ingelogde gebruiker mag zijn/
+// haar eigen optionele MFA aan/uit zetten (zie doelenboom_mfa_ontwerp.md §6).
+// Sysadmins krijgen hier bewust een 400: hun MFA is verplicht (zie mfaRequired
+// in /login hierboven) en dit ontwerp biedt daar expliciet geen eigen omweg
+// voor — anders zou een gecompromitteerd sysadmin-account zichzelf de
+// bescherming kunnen laten uitschakelen.
+authRouter.put('/mfa-enabled', requireAuth, async (req: AuthedRequest, res) => {
+  if (req.user!.isSysadmin) {
+    return res.status(400).json({ error: 'MFA is verplicht voor sysadmin-accounts en kan niet worden uitgezet.' });
+  }
+  const b = (req.body ?? {}) as Record<string, unknown>;
+  if (typeof b.enabled !== 'boolean') {
+    return res.status(400).json({ error: 'enabled (boolean) is verplicht.' });
+  }
+  await pool.query('update users set mfa_enabled = $1 where id = $2', [b.enabled, req.user!.id]);
+  res.json({ mfaEnabled: b.enabled });
 });
 
 // Heartbeat: zolang de tab open is stuurt de frontend dit elke minuut (zie

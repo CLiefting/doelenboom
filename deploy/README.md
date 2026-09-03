@@ -443,6 +443,46 @@ gunzip -c ~/doelenboom/backups/database/doelenboom-<tijdstip>.sql.gz | \
   psql -U doelenboom -d doelenboom
 ```
 
+## MFA (tweestapsverificatie): SMTP-instellingen en herstel
+
+Zie `doelenboom_mfa_ontwerp.md` (project) en `api/src/mfa.ts`/`api/src/email.ts`
+voor het volledige ontwerp. Verplicht voor sysadmin-accounts, optioneel (zelf
+aan/uit te zetten via "Mijn beveiliging") voor de rest.
+
+**SMTP-relay instellen op de VPS:** vul in `.env` (naast `JWT_SECRET` etc.,
+zie §4 hierboven) `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD` en
+eventueel `SMTP_FROM` (default `no-reply@code072.nl`) in — zie
+`.env.example`. Staat `SMTP_HOST` leeg/ontbrekend, dan wordt er **geen**
+e-mail verstuurd en komt de inlogcode alleen in de `api`-container-log te
+staan (`docker compose ... logs api`) — bruikbaar om de flow te testen, maar
+niet geschikt voor productie: zet de SMTP-variabelen dus altijd vóór
+productiegebruik.
+
+**Een vergrendelde niet-sysadmin** (code niet ontvangen/bereikbaar): een
+sysadmin zet MFA voor dat account uit via het bestaande Accountbeheer-scherm
+(`PUT /api/users/:id`), zelfde plek als een wachtwoordreset.
+
+**Een vergrendelde sysadmin:** bewust geen ingebouwd noodpad in de app (zou de
+"verplicht voor sysadmins"-garantie ondermijnen als een andere sysadmin dit
+voor een collega kon uitzetten) — herstel is, net als een vergeten
+sysadmin-wachtwoord, een handmatige ingreep rechtstreeks op de database:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml exec -T db \
+  psql -U doelenboom -d doelenboom -c \
+  "update users set mfa_enabled = false where email = 'naam@voorbeeld.nl';"
+```
+
+Dit zet alleen de optionele `mfa_enabled`-vlag uit; voor een sysadmin is MFA
+sowieso al verplicht ongeacht deze kolom (zie `mfaRequired` in `api/src/auth.ts`),
+dus dit commando helpt daar **niet** — bij een vergrendelde sysadmin is de
+enige weg terug tijdelijk inloggen met een ander sysadmin-account (indien
+aanwezig) om de SMTP-instellingen/e-mailbezorging te herstellen, of anders
+rechtstreeks in de database het account tijdelijk degraderen
+(`update users set is_sysadmin = false where email = '...';`, daarna na
+herstel weer terugzetten) — een bewuste, loggegevens-buiten-de-app-om-actie,
+zelfde soort ingreep als de migratie-commando's hierboven.
+
 ## Openstaand aandachtspunt: offsite-kopie
 
 De databaseback-up hierboven én de nachtelijke Excel-back-up staan beide

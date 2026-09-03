@@ -205,6 +205,24 @@ function AllUsersTable({
     }
   }
 
+  // Ook het herstelpad bij een vergrendelde niet-sysadmin (code niet ontvangen/
+  // bereikbaar, zie doelenboom_mfa_ontwerp.md §6): hier gewoon uitzetten.
+  // Voor sysadmins is dit veld genegeerd (MFA is voor hen sowieso verplicht,
+  // zie mfaRequired in auth.ts) — de checkbox hieronder staat voor hen dan ook
+  // altijd aan en uitgeschakeld.
+  async function toggleMfa(u: UserSummary) {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.updateUser(token, u.id, { mfaEnabled: !u.mfa_enabled });
+      onChanged();
+    } catch (err) {
+      setError(errMsg(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function remove(u: UserSummary) {
     if (!window.confirm(`Account "${u.email}" volledig verwijderen? Dit kan niet ongedaan worden gemaakt.`)) return;
     setBusy(true);
@@ -228,6 +246,7 @@ function AllUsersTable({
         <tr>
           <th style={styles.th}>E-mail</th>
           <th style={styles.th}>Sysadmin</th>
+          <th style={styles.th} title="Tweestapsverificatie — voor sysadmins altijd verplicht">MFA</th>
           <th style={styles.th}>Tenants</th>
           <th style={styles.th}></th>
         </tr>
@@ -249,6 +268,15 @@ function AllUsersTable({
                 checked={u.is_sysadmin}
                 disabled={busy}
                 onChange={() => toggleSysadmin(u)}
+              />
+            </td>
+            <td style={styles.td}>
+              <input
+                type="checkbox"
+                checked={u.is_sysadmin || u.mfa_enabled}
+                disabled={busy || u.is_sysadmin}
+                title={u.is_sysadmin ? 'Verplicht voor sysadmins' : 'MFA aan/uit voor dit account (herstelpad bij vergrendeling: hier uitzetten)'}
+                onChange={() => toggleMfa(u)}
               />
             </td>
             <td style={styles.td}>

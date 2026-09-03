@@ -2,6 +2,7 @@ import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   startTestServer, stopTestServer, closePool, req, unique, createSysadminUser, login, cleanupByPrefix,
+  getLastMfaCode,
 } from './helpers.js';
 import { pool } from '../src/db.js';
 
@@ -48,14 +49,38 @@ describe('auth', () => {
     assert.equal(status, 400);
   });
 
-  it('POST /api/auth/login geeft een token + user terug bij juiste gegevens', async () => {
+  it('POST /api/auth/login geeft voor sysadmins een MFA-uitdaging i.p.v. meteen een token (verplicht, zie mfa.ts)', async () => {
     const { status, body } = await req('POST', '/api/auth/login', {
       body: { email: sysadminEmail, password: 'geheim1234' },
     });
     assert.equal(status, 200);
-    assert.ok(body.token);
-    assert.equal(body.user.email, sysadminEmail);
-    assert.equal(body.user.isSysadmin, true);
+    assert.equal(body.mfaRequired, true);
+    assert.ok(body.challengeId);
+    assert.ok(body.expiresInSeconds > 0);
+    assert.equal(body.token, undefined);
+
+    // Vervolgstap: de (in de testomgeving opgevangen i.p.v. echt gemailde)
+    // code invullen bij /mfa/verify geeft dan alsnog het echte token + user.
+    const code = getLastMfaCode(sysadminEmail);
+    assert.ok(code, 'geen opgevangen MFA-code gevonden');
+    const verify = await req('POST', '/api/auth/mfa/verify', {
+      body: { challengeId: body.challengeId, code },
+    });
+    assert.equal(verify.status, 200);
+    assert.ok(verify.body.token);
+    assert.equal(verify.body.user.email, sysadminEmail);
+    assert.equal(verify.body.user.isSysadmin, true);
+  });
+
+  it('POST /api/auth/mfa/verify weigert een onjuiste code', async () => {
+    const loginResult = await req('POST', '/api/auth/login', {
+      body: { email: sysadminEmail, password: 'geheim1234' },
+    });
+    const verify = await req('POST', '/api/auth/mfa/verify', {
+      body: { challengeId: loginResult.body.challengeId, code: 'ZZZZZZ' },
+    });
+    assert.equal(verify.status, 401);
+    assert.equal(verify.body.reason, 'wrong_code');
   });
 
   it('GET /api/auth/me vereist een geldig token', async () => {

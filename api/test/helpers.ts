@@ -11,8 +11,26 @@
 // wegwerpbare database (doelenboom_test), dezelfde aanpak als productie.
 import { createApp } from '../src/app.js';
 import { pool } from '../src/db.js';
+import { setSendMfaEmailImpl } from '../src/email.js';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
+
+// MFA-testhaak (zie mfa.ts/email.ts): vangt elke "verstuurde" code op i.p.v.
+// echt te mailen (er is in de testomgeving toch geen SMTP_HOST gezet, dus dit
+// vervangt alleen de console-fallback door iets wat de tests kunnen uitlezen).
+// Eén keer geïnstalleerd per testproces (elk testbestand = eigen subproces),
+// dus geldig voor de hele duur van dat bestand. login() hieronder gebruikt dit
+// om sysadmin-logins (altijd MFA-verplicht) transparant af te ronden, zodat
+// bestaande tests niet allemaal zelf de MFA-stap hoeven te doen; mfa.test.ts
+// gebruikt getLastMfaCode() rechtstreeks om de stap zelf te testen.
+const lastMfaCodeByEmail = new Map<string, string>();
+setSendMfaEmailImpl(async (to: string, code: string) => {
+  lastMfaCodeByEmail.set(to, code);
+});
+
+export function getLastMfaCode(email: string): string | undefined {
+  return lastMfaCodeByEmail.get(email);
+}
 
 let server: Server | null = null;
 let baseUrl = '';
@@ -101,10 +119,38 @@ export async function createSysadminUser(email: string, password = 'test-wachtwo
   return r.rows[0].id;
 }
 
+// Gewoon (niet-sysadmin) account, rechtstreeks via SQL — zelfde reden als
+// createSysadminUser hierboven (geen tenant/rol nodig voor login-/MFA-tests
+// die niets met tenant-toegang te maken hebben).
+export async function createUser(email: string, password = 'test-wachtwoord-1'): Promise<number> {
+  const r = await pool.query(
+    `insert into users (email, password_hash, is_sysadmin, must_change_password)
+     values ($1, crypt($2, gen_salt('bf')), false, false) returning id`,
+    [email, password]
+  );
+  return r.rows[0].id;
+}
+
 export async function login(email: string, password = 'test-wachtwoord-1'): Promise<string> {
   const { status, body } = await req('POST', '/api/auth/login', { body: { email, password } });
   if (status !== 200) {
     throw new Error(`Login mislukt voor ${email}: ${status} ${JSON.stringify(body)}`);
+  }
+  if (body.mfaRequired) {
+    // Sysadmins zijn altijd MFA-verplicht (zie auth.ts) — rond dat hier
+    // transparant af zodat elk testbestand dat via login() een sysadmin-token
+    // haalt, niet zelf de MFA-stap hoeft te kennen.
+    const code = lastMfaCodeByEmail.get(email);
+    if (!code) {
+      throw new Error(`MFA vereist voor ${email}, maar geen opgevangen code gevonden.`);
+    }
+    const verify = await req('POST', '/api/auth/mfa/verify', {
+      body: { challengeId: body.challengeId, code },
+    });
+    if (verify.status !== 200) {
+      throw new Error(`MFA-verificatie mislukt voor ${email}: ${verify.status} ${JSON.stringify(verify.body)}`);
+    }
+    return verify.body.token as string;
   }
   return body.token as string;
 }

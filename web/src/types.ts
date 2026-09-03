@@ -17,8 +17,24 @@ export type User = {
   // TermsAcceptanceGate.tsx (mirrort het mustChangePassword-patroon
   // hierboven) en api/src/legal.ts (needsTermsAcceptance).
   termsAcceptanceRequired: boolean;
+  // Eigen (optionele) MFA-instelling — zie doelenboom_mfa_ontwerp.md §6 en
+  // MySecurityPage.tsx. Voor sysadmins altijd true in de praktijk (MFA is
+  // voor hen sowieso verplicht, ongeacht deze vlag — zie api/src/auth.ts
+  // mfaRequired), maar zij kunnen 'm hier niet zelf uitzetten.
+  mfaEnabled: boolean;
   tenantRoles: UserTenantRole[];
 };
+
+// Tweede stap van de inlogflow: POST /api/auth/login geeft dit terug i.p.v.
+// meteen {token,user} zodra MFA vereist is (sysadmin, of mfaEnabled aan) —
+// zie doelenboom_mfa_ontwerp.md §2 en api/src/mfa.ts.
+export type MfaChallengeResponse = {
+  mfaRequired: true;
+  challengeId: string;
+  expiresInSeconds: number;
+};
+
+export type LoginResult = { token: string; user: User } | MfaChallengeResponse;
 
 // Eén juridisch document (gebruiksvoorwaarden of privacyverklaring) zoals
 // geserveerd door GET /api/legal/:type — zie api/src/legal.ts. content volgt
@@ -48,6 +64,7 @@ export type UserSummary = {
   email: string;
   is_sysadmin: boolean;
   must_change_password: boolean;
+  mfa_enabled: boolean;
   created_at: string;
   tenantRoles: UserTenantRole[];
 };
@@ -96,7 +113,7 @@ export type SessionInfo = {
 // gewoon bestaan.
 export type AuditLogEntry = {
   id: number;
-  eventType: 'doelenboom_view' | 'tenant_settings_changed';
+  eventType: 'doelenboom_view' | 'tenant_settings_changed' | 'mfa_verified' | 'mfa_failed';
   createdAt: string;
   role: string | null;
   detail: Record<string, unknown>;
