@@ -207,7 +207,24 @@ authRouter.post('/login', async (req, res) => {
   // bescherming juist omzeilbaar maken.
   const mfaRequired = user.is_sysadmin || user.mfa_enabled;
   if (mfaRequired) {
-    const challenge = await createMfaChallenge(user.id, user.email);
+    // Expliciete try/catch (i.t.t. de meeste routes hier, die op de globale
+    // unhandledRejection-vangnet in index.ts leunen): een falende
+    // e-mailverzending (verkeerd wachtwoord, relay onbereikbaar, timeout) is
+    // hier geen onvoorziene fout maar een reëel, te verwachten scenario — en
+    // zonder deze catch bleef de hele /login-aanvraag onbeantwoord hangen
+    // (de client zag "Bezig…" voor altijd) in plaats van een nette foutmelding
+    // te krijgen. De net aangemaakte challenge-rij zelf hoeft niet opgeruimd
+    // te worden: die verloopt vanzelf (CODE_TTL_MINUTES) en is zonder
+    // ontvangen code toch onbruikbaar.
+    let challenge;
+    try {
+      challenge = await createMfaChallenge(user.id, user.email);
+    } catch (err) {
+      console.error('Kon MFA-inlogcode niet versturen:', err);
+      return res.status(502).json({
+        error: 'Kon geen inlogcode versturen (e-mailserver niet bereikbaar). Probeer het later opnieuw.',
+      });
+    }
     return res.json({
       mfaRequired: true,
       challengeId: challenge.challengeId,
@@ -292,7 +309,18 @@ authRouter.post('/mfa/resend', async (req, res) => {
     return res.status(400).json({ error: 'challengeId is verplicht' });
   }
 
-  const result = await resendMfaChallenge(String(challengeId));
+  // Zelfde reden als bij /login hierboven: een falende e-mailverzending is
+  // hier te verwachten, geen onvoorziene fout — zonder deze catch bleef ook
+  // deze aanvraag onbeantwoord hangen i.p.v. een nette foutmelding te geven.
+  let result: Awaited<ReturnType<typeof resendMfaChallenge>>;
+  try {
+    result = await resendMfaChallenge(String(challengeId));
+  } catch (err) {
+    console.error('Kon MFA-inlogcode niet opnieuw versturen:', err);
+    return res.status(502).json({
+      error: 'Kon geen nieuwe inlogcode versturen (e-mailserver niet bereikbaar). Probeer het later opnieuw.',
+    });
+  }
   if (!result.ok) {
     const messages: Record<typeof result.reason, string> = {
       not_found: 'Ongeldige of verlopen aanmeldpoging. Log opnieuw in.',

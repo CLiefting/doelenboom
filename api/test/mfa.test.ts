@@ -2,7 +2,7 @@ import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   startTestServer, stopTestServer, closePool, req, unique, createUser, createSysadminUser, login,
-  cleanupByPrefix, getLastMfaCode,
+  cleanupByPrefix, getLastMfaCode, setMfaEmailFailure,
 } from './helpers.js';
 import { pool } from '../src/db.js';
 import { MAX_ATTEMPTS, MAX_RESENDS, RESEND_COOLDOWN_SECONDS } from '../src/mfa.js';
@@ -229,5 +229,37 @@ describe('mfa', () => {
       [userId]
     );
     assert.deepEqual(rows.rows.map((r) => r.event_type), ['mfa_failed', 'mfa_verified']);
+  });
+
+  it('een falende e-mailverzending (SMTP onbereikbaar) geeft een nette 502 i.p.v. te blijven hangen', async () => {
+    const email = `${PREFIX}-smtpdown@test.local`;
+    await createSysadminUser(email, 'geheim1234');
+    setMfaEmailFailure(true);
+    try {
+      const loginResult = await req('POST', '/api/auth/login', { body: { email, password: 'geheim1234' } });
+      assert.equal(loginResult.status, 502);
+      assert.match(loginResult.body.error, /niet bereikbaar/);
+    } finally {
+      setMfaEmailFailure(false);
+    }
+  });
+
+  it('een falende e-mailverzending bij /mfa/resend geeft ook een nette 502', async () => {
+    const email = `${PREFIX}-smtpdown-resend@test.local`;
+    await createSysadminUser(email, 'geheim1234');
+    const loginResult = await req('POST', '/api/auth/login', { body: { email, password: 'geheim1234' } });
+    const challengeId = loginResult.body.challengeId as string;
+    await pool.query(
+      `update mfa_challenges set created_at = now() - make_interval(secs => $2) where id = $1`,
+      [challengeId, RESEND_COOLDOWN_SECONDS + 1]
+    );
+    setMfaEmailFailure(true);
+    try {
+      const resend = await req('POST', '/api/auth/mfa/resend', { body: { challengeId } });
+      assert.equal(resend.status, 502);
+      assert.match(resend.body.error, /niet bereikbaar/);
+    } finally {
+      setMfaEmailFailure(false);
+    }
   });
 });

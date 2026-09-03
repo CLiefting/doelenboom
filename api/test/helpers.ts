@@ -24,12 +24,30 @@ import type { Server } from 'node:http';
 // bestaande tests niet allemaal zelf de MFA-stap hoeven te doen; mfa.test.ts
 // gebruikt getLastMfaCode() rechtstreeks om de stap zelf te testen.
 const lastMfaCodeByEmail = new Map<string, string>();
-setSendMfaEmailImpl(async (to: string, code: string) => {
+function captureMfaEmail(to: string, code: string): Promise<void> {
   lastMfaCodeByEmail.set(to, code);
-});
+  return Promise.resolve();
+}
+setSendMfaEmailImpl(captureMfaEmail);
 
 export function getLastMfaCode(email: string): string | undefined {
   return lastMfaCodeByEmail.get(email);
+}
+
+// Simuleert een falende SMTP-relay (zie auth.ts: /login en /mfa/resend vangen
+// dit sinds kort netjes af i.p.v. de aanvraag te laten hangen — ECONNREFUSED
+// e.d.). true schakelt de normale codeopvang tijdelijk uit, false (of het
+// einde van de test) zet 'm terug — belangrijk om altijd terug te zetten,
+// anders lopen latere tests in hetzelfde bestand (die via login() een code
+// verwachten) alsnog vast.
+export function setMfaEmailFailure(shouldFail: boolean): void {
+  if (shouldFail) {
+    setSendMfaEmailImpl(async () => {
+      throw new Error('ECONNREFUSED (test): SMTP-relay niet bereikbaar');
+    });
+  } else {
+    setSendMfaEmailImpl(captureMfaEmail);
+  }
 }
 
 let server: Server | null = null;

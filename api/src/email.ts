@@ -26,6 +26,16 @@ function getTransporter(): Transporter | null {
       // upgradet zelf — dat regelt nodemailer automatisch als secure:false.
       secure: SMTP_PORT === 465,
       auth: SMTP_USER ? { user: SMTP_USER, pass: SMTP_PASSWORD } : undefined,
+      // Nodemailer's eigen standaardwaarden zijn (veel) te ruim voor een
+      // aanroep die middenin een login-request hangt (2 min. om te verbinden,
+      // tot 10 min. socket-inactiviteit) — bij een onbereikbare relay/
+      // firewall/verkeerd wachtwoord bleef de hele /login-aanvraag daardoor
+      // eindeloos op "Bezig…" hangen i.p.v. binnen een paar seconden een
+      // duidelijke fout te geven. Ruim genoeg voor een trage maar werkende
+      // relay, kort genoeg om niet als een nieuwe "hangt"-klacht aan te voelen.
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 15_000,
     });
   }
   return transporter;
