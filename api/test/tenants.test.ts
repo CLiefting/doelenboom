@@ -37,9 +37,39 @@ describe('tenants', () => {
     // (anders dan bv. products.ts/projectStatus.ts) — bewust letterlijk getest,
     // zodat een toekomstige "opschoning" naar camelCase hier zichtbaar breekt.
     assert.equal(created.body.session_timeout_minutes, 30);
+    // Default aan (opt-out, geen opt-in) — zie db/init.sql nightly_export_enabled.
+    assert.equal(created.body.nightly_export_enabled, true);
 
     const dup = await req('POST', '/api/tenants', { token: sysadminToken, body: { slug, name: 'Nog een keer' } });
     assert.equal(dup.status, 409);
+  });
+
+  it('PUT /api/tenants/:id: nightlyExportEnabled is aanpasbaar (tenant-brede standaardwaarde)', async () => {
+    const slug = `${PREFIX}-t8`;
+    const created = await req('POST', '/api/tenants', { token: sysadminToken, body: { slug, name: 'Test tenant 8' } });
+    const tenantId = created.body.id;
+    assert.equal(created.body.nightly_export_enabled, true, 'default aan');
+
+    const adminEmail = `${PREFIX}-t8-admin@test.local`;
+    await req('POST', `/api/tenants/${tenantId}/members`, {
+      token: sysadminToken, body: { email: adminEmail, password: 'wachtwoord123', role: 'admin' },
+    });
+    const tenantAdminToken = await login(adminEmail, 'wachtwoord123');
+
+    const asAdmin = await req('PUT', `/api/tenants/${tenantId}`, {
+      token: tenantAdminToken, body: { nightlyExportEnabled: false },
+    });
+    assert.equal(asAdmin.status, 200);
+    assert.equal(asAdmin.body.nightly_export_enabled, false);
+
+    // Zonder nightlyExportEnabled in de body blijft de huidige waarde staan
+    // (niet terugvallen op de default) — zelfde "omitted = ongewijzigd"-gedrag
+    // als wipeOnEmpty/sessionTimeoutMinutes.
+    const renameOnly = await req('PUT', `/api/tenants/${tenantId}`, {
+      token: tenantAdminToken, body: { sessionTimeoutMinutes: 45 },
+    });
+    assert.equal(renameOnly.status, 200);
+    assert.equal(renameOnly.body.nightly_export_enabled, false);
   });
 
   it('POST /api/tenants valideert verplichte velden', async () => {

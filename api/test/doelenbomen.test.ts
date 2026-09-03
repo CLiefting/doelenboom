@@ -188,6 +188,40 @@ describe('doelenbomen', () => {
     assert.equal(renameOnly.body.staleAfterDays, 30);
   });
 
+  it('nightlyExportEnabled: default aan, geërfd van de tenant-standaardwaarde, en daarna per doelenboom apart instelbaar', async () => {
+    const { tenantId, adminToken } = await makeTenantWithAdmin(sysadminToken, `${PREFIX}-t3c`, `${PREFIX}-t3c-admin@test.local`);
+
+    const boomMetDefault = await req('POST', `/api/tenants/${tenantId}/doelenbomen`, {
+      token: adminToken, body: { slug: 'boom3c-a', name: 'Boom 3c a' },
+    });
+    assert.equal(boomMetDefault.body.nightly_export_enabled, true, 'default aan, ook zonder eigen tenant-instelling');
+
+    // Tenant-brede standaardwaarde uitzetten — bestaande doelenbomen blijven
+    // ongemoeid, alleen een NIEUWE doelenboom erft de nieuwe standaardwaarde over.
+    await req('PUT', `/api/tenants/${tenantId}`, { token: adminToken, body: { nightlyExportEnabled: false } });
+    const boomNaDefaultUit = await req('POST', `/api/tenants/${tenantId}/doelenbomen`, {
+      token: adminToken, body: { slug: 'boom3c-b', name: 'Boom 3c b' },
+    });
+    assert.equal(boomNaDefaultUit.body.nightly_export_enabled, false);
+    const herlezenBoomMetDefault = await req('GET', `/api/doelenbomen/${boomMetDefault.body.id}`, { token: adminToken });
+    assert.equal(herlezenBoomMetDefault.body.nightly_export_enabled, true, 'bestaande doelenboom onveranderd');
+
+    // Per doelenboom onafhankelijk weer aan te zetten, zonder de
+    // tenant-standaardwaarde te raken.
+    const doelenboomUpdate = await req('PUT', `/api/doelenbomen/${boomNaDefaultUit.body.id}`, {
+      token: adminToken, body: { name: 'Boom 3c b', nightlyExportEnabled: true },
+    });
+    assert.equal(doelenboomUpdate.status, 200);
+    assert.equal(doelenboomUpdate.body.nightly_export_enabled, true);
+
+    // Zonder nightlyExportEnabled in de body blijft de huidige waarde staan.
+    const renameOnly = await req('PUT', `/api/doelenbomen/${boomNaDefaultUit.body.id}`, {
+      token: adminToken, body: { name: 'Boom 3c b hernoemd' },
+    });
+    assert.equal(renameOnly.status, 200);
+    assert.equal(renameOnly.body.nightly_export_enabled, true);
+  });
+
   it('member-roles: override overrult de tenant-rol binnen één doelenboom', async () => {
     const { tenantId, adminToken } = await makeTenantWithAdmin(sysadminToken, `${PREFIX}-t4`, `${PREFIX}-t4-admin@test.local`);
     const boom = await req('POST', `/api/tenants/${tenantId}/doelenbomen`, {

@@ -8,7 +8,8 @@ import { assertCanAddAdmin, computeDefaultLicenseEndDate, LicenseLimitError } fr
 export const tenantsRouter = Router();
 tenantsRouter.use(requireAuth);
 
-const TENANT_SELECT_FIELDS = 'id, slug, name, wipe_on_empty, session_timeout_minutes, open_access_role, created_at';
+const TENANT_SELECT_FIELDS =
+  'id, slug, name, wipe_on_empty, session_timeout_minutes, nightly_export_enabled, open_access_role, created_at';
 
 // Licentie-einddatum als losse, expliciet met to_char geformatteerde kolom
 // ("YYYY-MM-DD" of null) — bewust NIET in TENANT_SELECT_FIELDS hierboven,
@@ -45,7 +46,7 @@ tenantsRouter.get('/', async (req: AuthedRequest, res) => {
 // columnConfig.ts) — het sjabloon waarmee elke nieuwe doelenboom binnen deze
 // tenant straks start.
 tenantsRouter.post('/', requireSysadmin, async (req, res) => {
-  const { slug, name, wipeOnEmpty, sessionTimeoutMinutes } = req.body ?? {};
+  const { slug, name, wipeOnEmpty, sessionTimeoutMinutes, nightlyExportEnabled } = req.body ?? {};
   if (!slug || !name) {
     return res.status(400).json({ error: 'slug en name zijn verplicht' });
   }
@@ -58,9 +59,16 @@ tenantsRouter.post('/', requireSysadmin, async (req, res) => {
     // verlengen/wijzigen/wissen via het licentiescherm in Tenantbeheer.
     const defaultLicenseEndDate = computeDefaultLicenseEndDate(new Date());
     const result = await client.query(
-      `insert into tenants (slug, name, wipe_on_empty, session_timeout_minutes, license_end_date)
-       values ($1, $2, $3, $4, $5) returning ${TENANT_SELECT_FIELDS}, ${LICENSE_END_DATE_SELECT}`,
-      [slug, name, !!wipeOnEmpty, Number.isFinite(sessionTimeoutMinutes) ? sessionTimeoutMinutes : 30, defaultLicenseEndDate]
+      `insert into tenants (slug, name, wipe_on_empty, session_timeout_minutes, nightly_export_enabled, license_end_date)
+       values ($1, $2, $3, $4, $5, $6) returning ${TENANT_SELECT_FIELDS}, ${LICENSE_END_DATE_SELECT}`,
+      [
+        slug,
+        name,
+        !!wipeOnEmpty,
+        Number.isFinite(sessionTimeoutMinutes) ? sessionTimeoutMinutes : 30,
+        typeof nightlyExportEnabled === 'boolean' ? nightlyExportEnabled : true,
+        defaultLicenseEndDate,
+      ]
     );
     await createTenantDefaultConfig(client, result.rows[0].id, result.rows[0].name);
     await client.query('commit');
@@ -85,11 +93,18 @@ tenantsRouter.post('/', requireSysadmin, async (req, res) => {
 // ('in b'), ongeacht of de waarde zelf null of een rol is.
 tenantsRouter.put('/:id', requireTenantRoleForTenantParam('admin', 'id'), async (req, res) => {
   const b = (req.body ?? {}) as Record<string, unknown>;
-  const { wipeOnEmpty, sessionTimeoutMinutes } = b;
+  const { wipeOnEmpty, sessionTimeoutMinutes, nightlyExportEnabled } = b;
   const hasOpenAccessRole = 'openAccessRole' in b;
   const openAccessRole = b.openAccessRole;
-  if (typeof wipeOnEmpty !== 'boolean' && sessionTimeoutMinutes === undefined && !hasOpenAccessRole) {
-    return res.status(400).json({ error: 'Geef wipeOnEmpty, sessionTimeoutMinutes en/of openAccessRole mee.' });
+  if (
+    typeof wipeOnEmpty !== 'boolean' &&
+    sessionTimeoutMinutes === undefined &&
+    typeof nightlyExportEnabled !== 'boolean' &&
+    !hasOpenAccessRole
+  ) {
+    return res
+      .status(400)
+      .json({ error: 'Geef wipeOnEmpty, sessionTimeoutMinutes, nightlyExportEnabled en/of openAccessRole mee.' });
   }
   if (
     sessionTimeoutMinutes !== undefined &&
@@ -110,12 +125,14 @@ tenantsRouter.put('/:id', requireTenantRoleForTenantParam('admin', 'id'), async 
     `update tenants set
        wipe_on_empty = coalesce($1, wipe_on_empty),
        session_timeout_minutes = coalesce($2, session_timeout_minutes),
-       open_access_role = case when $3 then $4 else open_access_role end
-     where id = $5
+       nightly_export_enabled = coalesce($3, nightly_export_enabled),
+       open_access_role = case when $4 then $5 else open_access_role end
+     where id = $6
      returning ${TENANT_SELECT_FIELDS}, ${LICENSE_END_DATE_SELECT}`,
     [
       typeof wipeOnEmpty === 'boolean' ? wipeOnEmpty : null,
       sessionTimeoutMinutes ?? null,
+      typeof nightlyExportEnabled === 'boolean' ? nightlyExportEnabled : null,
       hasOpenAccessRole,
       openAccessRole ?? null,
       req.params.id,

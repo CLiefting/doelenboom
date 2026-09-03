@@ -119,15 +119,28 @@ function pruneDirectory(dir: string, doelenboomSlug: string, todayIsoStr: string
 
 async function main() {
   const todayIsoStr = todayIso();
-  const result = await pool.query<{ id: number; slug: string; tenant_slug: string }>(
-    `select d.id, d.slug, t.slug as tenant_slug
+  // nightly_export_enabled (zie db/init.sql / db/migrations/
+  // 0025_nightly_export_toggle.sql): per doelenboom instelbaar (PUT
+  // /api/doelenbomen/:id, "Doelenbomen" in Tenantbeheer), default true zodat
+  // een doelenboom niet per ongeluk buiten de back-up valt. Uitgezette
+  // doelenbomen worden bewust WEL opgehaald (i.p.v. al in de where-clause
+  // uitgefilterd) zodat ze in de telling hieronder als "overgeslagen"
+  // meetellen, niet stilzwijgend ontbreken.
+  const result = await pool.query<{ id: number; slug: string; tenant_slug: string; nightly_export_enabled: boolean }>(
+    `select d.id, d.slug, t.slug as tenant_slug, d.nightly_export_enabled
      from doelenbomen d join tenants t on t.id = d.tenant_id
      order by t.slug, d.slug`
   );
   console.log(`[export-all] start — ${result.rows.length} doelenbomen, datum ${todayIsoStr}`);
 
   let failures = 0;
+  let skipped = 0;
   for (const row of result.rows) {
+    if (!row.nightly_export_enabled) {
+      skipped += 1;
+      console.log(`[export-all] overgeslagen (nachtelijke back-up uitgezet): ${row.tenant_slug}/${row.slug}`);
+      continue;
+    }
     try {
       await exportOneDoelenboom(row.id, row.tenant_slug, row.slug, todayIsoStr);
     } catch (err) {
@@ -136,7 +149,11 @@ async function main() {
     }
   }
 
-  console.log(`[export-all] klaar — ${result.rows.length - failures}/${result.rows.length} geslaagd`);
+  const attempted = result.rows.length - skipped;
+  console.log(
+    `[export-all] klaar — ${attempted - failures}/${attempted} geslaagd` +
+      (skipped > 0 ? ` (${skipped} overgeslagen door uitgezette back-up)` : '')
+  );
   await pool.end();
   if (failures > 0) process.exitCode = 1;
 }

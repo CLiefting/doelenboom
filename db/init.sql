@@ -65,6 +65,16 @@ create table if not exists tenants (
   -- — dit blijft wél tenant-breed (een sessie heeft toegang tot de hele
   -- tenant, niet tot één specifieke doelenboom), zie tenantWipe.ts.
   session_timeout_minutes integer not null default 30 check (session_timeout_minutes > 0),
+  -- Zelfde patroon als wipe_on_empty hierboven: dit tenant-veld is alleen de
+  -- standaardwaarde waarmee een nieuwe doelenboom in deze tenant wordt
+  -- aangemaakt (zie POST /api/tenants/:tenantId/doelenbomen) — de
+  -- daadwerkelijke aan/uit-schakelaar voor de nachtelijke Excel-back-up
+  -- (api/src/scripts/exportAllDoelenbomen.ts, zie deploy/README.md
+  -- "Nachtelijke Excel-backup") staat per doelenboom (doelenbomen.
+  -- nightly_export_enabled hieronder). Default true: bewust "opt-out" i.p.v.
+  -- "opt-in", zodat een nieuwe doelenboom niet per ongeluk buiten de back-up
+  -- valt.
+  nightly_export_enabled boolean not null default true,
   created_at timestamptz not null default now()
 );
 
@@ -112,6 +122,13 @@ create table if not exists doelenbomen (
   -- /api/doelenbomen/:id), zie db/migrations/0020_project_status_review.sql
   -- voor de volledige toelichting.
   stale_after_days integer not null default 60 check (stale_after_days between 1 and 3650),
+  -- Of deze doelenboom meegenomen wordt in de nachtelijke Excel-back-up
+  -- (api/src/scripts/exportAllDoelenbomen.ts, gepland via cron — zie
+  -- deploy/README.md "Nachtelijke Excel-backup"). Default true (zie
+  -- tenants.nightly_export_enabled hierboven) en, net als wipe_on_empty, per
+  -- doelenboom apart instelbaar (i.p.v. tenant-breed) — bij het aanmaken
+  -- wordt 'm standaard gevuld met tenants.nightly_export_enabled.
+  nightly_export_enabled boolean not null default true,
   created_at timestamptz not null default now(),
   unique (tenant_id, slug)
 );

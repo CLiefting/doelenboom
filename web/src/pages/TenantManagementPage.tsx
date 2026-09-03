@@ -800,6 +800,7 @@ function DoelenboomEditRow({
   const [slug, setSlug] = useState(doelenboom.slug);
   const [readOnly, setReadOnly] = useState(doelenboom.read_only);
   const [wipeOnEmpty, setWipeOnEmpty] = useState(doelenboom.wipe_on_empty);
+  const [nightlyExportEnabled, setNightlyExportEnabled] = useState(doelenboom.nightly_export_enabled);
   // Getal als string in state (i.p.v. number) zodat een gebruiker het veld
   // eerst kan leegmaken tijdens het intypen van een nieuwe waarde — bij
   // opslaan valt een lege/ongeldige waarde terug op de huidige instelling.
@@ -815,7 +816,14 @@ function DoelenboomEditRow({
         Number.isInteger(parsedStaleAfterDays) && parsedStaleAfterDays > 0
           ? parsedStaleAfterDays
           : doelenboom.staleAfterDays;
-      await api.updateDoelenboom(token, doelenboom.id, { name, slug, readOnly, wipeOnEmpty, staleAfterDays });
+      await api.updateDoelenboom(token, doelenboom.id, {
+        name,
+        slug,
+        readOnly,
+        wipeOnEmpty,
+        nightlyExportEnabled,
+        staleAfterDays,
+      });
       onSaved();
     } catch (err) {
       setError(errMsg(err));
@@ -837,6 +845,14 @@ function DoelenboomEditRow({
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5 }}>
         <input type="checkbox" checked={wipeOnEmpty} onChange={(e) => setWipeOnEmpty(e.target.checked)} />
         Automatisch leegmaken zodra niemand meer actief toegang heeft tot de tenant
+      </label>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5 }}>
+        <input
+          type="checkbox"
+          checked={nightlyExportEnabled}
+          onChange={(e) => setNightlyExportEnabled(e.target.checked)}
+        />
+        Meenemen in de nachtelijke Excel-back-up
       </label>
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5 }}>
         Projecten tellen als 'verouderd' na
@@ -1281,6 +1297,7 @@ function TenantSettingsForm({
 }) {
   const [wipeOnEmpty, setWipeOnEmpty] = useState(tenant.wipe_on_empty);
   const [timeoutMinutes, setTimeoutMinutes] = useState(String(tenant.session_timeout_minutes));
+  const [nightlyExportEnabled, setNightlyExportEnabled] = useState(tenant.nightly_export_enabled);
   const [openAccessRole, setOpenAccessRole] = useState<TenantRoleName | ''>(tenant.open_access_role ?? '');
   const [saved, setSaved] = useState(false);
 
@@ -1289,6 +1306,7 @@ function TenantSettingsForm({
   useEffect(() => {
     setWipeOnEmpty(tenant.wipe_on_empty);
     setTimeoutMinutes(String(tenant.session_timeout_minutes));
+    setNightlyExportEnabled(tenant.nightly_export_enabled);
     setOpenAccessRole(tenant.open_access_role ?? '');
     setSaved(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1308,6 +1326,7 @@ function TenantSettingsForm({
       await api.updateTenantSettings(token, tenant.id, {
         wipeOnEmpty,
         sessionTimeoutMinutes: minutes,
+        nightlyExportEnabled,
         openAccessRole: openAccessRole || null,
       });
       setSaved(true);
@@ -1329,6 +1348,18 @@ function TenantSettingsForm({
       <p style={{ margin: '-4px 0 0 26px', fontSize: 12, color: '#9aa0a8' }}>
         Geldt alleen bij het aanmaken van een nieuwe doelenboom — per bestaande doelenboom is dit apart
         instelbaar bij "Doelenbomen" hieronder.
+      </p>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5 }}>
+        <input
+          type="checkbox"
+          checked={nightlyExportEnabled}
+          onChange={(e) => setNightlyExportEnabled(e.target.checked)}
+        />
+        Standaardinstelling voor nieuwe doelenbomen in deze tenant: meenemen in de nachtelijke Excel-back-up
+      </label>
+      <p style={{ margin: '-4px 0 0 26px', fontSize: 12, color: '#9aa0a8' }}>
+        Staat standaard aan. Geldt alleen bij het aanmaken van een nieuwe doelenboom — per bestaande doelenboom
+        is dit apart instelbaar bij "Doelenbomen" hieronder.
       </p>
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5 }}>
         Na

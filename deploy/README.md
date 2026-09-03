@@ -269,9 +269,14 @@ nachtelijke reset 'm weer.
 Elke nacht om 01:00 exporteert `api/src/scripts/exportAllDoelenbomen.ts`
 (gecompileerd naar `dist/scripts/exportAllDoelenbomen.js`, draait in de
 al-lopende `api`-container — geen aparte cronjob binnen Docker, geen extra
-auth nodig) **elke doelenboom van elke tenant** als `.xlsx`, met exact
-dezelfde inhoud als een handmatige export via de app (`GET /:id/export`,
-zelfde `format=oud|nieuw`-keuze op basis van de kolomconfiguratie).
+auth nodig) elke doelenboom van elke tenant als `.xlsx` (met exact
+dezelfde inhoud als een handmatige export via de app, `GET /:id/export`,
+zelfde `format=oud|nieuw`-keuze op basis van de kolomconfiguratie), **tenzij
+dit voor die doelenboom is uitgezet**: instelbaar per doelenboom (en met een
+tenant-brede standaardwaarde voor nieuw aan te maken doelenbomen) via het
+schuifje "Meenemen in de nachtelijke Excel-back-up" in Tenantbeheer — zie
+`doelenbomen.nightly_export_enabled`/`tenants.nightly_export_enabled` in
+`db/init.sql`. Standaard staat dit **aan**.
 
 **Locatie:** `~/doelenboom/backups/<tenant-slug>/<doelenboom-slug>/` op de
 VPS zelf (bind mount naar `/backups` in de container, zie
@@ -397,22 +402,53 @@ en tabellen (`legal_documents`, `legal_acceptances`, `account_retention_events`,
 al te bestaan. Zie ook `docs/juridische-documenten-en-retentie.md` voor wat
 deze specifieke migratie toevoegt en waarom.
 
-## Backups
+## Nachtelijke databaseback-up
 
-Een echte databasebackup is nog niet ingericht (zelfde aandachtspunt als bij
-WWspeur, zie `SERVER-BEHEER.md`) — de nachtelijke Excel-export hierboven
-("Nachtelijke Excel-backup") is een aanvulling daarop, geen vervanging: het
-is een dump van de zichtbare boom-inhoud per doelenboom, geen volledige
-databasebackup (geen gebruikers/accounts/sessies/licenties), en staat alleen
-lokaal op de VPS — bij verlies van de VPS zelf ben je ook deze kwijt. Voor nu
-bewust geaccepteerd risico; aanbevolen vóór veel productiegebruik: dezelfde
-soort offsite-kopie als hieronder voor de databasebackup, ook toepassen op
-`~/doelenboom/backups/`.
+Elke nacht om 02:00 maakt `deploy/backup-database.sh` een volledige
+`pg_dump` van de database (gzip-gecomprimeerd) — in tegenstelling tot de
+Excel-back-up hierboven (die alleen de zichtbare boom-inhoud per doelenboom
+dumpt) bevat dit ECHT alles: gebruikers/accounts/sessies/licenties/tenants/
+doelenbomen/instellingen. Draait rechtstreeks vanaf de VPS-shell (niet
+binnen de api-container), zelfde `pg_dump`-commando dat hiervoor als
+handmatig uit te voeren stap in dit document stond.
+
+**Locatie:** `~/doelenboom/backups/database/` op de VPS zelf. Bestandsnaam:
+`doelenboom-<JJJJMMDD-UUMMSS>.sql.gz`.
+
+**Bewaartermijn:** de laatste 14 dagen (instelbaar via de omgevingsvariabele
+`BACKUP_RETENTION_DAYS`), elke nacht opnieuw toegepast op wat er dan op
+schijf staat — bewust eenvoudiger dan de oplopende
+dagelijks/wekelijks/maandelijks-opbouw van de Excel-back-up, want een
+volledige databasedump is veel groter.
+
+Eenmalig instellen op de VPS (na de eerstvolgende deploy die dit script
+bevat):
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.prod.yml exec db \
-  pg_dump -U doelenboom doelenboom > ~/doelenboom-backup-$(date +%Y%m%d-%H%M).sql
+chmod +x ~/doelenboom/deploy/backup-database.sh ~/doelenboom/deploy/install-cron-backup-database.sh
+~/doelenboom/deploy/install-cron-backup-database.sh
 ```
 
-Periodiek (bv. cron) + offsite-kopie, zelfde aanpak als voorgesteld voor
-WWspeur.
+Handmatig testen (mag altijd):
+```bash
+~/doelenboom/deploy/backup-database.sh
+tail -20 ~/doelenboom-database-backup.log
+ls -lh ~/doelenboom/backups/database/
+```
+
+Terugzetten (bv. na dataverlies of voor een lokale kopie van productiedata):
+```bash
+gunzip -c ~/doelenboom/backups/database/doelenboom-<tijdstip>.sql.gz | \
+  docker compose -f docker-compose.yml -f docker-compose.prod.yml exec -T db \
+  psql -U doelenboom -d doelenboom
+```
+
+## Openstaand aandachtspunt: offsite-kopie
+
+De databaseback-up hierboven én de nachtelijke Excel-back-up staan beide
+alleen lokaal op de VPS-schijf — bij verlies van de VPS zelf (hardware,
+ongeval) ben je ook de back-ups kwijt. Voor nu bewust geaccepteerd risico;
+aanbevolen vóór veel productiegebruik: periodiek (bv. met `rclone`/`rsync`,
+in hetzelfde cron-patroon) een kopie van `~/doelenboom/backups/` naar een
+andere locatie/opslagdienst wegschrijven. Zelfde aandachtspunt als bij
+WWspeur, zie `SERVER-BEHEER.md`.

@@ -93,6 +93,11 @@ export type TenantSummary = {
   name: string;
   wipe_on_empty: boolean;
   session_timeout_minutes: number;
+  // Standaardwaarde voor nieuwe doelenbomen in deze tenant — de daadwerkelijke
+  // aan/uit-schakelaar voor de nachtelijke Excel-back-up staat per doelenboom
+  // (DoelenboomBase.nightly_export_enabled hieronder), zelfde patroon als
+  // wipe_on_empty hierboven.
+  nightly_export_enabled: boolean;
   // null = open toegang uit (huidig gedrag: alleen expliciete leden). Gezet
   // op een rol = elk account met een login krijgt minstens die rol binnen
   // deze tenant, ook zonder eigen lidmaatschap — zie api/src/rbac.ts
@@ -116,6 +121,10 @@ export type DoelenboomBase = {
   name: string;
   read_only: boolean;
   wipe_on_empty: boolean;
+  // Of deze doelenboom meegenomen wordt in de nachtelijke Excel-back-up (zie
+  // db/init.sql, api/src/scripts/exportAllDoelenbomen.ts). Default true,
+  // instelbaar via DoelenboomEditRow in TenantManagementPage.
+  nightly_export_enabled: boolean;
   // Drempel (in dagen) voor de 'verouderd'-markering op projectelementen —
   // zie db/migrations/0020_project_status_review.sql en isStale() in
   // tree.html. Instelbaar via DoelenboomEditRow in TenantManagementPage.

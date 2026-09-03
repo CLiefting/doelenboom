@@ -129,6 +129,7 @@ export const api = {
       slug?: string;
       readOnly?: boolean;
       wipeOnEmpty?: boolean;
+      nightlyExportEnabled?: boolean;
       archived?: boolean;
       staleAfterDays?: number;
     }
@@ -221,6 +222,7 @@ export const api = {
     patch: {
       wipeOnEmpty?: boolean;
       sessionTimeoutMinutes?: number;
+      nightlyExportEnabled?: boolean;
       // Alleen meesturen als je 'm ook echt wil wijzigen (undefined = laat
       // ongemoeid) — null zet open toegang expliciet uit, zie PUT
       // /api/tenants/:id (routes/tenants.ts) voor de tri-state-uitleg.

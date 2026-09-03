@@ -33,8 +33,8 @@ doelenbomenRouter.use(requireAuth);
 // doelenboom telt niet mee als "actieve" boom voor de tier-limiet (§5,
 // doelenboom_licentiemodel.md), maar blijft verder gewoon bestaan/leesbaar.
 const DOELENBOOM_FIELDS =
-  'd.id, d.slug, d.name, d.read_only, d.wipe_on_empty, d.stale_after_days as "staleAfterDays", ' +
-  'd.archived_at as "archivedAt", d.created_at';
+  'd.id, d.slug, d.name, d.read_only, d.wipe_on_empty, d.nightly_export_enabled, ' +
+  'd.stale_after_days as "staleAfterDays", d.archived_at as "archivedAt", d.created_at';
 
 doelenbomenRouter.get('/doelenbomen', async (req: AuthedRequest, res) => {
   if (req.user!.isSysadmin) {
@@ -129,14 +129,18 @@ doelenbomenRouter.post(
     const client = await pool.connect();
     try {
       await client.query('begin');
-      const tenantRow = await client.query('select wipe_on_empty, name from tenants where id = $1', [req.params.tenantId]);
+      const tenantRow = await client.query(
+        'select wipe_on_empty, nightly_export_enabled, name from tenants where id = $1',
+        [req.params.tenantId]
+      );
       const defaultWipeOnEmpty = tenantRow.rows[0]?.wipe_on_empty ?? false;
+      const defaultNightlyExportEnabled = tenantRow.rows[0]?.nightly_export_enabled ?? true;
       const result = await client.query(
-        `insert into doelenbomen (tenant_id, slug, name, wipe_on_empty)
-         values ($1, $2, $3, $4)
-         returning id, slug, name, read_only, wipe_on_empty, stale_after_days as "staleAfterDays",
-           archived_at as "archivedAt", created_at`,
-        [req.params.tenantId, slug, name, defaultWipeOnEmpty]
+        `insert into doelenbomen (tenant_id, slug, name, wipe_on_empty, nightly_export_enabled)
+         values ($1, $2, $3, $4, $5)
+         returning id, slug, name, read_only, wipe_on_empty, nightly_export_enabled,
+           stale_after_days as "staleAfterDays", archived_at as "archivedAt", created_at`,
+        [req.params.tenantId, slug, name, defaultWipeOnEmpty, defaultNightlyExportEnabled]
       );
       if (templateId != null) {
         // Sjabloon toepassen: kolommen + voorbeeldelementen + relaties komen
@@ -205,6 +209,7 @@ doelenbomenRouter.put(
     const slug = typeof b.slug === 'string' ? b.slug.trim() : '';
     const readOnly = typeof b.readOnly === 'boolean' ? b.readOnly : undefined;
     const wipeOnEmpty = typeof b.wipeOnEmpty === 'boolean' ? b.wipeOnEmpty : undefined;
+    const nightlyExportEnabled = typeof b.nightlyExportEnabled === 'boolean' ? b.nightlyExportEnabled : undefined;
     const archived = typeof b.archived === 'boolean' ? b.archived : undefined;
     // staleAfterDays: drempel (in dagen) voor de 'verouderd'-markering op
     // projectelementen — zie db/migrations/0020_project_status_review.sql.
@@ -222,13 +227,16 @@ doelenbomenRouter.put(
     if (!name) return res.status(400).json({ error: 'Naam is verplicht.' });
 
     const current = await pool.query(
-      'select tenant_id, slug, read_only, wipe_on_empty, stale_after_days, archived_at from doelenbomen where id = $1',
+      'select tenant_id, slug, read_only, wipe_on_empty, nightly_export_enabled, stale_after_days, archived_at ' +
+        'from doelenbomen where id = $1',
       [req.params.id]
     );
     if (current.rows.length === 0) return res.status(404).json({ error: 'Doelenboom niet gevonden.' });
     const newSlug = slug || current.rows[0].slug;
     const newReadOnly = readOnly === undefined ? current.rows[0].read_only : readOnly;
     const newWipeOnEmpty = wipeOnEmpty === undefined ? current.rows[0].wipe_on_empty : wipeOnEmpty;
+    const newNightlyExportEnabled =
+      nightlyExportEnabled === undefined ? current.rows[0].nightly_export_enabled : nightlyExportEnabled;
     const newStaleAfterDays = staleAfterDays === undefined ? current.rows[0].stale_after_days : staleAfterDays;
     const wasArchived = current.rows[0].archived_at != null;
     const willBeArchived = archived === undefined ? wasArchived : archived;
@@ -247,12 +255,22 @@ doelenbomenRouter.put(
 
     try {
       const result = await pool.query(
-        `update doelenbomen set name = $1, slug = $2, read_only = $3, wipe_on_empty = $4, stale_after_days = $5,
-           archived_at = case when $6 then coalesce(archived_at, now()) else null end
-         where id = $7
-         returning id, slug, name, read_only, wipe_on_empty, stale_after_days as "staleAfterDays",
-           archived_at as "archivedAt", created_at`,
-        [name, newSlug, newReadOnly, newWipeOnEmpty, newStaleAfterDays, willBeArchived, req.params.id]
+        `update doelenbomen set name = $1, slug = $2, read_only = $3, wipe_on_empty = $4,
+           nightly_export_enabled = $5, stale_after_days = $6,
+           archived_at = case when $7 then coalesce(archived_at, now()) else null end
+         where id = $8
+         returning id, slug, name, read_only, wipe_on_empty, nightly_export_enabled,
+           stale_after_days as "staleAfterDays", archived_at as "archivedAt", created_at`,
+        [
+          name,
+          newSlug,
+          newReadOnly,
+          newWipeOnEmpty,
+          newNightlyExportEnabled,
+          newStaleAfterDays,
+          willBeArchived,
+          req.params.id,
+        ]
       );
       res.json(result.rows[0]);
     } catch (err) {
