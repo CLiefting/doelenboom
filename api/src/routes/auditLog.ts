@@ -19,7 +19,9 @@ const LIST_QUERY = `
     a.role,
     a.detail,
     u.email as user_email,
+    a.tenant_id,
     t.name as tenant_name,
+    a.doelenboom_id,
     d.name as doelenboom_name
   from audit_log a
   left join users u on u.id = a.user_id
@@ -27,6 +29,16 @@ const LIST_QUERY = `
   left join doelenbomen d on d.id = a.doelenboom_id
   order by a.created_at desc
 `;
+
+// Tenant- en doelenboomnamen zijn NIET uniek (twee tenants of twee bomen
+// kunnen best dezelfde naam hebben, zie het "twee tenants heten allebei
+// Liefting"-verhaal) — het (id) erachter maakt in het logboek altijd
+// ondubbelzinnig duidelijk over wélke tenant/boom het gaat, ook al zijn de
+// namen toevallig gelijk of is een tenant/boom later hernoemd.
+function withId(name: unknown, id: unknown): string | null {
+  if (name === null || name === undefined) return null;
+  return `${name} (${id})`;
+}
 
 function mapRow(row: Record<string, unknown>) {
   return {
@@ -36,8 +48,8 @@ function mapRow(row: Record<string, unknown>) {
     role: row.role,
     detail: row.detail,
     userEmail: row.user_email,
-    tenantName: row.tenant_name,
-    doelenboomName: row.doelenboom_name,
+    tenantName: withId(row.tenant_name, row.tenant_id),
+    doelenboomName: withId(row.doelenboom_name, row.doelenboom_id),
   };
 }
 

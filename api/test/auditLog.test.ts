@@ -60,8 +60,14 @@ describe('audit log (sysadmin-only, append-only)', () => {
 
     const logRes = await req('GET', '/api/audit-log', { token: sysadminToken });
     assert.equal(logRes.status, 200);
+    // tenantName/doelenboomName zijn "naam (id)" (namen zijn niet uniek, zie
+    // withId() in auditLog.ts) — hier volstaat controleren dat de juiste id
+    // erin voorkomt, ongeacht de exacte naam.
     const entry = logRes.body.find(
-      (e: any) => e.eventType === 'doelenboom_view' && e.doelenboomName === 'Testboom' && e.tenantName === `${PREFIX}-view`
+      (e: any) =>
+        e.eventType === 'doelenboom_view' &&
+        e.doelenboomName === `Testboom (${fixture.doelenboomId})` &&
+        e.tenantName === `${PREFIX}-view (${fixture.tenantId})`
     );
     assert.ok(entry, 'verwacht een doelenboom_view-logregel voor deze boom');
     assert.equal(entry.userEmail, `${PREFIX}-view-gebruiker@test.local`);
@@ -79,7 +85,7 @@ describe('audit log (sysadmin-only, append-only)', () => {
 
     const logRes = await req('GET', '/api/audit-log', { token: sysadminToken });
     const entry = logRes.body.find(
-      (e: any) => e.eventType === 'tenant_settings_changed' && e.tenantName === `${PREFIX}-tenant`
+      (e: any) => e.eventType === 'tenant_settings_changed' && e.tenantName === `${PREFIX}-tenant (${fixture.tenantId})`
     );
     assert.ok(entry, 'verwacht een tenant_settings_changed-logregel');
     assert.equal(entry.userEmail, `${PREFIX}-tenant-admin@test.local`);
@@ -97,7 +103,7 @@ describe('audit log (sysadmin-only, append-only)', () => {
     assert.equal(first.status, 200);
 
     const beforeCount = (await req('GET', '/api/audit-log', { token: sysadminToken })).body.filter(
-      (e: any) => e.eventType === 'tenant_settings_changed' && e.tenantName === `${PREFIX}-nochg`
+      (e: any) => e.eventType === 'tenant_settings_changed' && e.tenantName === `${PREFIX}-nochg (${fixture.tenantId})`
     ).length;
 
     // Zelfde waarde nogmaals meesturen — mag geen nieuwe logregel opleveren.
@@ -108,7 +114,7 @@ describe('audit log (sysadmin-only, append-only)', () => {
     assert.equal(second.status, 200);
 
     const afterCount = (await req('GET', '/api/audit-log', { token: sysadminToken })).body.filter(
-      (e: any) => e.eventType === 'tenant_settings_changed' && e.tenantName === `${PREFIX}-nochg`
+      (e: any) => e.eventType === 'tenant_settings_changed' && e.tenantName === `${PREFIX}-nochg (${fixture.tenantId})`
     ).length;
     assert.equal(afterCount, beforeCount, 'een ongewijzigde PUT mag geen extra logregel opleveren');
   });
