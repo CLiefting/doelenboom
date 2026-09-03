@@ -15,3 +15,11 @@ __pycache__
 # code, en alleen relevant op de VPS zelf (bind mount, zie
 # docker-compose.prod.yml).
 /backups/
+
+# Door de Claude-desktop-app zelf aangemaakte map wanneer een bestand (bv. een
+# los opgeleverd document) naar deze verbonden map wordt weggeschreven — geen
+# projectbestand, hoort niet in git. Ongenegeerd zou dit git status --porcelain
+# laten zien en dus scripts/build-version.sh een "-dirty"-suffix in de
+# footer-versie laten zetten (zie GET /api/version), ook als de repo zelf
+# verder precies op een release-tag staat.
+/Claude outputs/
