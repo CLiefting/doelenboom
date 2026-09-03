@@ -451,11 +451,18 @@ aan/uit te zetten via "Mijn beveiliging") voor de rest.
 
 **SMTP-relay instellen op de VPS:** vul in `.env` (naast `JWT_SECRET` etc.,
 zie §4 hierboven) `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD` en
-eventueel `SMTP_FROM` (default `no-reply@code072.nl`) in — zie
-`.env.example`. Staat `SMTP_HOST` leeg/ontbrekend, dan wordt er **geen**
-e-mail verstuurd en komt de inlogcode alleen in de `api`-container-log te
-staan (`docker compose ... logs api`) — bruikbaar om de flow te testen, maar
-niet geschikt voor productie: zet de SMTP-variabelen dus altijd vóór
+eventueel `SMTP_FROM` in — zie `.env.example`. Voor Hostnet (bevestigd):
+`SMTP_HOST=mailout.hostnet.nl`, `SMTP_PORT=587` (STARTTLS), `SMTP_USER=
+no-reply@code072.nl` (de mailbox waarmee ingelogd wordt), `SMTP_FROM=
+no-reply.doelenboom@code072.nl` (een alias van die mailbox — de afzender die
+de ontvanger ziet, mag dus afwijken van `SMTP_USER`). Gebruik
+`scripts/set-smtp-env.sh` om dit lokaal in te vullen zonder het wachtwoord
+ergens in een bestand of in de chat te typen (vraagt het interactief,
+verborgen, en schrijft het alleen naar je eigen `.env`). Staat `SMTP_HOST`
+leeg/ontbrekend, dan wordt er **geen** e-mail verstuurd en komt de
+inlogcode alleen in de `api`-container-log te staan
+(`docker compose ... logs api`) — bruikbaar om de flow te testen, maar niet
+geschikt voor productie: zet de SMTP-variabelen dus altijd vóór
 productiegebruik.
 
 **Een vergrendelde niet-sysadmin** (code niet ontvangen/bereikbaar): een

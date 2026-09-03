@@ -8,7 +8,10 @@ const SMTP_HOST = process.env.SMTP_HOST;
 const SMTP_PORT = process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : 587;
 const SMTP_USER = process.env.SMTP_USER;
 const SMTP_PASSWORD = process.env.SMTP_PASSWORD;
-const SMTP_FROM = process.env.SMTP_FROM ?? 'no-reply@code072.nl';
+// no-reply.doelenboom@code072.nl is een alias van de mailbox waar we op
+// inloggen (SMTP_USER, doorgaans no-reply@code072.nl) — de afzender die de
+// ontvanger ziet mag dus afwijken van het account waarmee verstuurd wordt.
+const SMTP_FROM = process.env.SMTP_FROM ?? 'no-reply.doelenboom@code072.nl';
 
 let transporter: Transporter | null = null;
 

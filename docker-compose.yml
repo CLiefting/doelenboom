@@ -56,6 +56,15 @@ services:
       PORT: 4000
       JWT_SECRET: ${JWT_SECRET:-dev-secret-verander-mij}
       EXCEL_SERVICE_URL: http://excel-service:8000
+      # MFA-e-mail (zie doelenboom_mfa_ontwerp.md in het project en
+      # api/src/email.ts) — SMTP_HOST leeg/ontbrekend (de standaard hier) laat
+      # email.ts terugvallen op de console-log-fallback i.p.v. echt mailen,
+      # dus dit is ook zonder ingevulde .env veilig leeg te laten.
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-no-reply.doelenboom@code072.nl}
     ports:
       - "4000:4000"
     depends_on:
