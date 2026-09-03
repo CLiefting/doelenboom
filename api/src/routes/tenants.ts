@@ -4,6 +4,7 @@ import { requireAuth, AuthedRequest } from '../auth.js';
 import { requireSysadmin, requireTenantRoleForTenantParam } from '../rbac.js';
 import { createTenantDefaultConfig } from '../columnConfig.js';
 import { assertCanAddAdmin, computeDefaultLicenseEndDate, LicenseLimitError } from '../license.js';
+import { logAuditEvent } from '../auditLog.js';
 
 export const tenantsRouter = Router();
 tenantsRouter.use(requireAuth);
@@ -162,6 +163,17 @@ tenantsRouter.put('/:id', requireTenantRoleForTenantParam('admin', 'id'), async 
   if (hasSlug && !slug) {
     return res.status(400).json({ error: 'slug mag niet leeg zijn.' });
   }
+
+  // Vóór-toestand ophalen voor de auditlog-diff hieronder (zie db/init.sql
+  // audit_log, event_type 'tenant_settings_changed') — vóór de eigenlijke
+  // update, zodat we straks per gewijzigd veld {from, to} kunnen loggen i.p.v.
+  // alleen "iets is gewijzigd". Dubbele 404-check (hier én na de update) is
+  // bewust: de tenant kan in theorie tussen deze select en de update
+  // verwijderd zijn.
+  const before = await pool.query(`select ${TENANT_SELECT_FIELDS} from tenants where id = $1`, [req.params.id]);
+  if (before.rows.length === 0) return res.status(404).json({ error: 'Tenant niet gevonden' });
+  const beforeRow = before.rows[0] as Record<string, unknown>;
+
   try {
     const result = await pool.query(
       `update tenants set
@@ -189,7 +201,37 @@ tenantsRouter.put('/:id', requireTenantRoleForTenantParam('admin', 'id'), async 
       ]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Tenant niet gevonden' });
-    res.json(result.rows[0]);
+    const afterRow = result.rows[0] as Record<string, unknown>;
+
+    // Alleen loggen wat er echt veranderd is — een PUT die (per ongeluk of
+    // expres) dezelfde waarden terugstuurt levert geen logregel op.
+    const changedFields = [
+      'wipe_on_empty',
+      'session_timeout_minutes',
+      'nightly_export_enabled',
+      'open_access_role',
+      'entry_popup_enabled',
+      'entry_popup_message',
+      'name',
+      'slug',
+    ] as const;
+    const changes: Record<string, { from: unknown; to: unknown }> = {};
+    for (const field of changedFields) {
+      if (beforeRow[field] !== afterRow[field]) {
+        changes[field] = { from: beforeRow[field], to: afterRow[field] };
+      }
+    }
+    if (Object.keys(changes).length > 0) {
+      await logAuditEvent({
+        eventType: 'tenant_settings_changed',
+        userId: req.user!.id,
+        tenantId: req.params.id,
+        role: null,
+        detail: { changes },
+      });
+    }
+
+    res.json(afterRow);
   } catch (err) {
     if (isUniqueViolation(err)) {
       return res.status(409).json({ error: 'Er bestaat al een tenant met deze slug.' });

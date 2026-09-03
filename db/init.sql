@@ -586,6 +586,37 @@ alter table tenants add column if not exists open_access_role text
 alter table tenants add column if not exists entry_popup_enabled boolean not null default false;
 alter table tenants add column if not exists entry_popup_message text not null default '';
 
+-- Generiek, uitbreidbaar auditlogboek (CISO-aandachtspunt: "wie heeft wat
+-- gedaan, wanneer"). Zelfde event_type+detail-jsonb-opzet als
+-- account_retention_events hierboven, i.p.v. een aparte tabel per
+-- gebeurtenis-soort, zodat een toekomstig event_type er zonder
+-- schemawijziging bij kan. Op dit moment twee soorten (zie
+-- api/src/auditLog.ts): 'doelenboom_view' (iemand opent/ververst een
+-- boomweergave — role is dan de effectieve rol op dat moment) en
+-- 'tenant_settings_changed' (een sysadmin of tenant-admin wijzigt
+-- tenant-instellingen — detail bevat {"changes": {veld: {from, to}}}).
+-- Bewust GEEN delete-route/-knop ooit voorzien: dit log is append-only, ook
+-- voor een sysadmin (zie api/src/routes/auditLog.ts — alleen GET-routes).
+-- on delete set null (i.p.v. cascade) op user/tenant/doelenboom: een
+-- verwijderd account/tenant/boom mag het log van wat er ooit gebeurd is niet
+-- met zich meetrekken.
+create table if not exists audit_log (
+  id bigserial primary key,
+  event_type text not null check (event_type in ('doelenboom_view', 'tenant_settings_changed')),
+  user_id bigint references users(id) on delete set null,
+  tenant_id bigint references tenants(id) on delete set null,
+  doelenboom_id bigint references doelenbomen(id) on delete set null,
+  -- Alleen gevuld bij 'doelenboom_view' (de effectieve rol op het moment van
+  -- bekijken: admin/gebruiker/bezoeker) -- null bij andere event_types.
+  role text,
+  detail jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_audit_log_created on audit_log(created_at desc);
+create index if not exists idx_audit_log_user on audit_log(user_id, created_at desc);
+create index if not exists idx_audit_log_doelenboom on audit_log(doelenboom_id, created_at desc);
+create index if not exists idx_audit_log_tenant on audit_log(tenant_id, created_at desc);
+
 alter table doelenbomen add column if not exists archived_at timestamptz;
 create index if not exists idx_doelenbomen_tenant_active
   on doelenbomen(tenant_id) where archived_at is null;

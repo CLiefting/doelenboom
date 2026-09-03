@@ -4,6 +4,7 @@ import { requireAuth, AuthedRequest } from '../auth.js';
 import { requireTenantRoleForDoelenboomParam, getEffectiveRoleForDoelenboom } from '../rbac.js';
 import { getColumnsForDoelenboom } from '../columnConfig.js';
 import { getActiveModuleKeys, isLicenseExpired } from '../license.js';
+import { logAuditEvent } from '../auditLog.js';
 
 export const treeRouter = Router();
 treeRouter.use(requireAuth);
@@ -297,6 +298,22 @@ treeRouter.get('/:id/tree', requireTenantRoleForDoelenboomParam('bezoeker', 'id'
   // was de request al met 403 afgekapt) — de ?? 'bezoeker' hier is puur voor
   // TypeScript, geen echte fallback in de praktijk.
   const effectiveRole = (await getEffectiveRoleForDoelenboom(req.user!.id, req.params.id)) ?? 'bezoeker';
+
+  // Auditlog: elke keer dat iemand deze boom opent of ververst (tree.html doet
+  // dit exact één keer per fetchAndBoot()) — bewust hier en niet dieper op elke
+  // losse CRUD-actie binnen een al-geopende boom (zie het interview met
+  // Charles, 3 september 2026: "alleen bij openen"). Awaited zodat een test
+  // betrouwbaar meteen na de request kan verifiëren, maar logAuditEvent zelf
+  // vangt fouten af — een auditlog-storing mag het tonen van de boom nooit
+  // blokkeren.
+  await logAuditEvent({
+    eventType: 'doelenboom_view',
+    userId: req.user!.id,
+    tenantId: tree.doelenboom.tenant.id,
+    doelenboomId: tree.doelenboom.id,
+    role: effectiveRole,
+  });
+
   // "Geblokkeerd": read-only-vlag of verlopen licentie zet iedereen terug naar
   // puur lezen, ongeacht effectiveRole (zie ook requireWritableDoelenboom in
   // rbac.ts, dezelfde regel server-side) — geen uitzondering meer voor

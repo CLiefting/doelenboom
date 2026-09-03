@@ -90,6 +90,21 @@ export type SessionInfo = {
   active: boolean;
 };
 
+// Zie db/init.sql (audit_log) en api/src/routes/auditLog.ts. tenantName/
+// doelenboomName/userEmail zijn null zodra het gekoppelde account/tenant/boom
+// inmiddels verwijderd is (on delete set null) — de logregel zelf blijft dan
+// gewoon bestaan.
+export type AuditLogEntry = {
+  id: number;
+  eventType: 'doelenboom_view' | 'tenant_settings_changed';
+  createdAt: string;
+  role: string | null;
+  detail: Record<string, unknown>;
+  userEmail: string | null;
+  tenantName: string | null;
+  doelenboomName: string | null;
+};
+
 export type WipeCandidate = {
   tenant: { id: number; slug: string; name: string };
   doelenbomen: Array<{ id: number; slug: string; name: string; elementCount: number }>;

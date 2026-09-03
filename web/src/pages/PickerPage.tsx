@@ -217,6 +217,11 @@ function UserMenu({
               Login-overzicht
             </a>
           )}
+          {user.isSysadmin && (
+            <a role="menuitem" href="/audit-log" style={styles.dropdownItem}>
+              Auditlogboek
+            </a>
+          )}
           {user.isSysadmin && <div style={styles.dropdownDivider} />}
           <button
             role="menuitem"

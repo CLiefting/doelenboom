@@ -21,6 +21,7 @@ import { doelenboomTemplatesRouter } from './routes/doelenboomTemplates.js';
 import { licensesRouter } from './routes/licenses.js';
 import { dbstatRouter } from './routes/dbstat.js';
 import { sessionsRouter } from './routes/sessions.js';
+import { auditLogRouter } from './routes/auditLog.js';
 import { appSettingsRouter } from './routes/appSettings.js';
 import { announcementRouter } from './routes/announcement.js';
 import { subscriptionsRouter } from './routes/subscriptions.js';
@@ -166,6 +167,7 @@ export function createApp() {
   app.use('/api', licensesRouter);
   app.use('/api/dbstat', dbstatRouter);
   app.use('/api/sessions', sessionsRouter);
+  app.use('/api/audit-log', auditLogRouter);
   app.use('/api/app-settings', appSettingsRouter);
 
   return app;

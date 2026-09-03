@@ -528,6 +528,24 @@ export const api = {
   // --- Login-overzicht (sysadmin-only, /sessions): wie is (recent) ingelogd, wanneer ---
   sessions: (token: string) => request<import('./types').SessionInfo[]>('/api/sessions', {}, token),
 
+  // --- Auditlogboek (sysadmin-only, /audit-log): wie heeft welke boom bekeken
+  // en welke tenant-instellingen zijn gewijzigd — zie db/init.sql audit_log. ---
+  auditLog: (token: string) => request<import('./types').AuditLogEntry[]>('/api/audit-log', {}, token),
+  // Excel-export gaat bewust NIET via de generieke request()-helper hierboven
+  // (die verwacht altijd een JSON-body) maar via een losse fetch + blob, zelfde
+  // patroon als downloadExport() in tree.html: de bestandsnaam komt uit de
+  // Content-Disposition-header die de server meestuurt.
+  downloadAuditLogExport: async (token: string): Promise<{ blob: Blob; filename: string }> => {
+    const res = await fetch(`${API_URL}/api/audit-log/export`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) throw new ApiError(res.status, 'Export mislukt (HTTP ' + res.status + ')');
+    const blob = await res.blob();
+    const disposition = res.headers.get('Content-Disposition') ?? '';
+    const match = disposition.match(/filename="([^"]+)"/);
+    return { blob, filename: match ? match[1] : 'auditlogboek.xlsx' };
+  },
+
   // --- Systeemmelding (bv. onderhoudsaankondiging) — zie api/src/routes/announcement.ts ---
   // GET is bewust ongeauthenticeerd (ook zichtbaar vóór inloggen), dus geen token-param.
   announcement: () => request<import('./types').SystemAnnouncement>('/api/announcement', {}),
