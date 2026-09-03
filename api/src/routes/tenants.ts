@@ -9,7 +9,8 @@ export const tenantsRouter = Router();
 tenantsRouter.use(requireAuth);
 
 const TENANT_SELECT_FIELDS =
-  'id, slug, name, wipe_on_empty, session_timeout_minutes, nightly_export_enabled, open_access_role, created_at';
+  'id, slug, name, wipe_on_empty, session_timeout_minutes, nightly_export_enabled, open_access_role, ' +
+  'entry_popup_enabled, entry_popup_message, created_at';
 
 // Licentie-einddatum als losse, expliciet met to_char geformatteerde kolom
 // ("YYYY-MM-DD" of null) — bewust NIET in TENANT_SELECT_FIELDS hierboven,
@@ -81,9 +82,10 @@ tenantsRouter.post('/', requireSysadmin, async (req, res) => {
   }
 });
 
-// PUT /api/tenants/:id — wipeOnEmpty/sessionTimeoutMinutes/openAccessRole
-// aanpassen. Toegestaan voor sysadmins en tenant-admins van déze tenant (dat
-// valt onder "wijzigen in tenant"). Slug/naam wijzigen kan hier bewust niet.
+// PUT /api/tenants/:id — wipeOnEmpty/sessionTimeoutMinutes/openAccessRole/
+// entryPopupEnabled/entryPopupMessage aanpassen. Toegestaan voor sysadmins en
+// tenant-admins van déze tenant (dat valt onder "wijzigen in tenant").
+// Slug/naam wijzigen kan hier bewust niet.
 //
 // openAccessRole is nullable (null = open toegang uit), dus coalesce() zoals
 // bij wipeOnEmpty/sessionTimeoutMinutes hierboven volstaat niet — dat zou
@@ -96,15 +98,23 @@ tenantsRouter.put('/:id', requireTenantRoleForTenantParam('admin', 'id'), async 
   const { wipeOnEmpty, sessionTimeoutMinutes, nightlyExportEnabled } = b;
   const hasOpenAccessRole = 'openAccessRole' in b;
   const openAccessRole = b.openAccessRole;
+  const hasEntryPopupEnabled = typeof b.entryPopupEnabled === 'boolean';
+  const entryPopupEnabled = b.entryPopupEnabled as boolean | undefined;
+  const hasEntryPopupMessage = typeof b.entryPopupMessage === 'string';
+  const entryPopupMessage = hasEntryPopupMessage ? (b.entryPopupMessage as string).trim() : undefined;
   if (
     typeof wipeOnEmpty !== 'boolean' &&
     sessionTimeoutMinutes === undefined &&
     typeof nightlyExportEnabled !== 'boolean' &&
-    !hasOpenAccessRole
+    !hasOpenAccessRole &&
+    !hasEntryPopupEnabled &&
+    !hasEntryPopupMessage
   ) {
-    return res
-      .status(400)
-      .json({ error: 'Geef wipeOnEmpty, sessionTimeoutMinutes, nightlyExportEnabled en/of openAccessRole mee.' });
+    return res.status(400).json({
+      error:
+        'Geef wipeOnEmpty, sessionTimeoutMinutes, nightlyExportEnabled, openAccessRole, ' +
+        'entryPopupEnabled en/of entryPopupMessage mee.',
+    });
   }
   if (
     sessionTimeoutMinutes !== undefined &&
@@ -121,13 +131,23 @@ tenantsRouter.put('/:id', requireTenantRoleForTenantParam('admin', 'id'), async 
   ) {
     return res.status(400).json({ error: 'openAccessRole moet "admin", "gebruiker", "bezoeker" of null zijn.' });
   }
+  // De popup-tekst wordt bewust altijd sámen met entryPopupEnabled verwacht
+  // (zo verstuurt TenantSettingsForm het ook, net als de andere velden hier)
+  // — dat voorkomt dat 'ie aan komt te staan met een lege tekst zonder een
+  // aparte, extra select nodig te hebben om de al-opgeslagen tekst erbij te
+  // betrekken. Zelfde boolean+tekst-validatiepatroon als announcement.ts.
+  if (entryPopupEnabled === true && !entryPopupMessage) {
+    return res.status(400).json({ error: 'Bij een actieve popup-melding is een tekst (entryPopupMessage) verplicht.' });
+  }
   const result = await pool.query(
     `update tenants set
        wipe_on_empty = coalesce($1, wipe_on_empty),
        session_timeout_minutes = coalesce($2, session_timeout_minutes),
        nightly_export_enabled = coalesce($3, nightly_export_enabled),
-       open_access_role = case when $4 then $5 else open_access_role end
-     where id = $6
+       open_access_role = case when $4 then $5 else open_access_role end,
+       entry_popup_enabled = coalesce($6, entry_popup_enabled),
+       entry_popup_message = coalesce($7, entry_popup_message)
+     where id = $8
      returning ${TENANT_SELECT_FIELDS}, ${LICENSE_END_DATE_SELECT}`,
     [
       typeof wipeOnEmpty === 'boolean' ? wipeOnEmpty : null,
@@ -135,6 +155,8 @@ tenantsRouter.put('/:id', requireTenantRoleForTenantParam('admin', 'id'), async 
       typeof nightlyExportEnabled === 'boolean' ? nightlyExportEnabled : null,
       hasOpenAccessRole,
       openAccessRole ?? null,
+      hasEntryPopupEnabled ? entryPopupEnabled : null,
+      hasEntryPopupMessage ? entryPopupMessage : null,
       req.params.id,
     ]
   );

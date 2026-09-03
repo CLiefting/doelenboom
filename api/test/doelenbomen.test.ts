@@ -329,6 +329,36 @@ describe('doelenbomen', () => {
     assert.equal(getAfter.status, 404);
   });
 
+  // TenantEntryNotice (zie App.tsx/TenantEntryNotice.tsx): de picker moet de
+  // tenant-brede popup-instelling meteen bij GET /api/doelenbomen meekrijgen
+  // (tenant_entry_popup_enabled/tenant_entry_popup_message), zonder een
+  // aparte /api/tenants-aanroep — zie TENANT_JOIN_FIELDS in routes/doelenbomen.ts.
+  it('GET /api/doelenbomen en GET /api/doelenbomen/:id geven de tenant-entry-popup-instelling mee', async () => {
+    const { tenantId, adminToken } = await makeTenantWithAdmin(sysadminToken, `${PREFIX}-t8`, `${PREFIX}-t8-admin@test.local`);
+    const boom = await req('POST', `/api/tenants/${tenantId}/doelenbomen`, {
+      token: adminToken, body: { slug: 'boom8', name: 'Boom 8' },
+    });
+    const doelenboomId = boom.body.id;
+
+    const listUit = await req('GET', '/api/doelenbomen', { token: adminToken });
+    const rowUit = listUit.body.find((d: { id: number }) => d.id === doelenboomId);
+    assert.equal(rowUit.tenant_entry_popup_enabled, false, 'default uit');
+    assert.equal(rowUit.tenant_entry_popup_message, '');
+
+    await req('PUT', `/api/tenants/${tenantId}`, {
+      token: adminToken, body: { entryPopupEnabled: true, entryPopupMessage: 'Welkom, lees dit eerst.' },
+    });
+
+    const listAan = await req('GET', '/api/doelenbomen', { token: adminToken });
+    const rowAan = listAan.body.find((d: { id: number }) => d.id === doelenboomId);
+    assert.equal(rowAan.tenant_entry_popup_enabled, true);
+    assert.equal(rowAan.tenant_entry_popup_message, 'Welkom, lees dit eerst.');
+
+    const single = await req('GET', `/api/doelenbomen/${doelenboomId}`, { token: adminToken });
+    assert.equal(single.body.tenant_entry_popup_enabled, true);
+    assert.equal(single.body.tenant_entry_popup_message, 'Welkom, lees dit eerst.');
+  });
+
   // Privacy (zie rbac.ts rolmodel-comment): een ongekoppelde sysadmin mag nog
   // wél de doelenbomen-lijst zien en de "instellingen"-laag van een doelenboom
   // beheren (naam/slug/alleen-lezen/archiveren/verwijderen, en wie welke rol

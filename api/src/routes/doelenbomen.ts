@@ -36,10 +36,19 @@ const DOELENBOOM_FIELDS =
   'd.id, d.slug, d.name, d.read_only, d.wipe_on_empty, d.nightly_export_enabled, ' +
   'd.stale_after_days as "staleAfterDays", d.archived_at as "archivedAt", d.created_at';
 
+// t.entry_popup_enabled/t.entry_popup_message gaan hier mee (zie
+// db/init.sql/routes/tenants.ts) zodat de picker (PickerPage.tsx via
+// App.tsx's onSelect) meteen, zonder extra request, kan beslissen of de
+// TenantEntryNotice-popup getoond moet worden zodra deze doelenboom
+// geselecteerd wordt.
+const TENANT_JOIN_FIELDS =
+  't.id as tenant_id, t.slug as tenant_slug, t.name as tenant_name, ' +
+  't.entry_popup_enabled as tenant_entry_popup_enabled, t.entry_popup_message as tenant_entry_popup_message';
+
 doelenbomenRouter.get('/doelenbomen', async (req: AuthedRequest, res) => {
   if (req.user!.isSysadmin) {
     const result = await pool.query(
-      `select ${DOELENBOOM_FIELDS}, t.id as tenant_id, t.slug as tenant_slug, t.name as tenant_name
+      `select ${DOELENBOOM_FIELDS}, ${TENANT_JOIN_FIELDS}
        from doelenbomen d
        join tenants t on t.id = d.tenant_id
        order by t.name, d.name`
@@ -47,7 +56,7 @@ doelenbomenRouter.get('/doelenbomen', async (req: AuthedRequest, res) => {
     return res.json(result.rows);
   }
   const result = await pool.query(
-    `select ${DOELENBOOM_FIELDS}, t.id as tenant_id, t.slug as tenant_slug, t.name as tenant_name
+    `select ${DOELENBOOM_FIELDS}, ${TENANT_JOIN_FIELDS}
      from doelenbomen d
      join tenants t on t.id = d.tenant_id
      where t.open_access_role is not null
@@ -63,7 +72,7 @@ doelenbomenRouter.get(
   requireTenantRole('bezoeker', (req) => tenantIdForDoelenboom(req.params.id)),
   async (req, res) => {
     const result = await pool.query(
-      `select ${DOELENBOOM_FIELDS}, t.id as tenant_id, t.slug as tenant_slug, t.name as tenant_name
+      `select ${DOELENBOOM_FIELDS}, ${TENANT_JOIN_FIELDS}
        from doelenbomen d join tenants t on t.id = d.tenant_id
        where d.id = $1`,
       [req.params.id]

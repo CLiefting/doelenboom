@@ -111,6 +111,12 @@ export type TenantSummary = {
   // deze tenant, ook zonder eigen lidmaatschap — zie api/src/rbac.ts
   // getTenantRole. Bedoeld voor bv. de Demo-tenant.
   open_access_role: TenantRoleName | null;
+  // Popup-melding bij het openen van een doelenboom binnen deze tenant (OK =
+  // doorgaan, Annuleren = niet doorgaan) — zie TenantEntryNotice.tsx en
+  // App.tsx's onSelect-afhandeling. entry_popup_message is altijd gevuld als
+  // entry_popup_enabled true is (afgedwongen door PUT /api/tenants/:id).
+  entry_popup_enabled: boolean;
+  entry_popup_message: string;
   created_at: string;
   my_role?: TenantRoleName; // alleen aanwezig als niet-sysadmin dit ophaalt
   // "YYYY-MM-DD" of null (geen einddatum ingesteld/nooit verlopen) — zie
@@ -147,6 +153,12 @@ export type DoelenboomSummary = DoelenboomBase & {
   tenant_id: number;
   tenant_slug: string;
   tenant_name: string;
+  // Zie TenantSummary.entry_popup_enabled/entry_popup_message hierboven —
+  // hier meegegeven vanuit de tenant-join (GET /api/doelenbomen) zodat de
+  // picker meteen bij selectie kan beslissen of TenantEntryNotice moet
+  // verschijnen, zonder een aparte /api/tenants-aanroep.
+  tenant_entry_popup_enabled: boolean;
+  tenant_entry_popup_message: string;
 };
 
 // Eén rij in GET /api/tenants/:tenantId/doelenboom-templates (zie

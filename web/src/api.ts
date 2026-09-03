@@ -227,6 +227,10 @@ export const api = {
       // ongemoeid) — null zet open toegang expliciet uit, zie PUT
       // /api/tenants/:id (routes/tenants.ts) voor de tri-state-uitleg.
       openAccessRole?: import('./types').TenantRoleName | null;
+      // Bij entryPopupEnabled: true moet entryPopupMessage in dezelfde
+      // aanroep een niet-lege tekst zijn — zie PUT /api/tenants/:id.
+      entryPopupEnabled?: boolean;
+      entryPopupMessage?: string;
     }
   ) =>
     request<import('./types').TenantSummary>(`/api/tenants/${tenantId}`, {

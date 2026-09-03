@@ -72,6 +72,54 @@ describe('tenants', () => {
     assert.equal(renameOnly.body.nightly_export_enabled, false);
   });
 
+  it('PUT /api/tenants/:id: entryPopupEnabled/entryPopupMessage (boom-openen-melding)', async () => {
+    const slug = `${PREFIX}-t9`;
+    const created = await req('POST', '/api/tenants', { token: sysadminToken, body: { slug, name: 'Test tenant 9' } });
+    const tenantId = created.body.id;
+    assert.equal(created.body.entry_popup_enabled, false, 'default uit');
+    assert.equal(created.body.entry_popup_message, '', 'default lege tekst');
+
+    // Aanzetten zonder tekst mee te sturen wordt geweigerd — geen actieve
+    // popup met een lege boodschap.
+    const zonderTekst = await req('PUT', `/api/tenants/${tenantId}`, {
+      token: sysadminToken, body: { entryPopupEnabled: true },
+    });
+    assert.equal(zonderTekst.status, 400);
+
+    // Aanzetten met een tekst die alleen witruimte is telt ook als leeg.
+    const alleenWitruimte = await req('PUT', `/api/tenants/${tenantId}`, {
+      token: sysadminToken, body: { entryPopupEnabled: true, entryPopupMessage: '   ' },
+    });
+    assert.equal(alleenWitruimte.status, 400);
+
+    const aan = await req('PUT', `/api/tenants/${tenantId}`, {
+      token: sysadminToken,
+      body: { entryPopupEnabled: true, entryPopupMessage: 'Let op: dit is testdata.' },
+    });
+    assert.equal(aan.status, 200);
+    assert.equal(aan.body.entry_popup_enabled, true);
+    assert.equal(aan.body.entry_popup_message, 'Let op: dit is testdata.');
+
+    // Zonder entryPopupEnabled/entryPopupMessage in de body blijft alles
+    // ongewijzigd staan (zelfde "omitted = ongewijzigd"-gedrag als elders).
+    const renameOnly = await req('PUT', `/api/tenants/${tenantId}`, {
+      token: sysadminToken, body: { sessionTimeoutMinutes: 45 },
+    });
+    assert.equal(renameOnly.status, 200);
+    assert.equal(renameOnly.body.entry_popup_enabled, true);
+    assert.equal(renameOnly.body.entry_popup_message, 'Let op: dit is testdata.');
+
+    // Uitzetten mag altijd, ook zonder tekst mee te sturen.
+    const uit = await req('PUT', `/api/tenants/${tenantId}`, {
+      token: sysadminToken, body: { entryPopupEnabled: false },
+    });
+    assert.equal(uit.status, 200);
+    assert.equal(uit.body.entry_popup_enabled, false);
+    // Tekst zelf blijft gewoon bewaard (alleen de schakelaar staat uit) —
+    // handig als een tenant-admin de melding later weer aanzet.
+    assert.equal(uit.body.entry_popup_message, 'Let op: dit is testdata.');
+  });
+
   it('POST /api/tenants valideert verplichte velden', async () => {
     const res = await req('POST', '/api/tenants', { token: sysadminToken, body: { slug: '' } });
     assert.equal(res.status, 400);

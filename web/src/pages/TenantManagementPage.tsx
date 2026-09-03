@@ -1299,6 +1299,8 @@ function TenantSettingsForm({
   const [timeoutMinutes, setTimeoutMinutes] = useState(String(tenant.session_timeout_minutes));
   const [nightlyExportEnabled, setNightlyExportEnabled] = useState(tenant.nightly_export_enabled);
   const [openAccessRole, setOpenAccessRole] = useState<TenantRoleName | ''>(tenant.open_access_role ?? '');
+  const [entryPopupEnabled, setEntryPopupEnabled] = useState(tenant.entry_popup_enabled);
+  const [entryPopupMessage, setEntryPopupMessage] = useState(tenant.entry_popup_message);
   const [saved, setSaved] = useState(false);
 
   // Als de gebruiker een andere tenant selecteert moet het formulier de
@@ -1308,6 +1310,8 @@ function TenantSettingsForm({
     setTimeoutMinutes(String(tenant.session_timeout_minutes));
     setNightlyExportEnabled(tenant.nightly_export_enabled);
     setOpenAccessRole(tenant.open_access_role ?? '');
+    setEntryPopupEnabled(tenant.entry_popup_enabled);
+    setEntryPopupMessage(tenant.entry_popup_message);
     setSaved(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenant.id]);
@@ -1319,6 +1323,10 @@ function TenantSettingsForm({
       setError('Aantal minuten moet een positief getal zijn.');
       return;
     }
+    if (entryPopupEnabled && !entryPopupMessage.trim()) {
+      setError('Geef een tekst voor de popup-melding op, of zet de melding uit.');
+      return;
+    }
     setBusy(true);
     setError(null);
     setSaved(false);
@@ -1328,6 +1336,8 @@ function TenantSettingsForm({
         sessionTimeoutMinutes: minutes,
         nightlyExportEnabled,
         openAccessRole: openAccessRole || null,
+        entryPopupEnabled,
+        entryPopupMessage: entryPopupMessage.trim(),
       });
       setSaved(true);
       onSaved();
@@ -1390,6 +1400,26 @@ function TenantSettingsForm({
         toe te voegen — minstens deze rol in deze tenant (bv. handig voor de Demo-tenant). Iemand die je zelf
         als lid toevoegt met een andere rol houdt gewoon díe rol; dit is alleen de ondergrens voor wie geen
         eigen lidmaatschap heeft.
+      </p>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5 }}>
+        <input
+          type="checkbox"
+          checked={entryPopupEnabled}
+          onChange={(e) => setEntryPopupEnabled(e.target.checked)}
+        />
+        Toon een popup-melding zodra iemand een doelenboom in deze tenant opent
+      </label>
+      {entryPopupEnabled && (
+        <textarea
+          style={{ ...styles.input, minHeight: 70, fontFamily: 'inherit', resize: 'vertical' }}
+          value={entryPopupMessage}
+          onChange={(e) => setEntryPopupMessage(e.target.value)}
+          placeholder="Tekst die getoond wordt, met OK (doorgaan) en Annuleren (niet doorgaan)"
+        />
+      )}
+      <p style={{ margin: '-4px 0 0 26px', fontSize: 12, color: '#9aa0a8' }}>
+        Wordt getoond nadat een boom in deze tenant geselecteerd is, vóórdat 'ie geopend wordt — bij "Annuleren"
+        wordt de boom niet geopend. Verschijnt één keer per login-sessie, niet bij elke afzonderlijke boom.
       </p>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <button style={{ ...btnStyle('primary'), alignSelf: 'flex-start' }} type="submit" disabled={busy}>

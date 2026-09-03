@@ -573,6 +573,19 @@ alter table tenants add column if not exists license_end_date date;
 alter table tenants add column if not exists open_access_role text
   check (open_access_role in ('admin', 'gebruiker', 'bezoeker'));
 
+-- Popup-melding bij het openen van een doelenboom binnen deze tenant (zie
+-- db/migrations/0027_tenant_entry_popup.sql, PUT /api/tenants/:id in
+-- api/src/routes/tenants.ts, en TenantEntryNotice.tsx in de frontend). Toont
+-- entry_popup_message met een OK/Annuleren-keuze vlak nadat een gebruiker een
+-- doelenboom uit deze tenant selecteert — bij Annuleren wordt de boom niet
+-- geopend. Eén keer per login-sessie per tenant getoond (bijgehouden in
+-- sessionStorage aan de kant van de frontend), niet bij elke afzonderlijke
+-- boom-opening. Default uit; een lege tekst terwijl dit aan staat wordt door
+-- de PUT-route geweigerd (zie announcement.ts voor hetzelfde
+-- boolean+tekst-validatiepatroon).
+alter table tenants add column if not exists entry_popup_enabled boolean not null default false;
+alter table tenants add column if not exists entry_popup_message text not null default '';
+
 alter table doelenbomen add column if not exists archived_at timestamptz;
 create index if not exists idx_doelenbomen_tenant_active
   on doelenbomen(tenant_id) where archived_at is null;

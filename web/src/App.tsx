@@ -15,6 +15,7 @@ import HelpPage from './pages/HelpPage';
 import AboutPage from './pages/AboutPage';
 import LegalPage from './pages/LegalPage';
 import LogoutFlow from './components/LogoutFlow';
+import TenantEntryNotice from './components/TenantEntryNotice';
 import TermsAcceptanceGate from './components/TermsAcceptanceGate';
 import VersionFooter from './components/VersionFooter';
 import AnnouncementBanner from './components/AnnouncementBanner';
@@ -30,6 +31,32 @@ import type { DoelenboomSummary } from './types';
 // iemand terug is op het inlogscherm i.p.v. dat gewoon stilzwijgend te laten
 // gebeuren.
 const AUTH_NOTICE_KEY = 'doelenboom.authNotice';
+
+// Sessionstorage-sleutel voor "TenantEntryNotice al gezien deze login-sessie,
+// voor deze tenant" (zie TenantEntryNotice.tsx / onSelect hieronder) — het
+// sessie-token zit in de sleutel, zodat: (a) een pagina-herlaad in dezelfde
+// tab de melding niet opnieuw toont (sessionStorage overleeft een herlaad),
+// (b) een nieuwe login (nieuw token, ook in dezelfde tab) 'm wél weer laat
+// zien, en (c) een nieuwe tab/browserherstart vanzelf weer bij nul begint
+// (sessionStorage is tab-gebonden). Per tenant apart, want een gebruiker kan
+// bomen uit meerdere tenants achter elkaar openen.
+function entryNoticeSeenKey(token: string, tenantId: number): string {
+  return `doelenboom.entryNoticeSeen.${token}.${tenantId}`;
+}
+function hasSeenEntryNotice(token: string, tenantId: number): boolean {
+  try {
+    return sessionStorage.getItem(entryNoticeSeenKey(token, tenantId)) !== null;
+  } catch {
+    return false; // bv. privémodus zonder sessionStorage — dan liever elke keer tonen dan crashen
+  }
+}
+function markEntryNoticeSeen(token: string, tenantId: number): void {
+  try {
+    sessionStorage.setItem(entryNoticeSeenKey(token, tenantId), '1');
+  } catch {
+    // best effort — zonder sessionStorage toont de melding dan gewoon elke keer opnieuw
+  }
+}
 
 type View =
   | { name: 'picker' }
@@ -66,6 +93,11 @@ export default function App() {
   // boomweergave (tree.html, via postMessage) dezelfde flow starten, ongeacht
   // welk scherm er op dat moment getoond wordt.
   const [loggingOut, setLoggingOut] = useState(false);
+  // Doelenboom die geselecteerd is maar nog wacht op bevestiging van de
+  // tenant-eigen entry-popup (TenantEntryNotice, zie hierboven) — bij OK
+  // wordt hij alsnog geopend (zelfde als het gewone onSelect-pad), bij
+  // Annuleren blijft de gebruiker gewoon op de boom-kiezer staan.
+  const [pendingDoelenboom, setPendingDoelenboom] = useState<DoelenboomSummary | null>(null);
   // Alleen relevant zolang er nog geen sessie is (zie de !session-tak
   // hieronder) — welk van de twee publieke schermen getoond wordt: het
   // inlogscherm zelf, de aanvraagpagina, of de bevestiging na het indienen.
@@ -270,6 +302,10 @@ export default function App() {
         token={session.token}
         user={session.user}
         onSelect={(d) => {
+          if (d.tenant_entry_popup_enabled && !hasSeenEntryNotice(session.token, d.tenant_id)) {
+            setPendingDoelenboom(d);
+            return;
+          }
           setDoelenboom(d);
           setView({ name: 'tree' });
         }}
@@ -318,6 +354,18 @@ export default function App() {
       </div>
       {loggingOut && (
         <LogoutFlow token={session.token} onDone={finishLogout} onCancel={() => setLoggingOut(false)} />
+      )}
+      {pendingDoelenboom && (
+        <TenantEntryNotice
+          message={pendingDoelenboom.tenant_entry_popup_message}
+          onConfirm={() => {
+            markEntryNoticeSeen(session.token, pendingDoelenboom.tenant_id);
+            setDoelenboom(pendingDoelenboom);
+            setView({ name: 'tree' });
+            setPendingDoelenboom(null);
+          }}
+          onCancel={() => setPendingDoelenboom(null)}
+        />
       )}
       <VersionFooter onLegalRequest={(type) => setLegalOverlay(type)} />
     </>
