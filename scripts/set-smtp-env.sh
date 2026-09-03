@@ -10,12 +10,12 @@
 #   chmod +x scripts/set-smtp-env.sh
 #   ./scripts/set-smtp-env.sh
 #
-# Host/poort/beveiliging zijn de door Hostnet bevestigde waarden
-# (mailout.hostnet.nl, 587, STARTTLS — zie §9 in het ontwerpdocument) en
-# staan hieronder vast; alleen SMTP_USER/SMTP_PASSWORD zijn account-
-# specifiek en worden hier gevraagd. Wil je andere waarden (bv. een andere
-# relay), pas dan gewoon zelf de betreffende SMTP_*-regel(s) in .env aan na
-# het draaien van dit script.
+# Poort/beveiliging zijn de door Hostnet bevestigde waarden (587, STARTTLS —
+# zie §9 in het ontwerpdocument) en staan hieronder vast. Host is instelbaar
+# met smtp.hostnet.nl als standaard: sommige VPN's/firewalls blokkeren het
+# door Hostnet voor webapplicaties gesuggereerde mailout.hostnet.nl specifiek
+# (bekende bulkmail-relay), terwijl smtp.hostnet.nl (dezelfde mailbox, ander
+# adres) gewoon doorkomt — functioneel gelijkwaardig voor dit lage volume.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -26,6 +26,10 @@ if [ ! -f "$ENV_FILE" ]; then
   cp .env.example "$ENV_FILE"
   echo "Nieuw $ENV_FILE aangemaakt vanuit .env.example."
 fi
+
+DEFAULT_HOST="smtp.hostnet.nl"
+read -r -p "SMTP-server [$DEFAULT_HOST]: " SMTP_HOST
+SMTP_HOST="${SMTP_HOST:-$DEFAULT_HOST}"
 
 DEFAULT_USER="no-reply@code072.nl"
 read -r -p "SMTP-gebruikersnaam (mailbox waarmee ingelogd wordt) [$DEFAULT_USER]: " SMTP_USER
@@ -56,7 +60,7 @@ set_env_var() {
   fi
 }
 
-set_env_var SMTP_HOST "mailout.hostnet.nl"
+set_env_var SMTP_HOST "$SMTP_HOST"
 set_env_var SMTP_PORT "587"
 set_env_var SMTP_USER "$SMTP_USER"
 set_env_var SMTP_PASSWORD "$SMTP_PASSWORD"
@@ -64,5 +68,5 @@ set_env_var SMTP_FROM "$SMTP_FROM"
 
 unset SMTP_PASSWORD
 
-echo "SMTP-instellingen bijgewerkt in $ENV_FILE (host=mailout.hostnet.nl poort=587 gebruiker=$SMTP_USER afzender=$SMTP_FROM)."
+echo "SMTP-instellingen bijgewerkt in $ENV_FILE (host=$SMTP_HOST poort=587 gebruiker=$SMTP_USER afzender=$SMTP_FROM)."
 echo "Herstart de stack om dit te laten meetellen: unset DOCKER_DEFAULT_PLATFORM && doelenboom -local -restart"

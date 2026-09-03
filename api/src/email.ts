@@ -2,7 +2,7 @@ import nodemailer, { Transporter } from 'nodemailer';
 
 // E-mailverzending — momenteel uitsluitend voor de MFA-inlogcode (zie mfa.ts
 // en doelenboom_mfa_ontwerp.md in het project). SMTP-relay via nodemailer,
-// generiek genoeg voor vrijwel elke provider (Hostnet's mailout.hostnet.nl in
+// generiek genoeg voor vrijwel elke provider (Hostnet's smtp.hostnet.nl in
 // dit geval, zie deploy/README.md voor de env-vars).
 const SMTP_HOST = process.env.SMTP_HOST;
 const SMTP_PORT = process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : 587;

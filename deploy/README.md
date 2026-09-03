@@ -452,15 +452,21 @@ aan/uit te zetten via "Mijn beveiliging") voor de rest.
 **SMTP-relay instellen op de VPS:** vul in `.env` (naast `JWT_SECRET` etc.,
 zie §4 hierboven) `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD` en
 eventueel `SMTP_FROM` in — zie `.env.example`. Voor Hostnet (bevestigd):
-`SMTP_HOST=mailout.hostnet.nl`, `SMTP_PORT=587` (STARTTLS), `SMTP_USER=
+`SMTP_HOST=smtp.hostnet.nl`, `SMTP_PORT=587` (STARTTLS), `SMTP_USER=
 no-reply@code072.nl` (de mailbox waarmee ingelogd wordt), `SMTP_FROM=
 no-reply.doelenboom@code072.nl` (een alias van die mailbox — de afzender die
-de ontvanger ziet, mag dus afwijken van `SMTP_USER`). Gebruik
-`scripts/set-smtp-env.sh` om dit lokaal in te vullen zonder het wachtwoord
-ergens in een bestand of in de chat te typen (vraagt het interactief,
-verborgen, en schrijft het alleen naar je eigen `.env`). Staat `SMTP_HOST`
-leeg/ontbrekend, dan wordt er **geen** e-mail verstuurd en komt de
-inlogcode alleen in de `api`-container-log te staan
+de ontvanger ziet, mag dus afwijken van `SMTP_USER`). Bewust `smtp.hostnet.nl`
+i.p.v. het door Hostnet voor webapplicaties gesuggereerde `mailout.hostnet.nl`:
+sommige VPN's/firewalls blokkeren die laatste specifiek (bekende
+bulkmail-relay — zo ontdekt tijdens lokaal testen, zie `git log` op
+`api/src/email.ts`), terwijl `smtp.hostnet.nl` (dezelfde mailbox, ander
+adres) gewoon doorkomt en voor dit lage volume (incidentele inlogcodes)
+functioneel gelijkwaardig is. Gebruik `scripts/set-smtp-env.sh` om dit
+lokaal in te vullen zonder het wachtwoord ergens in een bestand of in de
+chat te typen (vraagt het interactief, verborgen, en schrijft het alleen
+naar je eigen `.env`). Staat `SMTP_HOST` leeg/ontbrekend, dan wordt er
+**geen** e-mail verstuurd en komt de inlogcode alleen in de
+`api`-container-log te staan
 (`docker compose ... logs api`) — bruikbaar om de flow te testen, maar niet
 geschikt voor productie: zet de SMTP-variabelen dus altijd vóór
 productiegebruik.
