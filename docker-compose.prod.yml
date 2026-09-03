@@ -61,8 +61,15 @@ services:
     # map uit docker-compose.yml (DATABASE_URL/PORT/JWT_SECRET/
     # EXCEL_SERVICE_URL blijven gewoon staan), net als bij de bestaande
     # selectieve overrides in dit bestand.
+    #
+    # NODE_ENV=production: laat de API bij het opstarten hard weigeren als
+    # JWT_SECRET ontbreekt of nog op een bekende dev-defaultwaarde staat (zie
+    # api/src/app.ts assertJwtSecretIsSafe) — zonder deze vlag (lokale dev,
+    # docker-compose.yml) blijft dat een waarschuwing i.p.v. een crash, zodat
+    # de lokale stack met de dev-default gewoon blijft werken.
     environment:
       ALLOWED_ORIGINS: https://doelenboom.code072.nl
+      NODE_ENV: production
     ports: !override
       - "127.0.0.1:4000:4000"   # alleen via een SSH-tunnel, niet vanaf internet
     networks:

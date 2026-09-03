@@ -7,6 +7,45 @@ import { getAppSettings } from './appSettings.js';
 
 const JWT_SECRET = process.env.JWT_SECRET ?? 'dev-secret-change-me';
 
+// Beide bekende, publiek-in-deze-repo-zichtbare dev-defaultwaarden: deze regel
+// hierboven (als JWT_SECRET in het geheel niet gezet is) én
+// docker-compose.yml's eigen `${JWT_SECRET:-dev-secret-verander-mij}` (als de
+// env var wél via Compose binnenkomt, maar met die shell-default). Beide zijn
+// even onveilig als productiegeheim: iedereen die deze repo leest kan er een
+// geldig, zelfs sysadmin-, JWT mee vervalsen (zie requireAuth hierboven).
+const KNOWN_DEV_JWT_SECRETS = new Set(['dev-secret-change-me', 'dev-secret-verander-mij']);
+
+// CISO-aandachtspunt: vóór deze check kon een misconfiguratie (JWT_SECRET
+// vergeten te zetten in productie, of per ongeluk de dev-.env meegekopieerd)
+// volledig stilzwijgend doorlopen — de app start gewoon op, alleen met een
+// publiek bekend ondertekeningsgeheim. In lokale dev (docker-compose.yml,
+// geen NODE_ENV) blijft dit bewust een waarschuwing i.p.v. een crash, zodat
+// de lokale stack met de ingebouwde dev-default gewoon blijft werken; alleen
+// met NODE_ENV=production (zie docker-compose.prod.yml) weigert de app
+// daadwerkelijk op te starten.
+//
+// Pure functie (secret/nodeEnv als parameters, geen directe process.env-
+// lezing hier) zodat api/test/auth.test.ts dit met allerlei combinaties kan
+// testen zonder een subprocess te hoeven starten — assertCurrentJwtSecretIsSafe()
+// hieronder is de dunne, module-scope-lezende wrapper die createApp() in
+// app.ts daadwerkelijk aanroept, 1x per opstart (dus ook vóór elke testrun,
+// met NODE_ENV nooit op 'production').
+export function assertJwtSecretIsSafe(secret: string, nodeEnv: string | undefined): void {
+  if (!KNOWN_DEV_JWT_SECRETS.has(secret)) return;
+  const message =
+    'JWT_SECRET staat nog op een bekende dev-defaultwaarde — zet een eigen, willekeurig geheim ' +
+    '(zie deploy/README.md §4: python3 -c "import secrets; print(secrets.token_urlsafe(32))") ' +
+    'vóór dit in productie draait.';
+  if (nodeEnv === 'production') {
+    throw new Error(message);
+  }
+  console.warn(`WAARSCHUWING: ${message}`);
+}
+
+export function assertCurrentJwtSecretIsSafe(): void {
+  assertJwtSecretIsSafe(JWT_SECRET, process.env.NODE_ENV);
+}
+
 // 15-minuten-inactiviteit-beveiliging (zie POST /activity hieronder en
 // web/src/useActivityPing.ts / web/public/tree.html's eigen kopie daarvan):
 // een sessie waarvan de écht-activiteit langer dan dit aantal minuten

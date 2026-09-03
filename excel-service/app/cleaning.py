@@ -34,6 +34,19 @@ def clean_raw(value: object):
     return value
 
 
+# Zelfde triggerset als xlsx_safety.sanitize_cell (CISO-formule-injectie-
+# mitigatie bij exporteren): een cel die daar met '=, +, -, @, Tab of CR
+# begon kreeg een voorloop-apostrof, opgeslagen als een letterlijk teken (dit
+# is geen door de Excel-UI zelf getypte cel, dus geen "onzichtbare"
+# invoer-apostrof — openpyxl slaat 'm gewoon als karakter op). Zonder deze
+# tegenhanger zou een round-trip (export -> door de app zelf weer importeren,
+# zie het round-trip-ontwerp bovenaan exporter.py/project_workbook.py) zo'n
+# apostrof blijvend in de tekst laten staan, terwijl het origineel — bv. een
+# Statustoelichting die met een opsomma-streepje begint, "- vertraging door
+# leverancier" — die nooit had.
+_ESCAPED_TRIGGER_RE = re.compile(r"^'([=+\-@\t\r])")
+
+
 def clean_text(value: object) -> str:
     """Voor tekstvelden: leeg -> '', literal 0 -> '', 'Geen FPBB-KPI' -> '-'."""
     v = clean_raw(value)
@@ -42,6 +55,7 @@ def clean_text(value: object) -> str:
     if isinstance(v, (int, float)) and not isinstance(v, bool) and v == 0:
         return ''
     s = re.sub(r'\s+', ' ', str(v)).strip()
+    s = _ESCAPED_TRIGGER_RE.sub(r'\1', s)
     if s == 'Geen FPBB-KPI':
         return '-'
     return s

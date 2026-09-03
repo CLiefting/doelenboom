@@ -28,6 +28,23 @@ class TestCleanText:
     def test_getal_ongelijk_aan_nul_wordt_string(self):
         assert clean_text(42) == '42'
 
+    def test_haalt_de_xlsx_safety_escape_apostrof_er_weer_af(self):
+        # Symmetrisch met xlsx_safety.sanitize_cell: een export die '-2 dagen'
+        # naar '\'-2 dagen' escapete (formule-injectie-mitigatie) moet bij het
+        # weer inlezen (round-trip) gewoon '-2 dagen' opleveren.
+        assert clean_text("'-2 dagen vertraging") == '-2 dagen vertraging'
+        assert clean_text("'=SOM(A1:A2)") == '=SOM(A1:A2)'
+        assert clean_text("'+31612345678") == '+31612345678'
+        assert clean_text("'@iemand") == '@iemand'
+
+    def test_laat_een_gewone_apostrof_met_rust(self):
+        # Alleen de exacte escape-vorm (apostrof direct gevolgd door een
+        # triggerteken) wordt gestript — een cel die toevallig met een
+        # letterlijke apostrof begint (niet gevolgd door =,+,-,@,tab,CR)
+        # blijft intact.
+        assert clean_text("'t Vestje staat klaar") == "'t Vestje staat klaar"
+        assert clean_text("'Citaat'") == "'Citaat'"
+
 
 class TestCleanDate:
     def test_none_wordt_none(self):

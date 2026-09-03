@@ -41,6 +41,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from .dependency_format import format_dependency, format_product_dependency
 from .excel_format_version import TREE_EXPORT_FORMAT_VERSION
+from .xlsx_safety import create_safe_sheet
 
 CONFIG_SHEET_NAME = 'Configuratie'
 VALIDATIELIJSTEN_SHEET_NAME = '_Validatielijsten'
@@ -168,14 +169,14 @@ def _new_workbook(format_: str) -> tuple[Workbook, dict[str, Worksheet]]:
     order = OUD_SHEET_ORDER if format_ == 'oud' else NIEUW_SHEET_ORDER
     sheets: dict[str, Worksheet] = {}
     for name in order:
-        ws = wb.create_sheet(name)
+        ws = create_safe_sheet(wb, name)
         _write_header(ws, headers_map[name])
         sheets[name] = ws
     return wb, sheets
 
 
 def _write_configuratie(wb: Workbook, meta: dict[str, Any], format_label: str, mode_label: str) -> None:
-    ws = wb.create_sheet(CONFIG_SHEET_NAME)
+    ws = create_safe_sheet(wb, CONFIG_SHEET_NAME)
     ws.append(['Sleutel', 'Waarde'])
     for cell in ws[1]:
         cell.font = Font(bold=True)
@@ -205,7 +206,7 @@ def _write_kolommen(wb: Workbook, columns: list[dict[str, Any]]) -> None:
     ook al is de kolomconfiguratie bij het "oud" formaat altijd de 8
     standaardkolommen (zie is_standard_columns) — ook dan is het nuttig om
     bevestigd te zien."""
-    ws = wb.create_sheet(KOLOMMEN_SHEET_NAME)
+    ws = create_safe_sheet(wb, KOLOMMEN_SHEET_NAME)
     headers = [
         'Volgorde', 'Type', 'Titel', 'Ondertitel', 'Kleur', 'Smal',
         'Projectrol', 'Label naar volgende kolom', 'Lettergrootte knoop',
@@ -239,7 +240,7 @@ def _write_validatielijsten(wb: Workbook, columns: list[dict[str, Any]]) -> dict
     'Type' komt (i.t.t. de andere lijsten) niet uit de vaste VALIDATIELIJSTEN-
     constante maar dynamisch uit de kolomconfiguratie van deze doelenboom."""
     lijsten: dict[str, list[str]] = {'Type': _type_names_from_columns(columns), **VALIDATIELIJSTEN}
-    ws = wb.create_sheet(VALIDATIELIJSTEN_SHEET_NAME)
+    ws = create_safe_sheet(wb, VALIDATIELIJSTEN_SHEET_NAME)
     headers = list(lijsten.keys())
     ws.append(headers)
     for cell in ws[1]:

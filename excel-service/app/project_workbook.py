@@ -42,6 +42,7 @@ from .dependency_format import parse_product_dependency_entry as _parse_product_
 from .excel_format_version import PROJECT_EXPORT_FORMAT_VERSION
 from .exporter import VALIDATIELIJSTEN
 from .parser import read_config_value, read_sheet
+from .xlsx_safety import create_safe_sheet
 
 INFO_SHEET = 'Info'
 PROJECT_SHEET = 'Project'
@@ -123,7 +124,7 @@ def build_project_workbook(data: dict[str, Any], meta: dict[str, Any]) -> bytes:
     wb = Workbook()
     wb.remove(wb.active)
 
-    info_ws = wb.create_sheet(INFO_SHEET)
+    info_ws = create_safe_sheet(wb, INFO_SHEET)
     info_ws.append(['Sleutel', 'Waarde'])
     for cell in info_ws[1]:
         cell.font = Font(bold=True)
@@ -139,7 +140,7 @@ def build_project_workbook(data: dict[str, Any], meta: dict[str, Any]) -> bytes:
         info_ws.append([key, value])
     _set_widths(info_ws, [22, 44])
 
-    proj_ws = wb.create_sheet(PROJECT_SHEET)
+    proj_ws = create_safe_sheet(wb, PROJECT_SHEET)
     _write_header(proj_ws, PROJECT_HEADERS)
     status = project.get('status') or {}
     tags_str = '; '.join(project.get('tags') or [])
@@ -156,7 +157,7 @@ def build_project_workbook(data: dict[str, Any], meta: dict[str, Any]) -> bytes:
     _add_dropdown(proj_ws, VALIDATIELIJSTEN['RAG-status'], 'E2:E2')
     _set_widths(proj_ws, [12, 26, 40, 14, 12, 30, 18, 16, 24, 34])
 
-    prod_ws = wb.create_sheet(PRODUCTS_SHEET)
+    prod_ws = create_safe_sheet(wb, PRODUCTS_SHEET)
     _write_header(prod_ws, PRODUCT_HEADERS)
     for p in products:
         prod_ws.append([
@@ -175,7 +176,7 @@ def build_project_workbook(data: dict[str, Any], meta: dict[str, Any]) -> bytes:
     _add_dropdown(prod_ws, ['d', 'w', 'm', 'y'], 'J2:J10000')
     _set_widths(prod_ws, [8, 30, 12, 34, 10, 16, 16, 14, 8, 9, 8, 30, 34])
 
-    act_ws = wb.create_sheet(ACTIVITIES_SHEET)
+    act_ws = create_safe_sheet(wb, ACTIVITIES_SHEET)
     _write_header(act_ws, ACTIVITY_HEADERS)
     for a in activities:
         preds = activity_preds.get(a.get('id'), [])

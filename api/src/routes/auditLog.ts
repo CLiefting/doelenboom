@@ -66,6 +66,16 @@ auditLogRouter.get('/', async (_req, res) => {
 // export-mechanisme). Één werkblad, kolomkoppen in het Nederlands, detail-jsonb
 // als platte JSON-string (leesbaar, geen aparte kolommen per mogelijk
 // detail-veld nodig).
+//
+// Formule-injectie (CISO-aandachtspunt, zie ook excel-service/app/
+// xlsx_safety.py): userEmail/tenantName/doelenboomName/detail hieronder komen
+// uit door tenants/gebruikers ingevoerde velden. GEEN sanitisatie hier nodig
+// — anders dan openpyxl (bevestigd met een testbestand: zet een plain-tekst-
+// waarde die met '=' begint automatisch om in een écht <f>-formuletag) slaat
+// exceljs.addRow() met een plain string altijd als tekstcel (t="s") op, nooit
+// als formule — geverifieerd door een testbestand te genereren en de ruwe
+// sheet-XML te inspecteren. Alleen een expliciet `{formula: ...}`-object zou
+// hier een formule opleveren, en dat gebeurt nergens in deze route.
 auditLogRouter.get('/export', async (_req, res) => {
   const result = await pool.query(LIST_QUERY);
   const rows = result.rows.map(mapRow);

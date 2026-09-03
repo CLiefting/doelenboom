@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import { authRouter } from './auth.js';
+import { authRouter, assertCurrentJwtSecretIsSafe } from './auth.js';
 import { tenantsRouter } from './routes/tenants.js';
 import { usersRouter } from './routes/users.js';
 import { doelenbomenRouter } from './routes/doelenbomen.js';
@@ -57,6 +57,11 @@ const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? 'http://localhost:5173')
 // starten/opruimen. index.ts blijft de enige plek die dit daadwerkelijk als
 // draaiende service opstart.
 export function createApp() {
+  // Vroegst mogelijke check, vóór er ook maar iets anders opgezet wordt (zie
+  // assertJwtSecretIsSafe in auth.ts) — een productie-opstart met een publiek
+  // bekend JWT-geheim mag nooit ook maar één request kunnen beantwoorden.
+  assertCurrentJwtSecretIsSafe();
+
   const app = express();
   // Beveiligingsheaders (CISO-aandachtspunt) — X-Content-Type-Options,
   // X-DNS-Prefetch-Control, Referrer-Policy, X-Frame-Options (SAMEORIGIN,
