@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import { authRouter } from './auth.js';
 import { tenantsRouter } from './routes/tenants.js';
 import { usersRouter } from './routes/users.js';
@@ -32,8 +33,43 @@ import { pool } from './db.js';
 // tests zelf) zonder een losse server-poort of de achtergrond-sweep te hoeven
 // starten/opruimen. index.ts blijft de enige plek die dit daadwerkelijk als
 // draaiende service opstart.
+// CORS-allowlist (zie de origin-functie hieronder) — komma-gescheiden lijst
+// met exact toegestane origins, via env var instelbaar zodat dit per
+// omgeving kan verschillen zonder codewijziging (CISO-aandachtspunt: geen
+// open '*'-CORS meer). Default dekt alleen lokale ontwikkeling (web draait
+// op :5173, zie web/Dockerfile en package.json "dev"-script). In productie
+// (docker-compose.prod.yml) doet de frontend sowieso same-origin verzoeken
+// (VITE_API_URL='', nginx stuurt /api/ intern door, zie nginx.conf) — de
+// browser stuurt dan al geen Origin-header mee die hier iets zou hoeven te
+// matchen. Deze allowlist is dus vooral defense-in-depth: hij voorkomt dat
+// een willekeurige andere website in iemands browser deze API rechtstreeks
+// cross-origin kan bevragen, mocht de API-poort ooit toch bereikbaar zijn.
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? 'http://localhost:5173')
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
+
+// Bouwt de Express-app zonder 'm te starten (geen app.listen, geen idle-sweep-
+// interval) — losgetrokken uit index.ts zodat de regressietest-suite (api/test/)
+// dezelfde routes/middleware in-process kan mounten (via app.listen(0) in de
+// tests zelf) zonder een losse server-poort of de achtergrond-sweep te hoeven
+// starten/opruimen. index.ts blijft de enige plek die dit daadwerkelijk als
+// draaiende service opstart.
 export function createApp() {
   const app = express();
+  // Beveiligingsheaders (CISO-aandachtspunt) — X-Content-Type-Options,
+  // X-DNS-Prefetch-Control, Referrer-Policy, X-Frame-Options (SAMEORIGIN,
+  // niet DENY: tree.html laadt zichzelf same-origin in een iframe, zie
+  // web/src/pages/TreePage.tsx), HSTS (no-op over gewone HTTP, dus onschadelijk
+  // in lokale dev) — allemaal standaard helmet()-instellingen. In productie
+  // zet Traefik (code072-infra, zie docker-compose.prod.yml) grotendeels
+  // dezelfde headers al op het hele domein (frontend + doorgestuurde /api/-
+  // responses); dit hier is zowel een vangnet als de enige plek waar lokale
+  // dev (geen Traefik ervoor) ze ook krijgt. Helmets default Content-Security-
+  // Policy staat bewust NIET uit: deze API geeft alleen JSON terug (nooit
+  // HTML), dus CSP-directives hebben hier geen praktisch effect maar ook geen
+  // nadeel.
+  app.use(helmet());
   // exposedHeaders: 'Content-Disposition' — zonder dit mag JS in de browser
   // (fetch/XHR) een cross-origin response-header wel ONTVANGEN, maar niet
   // via res.headers.get(...) UITLEZEN, tenzij de server 'm expliciet vrijgeeft
@@ -44,7 +80,23 @@ export function createApp() {
   // hele-doelenboom-export in exports.ts als de project-Excel-export in
   // projectExcel.ts) — zonder deze regel valt dat altijd terug op de kale
   // fallbacknaam, ook al stuurt de server de juiste header wél mee.
-  app.use(cors({ exposedHeaders: ['Content-Disposition'] }));
+  app.use(cors({
+    exposedHeaders: ['Content-Disposition'],
+    // origin===undefined: geen Origin-header meegestuurd (server-naar-server-
+    // verzoeken, curl/Postman, of gewoon deze test-suite via fetch() — zie
+    // api/test/helpers.ts) — dat is geen cross-origin BROWSER-verzoek, dus
+    // altijd toestaan; de allowlist hieronder is er specifiek voor verzoeken
+    // die wél een Origin meesturen. Een origin die niet op de lijst staat
+    // krijgt gewoon geen CORS-headers terug (callback(null, false)) i.p.v.
+    // een foutstatus — de browser blokkeert het resultaat dan zelf aan de
+    // cliëntkant; er is hier bewust geen centrale Express-foutafhandelaar
+    // (zie index.ts/app.ts) die een callback(new Error(...)) netjes zou
+    // afvangen.
+    origin: (origin, callback) => {
+      if (!origin || ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
+      callback(null, false);
+    },
+  }));
   app.use(express.json());
 
   app.get('/api/hello', (_req, res) => {

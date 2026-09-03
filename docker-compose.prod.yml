@@ -56,6 +56,13 @@ services:
       # herhalen voorkomt verrassingen als dat basisbestand ooit verandert.
       args:
         BUILD_VERSION: ${BUILD_VERSION:-dev}
+    # CORS-allowlist (zie ALLOWED_ORIGINS in api/src/app.ts) — het echte
+    # productiedomein. Compose merget deze map additief met de environment-
+    # map uit docker-compose.yml (DATABASE_URL/PORT/JWT_SECRET/
+    # EXCEL_SERVICE_URL blijven gewoon staan), net als bij de bestaande
+    # selectieve overrides in dit bestand.
+    environment:
+      ALLOWED_ORIGINS: https://doelenboom.code072.nl
     ports: !override
       - "127.0.0.1:4000:4000"   # alleen via een SSH-tunnel, niet vanaf internet
     networks:
