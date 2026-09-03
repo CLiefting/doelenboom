@@ -21,8 +21,32 @@ create table if not exists users (
   -- De frontend dwingt dan bij de eerstvolgende login een wachtwoordwijziging af
   -- (zie POST /api/auth/change-password) en zet 'm daarna terug op false.
   must_change_password boolean not null default false,
+  -- Rate limiting / tijdelijke accountblokkade bij herhaalde mislukte
+  -- inlogpogingen (zie auth.ts POST /login en de app_settings-tabel
+  -- hieronder voor de instelbare drempel/duur) — CISO-aandachtspunt: zonder
+  -- dit was een wachtwoord onbeperkt vaak te raden. failed_login_count telt
+  -- mislukte pogingen sinds de laatste geslaagde login (of de laatste
+  -- blokkade); locked_until is null zolang niet geblokkeerd, anders het
+  -- tijdstip waarop de blokkade weer vervalt.
+  failed_login_count integer not null default 0,
+  locked_until timestamptz,
   created_at timestamptz not null default now()
 );
+
+-- App-brede instellingen, sysadmin-only (zie routes/appSettings.ts),
+-- precies één rij (id altijd 1 — afgedwongen door de check-constraint, geen
+-- aparte "welke rij is de actieve"-logica nodig). In tegenstelling tot
+-- tenants.session_timeout_minutes/wipe_on_empty (per tenant instelbaar) zijn
+-- dit instellingen die voor de HELE applicatie gelden. Voorlopig alleen de
+-- twee parameters van de inlog-blokkade hierboven; bewust een losse tabel
+-- i.p.v. omgevingsvariabelen, zodat een sysadmin dit vanuit de app zelf kan
+-- aanpassen zonder herstart/nieuwe deploy.
+create table if not exists app_settings (
+  id integer primary key default 1 check (id = 1),
+  max_failed_login_attempts integer not null default 5 check (max_failed_login_attempts > 0),
+  login_lockout_minutes integer not null default 15 check (login_lockout_minutes > 0)
+);
+insert into app_settings (id) values (1) on conflict (id) do nothing;
 
 -- Eén rij per ingelogde sessie (niet per request) — nodig omdat een JWT zelf
 -- stateless is en de server dus niet weet of een browser nog open staat.

@@ -273,6 +273,18 @@ export const api = {
   deleteUser: (token: string, userId: number) =>
     request<void>(`/api/users/${userId}`, { method: 'DELETE' }, token),
 
+  // --- App-brede instellingen (sysadmin-only, zie api/src/appSettings.ts) ---
+  appSettings: (token: string) => request<import('./types').AppSettings>('/api/app-settings', {}, token),
+
+  updateAppSettings: (
+    token: string,
+    patch: { maxFailedLoginAttempts?: number; loginLockoutMinutes?: number }
+  ) =>
+    request<import('./types').AppSettings>('/api/app-settings', {
+      method: 'PUT',
+      body: JSON.stringify(patch),
+    }, token),
+
   // --- Kolomconfiguratie (zie docs/kolommen-configuratie-ontwerp.md) ---
   // Tenant-default: sysadmin-only, het sjabloon waarmee een nieuwe doelenboom
   // binnen die tenant start. Doelenboom-config: de eigen, onafhankelijke

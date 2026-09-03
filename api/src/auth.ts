@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import { pool } from './db.js';
 import { previewOrCommitWipe } from './tenantWipe.js';
 import { needsTermsAcceptance } from './legal.js';
+import { getAppSettings } from './appSettings.js';
 
 const JWT_SECRET = process.env.JWT_SECRET ?? 'dev-secret-change-me';
 
@@ -72,14 +73,62 @@ authRouter.post('/login', async (req, res) => {
   if (!email || !password) {
     return res.status(400).json({ error: 'E-mail en wachtwoord verplicht' });
   }
+
+  // Rate limiting / tijdelijke accountblokkade bij herhaalde mislukte
+  // inlogpogingen (CISO-aandachtspunt) — drempel/duur zijn sysadmin-
+  // instelbaar, app-breed (zie appSettings.ts/routes/appSettings.ts,
+  // "Accountbeheer" in de frontend), geen hardgecodeerde constanten.
+  // password_ok wordt als losse, berekende kolom meegenomen i.p.v. in de
+  // where-clause (zoals voorheen), zodat we ook bij een FOUT wachtwoord de
+  // rest van de rij (met name failed_login_count/locked_until) beschikbaar
+  // hebben om de teller op te hogen — een niet-bestaand e-mailadres geeft
+  // nog altijd domweg geen rij, exact zoals voorheen (geen aparte fout,
+  // voorkomt dat we verklappen of een e-mailadres bestaat).
   const result = await pool.query(
-    `select id, email, is_sysadmin, must_change_password, scheduled_deletion_at
+    `select id, email, is_sysadmin, must_change_password, scheduled_deletion_at,
+            failed_login_count, locked_until,
+            (password_hash = crypt($2, password_hash)) as password_ok
      from users
-     where email = $1 and password_hash = crypt($2, password_hash)`,
+     where email = $1`,
     [email, password]
   );
   const user = result.rows[0];
   if (!user) {
+    return res.status(401).json({ error: 'Onjuiste inloggegevens' });
+  }
+
+  const settings = await getAppSettings();
+
+  // Al geblokkeerd: geen wachtwoordcontrole meer nodig — ook een ondertussen
+  // toevallig juist wachtwoord wordt pas ná het verstrijken van de blokkade
+  // weer geaccepteerd. Eenvoudiger en voorspelbaarder dan een vroegtijdige
+  // uitzondering, en voorkomt dat een aanvaller die tijdens de blokkade
+  // alsnog raadt meteen binnenkomt.
+  if (user.locked_until && new Date(user.locked_until).getTime() > Date.now()) {
+    const minutesLeft = Math.max(1, Math.ceil((new Date(user.locked_until).getTime() - Date.now()) / 60000));
+    return res.status(429).json({
+      error: `Account tijdelijk geblokkeerd wegens te veel mislukte inlogpogingen. Probeer het over ongeveer ${minutesLeft} minuut/minuten opnieuw.`,
+      reason: 'account_locked',
+    });
+  }
+
+  if (!user.password_ok) {
+    const newCount = user.failed_login_count + 1;
+    if (newCount >= settings.maxFailedLoginAttempts) {
+      // Teller resetten (niet laten doorlopen): de blokkade zelf is nu de
+      // maatregel, en na afloop start een nieuwe telling vanaf 0.
+      await pool.query(
+        `update users
+         set failed_login_count = 0, locked_until = now() + make_interval(mins => $2)
+         where id = $1`,
+        [user.id, settings.loginLockoutMinutes]
+      );
+      return res.status(429).json({
+        error: `Te veel mislukte inlogpogingen. Account is ${settings.loginLockoutMinutes} minuten geblokkeerd.`,
+        reason: 'account_locked',
+      });
+    }
+    await pool.query('update users set failed_login_count = $2 where id = $1', [user.id, newCount]);
     return res.status(401).json({ error: 'Onjuiste inloggegevens' });
   }
 
@@ -89,10 +138,13 @@ authRouter.post('/login', async (req, res) => {
   // (scheduled_deletion_at/inactivity_warning_sent_at), dan annuleert deze
   // login die volledig en start de 12-maanden-klok opnieuw (§9 van de
   // opdracht) — vastgelegd als apart auditlog-event zodat zichtbaar blijft
-  // wanneer/waardoor een geplande verwijdering is afgeblazen.
+  // wanneer/waardoor een geplande verwijdering is afgeblazen. Een geslaagde
+  // login wist ook altijd een eventueel opgebouwde mislukte-pogingen-teller/
+  // blokkade (failed_login_count/locked_until).
   await pool.query(
     `update users
-     set last_login_at = now(), scheduled_deletion_at = null, inactivity_warning_sent_at = null
+     set last_login_at = now(), scheduled_deletion_at = null, inactivity_warning_sent_at = null,
+         failed_login_count = 0, locked_until = null
      where id = $1`,
     [user.id]
   );

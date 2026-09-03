@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '../api';
-import type { User, UserSummary } from '../types';
+import type { AppSettings, User, UserSummary } from '../types';
 
 // Accountbeheer — sysadmin-only: globale lijst van alle accounts (los van
 // tenants). Hier kan een sysadmin een account aanmaken, de sysadmin-vlag
@@ -16,11 +16,13 @@ export default function AccountManagementPage({
   onBack: () => void;
 }) {
   const [allUsers, setAllUsers] = useState<UserSummary[] | null>(null);
+  const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     api.users(token).then(setAllUsers).catch((err) => setError(errMsg(err)));
+    api.appSettings(token).then(setAppSettings).catch((err) => setError(errMsg(err)));
   }, [token]);
 
   function refreshUsers() {
@@ -38,6 +40,24 @@ export default function AccountManagementPage({
       </header>
 
       {error && <p style={styles.error}>{error}</p>}
+
+      <section style={styles.section}>
+        <h2 style={styles.h2}>Inlogbeveiliging</h2>
+        <p style={styles.subtitle}>
+          App-breed (geldt voor alle tenants), niet per account instelbaar.
+        </p>
+        {!appSettings && <p>Laden…</p>}
+        {appSettings && (
+          <AppSettingsForm
+            token={token}
+            settings={appSettings}
+            busy={busy}
+            setBusy={setBusy}
+            setError={setError}
+            onSaved={setAppSettings}
+          />
+        )}
+      </section>
 
       <section style={styles.section}>
         <h2 style={styles.h2}>Alle accounts</h2>
@@ -67,6 +87,92 @@ export default function AccountManagementPage({
 
 function errMsg(err: unknown): string {
   return err instanceof ApiError ? err.message : 'Er ging iets mis.';
+}
+
+// Rate limiting / tijdelijke accountblokkade bij herhaalde mislukte
+// inlogpogingen (zie api/src/auth.ts POST /login) — app-breed, sysadmin-
+// instelbaar, geen tenant-scope (vandaar hier in Accountbeheer i.p.v. in
+// TenantManagementPage).
+function AppSettingsForm({
+  token,
+  settings,
+  busy,
+  setBusy,
+  setError,
+  onSaved,
+}: {
+  token: string;
+  settings: AppSettings;
+  busy: boolean;
+  setBusy: (b: boolean) => void;
+  setError: (e: string | null) => void;
+  onSaved: (s: AppSettings) => void;
+}) {
+  const [maxAttempts, setMaxAttempts] = useState(String(settings.maxFailedLoginAttempts));
+  const [lockoutMinutes, setLockoutMinutes] = useState(String(settings.loginLockoutMinutes));
+  const [saved, setSaved] = useState(false);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const attempts = parseInt(maxAttempts, 10);
+    const minutes = parseInt(lockoutMinutes, 10);
+    if (!Number.isInteger(attempts) || attempts < 1) {
+      setError('Aantal mislukte pogingen moet een geheel getal ≥ 1 zijn.');
+      return;
+    }
+    if (!Number.isInteger(minutes) || minutes < 1) {
+      setError('Blokkadeduur moet een geheel getal ≥ 1 minuut zijn.');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setSaved(false);
+    try {
+      const updated = await api.updateAppSettings(token, {
+        maxFailedLoginAttempts: attempts,
+        loginLockoutMinutes: minutes,
+      });
+      onSaved(updated);
+      setSaved(true);
+    } catch (err) {
+      setError(errMsg(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 480 }}>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5 }}>
+        Na
+        <input
+          type="number"
+          min={1}
+          value={maxAttempts}
+          onChange={(e) => setMaxAttempts(e.target.value)}
+          style={{ ...styles.input, width: 70 }}
+        />
+        mislukte inlogpogingen op rij een account tijdelijk blokkeren
+      </label>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5 }}>
+        Blokkade duurt
+        <input
+          type="number"
+          min={1}
+          value={lockoutMinutes}
+          onChange={(e) => setLockoutMinutes(e.target.value)}
+          style={{ ...styles.input, width: 70 }}
+        />
+        minuten
+      </label>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <button type="submit" style={btnStyle('primary')} disabled={busy}>
+          Opslaan
+        </button>
+        {saved && <span style={{ fontSize: 12.5, color: '#2E7D5B' }}>Opgeslagen.</span>}
+      </div>
+    </form>
+  );
 }
 
 function AllUsersTable({

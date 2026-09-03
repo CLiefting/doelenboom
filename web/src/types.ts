@@ -35,6 +35,14 @@ export type LegalDocument = {
   content: string;
 };
 
+// GET/PUT /api/app-settings (sysadmin-only, app-breed, zie
+// api/src/appSettings.ts) — op dit moment alleen de inlog-blokkade
+// (auth.ts POST /login), instelbaar via AccountManagementPage.
+export type AppSettings = {
+  maxFailedLoginAttempts: number;
+  loginLockoutMinutes: number;
+};
+
 export type UserSummary = {
   id: number;
   email: string;

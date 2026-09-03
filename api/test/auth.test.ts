@@ -17,6 +17,12 @@ describe('auth', () => {
   });
 
   after(async () => {
+    // De lockout-tests hieronder wijzigen app_settings (een app-brede
+    // singleton, niet PREFIX-gescopet) — terugzetten naar de standaardwaarden
+    // zodat dit niet doorlekt naar andere testbestanden in dezelfde run.
+    await pool.query(
+      'update app_settings set max_failed_login_attempts = 5, login_lockout_minutes = 15 where id = 1'
+    );
     await cleanupByPrefix(PREFIX);
     await stopTestServer();
     await closePool();
@@ -186,5 +192,89 @@ describe('auth', () => {
     const freshToken = await login(email, 'wachtwoord123');
     const afterRelogin = await req('GET', '/api/auth/me', { token: freshToken });
     assert.equal(afterRelogin.status, 200);
+  });
+
+  // Rate limiting / accountblokkade (zie auth.ts POST /login en
+  // appSettings.ts) — drempel/duur zijn hier bewust laag gezet via
+  // /api/app-settings zelf, zodat de test niet op de standaardwaarden
+  // (5 pogingen / 15 minuten) hoeft te wachten of te vertrouwen. Alles wordt
+  // in de after-hook hierboven weer teruggezet naar de standaardwaarden.
+  it('een account wordt na het instelbare aantal mislukte pogingen tijdelijk geblokkeerd', async () => {
+    const settingsRes = await req('PUT', '/api/app-settings', {
+      token: await login(sysadminEmail, 'geheim1234'),
+      body: { maxFailedLoginAttempts: 3, loginLockoutMinutes: 15 },
+    });
+    assert.equal(settingsRes.status, 200);
+
+    const email = `${PREFIX}-lockout@test.local`;
+    await createSysadminUser(email, 'juist-wachtwoord1');
+
+    // 2 mislukte pogingen: nog gewoon 401, geen blokkade.
+    const eerste = await req('POST', '/api/auth/login', { body: { email, password: 'fout' } });
+    assert.equal(eerste.status, 401);
+    const tweede = await req('POST', '/api/auth/login', { body: { email, password: 'fout' } });
+    assert.equal(tweede.status, 401);
+
+    // Zelfs het JUISTE wachtwoord wordt hierna nog niet geaccepteerd, want de
+    // teller staat nu op 2 (nog niet geblokkeerd) — dit checkt puur dat een
+    // niet-geblokkeerd account met een juist wachtwoord gewoon doorgaat, dus
+    // we bewaren deze poging niet en gaan door naar de 3e mislukte poging.
+
+    // 3e mislukte poging bereikt de drempel (3): account raakt geblokkeerd.
+    const derde = await req('POST', '/api/auth/login', { body: { email, password: 'fout' } });
+    assert.equal(derde.status, 429);
+    assert.equal(derde.body.reason, 'account_locked');
+
+    // Ook het JUISTE wachtwoord wordt nu geweigerd zolang de blokkade actief is
+    // — geen vroegtijdige uitzondering voor een toevallig correcte poging.
+    const juistTijdensBlokkade = await req('POST', '/api/auth/login', {
+      body: { email, password: 'juist-wachtwoord1' },
+    });
+    assert.equal(juistTijdensBlokkade.status, 429);
+    assert.equal(juistTijdensBlokkade.body.reason, 'account_locked');
+
+    // Simuleer dat de blokkadeperiode al is verstreken (geen 15 minuten
+    // wachten in de testrun) door locked_until rechtstreeks terug te zetten.
+    await pool.query(
+      `update users set locked_until = now() - interval '1 minute' where email = $1`,
+      [email]
+    );
+    const naBlokkade = await req('POST', '/api/auth/login', {
+      body: { email, password: 'juist-wachtwoord1' },
+    });
+    assert.equal(naBlokkade.status, 200);
+
+    // Een geslaagde login reset de teller/blokkade volledig.
+    const row = await pool.query(
+      'select failed_login_count, locked_until from users where email = $1',
+      [email]
+    );
+    assert.equal(row.rows[0].failed_login_count, 0);
+    assert.equal(row.rows[0].locked_until, null);
+  });
+
+  it('een geslaagde login tussen mislukte pogingen in reset de teller (geen opeenstapeling)', async () => {
+    const settingsRes = await req('PUT', '/api/app-settings', {
+      token: await login(sysadminEmail, 'geheim1234'),
+      body: { maxFailedLoginAttempts: 3, loginLockoutMinutes: 15 },
+    });
+    assert.equal(settingsRes.status, 200);
+
+    const email = `${PREFIX}-lockout-reset@test.local`;
+    await createSysadminUser(email, 'juist-wachtwoord1');
+
+    await req('POST', '/api/auth/login', { body: { email, password: 'fout' } });
+    await req('POST', '/api/auth/login', { body: { email, password: 'fout' } });
+    const geslaagd = await req('POST', '/api/auth/login', { body: { email, password: 'juist-wachtwoord1' } });
+    assert.equal(geslaagd.status, 200);
+
+    // Teller staat weer op 0: nog 2 mislukte pogingen nodig voordat de
+    // volgende (3e) daadwerkelijk blokkeert, niet meteen weer 1 poging.
+    const derdeInRij = await req('POST', '/api/auth/login', { body: { email, password: 'fout' } });
+    assert.equal(derdeInRij.status, 401);
+    const vierdeInRij = await req('POST', '/api/auth/login', { body: { email, password: 'fout' } });
+    assert.equal(vierdeInRij.status, 401);
+    const vijfdeInRij = await req('POST', '/api/auth/login', { body: { email, password: 'fout' } });
+    assert.equal(vijfdeInRij.status, 429);
   });
 });
