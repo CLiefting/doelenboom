@@ -333,9 +333,15 @@ docker load < ~/doelenboom-images.tar.gz
 rm ~/doelenboom-images.tar.gz
 cd ~/doelenboom
 git pull   # voor eventuele niet-image-wijzigingen (docker-compose*.yml, db/init.sql, README's)
-./deploy/check-no-active-users.sh   # verplicht — zie hieronder
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+./deploy/check-no-active-users.sh && \
+  docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 ```
+
+**Let op de `&&`**: `check-no-active-users.sh` geeft bij een actieve gebruiker
+wel exit 1 én een duidelijke waarschuwing, maar als je de commando's als losse
+regels (zonder `&&`) plakt/uitvoert, loopt een terminal na die waarschuwing
+gewoon door naar `up -d` — de exit code van een losstaande regel stopt niets.
+Altijd met `&&` koppelen, niet als twee aparte commando's.
 
 Bewust geen `--build` op de VPS — zelfde reden als bij de eerste deploy. Was
 de wijziging alléén in `api`/`web`/`excel-service`-code, dan volstaat
