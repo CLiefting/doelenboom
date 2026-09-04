@@ -1,7 +1,14 @@
 # Extra dependencies voor de regressietest-suite (tests/), los van
 # requirements.txt (dat blijft de productie-runtime-set voor de Docker-image —
 # pytest hoort daar niet in thuis). Installeren: zie TESTING.md in de projectroot.
-pytest==8.3.3
+# pytest 9.1.1 (i.p.v. 8.3.3): fixt CVE-2025-71176 (GHSA-6w46-j5rx-g56g /
+# PYSEC-2026-1845, "vulnerable tmpdir handling", Gemiddeld) — zie
+# Softwarecomponenten-pagina. Puur een test-/CI-dependency (requirements.txt,
+# de productie-runtime-set voor de Docker-image, bevat 'm niet), dus geen
+# productierisico; getest op de nieuwe "deprecations zijn nu harde errors"
+# -aanscherping in pytest 9 (zie release notes) — alle 155 tests blijven
+# groen, geen deprecated fixture-/mark-syntax in gebruik.
+pytest==9.1.1
 # Vereist door starlette.testclient (gebruikt in tests/test_main.py) sinds
 # Starlette TestClient niet meer zelf een HTTP-client meelevert.
 httpx==0.28.1
