@@ -363,31 +363,52 @@ Bewust **niet** op de VPS zelf genereren (zelfde reden als "images bouwen":
 geen extra npm/pip-toolchain-belasting op de qua resources krappe, gedeelde
 server) — in plaats daarvan lokaal genereren en meesturen met de images:
 
-**Op de VPS eerst de bestaande map weggooien** (zie waarschuwing hieronder
-waarom dit niet overgeslagen mag worden), **daarna op je Mac**, ná
-`./scripts/generate-sbom.sh` (zie hoofd-README):
+**Op de VPS eerst de INHOUD van de map leegmaken (niet de map zelf
+verwijderen!)** — zie de twee waarschuwingen hieronder waarom het precies zo
+moet — **daarna op je Mac**, ná `./scripts/generate-sbom.sh` (zie
+hoofd-README):
 ```bash
-ssh charles@185.107.90.64 'rm -rf ~/doelenboom/sbom'
-scp -r sbom charles@185.107.90.64:~/doelenboom/sbom
+ssh charles@185.107.90.64 'rm -rf ~/doelenboom/sbom/*'
+scp -r sbom/. charles@185.107.90.64:~/doelenboom/sbom/
 ```
 
-**Waarschuwing — `scp -r` overschrijft NIET 1-op-1 als de doelmap al
-bestaat:** bestaat `~/doelenboom/sbom` op de VPS al (elke keer ná de
-allereerste deploy), dan plaatst `scp -r sbom host:~/doelenboom/sbom` de
-nieuwe bestanden in een geneste submap `~/doelenboom/sbom/sbom/...` in plaats
-van de bestaande `.json`-bestanden te vervangen — `dependencyHealth.ts` leest
-dan stilzwijgend de oude, nooit-bijgewerkte top-level bestanden, ook na een
-klik op "Nu controleren" (die leest wél telkens vers van schijf, maar dan
-gewoon de verkeerde, ongewijzigde bestanden). Geen foutmelding, geen crash —
-alleen een Softwarecomponenten-pagina die na een deploy stilletjes de oude
-cijfers blijft tonen. Vandaar de `rm -rf` hierboven: die dwingt scp om de map
-opnieuw als top-level map aan te maken in plaats van erin te nesten.
+**Waarschuwing 1 — `scp -r` overschrijft NIET 1-op-1 als de doelmap al
+bestaat:** `scp -r sbom host:~/doelenboom/sbom` (zónder de `/.`  hierboven)
+plaatst de nieuwe bestanden, zodra `~/doelenboom/sbom` al bestaat (dus elke
+keer ná de allereerste deploy), in een geneste submap
+`~/doelenboom/sbom/sbom/...` in plaats van de bestaande `.json`-bestanden te
+vervangen — `dependencyHealth.ts` leest dan stilzwijgend de oude,
+nooit-bijgewerkte top-level bestanden, ook na een klik op "Nu controleren"
+(die leest wél telkens vers van schijf, maar dan gewoon de verkeerde,
+ongewijzigde bestanden). Geen foutmelding, geen crash — alleen een
+Softwarecomponenten-pagina die na een deploy stilletjes de oude cijfers
+blijft tonen. Vandaar `sbom/.` (de INHOUD van de lokale map, niet de map
+zelf) als bron.
+
+**Waarschuwing 2 — verwijder nooit de map `~/doelenboom/sbom` zelf, alleen
+haar inhoud:** `docker-compose.yml`'s `./sbom:/app/sbom:ro` is een
+bind-mount die bij het starten van de `api`-container aan die ene specifieke
+map gekoppeld wordt. Verwijder je die map zelf (`rm -rf ~/doelenboom/sbom`)
+en laat je scp 'm opnieuw aanmaken, dan blijft de al-draaiende container aan
+de oude, inmiddels verwijderde map gekoppeld en ziet hij de nieuwe bestanden
+niet — de Softwarecomponenten-pagina meldt dan zelfs "geen SBOM gevonden",
+erger dan de oude cijfers uit waarschuwing 1. Dit is al één keer misgegaan in
+productie. Is dit toch per ongeluk gebeurd, dan is de enige weg terug de
+`api`-container herstarten zodat de bind-mount opnieuw gekoppeld wordt (zie
+"Verplichte check: geen actieve gebruikers" hieronder — ook een `restart`
+onderbreekt ingelogde gebruikers, dus eerst
+`./deploy/check-no-active-users.sh` draaien):
+```bash
+./deploy/check-no-active-users.sh && \
+  docker compose -f docker-compose.yml -f docker-compose.prod.yml restart api
+```
 
 **Op de VPS** is verder niets nodig — de map staat dan op de juiste plek
 (`~/doelenboom/sbom`, wat `docker-compose.yml`'s `./sbom:/app/sbom:ro`
 verwacht) vóórdat je `up -d` draait. Bij een latere dependency-wijziging dit
-hele `rm -rf` + `scp`-tweetal herhalen; een verse `sbom/`-set wordt pas
-zichtbaar in de app na een klik op "Nu controleren".
+`rm -rf .../sbom/*` + `scp -r sbom/. ...`-tweetal herhalen (nooit de map zelf
+verwijderen); een verse `sbom/`-set wordt pas zichtbaar in de app na een klik
+op "Nu controleren".
 
 ### Verplichte check: geen actieve gebruikers vóór `up -d`
 
