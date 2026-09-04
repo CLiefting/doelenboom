@@ -227,6 +227,11 @@ function UserMenu({
               Auditlogboek
             </a>
           )}
+          {user.isSysadmin && (
+            <a role="menuitem" href="/system-info" style={styles.dropdownItem}>
+              Softwarecomponenten
+            </a>
+          )}
           {user.isSysadmin && <div style={styles.dropdownDivider} />}
           <button
             role="menuitem"

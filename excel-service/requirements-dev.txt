@@ -5,3 +5,8 @@ pytest==8.3.3
 # Vereist door starlette.testclient (gebruikt in tests/test_main.py) sinds
 # Starlette TestClient niet meer zelf een HTTP-client meelevert.
 httpx==0.28.1
+# CycloneDX-SBOM-generatie voor dit onderdeel (scripts/generate-sbom.sh, zie
+# doelenboom_sbom_ontwerp.md) — een bouw-/analysehulpmiddel, geen
+# productie-runtime-dependency, dus net als pytest/httpx hierboven bewust hier
+# en niet in requirements.txt.
+cyclonedx-bom==7.3.1

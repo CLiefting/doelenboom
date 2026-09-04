@@ -9,7 +9,7 @@
     "start": "node dist/index.js",
     "test:db:reset": "tsx scripts/reset-test-db.ts",
     "pretest": "npm run test:db:reset",
-    "test": "DATABASE_URL=\"${TEST_DATABASE_URL:-postgres://doelenboom:doelenboom@localhost:5432/doelenboom_test}\" JWT_SECRET=\"${JWT_SECRET:-test-secret}\" EXCEL_SERVICE_URL=\"${EXCEL_SERVICE_URL:-http://localhost:8000}\" tsx --test --test-concurrency=1 test/**/*.test.ts"
+    "test": "DATABASE_URL=\"${TEST_DATABASE_URL:-postgres://doelenboom:doelenboom@localhost:5432/doelenboom_test}\" JWT_SECRET=\"${JWT_SECRET:-test-secret}\" EXCEL_SERVICE_URL=\"${EXCEL_SERVICE_URL:-http://localhost:8000}\" SBOM_DIR=\"${TEST_SBOM_DIR:-/tmp/doelenboom-test-sbom-does-not-exist}\" tsx --test --test-concurrency=1 test/**/*.test.ts"
   },
   "dependencies": {
     "cors": "^2.8.5",

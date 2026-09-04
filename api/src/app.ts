@@ -26,6 +26,7 @@ import { appSettingsRouter } from './routes/appSettings.js';
 import { announcementRouter } from './routes/announcement.js';
 import { subscriptionsRouter } from './routes/subscriptions.js';
 import { legalRouter } from './routes/legal.js';
+import { systemSbomRouter } from './routes/systemSbom.js';
 import { pool } from './db.js';
 
 // Bouwt de Express-app zonder 'm te starten (geen app.listen, geen idle-sweep-
@@ -174,6 +175,7 @@ export function createApp() {
   app.use('/api/sessions', sessionsRouter);
   app.use('/api/audit-log', auditLogRouter);
   app.use('/api/app-settings', appSettingsRouter);
+  app.use('/api/system/sbom', systemSbomRouter);
 
   return app;
 }
