@@ -12,10 +12,14 @@ import { pool } from './db.js';
 // getComponents/getVulnerabilities, gebruikt door routes/systemSbom.ts) raakt
 // NOOIT het netwerk, alleen de database — zie §22 van de opdracht.
 
-// Standaard "/app/sbom" (zie docker-compose.yml: ./sbom:/app/sbom:ro) — lokaal
-// zonder Docker (bv. `npm run dev` in api/) valt dit terug op de repo-root se
-// eigen sbom/-map, zodat SBOM_DIR niet apart gezet hoeft te worden voor lokaal
-// draaien met dat script al eens uitgevoerd.
+// In Docker zet docker-compose.yml SBOM_DIR expliciet op "/app/sbom" (waar
+// ./sbom:/app/sbom:ro daadwerkelijk gemount is) — de fallback hieronder is
+// ALLEEN voor lokaal draaien zónder Docker (`cd api && npm run dev`): daar is
+// cwd "api/", en gaat dit één map omhoog naar de repo-root se eigen sbom/-map.
+// Let op: dat is dus NIET de juiste default bínnen de container (WORKDIR
+// /app, dus cwd is daar ook "/app" — één map omhoog zou "/sbom" geven, een
+// map die niet bestaat) — vandaar dat docker-compose.yml 'm daar altijd
+// expliciet zet i.p.v. op deze fallback te vertrouwen.
 const SBOM_DIR = process.env.SBOM_DIR || path.resolve(process.cwd(), '..', 'sbom');
 
 export type ApplicationComponentKey = 'api' | 'web' | 'excel-service';
