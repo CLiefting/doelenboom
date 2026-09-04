@@ -65,8 +65,24 @@ services:
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM: ${SMTP_FROM:-no-reply.doelenboom@code072.nl}
+      # Expliciet i.p.v. te vertrouwen op dependencyHealth.ts's eigen
+      # cwd-gebaseerde fallback (`path.resolve(process.cwd(), '..', 'sbom')`,
+      # bedoeld voor lokaal `npm run dev` zonder Docker vanuit api/): met
+      # WORKDIR /app (zie api/Dockerfile) en `npm run dev` z'n cwd ook op
+      # /app, zou die fallback hier op "/sbom" uitkomen — één map te hoog,
+      # niet waar het volume hieronder daadwerkelijk gemount is.
+      SBOM_DIR: /app/sbom
     ports:
       - "4000:4000"
+    volumes:
+      # Door scripts/generate-sbom.sh op de host gegenereerde CycloneDX-SBOM's
+      # (zie .gitignore/doelenboom_sbom_ontwerp.md) — read-only, want de api
+      # leest dit alleen (api/src/dependencyHealth.ts, SBOM_DIR hierboven).
+      # Ontbreekt de map/staat hij leeg (nog niet gegenereerd), dan valt de
+      # Softwarecomponenten-pagina terug op "geen SBOM beschikbaar" i.p.v. te
+      # crashen. docker-compose.prod.yml merget dit additief mee, geen aparte
+      # override nodig.
+      - ./sbom:/app/sbom:ro
     depends_on:
       db:
         condition: service_healthy

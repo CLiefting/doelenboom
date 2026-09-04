@@ -37,6 +37,12 @@ const FEATURES: { icon: JSX.Element; title: string; description: string }[] = [
     description:
       'Meerdere organisaties, elk met eigen doelenbomen en leden, met rechten van alleen-lezen tot volledig beheer.',
   },
+  {
+    icon: <ShieldIcon />,
+    title: 'Tweestapsverificatie (MFA)',
+    description:
+      'Inloggen met een extra, tijdelijke code per e-mail — zelf aan te zetten, of organisatiebreed verplicht te stellen door een beheerder.',
+  },
 ];
 
 // notice: reden waarom iemand (mogelijk) automatisch teruggezet is op dit
@@ -402,6 +408,15 @@ function UsersIcon() {
       <path d="M3.5 19.5c0-3 2.5-5.5 5.5-5.5s5.5 2.5 5.5 5.5" />
       <circle cx="17.5" cy="8.5" r="2.3" />
       <path d="M15.2 14.2c2.6.4 4.3 2.5 4.3 5.3" />
+    </svg>
+  );
+}
+
+function ShieldIcon() {
+  return (
+    <svg {...iconProps()}>
+      <path d="M12 3.5l7 2.8v5.4c0 4.6-3 8.4-7 9.8-4-1.4-7-5.2-7-9.8V6.3l7-2.8z" />
+      <path d="M8.7 12l2.3 2.3 4.3-4.6" />
     </svg>
   );
 }

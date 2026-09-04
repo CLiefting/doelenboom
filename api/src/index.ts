@@ -1,6 +1,7 @@
 import { createApp } from './app.js';
 import { sweepIdleTenants } from './tenantWipe.js';
 import { sweepAccountRetention } from './accountRetention.js';
+import { sweepDependencyHealthCheck } from './dependencyHealth.js';
 
 // Laatste vangnet: een onafgevangen fout in een async route-handler (een
 // await die afwijst zonder eigen try/catch) crasht in Node.js standaard het
@@ -57,3 +58,16 @@ setInterval(() => {
     console.error('Accountretentie-sweep mislukt:', err);
   });
 }, ACCOUNT_RETENTION_SWEEP_INTERVAL_MS);
+
+// Dependency-health-sweep (SBOM/kwetsbaarheden-cache verversen, zie
+// dependencyHealth.ts) — zelfde in-process setInterval-patroon als hierboven.
+// sweepDependencyHealthCheck() bewaakt zelf de "hooguit 1x/24u"-regel via
+// dependency_check_runs (niet via deze intervaltimer), dus een grovere
+// controle-interval hier is puur om een gemiste/herstart-onderbroken run
+// tijdig opnieuw te proberen — geen scherpe klok.
+const DEPENDENCY_HEALTH_SWEEP_INTERVAL_MS = 60 * 60_000;
+setInterval(() => {
+  sweepDependencyHealthCheck().catch((err) => {
+    console.error('Dependency-health-sweep mislukt:', err);
+  });
+}, DEPENDENCY_HEALTH_SWEEP_INTERVAL_MS);

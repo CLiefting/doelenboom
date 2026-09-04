@@ -16,6 +16,14 @@ __pycache__
 # docker-compose.prod.yml).
 /backups/
 
+# Gegenereerde CycloneDX-SBOM's (scripts/generate-sbom.sh, zie
+# doelenboom_sbom_ontwerp.md in het project) — build-artefacten, niet
+# reproduceerbaar-identiek qua timestamp/serialNumber tussen twee runs van
+# dezelfde commit, dus horen net als /dist hierboven niet in git. Wordt in de
+# api-container gemount (docker-compose.yml, api.volumes) zodat
+# dependencyHealth.ts 'm runtime kan inlezen.
+/sbom/
+
 # Door de Claude-desktop-app zelf aangemaakte map wanneer een bestand (bv. een
 # los opgeleverd document) naar deze verbonden map wordt weggeschreven — geen
 # projectbestand, hoort niet in git. Ongenegeerd zou dit git status --porcelain

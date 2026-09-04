@@ -663,6 +663,110 @@ create table if not exists mfa_challenges (
 );
 create index if not exists idx_mfa_challenges_user on mfa_challenges(user_id, created_at desc);
 
+-- Software Bill of Materials / dependency-health (CISO-aandachtspunt, zie
+-- doelenboom_sbom_ontwerp.md in het project en api/src/dependencyHealth.ts).
+-- Elke build genereert een CycloneDX-SBOM per applicatiedeel (api/web/
+-- excel-service, zie scripts/generate-sbom.sh); dependency_sbom_builds is
+-- daarvan de metadata-rij (één per generatie, append-only geschiedenis, geen
+-- update-in-place — zo blijft "welke SBOM hoorde bij welke build" altijd
+-- herleidbaar, zie §29 van de opdracht). De "huidige" build is simpelweg de
+-- rij met de hoogste id/generated_at; oudere rijen blijven staan als
+-- geschiedenis maar worden nergens in de UI getoond.
+create table if not exists dependency_sbom_builds (
+  id bigserial primary key,
+  -- BUILD_VERSION-string zoals scripts/build-version.sh die produceert (zie
+  -- ook GET /api/version) — "dev" bij een lokale ontwikkelbuild zonder die
+  -- stap. git_commit apart (los, niet alleen als substring van build_version)
+  -- zodat de UI 'm zonder parsen kan tonen.
+  build_version text not null,
+  git_commit text,
+  cyclonedx_spec_version text not null,
+  -- CycloneDX serialNumber van de gecombineerde SBOM (sbom/combined.cdx.json,
+  -- zie scripts/sbom-postprocess.mjs) — §1 van de opdracht vraagt dit expliciet
+  -- op het overzicht ("SBOM serial/UUID indien beschikbaar").
+  sbom_serial_number text,
+  generated_at timestamptz not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_dependency_sbom_builds_generated on dependency_sbom_builds(generated_at desc);
+
+-- Genormaliseerde componentenlijst, telkens herschreven (delete+insert, zie
+-- dependencyHealth.ts) voor de build die net als "huidig" is ingelezen —
+-- oudere builds' componentrijen blijven staan (cascade bij het verwijderen
+-- van een oude build-rij, wat vooralsnog niet automatisch gebeurt). Dit is
+-- tegelijk de cache voor de "nieuwste versie beschikbaar"-controle
+-- (latest_version/update_category/version_checked_at, ververst door
+-- refreshDependencyHealth(), zie §9/§22 van de opdracht: niet bij elke
+-- paginaweergave opnieuw bij de registry navragen).
+create table if not exists dependency_components (
+  id bigserial primary key,
+  build_id bigint not null references dependency_sbom_builds(id) on delete cascade,
+  -- Welk van de drie Doelenboom-onderdelen dit component gebruikt (los van
+  -- application_part hieronder, dat is de grovere frontend/backend-indeling
+  -- die de opdracht vraagt — excel-service telt daarbij mee als backend).
+  application_component text not null check (application_component in ('api', 'web', 'excel-service')),
+  application_part text not null check (application_part in ('frontend', 'backend')),
+  ecosystem text not null check (ecosystem in ('npm', 'pypi')),
+  name text not null,
+  version text not null,
+  purl text,
+  -- direct: staat letterlijk in package.json (dependencies/devDependencies)
+  -- resp. requirements*.txt van dit onderdeel; transitive: komt alleen voor
+  -- via een andere dependency (zie scripts/generate-sbom.sh voor hoe dit
+  -- bepaald wordt — geen poging om dit uit de CycloneDX-dependency-graph zelf
+  -- te reconstrueren, dat is voor dit doel onnodig complex).
+  dependency_type text not null check (dependency_type in ('direct', 'transitive')),
+  -- runtime: zit ook in een install zonder devDependencies (npm --omit=dev)
+  -- resp. staat in requirements.txt (niet -dev.txt); development: alleen
+  -- nodig om te bouwen/testen.
+  scope text not null check (scope in ('runtime', 'development')),
+  license text,
+  latest_version text,
+  update_category text not null default 'onbekend'
+    check (update_category in ('actueel', 'patch', 'minor', 'major', 'onbekend')),
+  version_checked_at timestamptz,
+  created_at timestamptz not null default now(),
+  unique (build_id, application_component, name, version)
+);
+create index if not exists idx_dependency_components_build on dependency_components(build_id);
+create index if not exists idx_dependency_components_update on dependency_components(build_id, update_category);
+
+-- Kwetsbaarheden per component (bron: OSV.dev, zie dependencyHealth.ts) —
+-- losse tabel i.p.v. een kolom op dependency_components, want een component
+-- kan meerdere openstaande advisories tegelijk hebben.
+create table if not exists dependency_vulnerabilities (
+  id bigserial primary key,
+  component_id bigint not null references dependency_components(id) on delete cascade,
+  vulnerability_id text not null,
+  cve text,
+  severity text,
+  summary text,
+  fixed_version text,
+  source text not null default 'osv.dev',
+  checked_at timestamptz not null default now(),
+  unique (component_id, vulnerability_id)
+);
+create index if not exists idx_dependency_vulnerabilities_component on dependency_vulnerabilities(component_id);
+
+-- Geschiedenis van elke dependency-health-controle (handmatig via "Nu
+-- controleren" of automatisch, zie index.ts-sweep) — geeft "laatste controle"
+-- (het meest recente succesvolle finished_at) en is de basis voor de
+-- 24-uurs-/cooldown-bewaking (§9/§10 van de opdracht), zonder dat daar een
+-- aparte cachevoorziening voor nodig is (bestaande Postgres-database volstaat,
+-- zie §9 "geef voorkeur aan bestaande infrastructuur").
+create table if not exists dependency_check_runs (
+  id bigserial primary key,
+  started_at timestamptz not null default now(),
+  finished_at timestamptz,
+  status text not null default 'running' check (status in ('running', 'success', 'partial', 'failed')),
+  -- null = automatische (sweep-)controle, geen expliciete beheerder.
+  triggered_by_user_id bigint references users(id) on delete set null,
+  error text,
+  components_checked integer,
+  vulnerabilities_found integer
+);
+create index if not exists idx_dependency_check_runs_finished on dependency_check_runs(finished_at desc nulls last);
+
 alter table doelenbomen add column if not exists archived_at timestamptz;
 create index if not exists idx_doelenbomen_tenant_active
   on doelenbomen(tenant_id) where archived_at is null;

@@ -589,3 +589,74 @@ export type ColumnDef = {
   isProjectRole: boolean;
   relationLabelToNext: string | null;
 };
+
+// --- Softwarecomponenten / SBOM (sysadmin-only, /system-info) — zie
+// api/src/dependencyHealth.ts en doelenboom_sbom_ontwerp.md in het project.
+
+export type ApplicationComponentKey = 'api' | 'web' | 'excel-service';
+export type DependencyEcosystem = 'npm' | 'pypi';
+export type DependencyType = 'direct' | 'transitive';
+export type DependencyScope = 'runtime' | 'development';
+export type UpdateCategory = 'actueel' | 'patch' | 'minor' | 'major' | 'onbekend';
+export type SeverityLevel = 'kritiek' | 'hoog' | 'gemiddeld' | 'laag' | 'onbekend';
+
+export type DependencyHealthSummary = {
+  available: true;
+  buildVersion: string | null;
+  gitCommit: string | null;
+  generatedAt: string | null;
+  cyclonedxSpecVersion: string | null;
+  sbomSerialNumber: string | null;
+  lastCheckedAt: string | null;
+  totalComponents: number;
+  directDependencies: number;
+  transitiveDependencies: number;
+  updatesAvailable: number;
+  majorUpdates: number;
+  vulnerableComponents: number;
+  criticalVulnerabilities: number;
+};
+// GET /api/system/sbom/summary geeft { available: false } terug zolang er nog
+// nooit een SBOM gegenereerd is (bv. lokaal zonder scripts/generate-sbom.sh
+// te hebben gedraaid) — zie DependencyHealthSummaryResponse hieronder.
+export type DependencyHealthSummaryResponse = DependencyHealthSummary | { available: false };
+
+export type DependencyComponentRow = {
+  id: number;
+  applicationComponent: ApplicationComponentKey;
+  applicationPart: 'frontend' | 'backend';
+  ecosystem: DependencyEcosystem;
+  name: string;
+  version: string;
+  purl: string | null;
+  dependencyType: DependencyType;
+  scope: DependencyScope;
+  license: string | null;
+  latestVersion: string | null;
+  updateCategory: UpdateCategory;
+  versionCheckedAt: string | null;
+  vulnerabilityCount: number;
+};
+
+export type DependencyVulnerabilityRow = {
+  id: number;
+  componentId: number;
+  applicationComponent: ApplicationComponentKey;
+  componentName: string;
+  componentVersion: string;
+  vulnerabilityId: string;
+  cve: string | null;
+  severity: string | null;
+  severityLevel: SeverityLevel;
+  summary: string | null;
+  fixedVersion: string | null;
+  source: string;
+  checkedAt: string;
+};
+
+export type DependencyRefreshResult = {
+  status: 'success' | 'partial' | 'failed';
+  componentsChecked: number;
+  vulnerabilitiesFound: number;
+  error?: string;
+};

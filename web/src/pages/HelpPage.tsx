@@ -427,6 +427,14 @@ const SECTIONS: { id: string; title: string; content: JSX.Element }[] = [
           Sysadmins zien daarnaast een aparte knop <strong>Accountbeheer</strong>: de globale lijst van alle
           accounts, los van tenants (aanmaken, sysadmin-vlag zetten, wachtwoord resetten, verwijderen).
         </p>
+        <p style={styles.p}>
+          Via het gebruikersmenu rechtsboven vinden sysadmins nog een aantal systeembrede
+          diagnoseschermen, waaronder <strong>Softwarecomponenten</strong>: een overzicht (SBOM, Software
+          Bill of Materials) van alle software-onderdelen waaruit Doelenboom is opgebouwd, met per onderdeel
+          of er een nieuwere versie beschikbaar is en of er bekende kwetsbaarheden zijn gemeld. Dit is puur
+          signalerend — de knop "Nu controleren" ververst deze gegevens, maar Doelenboom werkt zelf nooit
+          automatisch iets bij.
+        </p>
       </>
     ),
   },

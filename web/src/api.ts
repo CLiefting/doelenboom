@@ -595,4 +595,68 @@ export const api = {
 
   acceptTerms: (token: string) =>
     request<{ accepted: true; version: string }>('/api/legal/terms/accept', { method: 'POST' }, token),
+
+  // --- Softwarecomponenten / SBOM (sysadmin-only, /system-info) — zie
+  // api/src/routes/systemSbom.ts. ---
+  sbomSummary: (token: string) =>
+    request<import('./types').DependencyHealthSummaryResponse>('/api/system/sbom/summary', {}, token),
+
+  sbomComponents: (
+    token: string,
+    filters: {
+      applicationComponent?: string;
+      ecosystem?: string;
+      dependencyType?: string;
+      scope?: string;
+      updateCategory?: string;
+      search?: string;
+      sortBy?: string;
+      sortDir?: string;
+      limit?: number;
+      offset?: number;
+    } = {}
+  ) =>
+    request<{ items: import('./types').DependencyComponentRow[]; total: number }>(
+      `/api/system/sbom/components${toQueryString(filters)}`,
+      {},
+      token
+    ),
+
+  sbomVulnerabilities: (
+    token: string,
+    filters: { applicationComponent?: string; severityLevel?: string; search?: string; limit?: number; offset?: number } = {}
+  ) =>
+    request<{ items: import('./types').DependencyVulnerabilityRow[]; total: number }>(
+      `/api/system/sbom/vulnerabilities${toQueryString(filters)}`,
+      {},
+      token
+    ),
+
+  sbomRefresh: (token: string) =>
+    request<import('./types').DependencyRefreshResult>('/api/system/sbom/refresh', { method: 'POST' }, token),
+
+  // Downloadknop — zelfde blob+Content-Disposition-patroon als
+  // downloadAuditLogExport hierboven.
+  downloadSbom: async (token: string): Promise<{ blob: Blob; filename: string }> => {
+    const res = await fetch(`${API_URL}/api/system/sbom/download`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) throw new ApiError(res.status, 'SBOM-download mislukt (HTTP ' + res.status + ')');
+    const blob = await res.blob();
+    const disposition = res.headers.get('Content-Disposition') ?? '';
+    const match = disposition.match(/filename="([^"]+)"/);
+    return { blob, filename: match ? match[1] : 'sbom.cdx.json' };
+  },
 };
+
+// Alleen gebruikt door de sbom*-functies hierboven (query-params zijn
+// optioneel/filterend, undefined-velden worden overgeslagen i.p.v. als
+// "undefined"-string meegestuurd).
+function toQueryString(params: Record<string, string | number | undefined>): string {
+  const usp = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== '') usp.set(key, String(value));
+  }
+  const qs = usp.toString();
+  return qs ? `?${qs}` : '';
+}
