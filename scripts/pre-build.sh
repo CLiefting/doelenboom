@@ -28,8 +28,22 @@ cleanup() {
 trap cleanup EXIT
 
 echo "==> Eén Python-venv voor excel-service (runtime + testdependencies)"
+# Expliciet python3.12 i.p.v. kaal python3: excel-service/Dockerfile bouwt op
+# python:3.12-slim, en requirements.txt eist sinds de fastapi 0.133.0-upgrade
+# (Softwarecomponenten-fix, Hoog-CVE's) Python >=3.10 — kaal python3 kan op
+# een ontwikkelmachine best een oudere, nog wél ondersteunde versie zijn (bv.
+# 3.9), wat pip install dan pas laat mislukken met een cryptische
+# "Requires-Python"-foutmelding i.p.v. hier meteen duidelijk te maken wat er
+# mist. Was er al een .venv van vóór deze eis, dan blijft die op de oude
+# Python staan (een venv "upgrade" je niet in-place) — eenmalig
+# `rm -rf excel-service/.venv` en opnieuw draaien lost dat op.
+if ! command -v python3.12 >/dev/null 2>&1; then
+  echo "python3.12 niet gevonden — nodig voor excel-service/.venv (zelfde versie als excel-service/Dockerfile, en vereist door fastapi>=0.129)." >&2
+  echo "macOS met Homebrew: brew install python@3.12" >&2
+  exit 1
+fi
 if [ ! -d excel-service/.venv ]; then
-  python3 -m venv excel-service/.venv
+  python3.12 -m venv excel-service/.venv
 fi
 # Ook setuptools expliciet upgraden (niet alleen pip): dat wordt bij het
 # aanmaken van de venv één keer bevroren op wat ensurepip op dat moment

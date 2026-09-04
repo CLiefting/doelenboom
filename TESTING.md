@@ -50,7 +50,7 @@ api-container praat er intern mee), dus draai 'm voor deze tests even los:
 ```bash
 set -euo pipefail
 cd ~/OneDrive/src/doelenboom/excel-service
-python3 -m venv .venv && source .venv/bin/activate
+python3.12 -m venv .venv && source .venv/bin/activate   # 3.12: zelfde als Dockerfile, en fastapi vereist >=3.10
 pip install -r requirements.txt
 uvicorn app.main:app --port 8000
 ```
@@ -69,7 +69,7 @@ tests op de parser/exporter-functies zelf.
 ```bash
 set -euo pipefail
 cd ~/OneDrive/src/doelenboom/excel-service
-python3 -m venv .venv && source .venv/bin/activate
+python3.12 -m venv .venv && source .venv/bin/activate   # 3.12: zelfde als Dockerfile, en fastapi vereist >=3.10
 pip install -r requirements.txt -r requirements-dev.txt
 pytest
 ```
