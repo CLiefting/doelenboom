@@ -8,6 +8,7 @@ vite.config.ts.timestamp-*.mjs
 __pycache__
 *.pyc
 *.tar.gz
+*.bundle
 .venv
 .pytest_cache
 
