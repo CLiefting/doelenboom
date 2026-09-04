@@ -363,16 +363,31 @@ Bewust **niet** op de VPS zelf genereren (zelfde reden als "images bouwen":
 geen extra npm/pip-toolchain-belasting op de qua resources krappe, gedeelde
 server) — in plaats daarvan lokaal genereren en meesturen met de images:
 
-**Op je Mac**, ná `./scripts/generate-sbom.sh` (zie hoofd-README):
+**Op de VPS eerst de bestaande map weggooien** (zie waarschuwing hieronder
+waarom dit niet overgeslagen mag worden), **daarna op je Mac**, ná
+`./scripts/generate-sbom.sh` (zie hoofd-README):
 ```bash
+ssh charles@185.107.90.64 'rm -rf ~/doelenboom/sbom'
 scp -r sbom charles@185.107.90.64:~/doelenboom/sbom
 ```
 
-**Op de VPS** is verder niets nodig — de map staat dan al op de juiste plek
+**Waarschuwing — `scp -r` overschrijft NIET 1-op-1 als de doelmap al
+bestaat:** bestaat `~/doelenboom/sbom` op de VPS al (elke keer ná de
+allereerste deploy), dan plaatst `scp -r sbom host:~/doelenboom/sbom` de
+nieuwe bestanden in een geneste submap `~/doelenboom/sbom/sbom/...` in plaats
+van de bestaande `.json`-bestanden te vervangen — `dependencyHealth.ts` leest
+dan stilzwijgend de oude, nooit-bijgewerkte top-level bestanden, ook na een
+klik op "Nu controleren" (die leest wél telkens vers van schijf, maar dan
+gewoon de verkeerde, ongewijzigde bestanden). Geen foutmelding, geen crash —
+alleen een Softwarecomponenten-pagina die na een deploy stilletjes de oude
+cijfers blijft tonen. Vandaar de `rm -rf` hierboven: die dwingt scp om de map
+opnieuw als top-level map aan te maken in plaats van erin te nesten.
+
+**Op de VPS** is verder niets nodig — de map staat dan op de juiste plek
 (`~/doelenboom/sbom`, wat `docker-compose.yml`'s `./sbom:/app/sbom:ro`
-verwacht) vóórdat je `up -d` draait. Bij een latere dependency-wijziging
-gewoon dit `scp`-commando herhalen (overschrijft de map 1-op-1); een verse
-`sbom/`-set wordt pas zichtbaar in de app na een klik op "Nu controleren".
+verwacht) vóórdat je `up -d` draait. Bij een latere dependency-wijziging dit
+hele `rm -rf` + `scp`-tweetal herhalen; een verse `sbom/`-set wordt pas
+zichtbaar in de app na een klik op "Nu controleren".
 
 ### Verplichte check: geen actieve gebruikers vóór `up -d`
 
