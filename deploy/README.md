@@ -343,6 +343,31 @@ de wijziging alléén in `api`/`web`/`excel-service`-code, dan volstaat
 veranderd is). Alleen als `docker-compose.yml`/`docker-compose.prod.yml`
 zelf wijzigde, is de `git pull` op de VPS ook nodig vóór `up -d`.
 
+### Softwarecomponenten (SBOM): `sbom/`-map los overzetten
+
+`scripts/generate-sbom.sh` schrijft naar `./sbom/` (bewust **niet** in git, zie
+`.gitignore` — build-artefact, niet reproduceerbaar-identiek qua timestamp
+tussen twee runs) en `docker-compose.yml` mount die map read-only in de
+`api`-container (`SBOM_DIR=/app/sbom`, zie hierboven). Die map zit dus niet in
+een `docker save`/`docker load`-image en ook niet in een `git pull` — zonder
+extra actie toont de Softwarecomponenten-pagina op de VPS na een deploy
+gewoon "geen SBOM beschikbaar" (netjes, geen crash, maar wel nutteloos).
+
+Bewust **niet** op de VPS zelf genereren (zelfde reden als "images bouwen":
+geen extra npm/pip-toolchain-belasting op de qua resources krappe, gedeelde
+server) — in plaats daarvan lokaal genereren en meesturen met de images:
+
+**Op je Mac**, ná `./scripts/generate-sbom.sh` (zie hoofd-README):
+```bash
+scp -r sbom charles@185.107.90.64:~/doelenboom/sbom
+```
+
+**Op de VPS** is verder niets nodig — de map staat dan al op de juiste plek
+(`~/doelenboom/sbom`, wat `docker-compose.yml`'s `./sbom:/app/sbom:ro`
+verwacht) vóórdat je `up -d` draait. Bij een latere dependency-wijziging
+gewoon dit `scp`-commando herhalen (overschrijft de map 1-op-1); een verse
+`sbom/`-set wordt pas zichtbaar in de app na een klik op "Nu controleren".
+
 ### Verplichte check: geen actieve gebruikers vóór `up -d`
 
 `docker compose ... up -d` herstart de `api`/`web`-containers zodra hun image
