@@ -1,7 +1,17 @@
-fastapi==0.115.0
+# fastapi 0.133.0 (i.p.v. 0.115.0): de laagste fastapi-versie die geen
+# bovengrens meer op starlette stelt (0.130.0 t/m 0.132.x cappen nog op
+# "<1.0.0"; 0.115.0 zelfs op "<0.39.0") — nodig om starlette 1.x te kunnen
+# ophalen, dat een reeks Hoog-kwetsbaarheden fixt (o.a. CVE-2026-54283/
+# request.form()-DoS, CVE-2024-47874/multipart-DoS, CVE-2026-48818/SSRF via
+# UNC-paden), zie Softwarecomponenten-pagina. python-multipart 0.0.30 (i.p.v.
+# 0.0.9) fixt op zichzelf ook een reeks Hoog-DoS-kwetsbaarheden. Onze eigen
+# FastAPI-gebruik in app/main.py (File/UploadFile/Body/Query, geen esoterische
+# API's) is ongewijzigd tussen deze versies — geverifieerd met de volledige
+# testsuite (tests/, alle 155 groen).
+fastapi==0.133.0
 uvicorn[standard]==0.30.6
 openpyxl==3.1.5
-python-multipart==0.0.9
+python-multipart==0.0.30
 # Project-PowerPoint-export (app/project_pptx.py) — /project-pptx.
 python-pptx==1.0.2
 # .mpp-import (app/mpp_converter.py) — mpxj bundelt de benodigde Java-.jar's

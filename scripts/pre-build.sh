@@ -31,7 +31,12 @@ echo "==> Eén Python-venv voor excel-service (runtime + testdependencies)"
 if [ ! -d excel-service/.venv ]; then
   python3 -m venv excel-service/.venv
 fi
-excel-service/.venv/bin/pip install -q --upgrade pip
+# Ook setuptools expliciet upgraden (niet alleen pip): dat wordt bij het
+# aanmaken van de venv één keer bevroren op wat ensurepip op dat moment
+# meelevert, en "pip install --upgrade pip" ververst 'm daarna niet vanzelf —
+# vandaar dat een al langer bestaande .venv hier op een oude, kwetsbare
+# setuptools (Hoog, zie Softwarecomponenten-pagina) kan blijven hangen.
+excel-service/.venv/bin/pip install -q --upgrade pip setuptools
 excel-service/.venv/bin/pip install -q -r excel-service/requirements.txt -r excel-service/requirements-dev.txt
 
 echo
