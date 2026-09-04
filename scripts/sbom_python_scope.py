@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+# from __future__ import annotations (hieronder) laat de PEP 604/585-syntax
+# (`str | None`, `dict[str, set[str]]`) hier wérken op Python 3.9 — die
+# syntax is er pas standaard sinds 3.10, maar excel-service/.venv draait op
+# Charles' Mac op 3.9 (zie excel-service/Dockerfile/requirements.txt: 3.9 is
+# de daadwerkelijk ondersteunde/gebruikte versie). De future-import maakt
+# alle annotaties lui/string-only (nooit runtime geëvalueerd), dus dit is
+# voldoende zonder elke annotatie te moeten vervangen door typing.Dict/
+# Optional/etc.
 """Bepaalt welke geïnstalleerde Python-packages in een venv "runtime" (nodig
 voor requirements.txt, incl. transitief) versus "development" (alleen nodig
 om te testen/bouwen, bv. pytest/httpx/cyclonedx-bom uit requirements-dev.txt)
@@ -27,6 +35,8 @@ Output (stdout): JSON {"runtimeNames": ["fastapi", "starlette", ...]}
 (package-namen genormaliseerd: lowercase, "_"/"." -> "-", zoals PyPI/pip zelf
 namen genormaliseerd vergelijkt — zie PEP 503).
 """
+from __future__ import annotations
+
 import json
 import re
 import sys
