@@ -1309,6 +1309,7 @@ function TenantSettingsForm({
   const [openAccessRole, setOpenAccessRole] = useState<TenantRoleName | ''>(tenant.open_access_role ?? '');
   const [entryPopupEnabled, setEntryPopupEnabled] = useState(tenant.entry_popup_enabled);
   const [entryPopupMessage, setEntryPopupMessage] = useState(tenant.entry_popup_message);
+  const [mfaRequired, setMfaRequired] = useState(tenant.mfa_required);
   const [saved, setSaved] = useState(false);
 
   // Als de gebruiker een andere tenant selecteert moet het formulier de
@@ -1322,6 +1323,7 @@ function TenantSettingsForm({
     setOpenAccessRole(tenant.open_access_role ?? '');
     setEntryPopupEnabled(tenant.entry_popup_enabled);
     setEntryPopupMessage(tenant.entry_popup_message);
+    setMfaRequired(tenant.mfa_required);
     setSaved(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenant.id]);
@@ -1357,6 +1359,7 @@ function TenantSettingsForm({
         openAccessRole: openAccessRole || null,
         entryPopupEnabled,
         entryPopupMessage: entryPopupMessage.trim(),
+        mfaRequired,
       });
       setSaved(true);
       onSaved();
@@ -1466,6 +1469,16 @@ function TenantSettingsForm({
       <p style={{ margin: '-4px 0 0 26px', fontSize: 12, color: '#9aa0a8' }}>
         Wordt getoond nadat een boom in deze tenant geselecteerd is, vóórdat 'ie geopend wordt — bij "Annuleren"
         wordt de boom niet geopend. Verschijnt één keer per login-sessie, niet bij elke afzonderlijke boom.
+      </p>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5 }}>
+        <input type="checkbox" checked={mfaRequired} onChange={(e) => setMfaRequired(e.target.checked)} />
+        Tweestapsverificatie (MFA) verplicht voor alle leden van deze tenant
+      </label>
+      <p style={{ margin: '-4px 0 0 26px', fontSize: 12, color: '#9aa0a8' }}>
+        Geldt voor elk lid (admin/gebruiker/bezoeker) van deze tenant, bij elke login, ongeacht ieders eigen
+        MFA-instelling in "Mijn beveiliging" — net als bij sysadmins is er geen individuele opt-out. Heeft iemand
+        toegang tot meerdere tenants, dan volstaat één tenant met deze instelling aan om MFA voor die persoon
+        overal verplicht te maken.
       </p>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <button style={{ ...btnStyle('primary'), alignSelf: 'flex-start' }} type="submit" disabled={busy}>

@@ -22,6 +22,13 @@ export type User = {
   // voor hen sowieso verplicht, ongeacht deze vlag — zie api/src/auth.ts
   // mfaRequired), maar zij kunnen 'm hier niet zelf uitzetten.
   mfaEnabled: boolean;
+  // Naam/namen van tenant(s) waar deze gebruiker lid van is en die MFA
+  // verplicht stellen (tenants.mfa_required, zie TenantSummary hieronder) —
+  // leeg voor sysadmins (hun verplichting volgt uit isSysadmin, niet hieruit).
+  // Puur voor UI-uitleg in MySecurityPage.tsx; net als bij sysadmins is er
+  // hier geen eigen opt-out, mfaEnabled hierboven is dan niet zelf te wijzigen
+  // (zie PUT /api/auth/mfa-enabled).
+  mfaRequiredTenants: string[];
   tenantRoles: UserTenantRole[];
 };
 
@@ -149,6 +156,10 @@ export type TenantSummary = {
   // entry_popup_enabled true is (afgedwongen door PUT /api/tenants/:id).
   entry_popup_enabled: boolean;
   entry_popup_message: string;
+  // Tweestapsverificatie (MFA) verplicht voor ALLE leden van deze tenant,
+  // zonder individuele opt-out — zie doelenboom_mfa_ontwerp.md,
+  // api/src/auth.ts (mfaRequired) en User.mfaRequiredTenants hierboven.
+  mfa_required: boolean;
   created_at: string;
   my_role?: TenantRoleName; // alleen aanwezig als niet-sysadmin dit ophaalt
   // "YYYY-MM-DD" of null (geen einddatum ingesteld/nooit verlopen) — zie

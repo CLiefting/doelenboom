@@ -251,6 +251,9 @@ export const api = {
       // aanroep een niet-lege tekst zijn — zie PUT /api/tenants/:id.
       entryPopupEnabled?: boolean;
       entryPopupMessage?: string;
+      // Verplicht MFA voor alle leden van deze tenant, zonder individuele
+      // opt-out — zie TenantSummary.mfa_required en api/src/auth.ts.
+      mfaRequired?: boolean;
       // Sysadmin-only (server geeft 403 terug als een tenant-admin dit
       // meestuurt) — zie PUT /api/tenants/:id.
       name?: string;

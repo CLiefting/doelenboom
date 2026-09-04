@@ -262,4 +262,73 @@ describe('mfa', () => {
       setMfaEmailFailure(false);
     }
   });
+
+  // Tenant-brede verplichte MFA (zie db/init.sql tenants.mfa_required,
+  // routes/tenants.ts PUT /api/tenants/:id, auth.ts mfaRequired) — los van de
+  // hierboven al geteste sysadmin-verplichting en de eigen (optionele)
+  // mfa_enabled-schakelaar.
+  it('tenant met mfa_required aan: een gewoon lid moet ook door de MFA-stap, zonder eigen mfa_enabled', async () => {
+    const sysadminEmail = `${PREFIX}-tenantmfa-admin@test.local`;
+    await createSysadminUser(sysadminEmail, 'geheim1234');
+    const sysadminToken = await login(sysadminEmail, 'geheim1234');
+
+    const slug = `${PREFIX}-tenantmfa`;
+    const tenant = await req('POST', '/api/tenants', { token: sysadminToken, body: { slug, name: 'Tenant MFA' } });
+    const tenantId = tenant.body.id as number;
+    const setRequired = await req('PUT', `/api/tenants/${tenantId}`, {
+      token: sysadminToken, body: { mfaRequired: true },
+    });
+    assert.equal(setRequired.status, 200);
+    assert.equal(setRequired.body.mfa_required, true);
+
+    const memberEmail = `${PREFIX}-tenantmfa-lid@test.local`;
+    await req('POST', `/api/tenants/${tenantId}/members`, {
+      token: sysadminToken, body: { email: memberEmail, password: 'geheim1234', role: 'gebruiker' },
+    });
+
+    // Geen sysadmin, mfa_enabled staat niet aan — toch moet /login een code
+    // vereisen, puur omdat dit account lid is van een tenant met mfa_required.
+    const loginResult = await req('POST', '/api/auth/login', { body: { email: memberEmail, password: 'geheim1234' } });
+    assert.equal(loginResult.body.mfaRequired, true);
+    const code = getLastMfaCode(memberEmail);
+    assert.ok(code);
+    const verify = await req('POST', '/api/auth/mfa/verify', {
+      body: { challengeId: loginResult.body.challengeId, code },
+    });
+    assert.equal(verify.status, 200);
+    assert.equal(verify.body.user.mfaEnabled, false);
+    assert.deepEqual(verify.body.user.mfaRequiredTenants, ['Tenant MFA']);
+
+    const me = await req('GET', '/api/auth/me', { token: verify.body.token });
+    assert.deepEqual(me.body.user.mfaRequiredTenants, ['Tenant MFA']);
+
+    // Geen individuele opt-out: net als bij sysadmins geeft de zelfbedienings-
+    // schakelaar hier een 400, met de tenantnaam erbij ter uitleg.
+    const toggle = await req('PUT', '/api/auth/mfa-enabled', { token: verify.body.token, body: { enabled: false } });
+    assert.equal(toggle.status, 400);
+    assert.match(toggle.body.error, /Tenant MFA/);
+  });
+
+  it('tenant met mfa_required uit: een gewoon lid logt zonder MFA-stap in en kan de eigen schakelaar gewoon gebruiken', async () => {
+    const sysadminEmail = `${PREFIX}-tenantnomfa-admin@test.local`;
+    await createSysadminUser(sysadminEmail, 'geheim1234');
+    const sysadminToken = await login(sysadminEmail, 'geheim1234');
+
+    const slug = `${PREFIX}-tenantnomfa`;
+    const tenant = await req('POST', '/api/tenants', { token: sysadminToken, body: { slug, name: 'Tenant zonder MFA' } });
+    const tenantId = tenant.body.id as number;
+    assert.equal(tenant.body.mfa_required, false, 'default uit');
+
+    const memberEmail = `${PREFIX}-tenantnomfa-lid@test.local`;
+    await req('POST', `/api/tenants/${tenantId}/members`, {
+      token: sysadminToken, body: { email: memberEmail, password: 'geheim1234', role: 'gebruiker' },
+    });
+
+    const loginResult = await req('POST', '/api/auth/login', { body: { email: memberEmail, password: 'geheim1234' } });
+    assert.equal(loginResult.status, 200);
+    assert.equal(loginResult.body.mfaRequired, undefined);
+
+    const toggle = await req('PUT', '/api/auth/mfa-enabled', { token: loginResult.body.token, body: { enabled: true } });
+    assert.equal(toggle.status, 200);
+  });
 });

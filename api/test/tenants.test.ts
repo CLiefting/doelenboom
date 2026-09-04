@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   startTestServer, stopTestServer, closePool, req, unique, createSysadminUser, login, cleanupByPrefix,
 } from './helpers.js';
+import { pool } from '../src/db.js';
 
 const PREFIX = unique('tenants');
 
@@ -70,6 +71,41 @@ describe('tenants', () => {
     });
     assert.equal(renameOnly.status, 200);
     assert.equal(renameOnly.body.nightly_export_enabled, false);
+  });
+
+  it('PUT /api/tenants/:id: mfaRequired (tenant-brede verplichte MFA, zie mfa.test.ts voor het inlogeffect)', async () => {
+    const slug = `${PREFIX}-t11`;
+    const created = await req('POST', '/api/tenants', { token: sysadminToken, body: { slug, name: 'Test tenant 11' } });
+    const tenantId = created.body.id;
+    assert.equal(created.body.mfa_required, false, 'default uit');
+
+    const adminEmail = `${PREFIX}-t11-admin@test.local`;
+    await req('POST', `/api/tenants/${tenantId}/members`, {
+      token: sysadminToken, body: { email: adminEmail, password: 'wachtwoord123', role: 'admin' },
+    });
+    const tenantAdminToken = await login(adminEmail, 'wachtwoord123');
+
+    const asAdmin = await req('PUT', `/api/tenants/${tenantId}`, {
+      token: tenantAdminToken, body: { mfaRequired: true },
+    });
+    assert.equal(asAdmin.status, 200);
+    assert.equal(asAdmin.body.mfa_required, true);
+
+    // Zonder mfaRequired in de body blijft de huidige waarde staan (zelfde
+    // "omitted = ongewijzigd"-gedrag als de andere velden hierboven).
+    const renameOnly = await req('PUT', `/api/tenants/${tenantId}`, {
+      token: tenantAdminToken, body: { sessionTimeoutMinutes: 20 },
+    });
+    assert.equal(renameOnly.status, 200);
+    assert.equal(renameOnly.body.mfa_required, true);
+
+    const auditRows = await pool.query(
+      `select detail from audit_log where tenant_id = $1 and event_type = 'tenant_settings_changed' order by created_at`,
+      [tenantId]
+    );
+    const mfaChange = auditRows.rows.find((r) => 'mfa_required' in (r.detail?.changes ?? {}));
+    assert.ok(mfaChange, 'mfa_required-wijziging moet in het auditlogboek staan');
+    assert.deepEqual(mfaChange.detail.changes.mfa_required, { from: false, to: true });
   });
 
   it('PUT /api/tenants/:id: entryPopupEnabled/entryPopupMessage (boom-openen-melding)', async () => {

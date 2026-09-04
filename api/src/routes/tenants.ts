@@ -15,7 +15,7 @@ function isUniqueViolation(err: unknown): boolean {
 
 const TENANT_SELECT_FIELDS =
   'id, slug, name, wipe_on_empty, session_timeout_minutes, nightly_export_enabled, open_access_role, ' +
-  'entry_popup_enabled, entry_popup_message, created_at';
+  'entry_popup_enabled, entry_popup_message, mfa_required, created_at';
 
 // Licentie-einddatum als losse, expliciet met to_char geformatteerde kolom
 // ("YYYY-MM-DD" of null) — bewust NIET in TENANT_SELECT_FIELDS hierboven,
@@ -52,7 +52,7 @@ tenantsRouter.get('/', async (req: AuthedRequest, res) => {
 // columnConfig.ts) — het sjabloon waarmee elke nieuwe doelenboom binnen deze
 // tenant straks start.
 tenantsRouter.post('/', requireSysadmin, async (req, res) => {
-  const { slug, name, wipeOnEmpty, sessionTimeoutMinutes, nightlyExportEnabled } = req.body ?? {};
+  const { slug, name, wipeOnEmpty, sessionTimeoutMinutes, nightlyExportEnabled, mfaRequired } = req.body ?? {};
   if (!slug || !name) {
     return res.status(400).json({ error: 'slug en name zijn verplicht' });
   }
@@ -65,14 +65,15 @@ tenantsRouter.post('/', requireSysadmin, async (req, res) => {
     // verlengen/wijzigen/wissen via het licentiescherm in Tenantbeheer.
     const defaultLicenseEndDate = computeDefaultLicenseEndDate(new Date());
     const result = await client.query(
-      `insert into tenants (slug, name, wipe_on_empty, session_timeout_minutes, nightly_export_enabled, license_end_date)
-       values ($1, $2, $3, $4, $5, $6) returning ${TENANT_SELECT_FIELDS}, ${LICENSE_END_DATE_SELECT}`,
+      `insert into tenants (slug, name, wipe_on_empty, session_timeout_minutes, nightly_export_enabled, mfa_required, license_end_date)
+       values ($1, $2, $3, $4, $5, $6, $7) returning ${TENANT_SELECT_FIELDS}, ${LICENSE_END_DATE_SELECT}`,
       [
         slug,
         name,
         !!wipeOnEmpty,
         Number.isFinite(sessionTimeoutMinutes) ? sessionTimeoutMinutes : 30,
         typeof nightlyExportEnabled === 'boolean' ? nightlyExportEnabled : true,
+        !!mfaRequired,
         defaultLicenseEndDate,
       ]
     );
@@ -87,13 +88,20 @@ tenantsRouter.post('/', requireSysadmin, async (req, res) => {
   }
 });
 
-// PUT /api/tenants/:id — wipeOnEmpty/sessionTimeoutMinutes/openAccessRole/
-// entryPopupEnabled/entryPopupMessage/name/slug aanpassen. De eerste groep is
-// toegestaan voor sysadmins én tenant-admins van déze tenant (dat valt onder
-// "wijzigen in tenant"). name/slug zijn bewust sysadmin-only (zie de check
-// hieronder) — een hernoeming raakt hoe een tenant voor de HELE app
-// (picker, andere sysadmins, back-up-bestandspaden die de slug gebruiken)
-// herkenbaar is, geen zelfbedieningsactie voor een individuele tenant-admin.
+// PUT /api/tenants/:id — wipeOnEmpty/sessionTimeoutMinutes/nightlyExportEnabled/
+// mfaRequired/openAccessRole/entryPopupEnabled/entryPopupMessage/name/slug
+// aanpassen. De eerste groep is toegestaan voor sysadmins én tenant-admins van
+// déze tenant (dat valt onder "wijzigen in tenant"). name/slug zijn bewust
+// sysadmin-only (zie de check hieronder) — een hernoeming raakt hoe een tenant
+// voor de HELE app (picker, andere sysadmins, back-up-bestandspaden die de
+// slug gebruiken) herkenbaar is, geen zelfbedieningsactie voor een
+// individuele tenant-admin.
+//
+// mfaRequired: simpel boolean, geen tri-state zoals openAccessRole hieronder
+// nodig (er is geen "niet gezet"-betekenis te onderscheiden — uit is uit) dus
+// coalesce() volstaat, zelfde patroon als wipeOnEmpty/nightlyExportEnabled.
+// Zie api/src/auth.ts (mfaRequired-berekening bij /login) voor het effect:
+// verplicht voor ALLE leden van deze tenant, zonder eigen opt-out.
 //
 // openAccessRole is nullable (null = open toegang uit), dus coalesce() zoals
 // bij wipeOnEmpty/sessionTimeoutMinutes hierboven volstaat niet — dat zou
@@ -104,6 +112,8 @@ tenantsRouter.post('/', requireSysadmin, async (req, res) => {
 tenantsRouter.put('/:id', requireTenantRoleForTenantParam('admin', 'id'), async (req: AuthedRequest, res) => {
   const b = (req.body ?? {}) as Record<string, unknown>;
   const { wipeOnEmpty, sessionTimeoutMinutes, nightlyExportEnabled } = b;
+  const hasMfaRequired = typeof b.mfaRequired === 'boolean';
+  const mfaRequired = b.mfaRequired as boolean | undefined;
   const hasOpenAccessRole = 'openAccessRole' in b;
   const openAccessRole = b.openAccessRole;
   const hasEntryPopupEnabled = typeof b.entryPopupEnabled === 'boolean';
@@ -122,6 +132,7 @@ tenantsRouter.put('/:id', requireTenantRoleForTenantParam('admin', 'id'), async 
     typeof wipeOnEmpty !== 'boolean' &&
     sessionTimeoutMinutes === undefined &&
     typeof nightlyExportEnabled !== 'boolean' &&
+    !hasMfaRequired &&
     !hasOpenAccessRole &&
     !hasEntryPopupEnabled &&
     !hasEntryPopupMessage &&
@@ -130,7 +141,7 @@ tenantsRouter.put('/:id', requireTenantRoleForTenantParam('admin', 'id'), async 
   ) {
     return res.status(400).json({
       error:
-        'Geef wipeOnEmpty, sessionTimeoutMinutes, nightlyExportEnabled, openAccessRole, ' +
+        'Geef wipeOnEmpty, sessionTimeoutMinutes, nightlyExportEnabled, mfaRequired, openAccessRole, ' +
         'entryPopupEnabled, entryPopupMessage, name en/of slug mee.',
     });
   }
@@ -184,8 +195,9 @@ tenantsRouter.put('/:id', requireTenantRoleForTenantParam('admin', 'id'), async 
          entry_popup_enabled = coalesce($6, entry_popup_enabled),
          entry_popup_message = coalesce($7, entry_popup_message),
          name = coalesce($8, name),
-         slug = coalesce($9, slug)
-       where id = $10
+         slug = coalesce($9, slug),
+         mfa_required = coalesce($10, mfa_required)
+       where id = $11
        returning ${TENANT_SELECT_FIELDS}, ${LICENSE_END_DATE_SELECT}`,
       [
         typeof wipeOnEmpty === 'boolean' ? wipeOnEmpty : null,
@@ -197,6 +209,7 @@ tenantsRouter.put('/:id', requireTenantRoleForTenantParam('admin', 'id'), async 
         hasEntryPopupMessage ? entryPopupMessage : null,
         name ?? null,
         slug ?? null,
+        hasMfaRequired ? mfaRequired : null,
         req.params.id,
       ]
     );
@@ -214,6 +227,7 @@ tenantsRouter.put('/:id', requireTenantRoleForTenantParam('admin', 'id'), async 
       'entry_popup_message',
       'name',
       'slug',
+      'mfa_required',
     ] as const;
     const changes: Record<string, { from: unknown; to: unknown }> = {};
     for (const field of changedFields) {

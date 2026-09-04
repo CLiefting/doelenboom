@@ -127,7 +127,11 @@ authRouter.post('/login', async (req, res) => {
   const result = await pool.query(
     `select id, email, is_sysadmin, must_change_password, scheduled_deletion_at,
             failed_login_count, locked_until, mfa_enabled,
-            (password_hash = crypt($2, password_hash)) as password_ok
+            (password_hash = crypt($2, password_hash)) as password_ok,
+            exists(
+              select 1 from tenant_users tu join tenants t on t.id = tu.tenant_id
+              where tu.user_id = users.id and t.mfa_required
+            ) as tenant_mfa_required
      from users
      where email = $1`,
     [email, password]
@@ -197,15 +201,20 @@ authRouter.post('/login', async (req, res) => {
   }
 
   // MFA-poort (CISO-aandachtspunt, zie doelenboom_mfa_ontwerp.md in het
-  // project en mfa.ts) — verplicht voor sysadmins (ongeacht mfa_enabled),
-  // optioneel voor de rest (zelf aan/uit te zetten, zie mfa_enabled hierboven).
-  // Bewust GEEN sessie/token hier als MFA vereist is: die worden pas
-  // aangemaakt in completeLogin() ná een geslaagde /mfa/verify — vóór dat punt
-  // bestaat er dus geen enkel bruikbaar token voor deze inlogpoging, anders
-  // dan bij mustChangePassword (dat al wél meteen een geldig token geeft en
-  // alleen de frontend-UI blokkeert) zou een kaal token vóór MFA de bedoelde
-  // bescherming juist omzeilbaar maken.
-  const mfaRequired = user.is_sysadmin || user.mfa_enabled;
+  // project en mfa.ts) — verplicht voor sysadmins (ongeacht mfa_enabled), voor
+  // leden van een tenant met mfa_required aan (tenant_mfa_required hierboven,
+  // zie db/init.sql tenants.mfa_required en routes/tenants.ts), en verder
+  // optioneel (zelf aan/uit te zetten, zie mfa_enabled hierboven). Bewust
+  // account-breed (niet sessie- of tenant-context-specifiek): heeft deze
+  // gebruiker toegang tot meerdere tenants en is er ook maar één met
+  // mfa_required aan, dan is MFA bij élke login verplicht, ongeacht welke
+  // tenant/doelenboom hierna geopend wordt. Bewust GEEN sessie/token hier als
+  // MFA vereist is: die worden pas aangemaakt in completeLogin() ná een
+  // geslaagde /mfa/verify — vóór dat punt bestaat er dus geen enkel bruikbaar
+  // token voor deze inlogpoging, anders dan bij mustChangePassword (dat al wél
+  // meteen een geldig token geeft en alleen de frontend-UI blokkeert) zou een
+  // kaal token vóór MFA de bedoelde bescherming juist omzeilbaar maken.
+  const mfaRequired = user.is_sysadmin || user.mfa_enabled || user.tenant_mfa_required;
   if (mfaRequired) {
     // Expliciete try/catch (i.t.t. de meeste routes hier, die op de globale
     // unhandledRejection-vangnet in index.ts leunen): een falende
@@ -260,6 +269,7 @@ async function completeLogin(userId: number) {
   );
   const tenantRoles = await fetchTenantRoles(user.id);
   const termsAcceptanceRequired = await needsTermsAcceptance(user.id);
+  const mfaRequiredTenants = user.is_sysadmin ? [] : await fetchMfaRequiredTenantNames(user.id);
   return {
     token,
     user: {
@@ -268,6 +278,7 @@ async function completeLogin(userId: number) {
       isSysadmin: user.is_sysadmin,
       mustChangePassword: user.must_change_password,
       mfaEnabled: user.mfa_enabled,
+      mfaRequiredTenants,
       termsAcceptanceRequired,
       tenantRoles,
     },
@@ -343,6 +354,24 @@ authRouter.post('/mfa/resend', async (req, res) => {
 // LEFT JOIN vanuit tenants (i.p.v. vanuit tenant_users) om ook die laatste
 // mee te pakken. coalesce(tu.role, t.open_access_role): een expliciete rol
 // wint altijd, open_access_role is puur de fallback.
+// Namen van de tenant(s) waar deze gebruiker lid van is (tenant_users) én die
+// mfa_required aan hebben staan — puur voor UI-uitleg (MySecurityPage.tsx: "MFA
+// is verplicht via tenant X" i.p.v. alleen "verplicht"). Bepaalt zelf NIET of
+// MFA vereist is bij login — dat gebeurt met de exists()-subquery in /login
+// hierboven (die ook open_access_role-toegang zonder eigen tenant_users-rij
+// bewust NEGEERT: mfa_required is een verplichting voor leden, geen
+// eigenschap die via open toegang "meelift").
+async function fetchMfaRequiredTenantNames(userId: number): Promise<string[]> {
+  const result = await pool.query(
+    `select t.name from tenants t
+     join tenant_users tu on tu.tenant_id = t.id
+     where tu.user_id = $1 and t.mfa_required
+     order by t.name`,
+    [userId]
+  );
+  return result.rows.map((r) => r.name as string);
+}
+
 async function fetchTenantRoles(userId: number) {
   const result = await pool.query(
     `select t.id as tenant_id, t.slug as tenant_slug, t.name as tenant_name,
@@ -365,11 +394,13 @@ authRouter.get('/me', requireAuth, async (req: AuthedRequest, res) => {
   const tenantRoles = req.user!.isSysadmin ? [] : await fetchTenantRoles(req.user!.id);
   const mcp = await pool.query('select must_change_password, mfa_enabled from users where id = $1', [req.user!.id]);
   const termsAcceptanceRequired = await needsTermsAcceptance(req.user!.id);
+  const mfaRequiredTenants = req.user!.isSysadmin ? [] : await fetchMfaRequiredTenantNames(req.user!.id);
   res.json({
     user: {
       ...req.user,
       mustChangePassword: mcp.rows[0]?.must_change_password ?? false,
       mfaEnabled: mcp.rows[0]?.mfa_enabled ?? false,
+      mfaRequiredTenants,
       termsAcceptanceRequired,
       tenantRoles,
     },
@@ -406,7 +437,23 @@ authRouter.post('/change-password', requireAuth, async (req: AuthedRequest, res)
   );
   const tenantRoles = req.user!.isSysadmin ? [] : await fetchTenantRoles(req.user!.id);
   const termsAcceptanceRequired = await needsTermsAcceptance(req.user!.id);
-  res.json({ user: { ...req.user, mustChangePassword: false, termsAcceptanceRequired, tenantRoles } });
+  // mfaEnabled/mfaRequiredTenants horen hier ook bij (dit retourneert een
+  // volledig User-object, zie types.ts) — zonder deze twee zou MySecurityPage
+  // meteen na een wachtwoordwijziging op een onvolledige user kunnen crashen
+  // als de gebruiker daar meteen daarna naartoe navigeert zonder tussentijdse
+  // /me-herlaadbeurt.
+  const mcp = await pool.query('select mfa_enabled from users where id = $1', [req.user!.id]);
+  const mfaRequiredTenants = req.user!.isSysadmin ? [] : await fetchMfaRequiredTenantNames(req.user!.id);
+  res.json({
+    user: {
+      ...req.user,
+      mustChangePassword: false,
+      mfaEnabled: mcp.rows[0]?.mfa_enabled ?? false,
+      mfaRequiredTenants,
+      termsAcceptanceRequired,
+      tenantRoles,
+    },
+  });
 });
 
 // PUT /api/auth/mfa-enabled — zelfbediening: elke ingelogde gebruiker mag zijn/
@@ -414,10 +461,19 @@ authRouter.post('/change-password', requireAuth, async (req: AuthedRequest, res)
 // Sysadmins krijgen hier bewust een 400: hun MFA is verplicht (zie mfaRequired
 // in /login hierboven) en dit ontwerp biedt daar expliciet geen eigen omweg
 // voor — anders zou een gecompromitteerd sysadmin-account zichzelf de
-// bescherming kunnen laten uitschakelen.
+// bescherming kunnen laten uitschakelen. Zelfde reden, zelfde 400, voor een
+// lid van een tenant met mfa_required aan (zie fetchMfaRequiredTenantNames
+// hierboven): ook dat is bedoeld als verplichting zonder individuele
+// opt-out — anders zou de tenant-instelling in de praktijk vrijblijvend zijn.
 authRouter.put('/mfa-enabled', requireAuth, async (req: AuthedRequest, res) => {
   if (req.user!.isSysadmin) {
     return res.status(400).json({ error: 'MFA is verplicht voor sysadmin-accounts en kan niet worden uitgezet.' });
+  }
+  const mfaRequiredTenants = await fetchMfaRequiredTenantNames(req.user!.id);
+  if (mfaRequiredTenants.length > 0) {
+    return res.status(400).json({
+      error: `MFA is verplicht gesteld door tenant "${mfaRequiredTenants.join('", "')}" en kan niet worden uitgezet.`,
+    });
   }
   const b = (req.body ?? {}) as Record<string, unknown>;
   if (typeof b.enabled !== 'boolean') {

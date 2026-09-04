@@ -3,10 +3,12 @@ import { api, ApiError } from '../api';
 import type { User } from '../types';
 
 // Zelfbedieningsscherm "Mijn beveiliging" — zie doelenboom_mfa_ontwerp.md §6.
-// Voor sysadmins toont dit alleen de (niet-uitzetbare) verplichte status: MFA
-// is voor hen sowieso vereist bij elke login (zie mfaRequired in
-// api/src/auth.ts), onafhankelijk van deze eigen mfaEnabled-vlag. Voor
-// iedereen anders is dit een simpele aan/uit-schakelaar.
+// Voor sysadmins, én voor leden van een tenant met MFA verplicht
+// (user.mfaRequiredTenants, zie tenants.mfa_required/TenantManagementPage.tsx),
+// toont dit alleen de (niet-uitzetbare) verplichte status: MFA is voor hen
+// sowieso vereist bij elke login (zie mfaRequired in api/src/auth.ts),
+// onafhankelijk van deze eigen mfaEnabled-vlag. Voor iedereen anders is dit
+// een simpele aan/uit-schakelaar.
 export default function MySecurityPage({
   token,
   user,
@@ -22,8 +24,10 @@ export default function MySecurityPage({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  const mfaRequiredByTenant = user.mfaRequiredTenants.length > 0;
+
   async function toggle() {
-    if (user.isSysadmin) return;
+    if (user.isSysadmin || mfaRequiredByTenant) return;
     setError(null);
     setBusy(true);
     const next = !mfaEnabled;
@@ -53,6 +57,17 @@ export default function MySecurityPage({
             <span style={{ color: '#6c6f76' }}>
               Als sysadmin kun je dit niet zelf uitzetten. Kom je niet meer bij je code (bv. geen toegang meer tot
               je e-mail), neem dan contact op met een andere sysadmin.
+            </span>
+          </div>
+        ) : mfaRequiredByTenant ? (
+          <div style={styles.mandatoryBox}>
+            <strong>
+              Verplicht gesteld door {user.mfaRequiredTenants.length === 1 ? 'tenant' : 'de tenants'}{' '}
+              "{user.mfaRequiredTenants.join('", "')}".
+            </strong>
+            <span style={{ color: '#6c6f76' }}>
+              Je kunt dit niet zelf uitzetten. Kom je niet meer bij je code (bv. geen toegang meer tot je
+              e-mail), neem dan contact op met een tenant- of sysadmin.
             </span>
           </div>
         ) : (

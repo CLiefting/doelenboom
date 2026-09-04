@@ -594,6 +594,18 @@ alter table tenants add column if not exists open_access_role text
 alter table tenants add column if not exists entry_popup_enabled boolean not null default false;
 alter table tenants add column if not exists entry_popup_message text not null default '';
 
+-- Tweestapsverificatie (MFA) tenant-breed verplicht stellen (CISO-aandachtspunt,
+-- zie doelenboom_mfa_ontwerp.md en db/migrations/0030_tenant_mfa_required.sql).
+-- Staat dit aan, dan geldt voor ELK lid van deze tenant (admin/gebruiker/
+-- bezoeker, zie tenant_users) hetzelfde als nu al voor sysadmins geldt: MFA is
+-- verplicht bij elke login, ongeacht de eigen users.mfa_enabled-vlag, en zonder
+-- individuele opt-out (zie mfaRequired in api/src/auth.ts en PUT
+-- /api/auth/mfa-enabled, dat zelf-uitzetten in dat geval weigert). Bewust
+-- account-breed bij login (niet sessie- of tenant-context-specifiek): heeft een
+-- gebruiker toegang tot meerdere tenants en is er ook maar één met deze vlag
+-- aan, dan is MFA voor die gebruiker bij élke login verplicht.
+alter table tenants add column if not exists mfa_required boolean not null default false;
+
 -- Generiek, uitbreidbaar auditlogboek (CISO-aandachtspunt: "wie heeft wat
 -- gedaan, wanneer"). Zelfde event_type+detail-jsonb-opzet als
 -- account_retention_events hierboven, i.p.v. een aparte tabel per
