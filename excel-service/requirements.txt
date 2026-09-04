@@ -7,11 +7,16 @@
 # 0.0.9) fixt op zichzelf ook een reeks Hoog-DoS-kwetsbaarheden. Onze eigen
 # FastAPI-gebruik in app/main.py (File/UploadFile/Body/Query, geen esoterische
 # API's) is ongewijzigd tussen deze versies — geverifieerd met de volledige
-# testsuite (tests/, alle 155 groen).
-fastapi==0.133.0
-uvicorn[standard]==0.30.6
+# testsuite (tests/, alle 155 groen). fastapi 0.141.1 (i.p.v. 0.133.0) en
+# uvicorn 0.52.4 (i.p.v. 0.30.6): reguliere patch/minor-updates, geen
+# aangekondigde breaking changes voor ons gebruik (geen websockets, geen
+# afhankelijkheid van colorama-kleuroutput) — zie Softwarecomponenten-pagina.
+# python-multipart 0.0.32 (i.p.v. 0.0.31) is een performance-only patch
+# (boundary-scan-optimalisatie), geen CVE-fix.
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
 openpyxl==3.1.5
-python-multipart==0.0.31
+python-multipart==0.0.32
 # Project-PowerPoint-export (app/project_pptx.py) — /project-pptx.
 python-pptx==1.0.2
 # .mpp-import (app/mpp_converter.py) — mpxj bundelt de benodigde Java-.jar's
