@@ -11,7 +11,7 @@
 fastapi==0.133.0
 uvicorn[standard]==0.30.6
 openpyxl==3.1.5
-python-multipart==0.0.30
+python-multipart==0.0.31
 # Project-PowerPoint-export (app/project_pptx.py) — /project-pptx.
 python-pptx==1.0.2
 # .mpp-import (app/mpp_converter.py) — mpxj bundelt de benodigde Java-.jar's
