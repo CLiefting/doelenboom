@@ -128,11 +128,18 @@ export function loadCurrentSbomBuild(): LoadedSbomBuild | null {
       // scripts/sbom_python_scope.py die ook produceert) — zie
       // scripts/sbom-postprocess.mjs voor waar deze sets vandaan komen.
       const matchKey = ecosystem === 'npm' ? npmComponentKey(c) : normalizePyName(c.name);
+      // Voor npm de scope (c.group, bv. "@esbuild") in de opgeslagen naam
+      // bewaren — anders wordt bv. "@esbuild/aix-ppc64" hier "aix-ppc64", en
+      // zoekt fetchLatestNpmVersion() straks de nieuwste versie op van een
+      // totaal ander, gelijknamig pakket op de publieke npm-registry (die
+      // "aix-ppc64" en "@esbuild/aix-ppc64" als twee losse pakketten ziet).
+      // matchKey is voor npm al exact deze scope-behoudende vorm.
+      const displayName = ecosystem === 'npm' ? matchKey : c.name;
       components.push({
         applicationComponent: key,
         applicationPart: APPLICATION_PART[key],
         ecosystem,
-        name: c.name,
+        name: displayName,
         version: c.version,
         purl: c.purl ?? null,
         dependencyType: directNames.has(matchKey) ? 'direct' : 'transitive',
