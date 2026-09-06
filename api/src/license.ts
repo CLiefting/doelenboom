@@ -42,11 +42,24 @@ export interface TenantLicense {
   activeModules: string[];
   // Licentie-einddatum (zie doelenboom_licentiemodel.md, db/migrations/
   // 0003_license_expiry.sql) — "YYYY-MM-DD" of null (geen einddatum
-  // ingesteld/nooit verlopen). expired is puur afgeleid (endDate in het
-  // verleden), gemakshalve al hier meegegeven zodat de frontend 'm niet zelf
-  // hoeft te herleiden.
+  // ingesteld/nooit verlopen). expired is de daadwerkelijke afdwingingsstatus
+  // (isLicenseExpired) — gemakshalve al hier meegegeven zodat de frontend 'm
+  // niet zelf hoeft te herleiden.
   endDate: string | null;
   expired: boolean;
+  // Losse, informatieve velden voor de opzeg-regel (zie
+  // db/migrations/0035_subscription_cancellation.sql en isLicenseExpired
+  // hieronder): datePassed = endDate is puur kalendermatig al voorbij (kan
+  // dus true zijn terwijl expired nog false is — een lopend, niet-opgezegd
+  // abonnement waarvan de einddatum is gepasseerd blijft schrijfbaar).
+  datePassed: boolean;
+  cancelledAt: string | null;
+  // Bepaalt of de opzeg-regel hierboven überhaupt van toepassing is: 'proef'
+  // en 'afgewezen' sluiten onvoorwaardelijk op hun (eventueel kunstmatig
+  // vervroegde) einddatum, ongeacht cancelledAt — zie isLicenseExpired. null =
+  // handmatig door een sysadmin aangemaakte tenant, zonder subscription_
+  // requests-rij (volgt dezelfde opzeg-regel als 'actief').
+  subscriptionRequestStatus: 'proef' | 'actief' | 'afgewezen' | null;
   usage: {
     activeAdmins: number;
     activeBomen: number;
@@ -222,16 +235,28 @@ export async function hasModule(tenantId: number | string, moduleKey: string): P
   return r.rows.length > 0;
 }
 
+// Bepaalt of het abonnement 'onvoorwaardelijk' op zijn (eventueel kunstmatig
+// vervroegde) einddatum sluit — proef en afgewezen, zie isLicenseExpired
+// hieronder — i.p.v. pas ná een expliciete opzegging.
+function closesUnconditionallyOnEndDate(requestStatus: string | null): boolean {
+  return requestStatus === 'proef' || requestStatus === 'afgewezen';
+}
+
 export async function getTenantLicense(tenantId: number | string): Promise<TenantLicense | null> {
   const tenantRow = await pool.query(
-    `select tier_id, lifetime_trees_created,
-            to_char(license_end_date, 'YYYY-MM-DD') as end_date,
-            (license_end_date is not null and license_end_date < current_date) as expired
-     from tenants where id = $1`,
+    `select t.tier_id, t.lifetime_trees_created,
+            to_char(t.license_end_date, 'YYYY-MM-DD') as end_date,
+            (t.license_end_date is not null and t.license_end_date < current_date) as date_passed,
+            t.subscription_cancelled_at as cancelled_at,
+            sr.status as request_status
+     from tenants t
+     left join subscription_requests sr on sr.tenant_id = t.id
+     where t.id = $1`,
     [tenantId]
   );
   if (tenantRow.rows.length === 0) return null;
-  const tierId = tenantRow.rows[0].tier_id as number | null;
+  const row = tenantRow.rows[0];
+  const tierId = row.tier_id as number | null;
   const tier =
     tierId == null
       ? null
@@ -241,15 +266,22 @@ export async function getTenantLicense(tenantId: number | string): Promise<Tenan
     countActiveAdmins(tenantId),
     countActiveBomen(tenantId),
   ]);
+  const datePassed = row.date_passed as boolean;
+  const cancelledAt = (row.cancelled_at as string | null) ?? null;
+  const requestStatus = (row.request_status as 'proef' | 'actief' | 'afgewezen' | null) ?? null;
+  const expired = datePassed && (closesUnconditionallyOnEndDate(requestStatus) || cancelledAt != null);
   return {
     tier,
     activeModules,
-    endDate: tenantRow.rows[0].end_date,
-    expired: tenantRow.rows[0].expired,
+    endDate: row.end_date,
+    expired,
+    datePassed,
+    cancelledAt,
+    subscriptionRequestStatus: requestStatus,
     usage: {
       activeAdmins,
       activeBomen,
-      lifetimeBomenAangemaakt: tenantRow.rows[0].lifetime_trees_created,
+      lifetimeBomenAangemaakt: row.lifetime_trees_created,
     },
   };
 }
@@ -277,13 +309,36 @@ export function computeDefaultLicenseEndDate(from: Date): string {
 // bestaande doelenboom.read_only-check, dus zonder apart handhavingspad.
 // null (geen einddatum ingesteld) = nooit verlopen, ook de staat waarin elke
 // tenant van vóór deze feature terechtkomt (db/migrations/0003_license_expiry.sql).
+//
+// Sinds db/migrations/0035_subscription_cancellation.sql (Charles' verzoek,
+// 6 september 2026: "pas als deze opgezegd is, gaat deze op einddatum op
+// readonly", net als een verzekeringspolis) is het passeren van de einddatum
+// alléén voor 'proef' en 'afgewezen' nog onvoorwaardelijk (zie
+// closesUnconditionallyOnEndDate hierboven — subscriptions.ts zet bij een
+// afwijzing license_end_date bewust op gisteren om meteen te blokkeren, en
+// een proefperiode MOET vanzelf sluiten, er is dan nooit een opzegging). Voor
+// elk ander geval — 'actief', of een handmatig door een sysadmin aangemaakte
+// tenant zonder subscription_requests-rij — is de tenant pas verlopen als het
+// abonnement ook daadwerkelijk is opgezegd (subscription_cancelled_at gezet,
+// zie setSubscriptionCancelled hieronder); zonder opzegging blijft zo'n
+// tenant gewoon schrijfbaar, ook ver na de kalendermatige einddatum (zie
+// getTenantLicense/customerManagement.ts se health-route voor de "risico"-
+// signalering die daar wél bij hoort).
 export async function isLicenseExpired(tenantId: number | string): Promise<boolean> {
   const r = await pool.query(
-    `select (license_end_date is not null and license_end_date < current_date) as expired
-     from tenants where id = $1`,
+    `select
+       (t.license_end_date is not null and t.license_end_date < current_date) as date_passed,
+       t.subscription_cancelled_at is not null as cancelled,
+       sr.status as request_status
+     from tenants t
+     left join subscription_requests sr on sr.tenant_id = t.id
+     where t.id = $1`,
     [tenantId]
   );
-  return r.rows[0]?.expired ?? false;
+  const row = r.rows[0];
+  if (!row || !row.date_passed) return false;
+  if (closesUnconditionallyOnEndDate(row.request_status)) return true;
+  return row.cancelled;
 }
 
 // Is deze tenant beëindigd (tenants.terminated_at gezet, zie
@@ -333,6 +388,36 @@ export async function setTenantLicenseEndDate(
       detail: { changes: { license_end_date: { from: beforeEndDate, to: endDate } } },
     });
   }
+}
+
+// Abonnement opzeggen/opzegging intrekken — zie db/migrations/
+// 0035_subscription_cancellation.sql en isLicenseExpired hierboven voor de
+// afdwingingsregel die dit aanstuurt (net als bij een polis: pas ná deze
+// opzegging maakt het passeren van license_end_date de tenant read-only).
+// cancelled: true zet subscription_cancelled_at op "nu" (de datum waarop de
+// opzegging is geregistreerd — de bestaande license_end_date blijft
+// ongewijzigd, dát is nog altijd de datum waarop de opzegging ingaat); false
+// trekt een eerdere opzegging in (bv. de klant bedenkt zich, of Charles heeft
+// 'm per ongeluk gezet) door het veld weer op null te zetten. Zonder effect
+// (en dus geen extra logregel) als de gevraagde staat al de huidige is.
+export async function setSubscriptionCancelled(
+  tenantId: number | string,
+  cancelled: boolean,
+  actorUserId: number | string
+): Promise<void> {
+  const before = await pool.query('select subscription_cancelled_at from tenants where id = $1', [tenantId]);
+  const beforeValue = (before.rows[0]?.subscription_cancelled_at as string | null) ?? null;
+  const wasCancelled = beforeValue != null;
+  if (wasCancelled === cancelled) return;
+  const newValue = cancelled ? new Date().toISOString() : null;
+  await pool.query('update tenants set subscription_cancelled_at = $1 where id = $2', [newValue, tenantId]);
+  await logAuditEvent({
+    eventType: 'tenant_subscription_changed',
+    userId: actorUserId,
+    tenantId,
+    role: null,
+    detail: { changes: { subscription_cancelled_at: { from: beforeValue, to: newValue } } },
+  });
 }
 
 export async function setTenantModuleActive(

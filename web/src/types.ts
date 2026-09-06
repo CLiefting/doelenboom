@@ -556,10 +556,20 @@ export type LicenseEvent = {
 export type TenantLicense = {
   tier: Tier | null;
   activeModules: string[];
-  // "YYYY-MM-DD" of null (geen einddatum ingesteld/nooit verlopen). expired
-  // is puur afgeleid, al server-side berekend (license.ts getTenantLicense).
+  // "YYYY-MM-DD" of null (geen einddatum ingesteld/nooit verlopen). expired is
+  // de daadwerkelijke afdwingingsstatus, al server-side berekend (license.ts
+  // getTenantLicense/isLicenseExpired) — zie db/migrations/
+  // 0035_subscription_cancellation.sql: sinds de opzeg-regel kan datePassed
+  // (kalendermatig al voorbij) true zijn terwijl expired nog false is (een
+  // lopend, niet-opgezegd abonnement blijft schrijfbaar na de einddatum).
   endDate: string | null;
   expired: boolean;
+  datePassed: boolean;
+  cancelledAt: string | null;
+  // 'proef'/'afgewezen' sluiten onvoorwaardelijk op endDate (ongeacht
+  // cancelledAt); null (handmatig aangemaakte tenant) volgt dezelfde
+  // opzeg-regel als 'actief'.
+  subscriptionRequestStatus: 'proef' | 'actief' | 'afgewezen' | null;
   usage: {
     activeAdmins: number;
     activeBomen: number;
@@ -584,6 +594,8 @@ export type TenantContact = {
   updatedAt: string;
 };
 
+export type TenantContractStatus = 'lopend' | 'opgezegd' | 'beeindigd';
+
 export type TenantCustomerInfo = {
   tenantId: number;
   customerSince: string | null;
@@ -594,6 +606,15 @@ export type TenantCustomerInfo = {
   contractReference: string | null;
   contractDate: string | null;
   contractUrl: string | null;
+  // Status van het CONTRACT VAN DE KLANT ZELF (contractReference hierboven) —
+  // puur informatief, stuurt geen toegang aan (in tegenstelling tot het
+  // abonnement, zie TenantLicense.cancelledAt) — zie db/migrations/
+  // 0035_subscription_cancellation.sql.
+  contractStatus: TenantContractStatus;
+  // Klantnummer: los van tenantId (de onveranderlijke technische identifier),
+  // een door een sysadmin vrij herschikbaar zakelijk volgnummer — zie
+  // db/migrations/0034_tenant_customer_number.sql.
+  customerNumber: number | null;
   updatedAt: string | null;
 };
 
@@ -605,6 +626,11 @@ export type TenantHealth = {
   terminated: boolean;
   licenseExpired: boolean;
   licenseEndDate: string | null;
+  // Opzegdatum van het abonnement (zie db/migrations/
+  // 0035_subscription_cancellation.sql) — null = nog niet opgezegd ("loopt
+  // door", net als een niet-opgezegde polis), ook als licenseEndDate al
+  // gepasseerd is (zie reasons voor die situatie).
+  subscriptionCancelledAt: string | null;
   daysUntilLicenseEnd: number | null;
   lastActivityAt: string | null;
   daysSinceActivity: number | null;

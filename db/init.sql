@@ -646,11 +646,33 @@ create table if not exists tenant_customer_info (
   contract_reference text,
   contract_date date,
   contract_url text,
+  -- Zakelijk volgnummer, los van tenant_id (de onveranderlijke technische
+  -- identifier) — zie db/migrations/0034_tenant_customer_number.sql. Nullable,
+  -- maar uniek zodra gezet (plain unique index staat willekeurig veel NULLs
+  -- toe).
+  customer_number integer,
+  -- Klantcontract-status: puur informatief (stuurt GEEN toegang aan, in
+  -- tegenstelling tot tenants.subscription_cancelled_at hieronder) — voor
+  -- Charles' eigen administratie van het contract van de klant zelf
+  -- (contract_reference hierboven), los van "ons" abonnement. Zie
+  -- db/migrations/0035_subscription_cancellation.sql.
+  contract_status text not null default 'lopend' check (contract_status in ('lopend', 'opgezegd', 'beeindigd')),
   updated_at timestamptz not null default now()
 );
 create index if not exists idx_tenant_customer_info_tags on tenant_customer_info using gin(tags);
+create unique index if not exists idx_tenant_customer_info_customer_number
+  on tenant_customer_info(customer_number);
 
 alter table tenants add column if not exists license_renewal_reminder_sent_at timestamptz;
+
+-- Abonnement-opzegging, analoog aan een verzekeringspolis — zie
+-- db/migrations/0035_subscription_cancellation.sql voor de volledige
+-- toelichting en license.ts isLicenseExpired/setSubscriptionCancelled voor de
+-- afdwingingsregel. null = "loopt door" (geen opzegging), gezet = "opgezegd op
+-- dit tijdstip" — pas dan gaat de tenant bij het passeren van license_end_date
+-- op alleen-lezen (behalve tijdens een proefperiode of na afwijzing, die
+-- blijven onvoorwaardelijk op hun einddatum sluiten).
+alter table tenants add column if not exists subscription_cancelled_at timestamptz;
 
 -- Generiek, uitbreidbaar auditlogboek (CISO-aandachtspunt: "wie heeft wat
 -- gedaan, wanneer"). Zelfde event_type+detail-jsonb-opzet als

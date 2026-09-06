@@ -252,7 +252,11 @@ const CUSTOMER_INFO_SELECT_FIELDS =
   `tenant_id as "tenantId", to_char(customer_since, 'YYYY-MM-DD') as "customerSince", ` +
   `kvk_number as "kvkNumber", vat_number as "vatNumber", billing_address as "billingAddress", tags, ` +
   `contract_reference as "contractReference", to_char(contract_date, 'YYYY-MM-DD') as "contractDate", ` +
-  `contract_url as "contractUrl", updated_at as "updatedAt"`;
+  `contract_url as "contractUrl", contract_status as "contractStatus", customer_number as "customerNumber", ` +
+  `updated_at as "updatedAt"`;
+
+const CONTRACT_STATUSES = ['lopend', 'opgezegd', 'beeindigd'] as const;
+type ContractStatus = (typeof CONTRACT_STATUSES)[number];
 
 // Leeg-object met defaults i.p.v. 404: elke tenant "heeft" klantgegevens,
 // alleen zijn ze mogelijk nog nooit ingevuld — de frontend hoeft dan geen
@@ -268,6 +272,8 @@ function emptyCustomerInfo(tenantId: string) {
     contractReference: null,
     contractDate: null,
     contractUrl: null,
+    contractStatus: 'lopend' as ContractStatus,
+    customerNumber: null,
     updatedAt: null,
   };
 }
@@ -290,6 +296,8 @@ function parseCustomerInfoBody(b: Record<string, unknown>): {
   contractReference: string | null;
   contractDate: string | null;
   contractUrl: string | null;
+  contractStatus: ContractStatus;
+  customerNumber: number | null;
 } | { error: string } {
   const dateRe = /^\d{4}-\d{2}-\d{2}$/;
   const customerSince = b.customerSince === null || b.customerSince === undefined ? null : b.customerSince;
@@ -300,6 +308,28 @@ function parseCustomerInfoBody(b: Record<string, unknown>): {
   if (contractDate !== null && (typeof contractDate !== 'string' || !dateRe.test(contractDate))) {
     return { error: 'contractDate moet "YYYY-MM-DD" of null zijn.' };
   }
+  // Klantnummer: los, door een sysadmin vrij herschikbaar volgnummer (zie
+  // db/migrations/0034_tenant_customer_number.sql) — nullable, maar als gezet
+  // een positief geheel getal. Uniciteit wordt door de databaseconstraint
+  // afgedwongen (409 hieronder), niet hier.
+  const customerNumberRaw = b.customerNumber;
+  let customerNumber: number | null = null;
+  if (customerNumberRaw !== null && customerNumberRaw !== undefined) {
+    if (typeof customerNumberRaw !== 'number' || !Number.isInteger(customerNumberRaw) || customerNumberRaw < 1) {
+      return { error: 'customerNumber moet een positief geheel getal of null zijn.' };
+    }
+    customerNumber = customerNumberRaw;
+  }
+  // Klantcontract-status: puur informatief (zie db/migrations/
+  // 0035_subscription_cancellation.sql) — géén effect op toegang, alleen voor
+  // Charles' eigen administratie van het contract van de klant zelf. Ontbreekt
+  // 'ie in de body (bv. een oudere client, of alleen andere velden bijwerken),
+  // dan blijft de bestaande waarde staan (default 'lopend' voor een nieuwe rij).
+  const contractStatusRaw = b.contractStatus;
+  if (contractStatusRaw !== undefined && !CONTRACT_STATUSES.includes(contractStatusRaw as ContractStatus)) {
+    return { error: `contractStatus moet een van ${CONTRACT_STATUSES.join(', ')} zijn.` };
+  }
+  const contractStatus = (contractStatusRaw as ContractStatus | undefined) ?? 'lopend';
   const tags = Array.isArray(b.tags) ? b.tags.filter((t): t is string => typeof t === 'string' && t.trim().length > 0).map((t) => t.trim()) : [];
   const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim() : null);
   return {
@@ -311,6 +341,8 @@ function parseCustomerInfoBody(b: Record<string, unknown>): {
     contractReference: str(b.contractReference),
     contractDate,
     contractUrl: str(b.contractUrl),
+    contractStatus,
+    customerNumber,
   };
 }
 
@@ -325,37 +357,50 @@ customerManagementRouter.put('/tenants/:tenantId/customer-info', async (req: Aut
   );
   const beforeRow = (before.rows[0] as Record<string, unknown>) ?? emptyCustomerInfo(req.params.tenantId);
 
-  const result = await pool.query(
-    `insert into tenant_customer_info
-       (tenant_id, customer_since, kvk_number, vat_number, billing_address, tags, contract_reference, contract_date, contract_url, updated_at)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9, now())
-     on conflict (tenant_id) do update set
-       customer_since = excluded.customer_since,
-       kvk_number = excluded.kvk_number,
-       vat_number = excluded.vat_number,
-       billing_address = excluded.billing_address,
-       tags = excluded.tags,
-       contract_reference = excluded.contract_reference,
-       contract_date = excluded.contract_date,
-       contract_url = excluded.contract_url,
-       updated_at = now()
-     returning ${CUSTOMER_INFO_SELECT_FIELDS}`,
-    [
-      req.params.tenantId,
-      parsed.customerSince,
-      parsed.kvkNumber,
-      parsed.vatNumber,
-      parsed.billingAddress,
-      parsed.tags,
-      parsed.contractReference,
-      parsed.contractDate,
-      parsed.contractUrl,
-    ]
-  );
+  let result;
+  try {
+    result = await pool.query(
+      `insert into tenant_customer_info
+         (tenant_id, customer_since, kvk_number, vat_number, billing_address, tags, contract_reference, contract_date, contract_url, contract_status, customer_number, updated_at)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, now())
+       on conflict (tenant_id) do update set
+         customer_since = excluded.customer_since,
+         kvk_number = excluded.kvk_number,
+         vat_number = excluded.vat_number,
+         billing_address = excluded.billing_address,
+         tags = excluded.tags,
+         contract_reference = excluded.contract_reference,
+         contract_date = excluded.contract_date,
+         contract_url = excluded.contract_url,
+         contract_status = excluded.contract_status,
+         customer_number = excluded.customer_number,
+         updated_at = now()
+       returning ${CUSTOMER_INFO_SELECT_FIELDS}`,
+      [
+        req.params.tenantId,
+        parsed.customerSince,
+        parsed.kvkNumber,
+        parsed.vatNumber,
+        parsed.billingAddress,
+        parsed.tags,
+        parsed.contractReference,
+        parsed.contractDate,
+        parsed.contractUrl,
+        parsed.contractStatus,
+        parsed.customerNumber,
+      ]
+    );
+  } catch (err) {
+    if (isUniqueViolation(err)) {
+      return res.status(409).json({ error: 'Er bestaat al een klant met dit klantnummer.' });
+    }
+    throw err;
+  }
   const afterRow = result.rows[0] as Record<string, unknown>;
 
   const changedFields = [
     'customerSince', 'kvkNumber', 'vatNumber', 'billingAddress', 'contractReference', 'contractDate', 'contractUrl',
+    'contractStatus', 'customerNumber',
   ] as const;
   const changes: Record<string, { from: unknown; to: unknown }> = {};
   for (const field of changedFields) {
@@ -390,12 +435,12 @@ customerManagementRouter.get('/tenants/:tenantId/health', async (req, res) => {
   const tenantId = req.params.tenantId;
 
   const [tenantRow, license, lastActivity] = await Promise.all([
-    pool.query(
-      `select terminated_at, to_char(license_end_date, 'YYYY-MM-DD') as license_end_date,
-              (license_end_date is not null and license_end_date < current_date) as expired
-       from tenants where id = $1`,
-      [tenantId]
-    ),
+    pool.query('select terminated_at from tenants where id = $1', [tenantId]),
+    // license.expired is de daadwerkelijke afdwingingsstatus (isLicenseExpired
+    // — sinds de opzeg-regel dus NIET meer hetzelfde als "einddatum
+    // gepasseerd", zie license.ts). datePassed/cancelledAt/
+    // subscriptionRequestStatus geven de nuance die de reasons hieronder nodig
+    // hebben (verlopen-maar-niet-opgezegd vs. opgezegd-maar-nog-lopend).
     getTenantLicense(tenantId),
     // Laatste activiteit van een lid van deze tenant — via sessions.last_seen_at
     // (zelfde bron als routes/sessions.ts), niet users.last_login_at: dat is
@@ -412,8 +457,13 @@ customerManagementRouter.get('/tenants/:tenantId/health', async (req, res) => {
   ]);
 
   const terminated = tenantRow.rows[0]?.terminated_at != null;
-  const expired = tenantRow.rows[0]?.expired ?? false;
-  const licenseEndDate = tenantRow.rows[0]?.license_end_date ?? null;
+  const expired = license?.expired ?? false;
+  const licenseEndDate = license?.endDate ?? null;
+  // Een lopend (niet-opgezegd) abonnement waarvan de einddatum wél al is
+  // gepasseerd is NIET hetzelfde als expired (zie license.ts) — dat blijft
+  // gewoon schrijfbaar, maar verdient wel een duidelijk risicosignaal hier.
+  const datePassedNotCancelled = !expired && (license?.datePassed ?? false);
+  const isCancelled = license?.cancelledAt != null;
   const daysUntilLicenseEnd =
     licenseEndDate != null
       ? Math.ceil((new Date(`${licenseEndDate}T00:00:00Z`).getTime() - Date.now()) / (24 * 3600 * 1000))
@@ -424,13 +474,13 @@ customerManagementRouter.get('/tenants/:tenantId/health', async (req, res) => {
   const adminUsagePct = license?.tier ? license.usage.activeAdmins / license.tier.maxAdmins : null;
   const bomenUsagePct = license?.tier ? license.usage.activeBomen / license.tier.maxBomen : null;
 
-  // Simpel stoplicht: beëindigd/verlopen of al lang geen activiteit meer =
-  // risico; licentie loopt binnenkort af of gebruik zit dicht tegen de
-  // tierlimiet = aandacht; anders gezond. Bewust een paar harde, in code
-  // gedocumenteerde drempels i.p.v. instelbare configuratie — dit is een
-  // signalering, geen contractuele afspraak (in tegenstelling tot de
-  // bewaartermijnen elders, die wél expliciet als constante bovenaan een
-  // bestand staan).
+  // Simpel stoplicht: beëindigd/verlopen (of verlopen-zonder-opzegging) of al
+  // lang geen activiteit meer = risico; licentie loopt binnenkort af, is
+  // opgezegd maar nog lopend, of gebruik zit dicht tegen de tierlimiet =
+  // aandacht; anders gezond. Bewust een paar harde, in code gedocumenteerde
+  // drempels i.p.v. instelbare configuratie — dit is een signalering, geen
+  // contractuele afspraak (in tegenstelling tot de bewaartermijnen elders,
+  // die wél expliciet als constante bovenaan een bestand staan).
   let status: HealthStatus = 'gezond';
   const reasons: string[] = [];
   if (terminated) {
@@ -438,16 +488,27 @@ customerManagementRouter.get('/tenants/:tenantId/health', async (req, res) => {
     reasons.push('Tenant is beëindigd.');
   } else if (expired) {
     status = 'risico';
-    reasons.push('Licentie is verlopen.');
+    reasons.push(
+      isCancelled
+        ? 'Abonnement is opgezegd en de einddatum is gepasseerd — tenant staat nu op alleen-lezen.'
+        : 'Licentie is verlopen.' // proef/afgewezen, zie license.ts closesUnconditionallyOnEndDate
+    );
   } else {
+    if (datePassedNotCancelled) {
+      status = 'risico';
+      reasons.push('Licentie is verlopen maar niet opgezegd — klant kan nog gewoon werken. Verleng de einddatum of zet het abonnement op opgezegd.');
+    }
     if (daysSinceActivity !== null && daysSinceActivity > 60) {
       status = 'risico';
       reasons.push(`Geen activiteit in ${daysSinceActivity} dagen.`);
     } else if (daysSinceActivity !== null && daysSinceActivity > 30) {
-      status = 'aandacht';
+      if (status !== 'risico') status = 'aandacht';
       reasons.push(`Geen activiteit in ${daysSinceActivity} dagen.`);
     }
-    if (daysUntilLicenseEnd !== null && daysUntilLicenseEnd <= 30) {
+    if (isCancelled && !datePassedNotCancelled) {
+      if (status !== 'risico') status = 'aandacht';
+      reasons.push(`Abonnement is opgezegd, loopt af op ${licenseEndDate ?? '(geen einddatum)'}.`);
+    } else if (daysUntilLicenseEnd !== null && daysUntilLicenseEnd <= 30) {
       if (status !== 'risico') status = 'aandacht';
       reasons.push(`Licentie loopt over ${daysUntilLicenseEnd} dag(en) af.`);
     }
@@ -464,6 +525,7 @@ customerManagementRouter.get('/tenants/:tenantId/health', async (req, res) => {
     terminated,
     licenseExpired: expired,
     licenseEndDate,
+    subscriptionCancelledAt: license?.cancelledAt ?? null,
     daysUntilLicenseEnd,
     lastActivityAt: lastSeenAt,
     daysSinceActivity,

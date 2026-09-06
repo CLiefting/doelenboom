@@ -7,6 +7,7 @@ import type {
   TenantAuditLogEntry,
   TenantContact,
   TenantContactRole,
+  TenantContractStatus,
   TenantCustomerInfo,
   TenantHealth,
   TenantLicense,
@@ -31,6 +32,15 @@ const CONTACT_ROLE_LABEL: Record<TenantContactRole, string> = {
   overig: 'Overig',
 };
 
+// Status van het CONTRACT VAN DE KLANT ZELF — puur informatief (zie
+// db/migrations/0035_subscription_cancellation.sql), analoog aan maar los van
+// de opzegging van "ons" abonnement (SubscriptionPanel hieronder).
+const CONTRACT_STATUS_LABEL: Record<TenantContractStatus, string> = {
+  lopend: 'Lopend',
+  opgezegd: 'Opgezegd',
+  beeindigd: 'Beëindigd',
+};
+
 const HEALTH_LABEL: Record<TenantHealth['status'], { label: string; color: string; bg: string }> = {
   gezond: { label: 'Gezond', color: '#1e6b34', bg: '#e6f4ea' },
   aandacht: { label: 'Aandacht', color: '#8a5a00', bg: '#fdf1da' },
@@ -47,6 +57,7 @@ export default function KlantbeheerPage({ token, onBack }: { token: string; onBa
   // lijst wil zien ("wie is de klant, naam, klant sinds, primair contact").
   const [primaryContacts, setPrimaryContacts] = useState<Record<number, TenantContact | null>>({});
   const [customerSinceByTenant, setCustomerSinceByTenant] = useState<Record<number, string | null>>({});
+  const [customerNumberByTenant, setCustomerNumberByTenant] = useState<Record<number, number | null>>({});
   const [healthByTenant, setHealthByTenant] = useState<Record<number, TenantHealth | null>>({});
 
   function load() {
@@ -65,8 +76,14 @@ export default function KlantbeheerPage({ token, onBack }: { token: string; onBa
         .then((contacts) => setPrimaryContacts((m) => ({ ...m, [t.id]: contacts.find((c) => c.isPrimary) ?? null })))
         .catch(() => setPrimaryContacts((m) => ({ ...m, [t.id]: null })));
       api.tenantCustomerInfo(token, t.id)
-        .then((info) => setCustomerSinceByTenant((m) => ({ ...m, [t.id]: info.customerSince })))
-        .catch(() => setCustomerSinceByTenant((m) => ({ ...m, [t.id]: null })));
+        .then((info) => {
+          setCustomerSinceByTenant((m) => ({ ...m, [t.id]: info.customerSince }));
+          setCustomerNumberByTenant((m) => ({ ...m, [t.id]: info.customerNumber }));
+        })
+        .catch(() => {
+          setCustomerSinceByTenant((m) => ({ ...m, [t.id]: null }));
+          setCustomerNumberByTenant((m) => ({ ...m, [t.id]: null }));
+        });
       api.tenantHealth(token, t.id)
         .then((h) => setHealthByTenant((m) => ({ ...m, [t.id]: h })))
         .catch(() => setHealthByTenant((m) => ({ ...m, [t.id]: null })));
@@ -110,6 +127,7 @@ export default function KlantbeheerPage({ token, onBack }: { token: string; onBa
               <thead>
                 <tr>
                   <th style={styles.th}>ID</th>
+                  <th style={styles.th}>Klantnummer</th>
                   <th style={styles.th}>Klant</th>
                   <th style={styles.th}>Klant sinds</th>
                   <th style={styles.th}>Primair contact</th>
@@ -122,6 +140,7 @@ export default function KlantbeheerPage({ token, onBack }: { token: string; onBa
                   const isExpanded = expandedId === t.id;
                   const primary = primaryContacts[t.id];
                   const customerSince = customerSinceByTenant[t.id];
+                  const customerNumber = customerNumberByTenant[t.id];
                   const health = healthByTenant[t.id];
                   return (
                     <Fragment key={t.id}>
@@ -130,6 +149,7 @@ export default function KlantbeheerPage({ token, onBack }: { token: string; onBa
                         onClick={() => setExpandedId(isExpanded ? null : t.id)}
                       >
                         <td style={styles.td}>{t.id}</td>
+                        <td style={styles.td}>{customerNumber ?? <span style={styles.muted}>—</span>}</td>
                         <td style={styles.td}>
                           <strong>{t.name}</strong>
                           <div style={styles.tenantSlug}>{t.slug}</div>
@@ -170,7 +190,7 @@ export default function KlantbeheerPage({ token, onBack }: { token: string; onBa
                       </tr>
                       {isExpanded && (
                         <tr>
-                          <td style={styles.detailCell} colSpan={6}>
+                          <td style={styles.detailCell} colSpan={7}>
                             <CustomerDetail
                               token={token}
                               tenant={t}
@@ -179,9 +199,10 @@ export default function KlantbeheerPage({ token, onBack }: { token: string; onBa
                                   .then((contacts) => setPrimaryContacts((m) => ({ ...m, [t.id]: contacts.find((c) => c.isPrimary) ?? null })))
                                   .catch(() => {});
                               }}
-                              onCustomerInfoChanged={(info) =>
-                                setCustomerSinceByTenant((m) => ({ ...m, [t.id]: info.customerSince }))
-                              }
+                              onCustomerInfoChanged={(info) => {
+                                setCustomerSinceByTenant((m) => ({ ...m, [t.id]: info.customerSince }));
+                                setCustomerNumberByTenant((m) => ({ ...m, [t.id]: info.customerNumber }));
+                              }}
                               onHealthRefresh={(h) => setHealthByTenant((m) => ({ ...m, [t.id]: h }))}
                             />
                           </td>
@@ -192,7 +213,7 @@ export default function KlantbeheerPage({ token, onBack }: { token: string; onBa
                 })}
                 {visibleTenants.length === 0 && (
                   <tr>
-                    <td style={styles.td} colSpan={6}>
+                    <td style={styles.td} colSpan={7}>
                       <span style={styles.muted}>Geen tenants gevonden.</span>
                     </td>
                   </tr>
@@ -549,12 +570,19 @@ function CustomerInfoForm({
   const [contractReference, setContractReference] = useState(info.contractReference ?? '');
   const [contractDate, setContractDate] = useState(info.contractDate ?? '');
   const [contractUrl, setContractUrl] = useState(info.contractUrl ?? '');
+  const [contractStatus, setContractStatus] = useState<TenantContractStatus>(info.contractStatus);
+  const [customerNumber, setCustomerNumber] = useState(info.customerNumber != null ? String(info.customerNumber) : '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function handleSave(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    const trimmedNumber = customerNumber.trim();
+    if (trimmedNumber && (!/^\d+$/.test(trimmedNumber) || Number(trimmedNumber) < 1)) {
+      setError('Klantnummer moet een positief geheel getal zijn.');
+      return;
+    }
     setBusy(true);
     try {
       const saved = await api.updateTenantCustomerInfo(token, tenantId, {
@@ -566,6 +594,8 @@ function CustomerInfoForm({
         contractReference: contractReference.trim() || null,
         contractDate: contractDate || null,
         contractUrl: contractUrl.trim() || null,
+        contractStatus,
+        customerNumber: trimmedNumber ? Number(trimmedNumber) : null,
       });
       onSaved(saved);
     } catch (err) {
@@ -578,6 +608,18 @@ function CustomerInfoForm({
   return (
     <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       {error && <p style={styles.error}>{error}</p>}
+      <label style={styles.label}>
+        Klantnummer
+        <input
+          style={styles.input}
+          type="number"
+          min={1}
+          step={1}
+          value={customerNumber}
+          onChange={(e) => setCustomerNumber(e.target.value)}
+          placeholder="bv. 1 (Liefting)"
+        />
+      </label>
       <label style={styles.label}>
         Klant sinds
         <input style={styles.input} type="date" value={customerSince} onChange={(e) => setCustomerSince(e.target.value)} />
@@ -610,6 +652,18 @@ function CustomerInfoForm({
         Contract-URL
         <input style={styles.input} value={contractUrl} onChange={(e) => setContractUrl(e.target.value)} placeholder="https://…" />
       </label>
+      <label style={styles.label}>
+        Contractstatus
+        <select style={styles.input} value={contractStatus} onChange={(e) => setContractStatus(e.target.value as TenantContractStatus)}>
+          {(Object.keys(CONTRACT_STATUS_LABEL) as TenantContractStatus[]).map((s) => (
+            <option key={s} value={s}>{CONTRACT_STATUS_LABEL[s]}</option>
+          ))}
+        </select>
+      </label>
+      <p style={styles.hint}>
+        Puur informatief (contract van de klant zelf) — heeft geen effect op de toegang van de tenant.
+        Dat regelt de opzegging van het abonnement hiernaast.
+      </p>
       <button type="submit" disabled={busy} style={{ ...btnStyle('primary'), alignSelf: 'flex-start' }}>Opslaan</button>
     </form>
   );
@@ -674,11 +728,28 @@ function SubscriptionPanel({ token, tenantId, onChanged }: { token: string; tena
     }
   }
 
+  async function toggleCancelled(cancelled: boolean) {
+    setBusy(true);
+    setError(null);
+    try {
+      setLicense(await api.setTenantSubscriptionCancelled(token, tenantId, cancelled));
+      onChanged();
+    } catch (err) {
+      setError(errMsg(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (!license || !tiers || !modules) {
     return error ? <p style={styles.error}>{error}</p> : <p style={styles.muted}>Laden…</p>;
   }
 
   const activeModuleSet = new Set(license.activeModules);
+  // 'proef'/'afgewezen' sluiten altijd al onvoorwaardelijk op de einddatum
+  // (zie license.ts closesUnconditionallyOnEndDate) — de opzeg-knop hieronder
+  // heeft dan geen effect, dus tonen we 'm niet.
+  const cancellationApplies = license.subscriptionRequestStatus !== 'proef' && license.subscriptionRequestStatus !== 'afgewezen';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -694,6 +765,32 @@ function SubscriptionPanel({ token, tenantId, onChanged }: { token: string; tena
         Einddatum
         <input style={styles.input} type="date" disabled={busy} value={license.endDate ?? ''} onChange={(e) => changeEndDate(e.target.value || null)} />
       </label>
+      {cancellationApplies ? (
+        <div>
+          <div style={styles.roleLabel}>Opzegging</div>
+          {license.cancelledAt ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+              <span>
+                Opgezegd op {formatDateTimeNL(license.cancelledAt)}
+                {license.endDate && ` — loopt af op ${formatDateNL(license.endDate)}`}
+                {license.expired && ' (nu alleen-lezen)'}.
+              </span>
+              <button style={btnStyle('ghost')} disabled={busy} onClick={() => toggleCancelled(false)}>Opzegging intrekken</button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+              <span style={styles.muted}>
+                Loopt door (niet opgezegd){license.datePassed && ' — einddatum is al gepasseerd, blijft schrijfbaar tot opzegging'}.
+              </span>
+              <button style={btnStyle('danger')} disabled={busy} onClick={() => toggleCancelled(true)}>Opzeggen</button>
+            </div>
+          )}
+        </div>
+      ) : (
+        <p style={styles.hint}>
+          {license.subscriptionRequestStatus === 'proef' ? 'Proefperiode' : 'Afgewezen aanvraag'} — sluit onvoorwaardelijk op de einddatum, opzegging is hier niet van toepassing.
+        </p>
+      )}
       {modules.length > 0 && (
         <div>
           <div style={styles.roleLabel}>Modules</div>
@@ -762,6 +859,7 @@ function fieldLabel(field: string): string {
   if (field === 'tier_id') return 'Tier';
   if (field === 'license_end_date') return 'Einddatum';
   if (field === 'module') return 'Module';
+  if (field === 'subscription_cancelled_at') return 'Opzegging';
   return field;
 }
 

@@ -545,6 +545,15 @@ export const api = {
       body: JSON.stringify({ endDate }),
     }, token),
 
+  // Abonnement opzeggen/opzegging intrekken — zie db/migrations/
+  // 0035_subscription_cancellation.sql: pas ná cancelled=true maakt een
+  // gepasseerde einddatum de tenant read-only (net als een verzekeringspolis).
+  setTenantSubscriptionCancelled: (token: string, tenantId: number, cancelled: boolean) =>
+    request<import('./types').TenantLicense>(`/api/tenants/${tenantId}/license/cancel`, {
+      method: 'PUT',
+      body: JSON.stringify({ cancelled }),
+    }, token),
+
   // --- Klantbeheer (sysadmin-only, /api/tenants/:tenantId/contacts, .../customer-info, .../health) ---
 
   tenantContacts: (token: string, tenantId: number) =>

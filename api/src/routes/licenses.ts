@@ -325,6 +325,18 @@ licensesRouter.put('/tenants/:tenantId/license/end-date', requireSysadmin, async
   res.json(await license.getTenantLicense(req.params.tenantId));
 });
 
+// PUT .../license/cancel — { cancelled: boolean }. Sysadmin-only, zelfde
+// reden als hierboven. Zie license.ts setSubscriptionCancelled/
+// isLicenseExpired: alleen ná cancelled=true maakt een gepasseerde
+// license_end_date de tenant read-only (net als een verzekeringspolis) — bij
+// 'proef'/'afgewezen' abonnementen (subscriptions.ts) heeft dit geen effect,
+// die sluiten altijd al onvoorwaardelijk op hun einddatum.
+licensesRouter.put('/tenants/:tenantId/license/cancel', requireSysadmin, async (req: AuthedRequest, res) => {
+  const cancelled = (req.body ?? {}).cancelled === true;
+  await license.setSubscriptionCancelled(req.params.tenantId, cancelled, req.user!.id);
+  res.json(await license.getTenantLicense(req.params.tenantId));
+});
+
 // --- Aanbiedingen (offers) — zie offers.ts en doelenboom_licentiemodel.md §9.
 // Zelfde toegangsmodel als tiers/modules hierboven: lezen mag iedereen
 // ingelogd (nodig voor het Sjablonen/Aanvragen-scherm en de publieke

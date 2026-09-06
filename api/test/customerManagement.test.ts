@@ -131,10 +131,12 @@ describe('klantbeheer (contactpersonen, klantgegevens, klantgezondheid)', () => 
         contractReference: 'CTR-2024-001',
         contractDate: '2024-01-10',
         contractUrl: 'https://example.test/contract.pdf',
+        customerNumber: 1,
       },
     });
     assert.equal(put1.status, 200);
     assert.equal(put1.body.kvkNumber, '12345678');
+    assert.equal(put1.body.customerNumber, 1);
     assert.deepEqual(put1.body.tags, ['overheid', 'pilot']);
 
     // Ongewijzigde PUT levert geen extra logregel op — alleen een wijziging
@@ -162,6 +164,39 @@ describe('klantbeheer (contactpersonen, klantgegevens, klantgezondheid)', () => 
       token: sysadminToken, body: { customerSince: 'not-a-date' },
     });
     assert.equal(badDate.status, 400);
+
+    // Ongeldig klantnummer (0, negatief of niet-geheel) wordt geweigerd.
+    const badNumber = await req('PUT', `/api/tenants/${tenantId}/customer-info`, {
+      token: sysadminToken, body: { customerNumber: 0 },
+    });
+    assert.equal(badNumber.status, 400);
+  });
+
+  it('klantnummer: los van tenant-ID, vrij herschikbaar, maar uniek zodra gezet (409 bij dubbel)', async () => {
+    const otherTenant = await req('POST', '/api/tenants', {
+      token: sysadminToken, body: { slug: `${PREFIX}-t2`, name: `${PREFIX}-t2` },
+    });
+    const otherTenantId = otherTenant.body.id as number;
+
+    // tenantId heeft al klantnummer 1 (vorige test) — otherTenant mag een
+    // ander nummer krijgen, maar niet hetzelfde.
+    const ok = await req('PUT', `/api/tenants/${otherTenantId}/customer-info`, {
+      token: sysadminToken, body: { customerNumber: 2 },
+    });
+    assert.equal(ok.status, 200);
+    assert.equal(ok.body.customerNumber, 2);
+
+    const conflict = await req('PUT', `/api/tenants/${otherTenantId}/customer-info`, {
+      token: sysadminToken, body: { customerNumber: 1 },
+    });
+    assert.equal(conflict.status, 409);
+
+    // null blijft altijd toegestaan (meerdere tenants zonder klantnummer).
+    const clearOther = await req('PUT', `/api/tenants/${otherTenantId}/customer-info`, {
+      token: sysadminToken, body: { customerNumber: null },
+    });
+    assert.equal(clearOther.status, 200);
+    assert.equal(clearOther.body.customerNumber, null);
   });
 
   it('licentiewijzigingen loggen als tenant_subscription_changed, en zetten de herinnering-vlag terug', async () => {
@@ -189,7 +224,7 @@ describe('klantbeheer (contactpersonen, klantgegevens, klantgezondheid)', () => 
     assert.ok(subLog.body.some((h: any) => h.detail?.changes?.license_end_date?.to === '2030-01-01'));
   });
 
-  it('klantgezondheid: geeft status/reasons terug en signaleert een verlopen licentie als risico', async () => {
+  it('klantgezondheid: geeft status/reasons terug en signaleert een verlopen licentie als risico (pas écht "expired"/read-only ná opzegging, zie db/migrations/0035_subscription_cancellation.sql)', async () => {
     const healthy = await req('GET', `/api/tenants/${tenantId}/health`, { token: sysadminToken });
     assert.equal(healthy.status, 200);
     assert.ok(['gezond', 'aandacht', 'risico'].includes(healthy.body.status));
@@ -199,10 +234,37 @@ describe('klantbeheer (contactpersonen, klantgegevens, klantgezondheid)', () => 
     });
     assert.equal(expired.status, 200);
 
+    // Deze tenant is handmatig aangemaakt (geen subscription_requests-rij) en
+    // dus nog niet opgezegd: de einddatum is al lang gepasseerd, maar dat
+    // maakt 'm nog NIET read-only (net als een niet-opgezegde polis) — wel al
+    // "risico" in de klantgezondheid, met een andere reden dan hierna.
+    const healthNotCancelled = await req('GET', `/api/tenants/${tenantId}/health`, { token: sysadminToken });
+    assert.equal(healthNotCancelled.status, 200);
+    assert.equal(healthNotCancelled.body.status, 'risico');
+    assert.equal(healthNotCancelled.body.licenseExpired, false);
+    assert.ok(healthNotCancelled.body.reasons.some((r: string) => /niet opgezegd/.test(r)));
+
+    // Pas ná opzegging wordt de gepasseerde einddatum daadwerkelijk afgedwongen.
+    const cancel = await req('PUT', `/api/tenants/${tenantId}/license/cancel`, {
+      token: sysadminToken, body: { cancelled: true },
+    });
+    assert.equal(cancel.status, 200);
+    assert.ok(cancel.body.cancelledAt);
+
     const health = await req('GET', `/api/tenants/${tenantId}/health`, { token: sysadminToken });
     assert.equal(health.status, 200);
     assert.equal(health.body.status, 'risico');
     assert.equal(health.body.licenseExpired, true);
+    assert.ok(health.body.subscriptionCancelledAt);
+
+    // Opzegging intrekken herstelt schrijfbaarheid (en laat de tenant weer
+    // "verlopen maar niet opgezegd" zien).
+    const uncancel = await req('PUT', `/api/tenants/${tenantId}/license/cancel`, {
+      token: sysadminToken, body: { cancelled: false },
+    });
+    assert.equal(uncancel.status, 200);
+    assert.equal(uncancel.body.cancelledAt, null);
+    assert.equal(uncancel.body.expired, false);
   });
 
   it('sweepLicenseRenewalReminders: signaleert een bijna-verlopen licentie precies één keer', async () => {
