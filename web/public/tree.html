@@ -2904,11 +2904,15 @@ function runApp(data) {
   }, true);
 
   // ---- Detail panel (shown while zoomed in on an element) ----
+  // value komt rechtstreeks uit element-data (bv. d.parent/d.kpi, zie
+  // renderDetailPanel) — dus altijd escapen (SEC-001): dit is user-
+  // controlled vrije tekst, geen vertrouwde markup. label is altijd een
+  // hardgecodeerde letterlijke string op de aanroepplek, geen user input.
   function fieldHtml(label, value) {
     const has = value && String(value).trim().length > 0;
     return '<div class="dp-field' + (has ? '' : ' empty') + '">' +
       '<label>' + label + '</label>' +
-      '<span>' + (has ? value : '&mdash;') + '</span></div>';
+      '<span>' + (has ? escapeHtml(value) : '&mdash;') + '</span></div>';
   }
 
   function tagsChipsHtml(id) {
@@ -2931,8 +2935,11 @@ function runApp(data) {
     const chips = rels.map(r => {
       const name = ORGS[r.org] ? ORGS[r.org].name : r.org;
       const relCls = 'org-' + (r.relatietype || '').toLowerCase();
-      const title = [r.relatietype, r.toelichting, r.status].filter(Boolean).join(' — ');
-      return '<span class="dp-chip ' + relCls + ' dp-org-chip" title="' + title.replace(/"/g, '&quot;') + '" data-code="' + escapeHtml(id) + '" data-org="' + escapeHtml(r.org) + '">' + escapeHtml(name) +
+      // r.toelichting is vrije tekst (db/init.sql: geen CHECK-constraint) —
+      // SEC-001: via de gedeelde escapeHtml i.p.v. de eerdere bespoke
+      // '"'-only-vervanging, die <, > en & ongemoeid liet.
+      const title = escapeHtml([r.relatietype, r.toelichting, r.status].filter(Boolean).join(' — '));
+      return '<span class="dp-chip ' + relCls + ' dp-org-chip" title="' + title + '" data-code="' + escapeHtml(id) + '" data-org="' + escapeHtml(r.org) + '">' + escapeHtml(name) +
         '<button type="button" class="dp-chip-remove crud-only dp-org-remove-btn" data-code="' + escapeHtml(id) + '" data-org="' + escapeHtml(r.org) + '" title="Koppeling verwijderen">&times;</button></span>';
     }).join('');
     return '<div class="dp-field">' +
@@ -4404,8 +4411,11 @@ function runApp(data) {
     return rels.map(r => {
       const name = ORGS[r.org] ? ORGS[r.org].name : r.org;
       const relCls = 'org-' + (r.relatietype || '').toLowerCase();
-      const title = [r.relatietype, r.toelichting, r.status].filter(Boolean).join(' — ');
-      return '<span class="dp-chip ' + relCls + ' dp-org-chip" title="' + title.replace(/"/g, '&quot;') + '" data-code="' + escapeHtml(id) + '" data-org="' + escapeHtml(r.org) + '">' + escapeHtml(name) +
+      // r.toelichting is vrije tekst (db/init.sql: geen CHECK-constraint) —
+      // SEC-001: via de gedeelde escapeHtml i.p.v. de eerdere bespoke
+      // '"'-only-vervanging, die <, > en & ongemoeid liet.
+      const title = escapeHtml([r.relatietype, r.toelichting, r.status].filter(Boolean).join(' — '));
+      return '<span class="dp-chip ' + relCls + ' dp-org-chip" title="' + title + '" data-code="' + escapeHtml(id) + '" data-org="' + escapeHtml(r.org) + '">' + escapeHtml(name) +
         '<button type="button" class="dp-chip-remove crud-only dp-org-remove-btn" data-code="' + escapeHtml(id) + '" data-org="' + escapeHtml(r.org) + '" title="Koppeling verwijderen">&times;</button></span>';
     }).join('');
   }
@@ -4737,11 +4747,15 @@ function runApp(data) {
     // andere elementtypen (die geen projectkaart hebben) blijft dit de enige
     // plek om ze te beheren.
     const isProject = d.type === PROJECT_ROLE_TYPE;
+    // d.code/d.type/d.name/d.desc komen rechtstreeks uit element-data
+    // (user-controlled) — SEC-001: allemaal via escapeHtml, ook al waren
+    // code/type hier voorheen (in tegenstelling tot elders in dit bestand)
+    // niet geëscaped.
     detailPanel.innerHTML =
-      '<div class="dp-meta"><span class="dp-code" style="background:' + color + '">' + d.code + '</span>' +
-      '<span class="dp-type">' + d.type + '</span>' + ragBadgeHtml(id) + '</div>' +
-      '<div class="dp-title">' + d.name + '</div>' +
-      '<div class="dp-desc">' + (d.desc || '') + '</div>' +
+      '<div class="dp-meta"><span class="dp-code" style="background:' + color + '">' + escapeHtml(d.code) + '</span>' +
+      '<span class="dp-type">' + escapeHtml(d.type) + '</span>' + ragBadgeHtml(id) + '</div>' +
+      '<div class="dp-title">' + escapeHtml(d.name) + '</div>' +
+      '<div class="dp-desc">' + escapeHtml(d.desc || '') + '</div>' +
       '<div class="dp-grid">' +
         fieldHtml('Bovenliggend element', d.parent) +
         fieldHtml('Mogelijke KPI / indicator', d.kpi) +
@@ -4919,19 +4933,24 @@ function runApp(data) {
     const tagIds = ELEMENT_TAGS[node.dataset.id] || [];
     const orgRels = OB_ORG[node.dataset.id] || [];
     let extraHtml = '';
+    // Tag-/organisatienamen zijn user-controlled vrije tekst (db/init.sql:
+    // tags.name/org_units.name hebben geen CHECK-constraint) — SEC-001:
+    // escapeHtml per naam, dan pas joinen.
     if (tagIds.length) {
       extraHtml += '<div class="tt-tags"><b>Tags:</b> ' +
-        tagIds.map(t => (TAGS[t] ? TAGS[t].name : t)).join(', ') + '</div>';
+        tagIds.map(t => escapeHtml(TAGS[t] ? TAGS[t].name : t)).join(', ') + '</div>';
     }
     if (orgRels.length) {
       extraHtml += '<div class="tt-orgs"><b>Organisatieonderdelen:</b> ' +
-        orgRels.map(r => (ORGS[r.org] ? ORGS[r.org].name : r.org)).join(', ') + '</div>';
+        orgRels.map(r => escapeHtml(ORGS[r.org] ? ORGS[r.org].name : r.org)).join(', ') + '</div>';
     }
+    // d.code/d.type/d.name/d.desc: zelfde reden als renderDetailPanel
+    // hierboven — allemaal user-controlled, dus escapeHtml.
     tooltipEl.innerHTML =
-      '<div class="tt-meta"><span class="tt-code" style="background:' + color + '">' + d.code + '</span>' +
-      '<span class="tt-type">' + d.type + '</span></div>' +
-      '<div class="tt-name">' + d.name + '</div>' +
-      '<div class="tt-desc">' + d.desc + '</div>' + extraHtml;
+      '<div class="tt-meta"><span class="tt-code" style="background:' + color + '">' + escapeHtml(d.code) + '</span>' +
+      '<span class="tt-type">' + escapeHtml(d.type) + '</span></div>' +
+      '<div class="tt-name">' + escapeHtml(d.name) + '</div>' +
+      '<div class="tt-desc">' + escapeHtml(d.desc) + '</div>' + extraHtml;
     positionTooltip(clientX, clientY);
     tooltipEl.classList.add('visible');
   }
@@ -8461,7 +8480,11 @@ function showToast(message, kind) {
 // andere kolomconfiguratie.
 function nodeInnerHtml(col, idx, total, el) {
   const name = escapeHtml(el.name);
-  if (idx === total - 1) return col.title.toUpperCase() + '<br><br>' + name;
+  // col.title (ColumnConfig, tenant-admin/sysadmin-beheerd) staat elders in
+  // dit bestand (bv. buildColumnsHtml's col-header) al wél via escapeHtml —
+  // hier ontbrak dat (SEC-001: consistentie/defense-in-depth, ook al is dit
+  // geen vrij-voor-iedereen-instelbaar veld).
+  if (idx === total - 1) return escapeHtml(col.title).toUpperCase() + '<br><br>' + name;
   if (idx === total - 2) return name;
   return escapeHtml(el.code) + '<br>' + name;
 }
