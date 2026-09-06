@@ -302,4 +302,44 @@ describe('auth', () => {
     const vijfdeInRij = await req('POST', '/api/auth/login', { body: { email, password: 'fout' } });
     assert.equal(vijfdeInRij.status, 429);
   });
+
+  // SEC-003: requireAuth haalde isSysadmin voorheen puur uit de JWT-payload
+  // (gezet bij inloggen) — een tussentijds ingetrokken sysadmin-recht bleef
+  // daardoor tot de 12 uur-vervaldatum van het token gewoon werken. Nu wordt
+  // dit bij elke request live tegen users.is_sysadmin gecontroleerd (zie
+  // requireAuth in auth.ts).
+  it('een ingetrokken sysadmin-recht werkt meteen niet meer, ook met een nog geldig (ouder) token', async () => {
+    // Twee sysadmins nodig: PUT /api/users/:id weigert de laatste sysadmin te
+    // degraderen (zie routes/users.ts).
+    const otherAdminEmail = `${PREFIX}-sec003-admin2@test.local`;
+    await createSysadminUser(otherAdminEmail, 'geheim1234');
+    const otherAdminToken = await login(otherAdminEmail, 'geheim1234');
+
+    const targetEmail = `${PREFIX}-sec003-target@test.local`;
+    const targetId = await createSysadminUser(targetEmail, 'geheim1234');
+    const targetToken = await login(targetEmail, 'geheim1234');
+
+    // Het (nog geldige, niet-verlopen) token werkt eerst gewoon op een
+    // sysadmin-only endpoint.
+    const before = await req('GET', '/api/app-settings', { token: targetToken });
+    assert.equal(before.status, 200);
+
+    // Een andere sysadmin trekt het recht in — geen nieuwe login, geen nieuw
+    // token voor targetToken.
+    const revoke = await req('PUT', `/api/users/${targetId}`, {
+      token: otherAdminToken, body: { isSysadmin: false },
+    });
+    assert.equal(revoke.status, 200);
+    assert.equal(revoke.body.is_sysadmin, false);
+
+    // Exact hetzelfde token dat hierboven nog werkte, faalt nu meteen op
+    // hetzelfde sysadmin-only endpoint — geen 12 uur wachten, geen herlogin.
+    const after = await req('GET', '/api/app-settings', { token: targetToken });
+    assert.equal(after.status, 403);
+
+    // En /me met datzelfde token toont ook meteen de actuele status.
+    const me = await req('GET', '/api/auth/me', { token: targetToken });
+    assert.equal(me.status, 200);
+    assert.equal(me.body.user.isSysadmin, false);
+  });
 });
