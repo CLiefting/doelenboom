@@ -76,9 +76,25 @@ export async function requireAuth(req: AuthedRequest, res: Response, next: NextF
     return res.status(401).json({ error: 'Ongeldige of verlopen sessie' });
   }
 
+  // SEC-003: is_sysadmin komt hier LIVE uit de database i.p.v. uit de
+  // JWT-payload (payload.isSysadmin hierboven is wel geverifieerd — het token
+  // is dus authentiek — maar wordt bewust NIET meer voor autorisatie
+  // gebruikt). Puur op de JWT-claim vertrouwen betekende dat een ingetrokken
+  // sysadmin-recht pas verdween bij de eerstvolgende login, of anders pas na
+  // de 12 uur-vervaldatum van het token (zie jwt.sign hieronder) — in de
+  // tussentijd bleef een al ingelogde sessie gewoon sysadmin-toegang houden.
+  // De query die toch al de sessions-rij opzoekt (ended_at/idle-check
+  // hieronder) joint nu meteen users.is_sysadmin mee, dus geen extra
+  // database-rondje. Dit is de ENE plek waar req.user wordt opgebouwd, dus
+  // elke consument hieronder (requireSysadmin/requireTenantRole in rbac.ts,
+  // GET /me, mfaRequiredTenants, enz.) krijgt hierdoor automatisch de actuele
+  // waarde — geen losse fixes per call site nodig.
   const sessionResult = await pool.query(
-    `select ended_at, (last_activity_at < now() - interval '${IDLE_TIMEOUT_MINUTES} minutes') as idle
-     from sessions where id = $1`,
+    `select s.ended_at, (s.last_activity_at < now() - interval '${IDLE_TIMEOUT_MINUTES} minutes') as idle,
+            u.is_sysadmin
+     from sessions s
+     join users u on u.id = s.user_id
+     where s.id = $1`,
     [payload.sid]
   );
   const session = sessionResult.rows[0];
@@ -89,7 +105,7 @@ export async function requireAuth(req: AuthedRequest, res: Response, next: NextF
     return res.status(401).json({ error: 'Sessie is verlopen door inactiviteit', reason: 'idle_timeout' });
   }
 
-  req.user = { id: payload.id, email: payload.email, isSysadmin: payload.isSysadmin, sessionId: payload.sid };
+  req.user = { id: payload.id, email: payload.email, isSysadmin: session.is_sysadmin, sessionId: payload.sid };
   next();
 }
 
