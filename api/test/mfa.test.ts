@@ -331,4 +331,105 @@ describe('mfa', () => {
     const toggle = await req('PUT', '/api/auth/mfa-enabled', { token: loginResult.body.token, body: { enabled: true } });
     assert.equal(toggle.status, 200);
   });
+
+  // SEC-004: verifyMfaChallenge/resendMfaChallenge gingen voorheen uit van een
+  // SELECT (lezen + checken) gevolgd door een losse UPDATE — een klassieke
+  // read-check-write race. De tests hierboven bewijzen alleen dat de limiet
+  // bij SEQUENTIËLE aanvragen werkt; deze groep vuurt de aanvragen bewust
+  // gelijktijdig af (Promise.all) om aan te tonen dat de limiet ook onder
+  // concurrency nooit overschreden wordt, en dat exact dezelfde (juiste) code
+  // niet twee keer tot een geslaagde login kan leiden.
+  describe('concurrency (SEC-004): limieten en eenmalig verbruik onder gelijktijdige aanvragen', () => {
+    it('N parallelle foute-code verifies: de teller in de database komt nooit boven MAX_ATTEMPTS uit', async () => {
+      const email = `${PREFIX}-race-attempts@test.local`;
+      await createSysadminUser(email, 'geheim1234');
+      const loginResult = await req('POST', '/api/auth/login', { body: { email, password: 'geheim1234' } });
+      const challengeId = loginResult.body.challengeId as string;
+
+      // Ruim boven MAX_ATTEMPTS, allemaal exact gelijktijdig afgevuurd.
+      const N = MAX_ATTEMPTS + 5;
+      const responses = await Promise.all(
+        Array.from({ length: N }, () => req('POST', '/api/auth/mfa/verify', { body: { challengeId, code: 'ZZZZZZ' } }))
+      );
+
+      const wrongCode = responses.filter((r) => r.body.reason === 'wrong_code');
+      const tooMany = responses.filter((r) => r.body.reason === 'too_many_attempts');
+      assert.equal(wrongCode.length + tooMany.length, N, 'elke respons moet wrong_code of too_many_attempts zijn');
+      // Postgres serialiseert de atomische UPDATEs op deze rij: precies de
+      // eerste MAX_ATTEMPTS pogingen kunnen de teller ophogen (de laatste
+      // daarvan kantelt zelf al naar too_many_attempts, zie mfa.ts) — dit is
+      // dus een EXACTE verdeling, geen "ergens rond".
+      assert.equal(wrongCode.length, MAX_ATTEMPTS - 1);
+      assert.equal(tooMany.length, N - (MAX_ATTEMPTS - 1));
+      assert.ok(responses.every((r) => r.status === 401 || r.status === 429));
+
+      const dbRow = await pool.query('select attempts from mfa_challenges where id = $1', [challengeId]);
+      assert.equal(dbRow.rows[0].attempts, MAX_ATTEMPTS, 'attempts mag nooit boven MAX_ATTEMPTS uitkomen');
+
+      // En de echte code werkt nu terecht ook niet meer.
+      const code = getLastMfaCode(email);
+      const withRealCode = await req('POST', '/api/auth/mfa/verify', { body: { challengeId, code } });
+      assert.equal(withRealCode.body.reason, 'too_many_attempts');
+    });
+
+    it('N parallelle verifies met exact dezelfde juiste code: precies één slaagt, de rest krijgt already_used', async () => {
+      const email = `${PREFIX}-race-doubleuse@test.local`;
+      await createSysadminUser(email, 'geheim1234');
+      const loginResult = await req('POST', '/api/auth/login', { body: { email, password: 'geheim1234' } });
+      const challengeId = loginResult.body.challengeId as string;
+      const code = getLastMfaCode(email);
+
+      const N = 8;
+      const responses = await Promise.all(
+        Array.from({ length: N }, () => req('POST', '/api/auth/mfa/verify', { body: { challengeId, code } }))
+      );
+
+      const succeeded = responses.filter((r) => r.status === 200 && r.body.token);
+      const alreadyUsed = responses.filter((r) => r.status === 401 && r.body.reason === 'already_used');
+      assert.equal(succeeded.length, 1, 'exact één van de gelijktijdige aanvragen met dezelfde code mag slagen');
+      assert.equal(alreadyUsed.length, N - 1, 'de rest moet already_used krijgen, niet nogmaals een geldig token');
+
+      const verifiedEvents = await pool.query(
+        `select count(*)::int as n from audit_log where event_type = 'mfa_verified' and detail->>'challengeId' = $1`,
+        [challengeId]
+      );
+      assert.equal(verifiedEvents.rows[0].n, 1, 'mfa_verified mag maar één keer gelogd worden voor deze challenge');
+    });
+
+    it('N parallelle resends (na cooldown): resend_count in de database komt nooit boven MAX_RESENDS uit', async () => {
+      const email = `${PREFIX}-race-resend@test.local`;
+      await createSysadminUser(email, 'geheim1234');
+      const loginResult = await req('POST', '/api/auth/login', { body: { email, password: 'geheim1234' } });
+      const challengeId = loginResult.body.challengeId as string;
+
+      // Start één resend vóór de limiet (MAX_RESENDS - 1), zodat er onder
+      // concurrency nog precies één geldige resend "over" is — de scherpste
+      // test van de grens. Cooldown alvast omzeild, zoals in de bestaande
+      // resend-tests hierboven.
+      await pool.query(
+        `update mfa_challenges set created_at = now() - make_interval(secs => $2) where id = $1`,
+        [challengeId, RESEND_COOLDOWN_SECONDS + 1]
+      );
+      await pool.query('update mfa_challenges set resend_count = $2 where id = $1', [challengeId, MAX_RESENDS - 1]);
+      await pool.query(
+        `update mfa_challenges set created_at = now() - make_interval(secs => $2) where id = $1`,
+        [challengeId, RESEND_COOLDOWN_SECONDS + 1]
+      );
+
+      const N = 6;
+      const responses = await Promise.all(
+        Array.from({ length: N }, () => req('POST', '/api/auth/mfa/resend', { body: { challengeId } }))
+      );
+
+      const succeeded = responses.filter((r) => r.status === 200);
+      assert.equal(succeeded.length, 1, 'nog maar één resend was toegestaan (resend_count stond al op MAX_RESENDS - 1)');
+      assert.ok(
+        responses.filter((r) => r.status !== 200).every((r) => r.status === 429),
+        'alle afgewezen gelijktijdige resends horen 429 te zijn (cooldown of too_many_resends)'
+      );
+
+      const dbRow = await pool.query('select resend_count from mfa_challenges where id = $1', [challengeId]);
+      assert.equal(dbRow.rows[0].resend_count, MAX_RESENDS, 'resend_count mag nooit boven MAX_RESENDS uitkomen');
+    });
+  });
 });
