@@ -16,6 +16,7 @@ export default function PickerPage({
   onHelpRequest,
   onChangePasswordRequest,
   onMySecurityRequest,
+  onWhatsNewRequest,
 }: {
   token: string;
   user: User;
@@ -30,6 +31,7 @@ export default function PickerPage({
   onHelpRequest: () => void;
   onChangePasswordRequest: () => void;
   onMySecurityRequest: () => void;
+  onWhatsNewRequest: () => void;
 }) {
   const canManageUsers = user.isSysadmin || user.tenantRoles.some((r) => r.role === 'admin');
   const [items, setItems] = useState<DoelenboomSummary[] | null>(null);
@@ -99,6 +101,7 @@ export default function PickerPage({
               onCustomersRequest={onCustomersRequest}
               onChangePasswordRequest={onChangePasswordRequest}
               onMySecurityRequest={onMySecurityRequest}
+              onWhatsNewRequest={onWhatsNewRequest}
               onLogoutRequest={onLogoutRequest}
             />
           </div>
@@ -147,6 +150,7 @@ function UserMenu({
   onCustomersRequest,
   onChangePasswordRequest,
   onMySecurityRequest,
+  onWhatsNewRequest,
   onLogoutRequest,
 }: {
   user: User;
@@ -155,6 +159,7 @@ function UserMenu({
   onCustomersRequest: () => void;
   onChangePasswordRequest: () => void;
   onMySecurityRequest: () => void;
+  onWhatsNewRequest: () => void;
   onLogoutRequest: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -269,6 +274,16 @@ function UserMenu({
             }}
           >
             Mijn beveiliging
+          </button>
+          <button
+            role="menuitem"
+            style={styles.dropdownItem}
+            onClick={() => {
+              setOpen(false);
+              onWhatsNewRequest();
+            }}
+          >
+            Over Doelenboom
           </button>
           <div style={styles.dropdownDivider} />
           <button

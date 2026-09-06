@@ -15,6 +15,7 @@ import ChangePasswordPage from './pages/ChangePasswordPage';
 import MySecurityPage from './pages/MySecurityPage';
 import HelpPage from './pages/HelpPage';
 import AboutPage from './pages/AboutPage';
+import WhatsNewPage from './pages/WhatsNewPage';
 import LegalPage from './pages/LegalPage';
 import LogoutFlow from './components/LogoutFlow';
 import TenantEntryNotice from './components/TenantEntryNotice';
@@ -73,6 +74,7 @@ type View =
   | { name: 'customers' }
   | { name: 'password' }
   | { name: 'my-security' }
+  | { name: 'whats-new' }
   // 'from' onthoudt vanaf welk scherm Help geopend is (picker of tree), zodat
   // "Terug" daar weer naartoe kan — Help is vanuit beide bereikbaar.
   | { name: 'help'; from: 'picker' | 'tree' };
@@ -290,6 +292,8 @@ export default function App() {
   } else if (view.name === 'help') {
     const returnView: View = view.from === 'tree' ? { name: 'tree' } : { name: 'picker' };
     content = <HelpPage onBack={() => setView(returnView)} />;
+  } else if (view.name === 'whats-new') {
+    content = <WhatsNewPage onBack={() => setView({ name: 'picker' })} />;
   } else if (view.name === 'password') {
     content = (
       <ChangePasswordPage
@@ -334,6 +338,7 @@ export default function App() {
         onHelpRequest={() => setView({ name: 'help', from: 'picker' })}
         onChangePasswordRequest={() => setView({ name: 'password' })}
         onMySecurityRequest={() => setView({ name: 'my-security' })}
+        onWhatsNewRequest={() => setView({ name: 'whats-new' })}
       />
     );
   } else if (view.name === 'import') {
