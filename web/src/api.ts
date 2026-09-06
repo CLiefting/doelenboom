@@ -538,6 +538,27 @@ export const api = {
       body: JSON.stringify({ active }),
     }, token),
 
+  // Start-/einddatum en losse opzegging per module ("optie") — zie
+  // db/migrations/0036_tenant_module_dates.sql. Vereisen een bestaande
+  // toewijzing (eerst setTenantModule(..., true) hierboven).
+  setTenantModuleStartDate: (token: string, tenantId: number, moduleKey: string, startDate: string) =>
+    request<import('./types').TenantLicense>(`/api/tenants/${tenantId}/license/modules/${moduleKey}/start-date`, {
+      method: 'PUT',
+      body: JSON.stringify({ startDate }),
+    }, token),
+
+  setTenantModuleEndDate: (token: string, tenantId: number, moduleKey: string, endDate: string | null) =>
+    request<import('./types').TenantLicense>(`/api/tenants/${tenantId}/license/modules/${moduleKey}/end-date`, {
+      method: 'PUT',
+      body: JSON.stringify({ endDate }),
+    }, token),
+
+  setTenantModuleCancelled: (token: string, tenantId: number, moduleKey: string, cancelled: boolean) =>
+    request<import('./types').TenantLicense>(`/api/tenants/${tenantId}/license/modules/${moduleKey}/cancel`, {
+      method: 'PUT',
+      body: JSON.stringify({ cancelled }),
+    }, token),
+
   // endDate: "YYYY-MM-DD" of null (geen einddatum ingesteld/nooit verlopen).
   setTenantLicenseEndDate: (token: string, tenantId: number, endDate: string | null) =>
     request<import('./types').TenantLicense>(`/api/tenants/${tenantId}/license/end-date`, {

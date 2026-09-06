@@ -559,6 +559,14 @@ create table if not exists tenant_modules (
   tenant_id bigint not null references tenants(id) on delete cascade,
   module_id bigint not null references modules(id) on delete cascade,
   activated_at timestamptz not null default now(),
+  -- Contractuele start-/einddatum en opzegging van deze module ("optie") —
+  -- los van het abonnement zelf, zelfde polis-model als tenants.
+  -- subscription_cancelled_at: pas opgezegd ÉN einddatum gepasseerd maakt de
+  -- module inactief (zie db/migrations/0036_tenant_module_dates.sql en
+  -- license.ts getActiveModuleKeys/hasModule).
+  start_date date not null default current_date,
+  end_date date,
+  cancelled_at timestamptz,
   primary key (tenant_id, module_id)
 );
 

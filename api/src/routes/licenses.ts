@@ -312,6 +312,54 @@ licensesRouter.put('/tenants/:tenantId/license/modules/:moduleKey', requireSysad
   }
 });
 
+// --- Start-/einddatum en losse opzegging per module ("optie") — Charles'
+// verzoek (6 september 2026): "opties op abonnementen hebben ook een start
+// en einddatum. kunnen ook afzonderlijk worden opgezegd." Vereisen een
+// bestaande toewijzing (eerst PUT .../modules/:moduleKey met active:true) —
+// 404 als de module nog niet aan deze tenant is toegewezen. ---
+
+licensesRouter.put(
+  '/tenants/:tenantId/license/modules/:moduleKey/start-date',
+  requireSysadmin,
+  async (req: AuthedRequest, res) => {
+    const raw = (req.body ?? {}).startDate;
+    if (!(typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw))) {
+      return res.status(400).json({ error: 'startDate moet "YYYY-MM-DD" zijn.' });
+    }
+    const ok = await license.setTenantModuleStartDate(req.params.tenantId, req.params.moduleKey, raw, req.user!.id);
+    if (!ok) return res.status(404).json({ error: 'Module is niet toegewezen aan deze tenant.' });
+    res.json(await license.getTenantLicense(req.params.tenantId));
+  }
+);
+
+// { endDate: "YYYY-MM-DD" | null } — null = geen einddatum ingesteld.
+licensesRouter.put(
+  '/tenants/:tenantId/license/modules/:moduleKey/end-date',
+  requireSysadmin,
+  async (req: AuthedRequest, res) => {
+    const raw = (req.body ?? {}).endDate;
+    if (raw !== null && !(typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw))) {
+      return res.status(400).json({ error: 'endDate moet "YYYY-MM-DD" of null zijn.' });
+    }
+    const ok = await license.setTenantModuleEndDate(req.params.tenantId, req.params.moduleKey, raw, req.user!.id);
+    if (!ok) return res.status(404).json({ error: 'Module is niet toegewezen aan deze tenant.' });
+    res.json(await license.getTenantLicense(req.params.tenantId));
+  }
+);
+
+// { cancelled: boolean } — zie license.ts setTenantModuleCancelled: pas ná
+// cancelled=true maakt een gepasseerde end-date de module ook echt inactief.
+licensesRouter.put(
+  '/tenants/:tenantId/license/modules/:moduleKey/cancel',
+  requireSysadmin,
+  async (req: AuthedRequest, res) => {
+    const cancelled = (req.body ?? {}).cancelled === true;
+    const ok = await license.setTenantModuleCancelled(req.params.tenantId, req.params.moduleKey, cancelled, req.user!.id);
+    if (!ok) return res.status(404).json({ error: 'Module is niet toegewezen aan deze tenant.' });
+    res.json(await license.getTenantLicense(req.params.tenantId));
+  }
+);
+
 // PUT .../license/end-date — { endDate: "YYYY-MM-DD" | null }. Sysadmin-only,
 // zelfde reden als tier/modules hierboven (commerciële beslissing, geen
 // zelfbedieningsactie). null = geen einddatum ingesteld (nooit verlopen) —

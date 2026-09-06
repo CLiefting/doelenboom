@@ -570,11 +570,26 @@ export type TenantLicense = {
   // cancelledAt); null (handmatig aangemaakte tenant) volgt dezelfde
   // opzeg-regel als 'actief'.
   subscriptionRequestStatus: 'proef' | 'actief' | 'afgewezen' | null;
+  // Volledige per-module toewijzingen (start-/einddatum, opzegging) — zie
+  // db/migrations/0036_tenant_module_dates.sql. activeModules hierboven
+  // blijft de simpele boolean lijst; alleen modules die ooit voor deze
+  // tenant zijn geactiveerd staan hierin (ook als ze inmiddels weer
+  // inactief zijn door een opzegging + gepasseerde einddatum).
+  moduleAssignments: TenantModuleAssignment[];
   usage: {
     activeAdmins: number;
     activeBomen: number;
     lifetimeBomenAangemaakt: number;
   };
+};
+
+export type TenantModuleAssignment = {
+  key: string;
+  name: string;
+  startDate: string;
+  endDate: string | null;
+  cancelledAt: string | null;
+  active: boolean;
 };
 
 // --- Klantbeheer (zie db/migrations/0033_customer_management.sql en

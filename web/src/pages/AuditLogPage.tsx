@@ -59,8 +59,20 @@ function formatDetail(entry: AuditLogEntry): string {
     entry.eventType === 'tenant_customer_info_changed' ||
     entry.eventType === 'tenant_subscription_changed'
   ) {
-    const changes = (entry.detail as { changes?: Record<string, { from: unknown; to: unknown }> }).changes ?? {};
-    const parts = Object.entries(changes).map(([field, { from, to }]) => `${field}: ${JSON.stringify(from)} → ${JSON.stringify(to)}`);
+    const changes = (entry.detail as { changes?: Record<string, unknown> }).changes ?? {};
+    // changes.module heeft NIET de generieke {from,to}-vorm (zie
+    // license.ts setTenantModuleActive/setTenantModuleStartDate/EndDate/
+    // Cancelled) — apart afgehandeld i.p.v. de generieke from/to-weergave die
+    // hier undefined/undefined zou tonen.
+    const parts = Object.entries(changes).map(([field, value]) => {
+      if (field === 'module' && typeof value === 'object' && value !== null) {
+        const m = value as { key?: string; active?: boolean; field?: string; from?: unknown; to?: unknown };
+        if (m.field) return `module ${m.key} — ${m.field}: ${JSON.stringify(m.from)} → ${JSON.stringify(m.to)}`;
+        if ('active' in m) return `module ${m.key}: ${m.active ? 'aangezet' : 'uitgezet'}`;
+      }
+      const { from, to } = (value ?? {}) as { from?: unknown; to?: unknown };
+      return `${field}: ${JSON.stringify(from)} → ${JSON.stringify(to)}`;
+    });
     return parts.join(', ');
   }
   if (entry.eventType === 'tenant_contact_changed') {

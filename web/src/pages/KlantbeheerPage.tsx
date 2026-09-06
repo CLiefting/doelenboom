@@ -741,11 +741,52 @@ function SubscriptionPanel({ token, tenantId, onChanged }: { token: string; tena
     }
   }
 
+  // Start-/einddatum en losse opzegging per module ("optie") — zie
+  // db/migrations/0036_tenant_module_dates.sql.
+  async function changeModuleStartDate(moduleKey: string, startDate: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      setLicense(await api.setTenantModuleStartDate(token, tenantId, moduleKey, startDate));
+      onChanged();
+    } catch (err) {
+      setError(errMsg(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function changeModuleEndDate(moduleKey: string, endDate: string | null) {
+    setBusy(true);
+    setError(null);
+    try {
+      setLicense(await api.setTenantModuleEndDate(token, tenantId, moduleKey, endDate));
+      onChanged();
+    } catch (err) {
+      setError(errMsg(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggleModuleCancelled(moduleKey: string, cancelled: boolean) {
+    setBusy(true);
+    setError(null);
+    try {
+      setLicense(await api.setTenantModuleCancelled(token, tenantId, moduleKey, cancelled));
+      onChanged();
+    } catch (err) {
+      setError(errMsg(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (!license || !tiers || !modules) {
     return error ? <p style={styles.error}>{error}</p> : <p style={styles.muted}>Laden…</p>;
   }
 
-  const activeModuleSet = new Set(license.activeModules);
+  const moduleAssignmentByKey = new Map(license.moduleAssignments.map((a) => [a.key, a]));
   // 'proef'/'afgewezen' sluiten altijd al onvoorwaardelijk op de einddatum
   // (zie license.ts closesUnconditionallyOnEndDate) — de opzeg-knop hieronder
   // heeft dan geen effect, dus tonen we 'm niet.
@@ -794,12 +835,75 @@ function SubscriptionPanel({ token, tenantId, onChanged }: { token: string; tena
       {modules.length > 0 && (
         <div>
           <div style={styles.roleLabel}>Modules</div>
-          {modules.map((m) => (
-            <label key={m.key} style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13 }}>
-              <input type="checkbox" disabled={busy} checked={activeModuleSet.has(m.key)} onChange={(e) => toggleModule(m.key, e.target.checked)} />
-              {m.name}
-            </label>
-          ))}
+          <p style={styles.hint}>
+            Elke module heeft een eigen start-/einddatum en kan los van het abonnement worden opgezegd — zelfde
+            polis-model: opgezegd + einddatum gepasseerd = inactief, anders blijft de module gewoon lopen.
+          </p>
+          {modules.map((m) => {
+            const assignment = moduleAssignmentByKey.get(m.key);
+            return (
+              <div key={m.key} style={{ marginBottom: 10 }}>
+                <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13 }}>
+                  <input
+                    type="checkbox"
+                    disabled={busy}
+                    checked={!!assignment}
+                    onChange={(e) => toggleModule(m.key, e.target.checked)}
+                  />
+                  {m.name}
+                  {assignment && (
+                    <span
+                      style={{
+                        ...styles.healthBadge,
+                        fontSize: 10,
+                        padding: '1px 7px',
+                        color: assignment.active ? '#1e6b34' : '#7A1F1F',
+                        background: assignment.active ? '#e6f4ea' : '#FBE8E8',
+                      }}
+                    >
+                      {assignment.active ? 'actief' : 'inactief'}
+                    </span>
+                  )}
+                </label>
+                {assignment && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginLeft: 24, marginTop: 4, fontSize: 12.5 }}>
+                    <label style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                      Start
+                      <input
+                        style={{ ...styles.input, padding: '3px 6px', fontSize: 12.5, width: 140 }}
+                        type="date"
+                        disabled={busy}
+                        value={assignment.startDate}
+                        onChange={(e) => e.target.value && changeModuleStartDate(m.key, e.target.value)}
+                      />
+                    </label>
+                    <label style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                      Einde
+                      <input
+                        style={{ ...styles.input, padding: '3px 6px', fontSize: 12.5, width: 140 }}
+                        type="date"
+                        disabled={busy}
+                        value={assignment.endDate ?? ''}
+                        onChange={(e) => changeModuleEndDate(m.key, e.target.value || null)}
+                      />
+                    </label>
+                    {assignment.cancelledAt ? (
+                      <>
+                        <span style={styles.muted}>Opgezegd op {formatDateTimeNL(assignment.cancelledAt)}</span>
+                        <button type="button" style={btnStyle('ghost')} disabled={busy} onClick={() => toggleModuleCancelled(m.key, false)}>
+                          Opzegging intrekken
+                        </button>
+                      </>
+                    ) : (
+                      <button type="button" style={btnStyle('danger')} disabled={busy} onClick={() => toggleModuleCancelled(m.key, true)}>
+                        Opzeggen
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
       <p style={styles.muted}>
@@ -830,7 +934,7 @@ function SubscriptionHistory({ token, tenantId }: { token: string; tenantId: num
     <div style={styles.historyBox}>
       {entries.map((e) => {
         const isOpen = expandedEntryId === e.id;
-        const changes = (e.detail.changes as Record<string, { from: unknown; to: unknown }>) ?? {};
+        const changes = (e.detail.changes as Record<string, unknown>) ?? {};
         return (
           <div key={e.id} style={styles.historyRow}>
             <div
@@ -841,9 +945,12 @@ function SubscriptionHistory({ token, tenantId }: { token: string; tenantId: num
             </div>
             {isOpen && (
               <ul style={styles.reasonsList}>
-                {Object.entries(changes).map(([field, { from, to }]) => (
+                {Object.entries(changes).map(([field, value]) => (
                   <li key={field}>
-                    <strong>{fieldLabel(field)}</strong>: {formatChangeValue(from)} → {formatChangeValue(to)}
+                    <strong>{fieldLabel(field)}</strong>:{' '}
+                    {field === 'module'
+                      ? describeModuleChange(value)
+                      : `${formatChangeValue((value as { from: unknown }).from)} → ${formatChangeValue((value as { to: unknown }).to)}`}
                   </li>
                 ))}
               </ul>
@@ -867,6 +974,27 @@ function formatChangeValue(v: unknown): string {
   if (v === null || v === undefined) return '—';
   if (typeof v === 'object') return JSON.stringify(v);
   return String(v);
+}
+
+const MODULE_CHANGE_FIELD_LABEL: Record<string, string> = {
+  startDate: 'Startdatum',
+  endDate: 'Einddatum',
+  cancelledAt: 'Opzegging',
+};
+
+// changes.module heeft NIET de generieke {from,to}-vorm (zie
+// license.ts setTenantModuleActive/setTenantModuleStartDate/EndDate/
+// Cancelled) — dit geeft 'm een leesbare weergave i.p.v. de generieke
+// renderer die op deze vorm undefined/undefined zou tonen.
+function describeModuleChange(value: unknown): string {
+  if (typeof value !== 'object' || value === null) return formatChangeValue(value);
+  const m = value as { key?: string; active?: boolean; field?: string; from?: unknown; to?: unknown };
+  if (m.field) {
+    const label = MODULE_CHANGE_FIELD_LABEL[m.field] ?? m.field;
+    return `${m.key} — ${label}: ${formatChangeValue(m.from)} → ${formatChangeValue(m.to)}`;
+  }
+  if ('active' in m) return `${m.key}: ${m.active ? 'aangezet' : 'uitgezet'}`;
+  return formatChangeValue(value);
 }
 
 function errMsg(err: unknown): string {

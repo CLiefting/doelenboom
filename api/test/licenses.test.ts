@@ -217,6 +217,136 @@ describe('licenties', () => {
     });
   });
 
+  // Charles' verzoek (6 september 2026): "opties op abonnementen hebben ook
+  // een start en einddatum. kunnen ook afzonderlijk worden opgezegd." Zelfde
+  // polis-model als het hoofdabonnement (license/cancel), maar dan per module
+  // — zie license.ts TENANT_MODULE_ACTIVE_SQL/setTenantModule*.
+  describe('modules: start-/einddatum en losse opzegging', () => {
+    it('start-date/end-date/cancel op een nog niet toegewezen module geven 404', async () => {
+      const { tenantId } = await setupWritableDoelenboom(sysadminToken, `${PREFIX}-t8`);
+
+      const startDate = await req('PUT', `/api/tenants/${tenantId}/license/modules/projecten/start-date`, {
+        token: sysadminToken, body: { startDate: '2026-01-01' },
+      });
+      assert.equal(startDate.status, 404);
+
+      const endDate = await req('PUT', `/api/tenants/${tenantId}/license/modules/projecten/end-date`, {
+        token: sysadminToken, body: { endDate: '2026-12-31' },
+      });
+      assert.equal(endDate.status, 404);
+
+      const cancel = await req('PUT', `/api/tenants/${tenantId}/license/modules/projecten/cancel`, {
+        token: sysadminToken, body: { cancelled: true },
+      });
+      assert.equal(cancel.status, 404);
+    });
+
+    it('startDate in de toekomst: module is nog niet actief; eenmaal aangebroken wel', async () => {
+      const { tenantId } = await setupWritableDoelenboom(sysadminToken, `${PREFIX}-t9`);
+      await req('PUT', `/api/tenants/${tenantId}/license/modules/projecten`, {
+        token: sysadminToken, body: { active: true },
+      });
+
+      const future = await req('PUT', `/api/tenants/${tenantId}/license/modules/projecten/start-date`, {
+        token: sysadminToken, body: { startDate: '2099-01-01' },
+      });
+      assert.equal(future.status, 200);
+      assert.deepEqual(future.body.activeModules, []);
+      const assignmentFuture = future.body.moduleAssignments.find((m: any) => m.key === 'projecten');
+      assert.equal(assignmentFuture.active, false);
+      assert.equal(assignmentFuture.startDate, '2099-01-01');
+
+      const past = await req('PUT', `/api/tenants/${tenantId}/license/modules/projecten/start-date`, {
+        token: sysadminToken, body: { startDate: '2020-01-01' },
+      });
+      assert.equal(past.status, 200);
+      assert.deepEqual(past.body.activeModules, ['projecten']);
+    });
+
+    it('endDate zonder opzegging: module blijft actief, ook na de einddatum (polis-model)', async () => {
+      const { tenantId } = await setupWritableDoelenboom(sysadminToken, `${PREFIX}-t10`);
+      await req('PUT', `/api/tenants/${tenantId}/license/modules/projecten`, {
+        token: sysadminToken, body: { active: true },
+      });
+
+      const withPastEndDate = await req('PUT', `/api/tenants/${tenantId}/license/modules/projecten/end-date`, {
+        token: sysadminToken, body: { endDate: '2020-01-01' },
+      });
+      assert.equal(withPastEndDate.status, 200);
+      // Geen cancelled_at gezet => blijft actief, net als het hoofdabonnement.
+      assert.deepEqual(withPastEndDate.body.activeModules, ['projecten']);
+      const assignment = withPastEndDate.body.moduleAssignments.find((m: any) => m.key === 'projecten');
+      assert.equal(assignment.active, true);
+      assert.equal(assignment.endDate, '2020-01-01');
+      assert.equal(assignment.cancelledAt, null);
+
+      // Einddatum weer wissen (null) mag ook.
+      const cleared = await req('PUT', `/api/tenants/${tenantId}/license/modules/projecten/end-date`, {
+        token: sysadminToken, body: { endDate: null },
+      });
+      assert.equal(cleared.status, 200);
+      assert.equal(cleared.body.moduleAssignments.find((m: any) => m.key === 'projecten').endDate, null);
+    });
+
+    it('opzeggen (cancel) + gepasseerde einddatum maakt de module inactief; intrekken herstelt', async () => {
+      const { tenantId } = await setupWritableDoelenboom(sysadminToken, `${PREFIX}-t11`);
+      await req('PUT', `/api/tenants/${tenantId}/license/modules/projecten`, {
+        token: sysadminToken, body: { active: true },
+      });
+      await req('PUT', `/api/tenants/${tenantId}/license/modules/projecten/end-date`, {
+        token: sysadminToken, body: { endDate: '2020-01-01' },
+      });
+
+      const cancelled = await req('PUT', `/api/tenants/${tenantId}/license/modules/projecten/cancel`, {
+        token: sysadminToken, body: { cancelled: true },
+      });
+      assert.equal(cancelled.status, 200);
+      assert.deepEqual(cancelled.body.activeModules, []);
+      const assignment = cancelled.body.moduleAssignments.find((m: any) => m.key === 'projecten');
+      assert.equal(assignment.active, false);
+      assert.ok(assignment.cancelledAt);
+
+      // Opgezegd, maar einddatum nog niet gepasseerd => blijft actief.
+      await req('PUT', `/api/tenants/${tenantId}/license/modules/projecten/end-date`, {
+        token: sysadminToken, body: { endDate: '2099-01-01' },
+      });
+      const stillActive = await req('GET', `/api/tenants/${tenantId}/license`, { token: sysadminToken });
+      assert.deepEqual(stillActive.body.activeModules, ['projecten']);
+
+      // Intrekken van de opzegging herstelt de module, ongeacht einddatum.
+      await req('PUT', `/api/tenants/${tenantId}/license/modules/projecten/end-date`, {
+        token: sysadminToken, body: { endDate: '2020-01-01' },
+      });
+      const uncancelled = await req('PUT', `/api/tenants/${tenantId}/license/modules/projecten/cancel`, {
+        token: sysadminToken, body: { cancelled: false },
+      });
+      assert.equal(uncancelled.status, 200);
+      assert.deepEqual(uncancelled.body.activeModules, ['projecten']);
+    });
+
+    it('start-/einddatum/cancel zijn sysadmin-only', async () => {
+      const { tenantId, adminToken } = await setupWritableDoelenboom(sysadminToken, `${PREFIX}-t12`);
+      await req('PUT', `/api/tenants/${tenantId}/license/modules/projecten`, {
+        token: sysadminToken, body: { active: true },
+      });
+
+      const asAdminStart = await req('PUT', `/api/tenants/${tenantId}/license/modules/projecten/start-date`, {
+        token: adminToken, body: { startDate: '2026-01-01' },
+      });
+      assert.equal(asAdminStart.status, 403);
+
+      const asAdminEnd = await req('PUT', `/api/tenants/${tenantId}/license/modules/projecten/end-date`, {
+        token: adminToken, body: { endDate: '2026-12-31' },
+      });
+      assert.equal(asAdminEnd.status, 403);
+
+      const asAdminCancel = await req('PUT', `/api/tenants/${tenantId}/license/modules/projecten/cancel`, {
+        token: adminToken, body: { cancelled: true },
+      });
+      assert.equal(asAdminCancel.status, 403);
+    });
+  });
+
   describe('handhaving: admins', () => {
     it('een admin toevoegen boven de tier-limiet geeft 403; een bestaande admin opnieuw admin maken mag altijd', async () => {
       const { tenantId, adminToken } = await setupWritableDoelenboom(sysadminToken, `${PREFIX}-t8`);

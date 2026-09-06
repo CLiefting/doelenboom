@@ -60,6 +60,12 @@ export interface TenantLicense {
   // handmatig door een sysadmin aangemaakte tenant, zonder subscription_
   // requests-rij (volgt dezelfde opzeg-regel als 'actief').
   subscriptionRequestStatus: 'proef' | 'actief' | 'afgewezen' | null;
+  // Volledige per-module toewijzingen (start-/einddatum, opzegging) — zie
+  // TenantModuleAssignment/getTenantModuleAssignments hieronder en
+  // db/migrations/0036_tenant_module_dates.sql. activeModules hierboven blijft
+  // de simpele, puur boolean lijst (voor tree.ts-gating e.d.); dit is de
+  // volledige data voor het beheerscherm.
+  moduleAssignments: TenantModuleAssignment[];
   usage: {
     activeAdmins: number;
     activeBomen: number;
@@ -218,18 +224,60 @@ async function countActiveBomen(tenantId: number | string): Promise<number> {
   return r.rows[0].n;
 }
 
+// Herbruikbare "is deze module-toewijzing nu actief"-voorwaarde — zelfde
+// polis-model als isLicenseExpired/closesUnconditionallyOnEndDate hierboven,
+// maar dan voor een module ("optie") in plaats van het hele abonnement (zie
+// db/migrations/0036_tenant_module_dates.sql): nog niet gestart (start_date
+// in de toekomst) = niet actief; opgezegd ÉN einddatum gepasseerd = niet
+// actief; anders actief — een gepasseerde einddatum zónder opzegging maakt
+// een module dus NIET inactief, precies zoals bij het abonnement zelf.
+const TENANT_MODULE_ACTIVE_SQL = `
+  tm.start_date <= current_date
+  and not (tm.cancelled_at is not null and tm.end_date is not null and tm.end_date < current_date)
+`;
+
 export async function getActiveModuleKeys(tenantId: number | string): Promise<string[]> {
   const r = await pool.query(
-    `select m.key from tenant_modules tm join modules m on m.id = tm.module_id where tm.tenant_id = $1`,
+    `select m.key from tenant_modules tm join modules m on m.id = tm.module_id
+     where tm.tenant_id = $1 and ${TENANT_MODULE_ACTIVE_SQL}`,
     [tenantId]
   );
   return r.rows.map((row) => row.key as string);
 }
 
+export interface TenantModuleAssignment {
+  key: string;
+  name: string;
+  startDate: string;
+  endDate: string | null;
+  cancelledAt: string | null;
+  active: boolean;
+}
+
+// Alle module-TOEWIJZINGEN van een tenant (in tegenstelling tot
+// getActiveModuleKeys hierboven: ook een nog niet gestarte of al opgezegde
+// toewijzing, met de volledige data — voor het beheerscherm in Klantbeheer,
+// zie routes/customerManagement.ts/KlantbeheerPage.tsx). Modules zonder
+// toewijzing (nooit geactiveerd voor deze tenant) staan er niet in.
+export async function getTenantModuleAssignments(tenantId: number | string): Promise<TenantModuleAssignment[]> {
+  const r = await pool.query(
+    `select m.key, m.name,
+            to_char(tm.start_date, 'YYYY-MM-DD') as "startDate",
+            to_char(tm.end_date, 'YYYY-MM-DD') as "endDate",
+            tm.cancelled_at as "cancelledAt",
+            (${TENANT_MODULE_ACTIVE_SQL}) as active
+     from tenant_modules tm join modules m on m.id = tm.module_id
+     where tm.tenant_id = $1
+     order by m.name`,
+    [tenantId]
+  );
+  return r.rows;
+}
+
 export async function hasModule(tenantId: number | string, moduleKey: string): Promise<boolean> {
   const r = await pool.query(
     `select 1 from tenant_modules tm join modules m on m.id = tm.module_id
-     where tm.tenant_id = $1 and m.key = $2`,
+     where tm.tenant_id = $1 and m.key = $2 and ${TENANT_MODULE_ACTIVE_SQL}`,
     [tenantId, moduleKey]
   );
   return r.rows.length > 0;
@@ -261,8 +309,9 @@ export async function getTenantLicense(tenantId: number | string): Promise<Tenan
     tierId == null
       ? null
       : ((await pool.query(`select ${TIER_SELECT_FIELDS} from tiers where id = $1`, [tierId])).rows[0] ?? null);
-  const [activeModules, activeAdmins, activeBomen] = await Promise.all([
+  const [activeModules, moduleAssignments, activeAdmins, activeBomen] = await Promise.all([
     getActiveModuleKeys(tenantId),
+    getTenantModuleAssignments(tenantId),
     countActiveAdmins(tenantId),
     countActiveBomen(tenantId),
   ]);
@@ -278,6 +327,7 @@ export async function getTenantLicense(tenantId: number | string): Promise<Tenan
     datePassed,
     cancelledAt,
     subscriptionRequestStatus: requestStatus,
+    moduleAssignments,
     usage: {
       activeAdmins,
       activeBomen,
@@ -420,22 +470,44 @@ export async function setSubscriptionCancelled(
   });
 }
 
+async function tenantModuleId(moduleKey: string): Promise<number> {
+  const moduleRow = await pool.query('select id from modules where key = $1', [moduleKey]);
+  if (!moduleRow.rows[0]) throw new Error(`Module "${moduleKey}" bestaat niet.`);
+  return moduleRow.rows[0].id;
+}
+
+// Simpele aan/uit-schakelaar (zie TenantLicensePanel.tsx en de vinkjes in
+// KlantbeheerPage.tsx) — voor de fijnmazige start-/einddatum en losse
+// opzegging per module ("optie", Charles' verzoek van 6 september 2026), zie
+// setTenantModuleStartDate/setTenantModuleEndDate/setTenantModuleCancelled
+// hieronder. active=true (her)activeert altijd een SCHONE toewijzing (start
+// vandaag, geen einddatum, niet opgezegd) — ook als er al een (inmiddels
+// verlopen/opgezegde) rij bestond, zodat "aanvinken" nooit stil blijft hangen
+// op een oude einddatum/opzegging. active=false verwijdert de toewijzing
+// volledig en onmiddellijk (in tegenstelling tot opzeggen, dat pas op de
+// einddatum ingaat) — voor het direct corrigeren van een vergissing.
 export async function setTenantModuleActive(
   tenantId: number | string,
   moduleKey: string,
   active: boolean,
   actorUserId: number | string
 ): Promise<void> {
-  const moduleRow = await pool.query('select id from modules where key = $1', [moduleKey]);
-  if (!moduleRow.rows[0]) throw new Error(`Module "${moduleKey}" bestaat niet.`);
-  const moduleId = moduleRow.rows[0].id;
+  const moduleId = await tenantModuleId(moduleKey);
   let changed = false;
   if (active) {
-    const r = await pool.query(
-      'insert into tenant_modules (tenant_id, module_id) values ($1,$2) on conflict do nothing returning tenant_id',
+    const before = await pool.query(
+      `select 1 from tenant_modules tm where tenant_id = $1 and module_id = $2 and ${TENANT_MODULE_ACTIVE_SQL}`,
       [tenantId, moduleId]
     );
-    changed = (r.rowCount ?? 0) > 0;
+    const wasActive = (before.rowCount ?? 0) > 0;
+    await pool.query(
+      `insert into tenant_modules (tenant_id, module_id, start_date, end_date, cancelled_at)
+       values ($1,$2,current_date,null,null)
+       on conflict (tenant_id, module_id) do update set
+         start_date = current_date, end_date = null, cancelled_at = null`,
+      [tenantId, moduleId]
+    );
+    changed = !wasActive;
   } else {
     const r = await pool.query('delete from tenant_modules where tenant_id = $1 and module_id = $2 returning tenant_id', [
       tenantId,
@@ -452,6 +524,109 @@ export async function setTenantModuleActive(
       detail: { changes: { module: { key: moduleKey, active } } },
     });
   }
+}
+
+// Contractuele startdatum van een module-toewijzing wijzigen — vereist een
+// bestaande toewijzing (eerst setTenantModuleActive(..., true, ...), zie
+// routes/licenses.ts). Een startdatum in de toekomst zet de module tijdelijk
+// "nog niet gestart" (zie TENANT_MODULE_ACTIVE_SQL) zonder de toewijzing te
+// verwijderen — handig om een module vooraf al in te plannen.
+export async function setTenantModuleStartDate(
+  tenantId: number | string,
+  moduleKey: string,
+  startDate: string,
+  actorUserId: number | string
+): Promise<boolean> {
+  const moduleId = await tenantModuleId(moduleKey);
+  const before = await pool.query(
+    `select to_char(start_date, 'YYYY-MM-DD') as start_date from tenant_modules where tenant_id = $1 and module_id = $2`,
+    [tenantId, moduleId]
+  );
+  if (before.rows.length === 0) return false;
+  const beforeStartDate = before.rows[0].start_date as string;
+  await pool.query('update tenant_modules set start_date = $1 where tenant_id = $2 and module_id = $3', [
+    startDate,
+    tenantId,
+    moduleId,
+  ]);
+  if (beforeStartDate !== startDate) {
+    await logAuditEvent({
+      eventType: 'tenant_subscription_changed',
+      userId: actorUserId,
+      tenantId,
+      role: null,
+      detail: { changes: { module: { key: moduleKey, field: 'startDate', from: beforeStartDate, to: startDate } } },
+    });
+  }
+  return true;
+}
+
+// Contractuele einddatum van een module-toewijzing wijzigen (null = geen
+// einddatum ingesteld) — zelfde polis-semantiek als setTenantLicenseEndDate:
+// pas in combinatie met een opzegging (zie setTenantModuleCancelled
+// hieronder) maakt een gepasseerde einddatum de module ook echt inactief.
+export async function setTenantModuleEndDate(
+  tenantId: number | string,
+  moduleKey: string,
+  endDate: string | null,
+  actorUserId: number | string
+): Promise<boolean> {
+  const moduleId = await tenantModuleId(moduleKey);
+  const before = await pool.query(
+    `select to_char(end_date, 'YYYY-MM-DD') as end_date from tenant_modules where tenant_id = $1 and module_id = $2`,
+    [tenantId, moduleId]
+  );
+  if (before.rows.length === 0) return false;
+  const beforeEndDate = (before.rows[0].end_date as string | null) ?? null;
+  await pool.query('update tenant_modules set end_date = $1 where tenant_id = $2 and module_id = $3', [
+    endDate,
+    tenantId,
+    moduleId,
+  ]);
+  if (beforeEndDate !== endDate) {
+    await logAuditEvent({
+      eventType: 'tenant_subscription_changed',
+      userId: actorUserId,
+      tenantId,
+      role: null,
+      detail: { changes: { module: { key: moduleKey, field: 'endDate', from: beforeEndDate, to: endDate } } },
+    });
+  }
+  return true;
+}
+
+// Module-toewijzing opzeggen/opzegging intrekken — los van het abonnement
+// zelf (Charles' verzoek: "kunnen ook afzonderlijk worden opgezegd"), zelfde
+// polis-model als setSubscriptionCancelled hierboven.
+export async function setTenantModuleCancelled(
+  tenantId: number | string,
+  moduleKey: string,
+  cancelled: boolean,
+  actorUserId: number | string
+): Promise<boolean> {
+  const moduleId = await tenantModuleId(moduleKey);
+  const before = await pool.query('select cancelled_at from tenant_modules where tenant_id = $1 and module_id = $2', [
+    tenantId,
+    moduleId,
+  ]);
+  if (before.rows.length === 0) return false;
+  const beforeValue = (before.rows[0].cancelled_at as string | null) ?? null;
+  const wasCancelled = beforeValue != null;
+  if (wasCancelled === cancelled) return true;
+  const newValue = cancelled ? new Date().toISOString() : null;
+  await pool.query('update tenant_modules set cancelled_at = $1 where tenant_id = $2 and module_id = $3', [
+    newValue,
+    tenantId,
+    moduleId,
+  ]);
+  await logAuditEvent({
+    eventType: 'tenant_subscription_changed',
+    userId: actorUserId,
+    tenantId,
+    role: null,
+    detail: { changes: { module: { key: moduleKey, field: 'cancelledAt', from: beforeValue, to: newValue } } },
+  });
+  return true;
 }
 
 // Gooit LicenseLimitError als het instellen van tierId (null = geen licentie/
