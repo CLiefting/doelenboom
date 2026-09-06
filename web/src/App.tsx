@@ -10,6 +10,7 @@ import SubscriptionRequestsPage from './pages/SubscriptionRequestsPage';
 import SubscriptionOverviewPage from './pages/SubscriptionOverviewPage';
 import AccountManagementPage from './pages/AccountManagementPage';
 import LicenseCatalogPage from './pages/LicenseCatalogPage';
+import KlantbeheerPage from './pages/KlantbeheerPage';
 import ChangePasswordPage from './pages/ChangePasswordPage';
 import MySecurityPage from './pages/MySecurityPage';
 import HelpPage from './pages/HelpPage';
@@ -69,6 +70,7 @@ type View =
   | { name: 'subscription-overview' }
   | { name: 'accounts' }
   | { name: 'licenses' }
+  | { name: 'customers' }
   | { name: 'password' }
   | { name: 'my-security' }
   // 'from' onthoudt vanaf welk scherm Help geopend is (picker of tree), zodat
@@ -283,6 +285,8 @@ export default function App() {
     content = <AccountManagementPage token={session.token} user={session.user} onBack={() => setView({ name: 'picker' })} />;
   } else if (view.name === 'licenses') {
     content = <LicenseCatalogPage token={session.token} onBack={() => setView({ name: 'picker' })} />;
+  } else if (view.name === 'customers') {
+    content = <KlantbeheerPage token={session.token} onBack={() => setView({ name: 'picker' })} />;
   } else if (view.name === 'help') {
     const returnView: View = view.from === 'tree' ? { name: 'tree' } : { name: 'picker' };
     content = <HelpPage onBack={() => setView(returnView)} />;
@@ -326,6 +330,7 @@ export default function App() {
         onSubscriptionRequestsRequest={() => setView({ name: 'subscription-requests' })}
         onAccountsRequest={() => setView({ name: 'accounts' })}
         onLicensesRequest={() => setView({ name: 'licenses' })}
+        onCustomersRequest={() => setView({ name: 'customers' })}
         onHelpRequest={() => setView({ name: 'help', from: 'picker' })}
         onChangePasswordRequest={() => setView({ name: 'password' })}
         onMySecurityRequest={() => setView({ name: 'my-security' })}

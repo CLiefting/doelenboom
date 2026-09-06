@@ -6,7 +6,14 @@ import { pool } from './db.js';
 // betrouwbaar meteen na de request kan controleren, maar wel zelf try/catch
 // om de aanroeper: een auditlog-schrijffout mag de "echte" actie (boom tonen,
 // tenant-instellingen opslaan) nooit laten mislukken.
-export type AuditEventType = 'doelenboom_view' | 'tenant_settings_changed' | 'mfa_verified' | 'mfa_failed';
+export type AuditEventType =
+  | 'doelenboom_view'
+  | 'tenant_settings_changed'
+  | 'mfa_verified'
+  | 'mfa_failed'
+  | 'tenant_contact_changed'
+  | 'tenant_customer_info_changed'
+  | 'tenant_subscription_changed';
 
 export interface LogAuditEventInput {
   eventType: AuditEventType;

@@ -1,7 +1,7 @@
 import { Response, NextFunction } from 'express';
 import { pool } from './db.js';
 import { AuthedRequest } from './auth.js';
-import { hasModule, isLicenseExpired } from './license.js';
+import { hasModule, isLicenseExpired, isTenantTerminated } from './license.js';
 
 // Rolmodel (zie db/init.sql voor de tabellen):
 // - sysadmin (users.is_sysadmin): platformbeheer — tenants aanmaken/verwijderen,
@@ -134,6 +134,14 @@ export function requireTenantRole(
     const tenantId = await resolveTenantId(req);
     if (tenantId == null) return res.status(404).json({ error: 'Niet gevonden.' });
 
+    // Beëindigde tenant (zie tenantRetention.ts): voor gewone leden alsof de
+    // tenant niet meer bestaat, ongeacht hun tenant_users-rol — alleen een
+    // sysadmin (bypass hierboven) mag 'm nog zien (read-only, zie
+    // requireTenantRoleForDoelenboomParam/requireWritableDoelenboom).
+    if (await isTenantTerminated(tenantId)) {
+      return res.status(403).json({ error: 'Deze tenant is beëindigd.' });
+    }
+
     const role = await getTenantRole(req.user!.id, tenantId);
     if (!role) return res.status(403).json({ error: 'Geen toegang tot deze tenant.' });
     if (!roleAtLeast(role, minRole)) {
@@ -160,11 +168,24 @@ export function requireTenantRoleForDoelenboomParam(
   opts: { allowSysadmin?: boolean } = {}
 ) {
   return async (req: AuthedRequest, res: Response, next: NextFunction) => {
-    if (opts.allowSysadmin && req.user?.isSysadmin) return next();
-
     const doelenboomId = req.params[paramName];
     const tenantId = await tenantIdForDoelenboom(doelenboomId);
     if (tenantId == null) return res.status(404).json({ error: 'Niet gevonden.' });
+
+    // Beëindigde tenant (zie tenantRetention.ts): voor gewone leden alsof hij
+    // niet meer bestaat — ook via een allowSysadmin:true-'instellingen'-route
+    // hierboven mag dan niets meer gewijzigd worden. Alleen een sysadmin mag
+    // 'm nog raadplegen, en dan uitsluitend read-only (minRole='bezoeker' —
+    // de enige uitzondering op "geen sysadmin-bypass op boom-inhoud" uit het
+    // rolmodel hierboven, specifiek voor deze bewaartermijn-periode).
+    if (await isTenantTerminated(tenantId)) {
+      if (req.user?.isSysadmin && minRole === 'bezoeker') return next();
+      return res.status(403).json({
+        error: 'Deze tenant is beëindigd; de gegevens zijn alleen-lezen en alleen nog voor een sysadmin te raadplegen.',
+      });
+    }
+
+    if (opts.allowSysadmin && req.user?.isSysadmin) return next();
 
     const role = await getEffectiveRoleForDoelenboom(req.user!.id, doelenboomId);
     if (!role) return res.status(403).json({ error: 'Geen toegang tot deze tenant.' });
@@ -215,6 +236,16 @@ export function requireWritableDoelenboom(
 
     const tenantId = await tenantIdForDoelenboom(doelenboomId);
     if (tenantId == null) return res.status(404).json({ error: 'Niet gevonden.' });
+
+    // Beëindigde tenant (zie tenantRetention.ts): schrijven mag dan door
+    // niemand meer, ook niet door een sysadmin of een lid met een nog
+    // bestaande tenant_users-rij — de gegevens zijn voor de duur van de
+    // bewaartermijn strikt alleen-lezen (zie rbac.ts-toelichting hierboven en
+    // requireTenantRoleForDoelenboomParam voor het lezen zelf).
+    if (await isTenantTerminated(tenantId)) {
+      return res.status(403).json({ error: 'Deze tenant is beëindigd; de gegevens staan alleen-lezen.' });
+    }
+
     const role = await getEffectiveRoleForDoelenboom(req.user!.id, doelenboomId);
     if (!role) return res.status(403).json({ error: 'Geen toegang tot deze tenant.' });
     if (!roleAtLeast(role, minRole)) {

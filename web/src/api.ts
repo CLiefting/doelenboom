@@ -545,6 +545,64 @@ export const api = {
       body: JSON.stringify({ endDate }),
     }, token),
 
+  // --- Klantbeheer (sysadmin-only, /api/tenants/:tenantId/contacts, .../customer-info, .../health) ---
+
+  tenantContacts: (token: string, tenantId: number) =>
+    request<import('./types').TenantContact[]>(`/api/tenants/${tenantId}/contacts`, {}, token),
+
+  tenantContactsHistory: (token: string, tenantId: number) =>
+    request<import('./types').TenantAuditLogEntry[]>(`/api/tenants/${tenantId}/contacts/history`, {}, token),
+
+  createTenantContact: (
+    token: string,
+    tenantId: number,
+    body: { name: string; email: string; phone?: string | null; role: import('./types').TenantContactRole; isPrimary?: boolean }
+  ) =>
+    request<import('./types').TenantContact>(`/api/tenants/${tenantId}/contacts`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }, token),
+
+  updateTenantContact: (
+    token: string,
+    contactId: number,
+    body: { name: string; email: string; phone?: string | null; role: import('./types').TenantContactRole; isPrimary?: boolean }
+  ) =>
+    request<import('./types').TenantContact>(`/api/contacts/${contactId}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }, token),
+
+  deleteTenantContact: (token: string, contactId: number) =>
+    request<void>(`/api/contacts/${contactId}`, { method: 'DELETE' }, token),
+
+  tenantCustomerInfo: (token: string, tenantId: number) =>
+    request<import('./types').TenantCustomerInfo>(`/api/tenants/${tenantId}/customer-info`, {}, token),
+
+  updateTenantCustomerInfo: (
+    token: string,
+    tenantId: number,
+    body: Omit<import('./types').TenantCustomerInfo, 'tenantId' | 'updatedAt'>
+  ) =>
+    request<import('./types').TenantCustomerInfo>(`/api/tenants/${tenantId}/customer-info`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }, token),
+
+  tenantHealth: (token: string, tenantId: number) =>
+    request<import('./types').TenantHealth>(`/api/tenants/${tenantId}/health`, {}, token),
+
+  // Zelfde generieke auditlog-endpoint als api.auditLog hierboven, maar met
+  // de query-string-filters die auditLog.ts sinds Klantbeheer ondersteunt —
+  // gebruikt voor het abonnementen-wijzigingslog binnen KlantbeheerPage.
+  auditLogFiltered: (token: string, filters: { tenantId?: number; eventType?: string }) => {
+    const params = new URLSearchParams();
+    if (filters.tenantId != null) params.set('tenantId', String(filters.tenantId));
+    if (filters.eventType) params.set('eventType', filters.eventType);
+    const qs = params.toString();
+    return request<import('./types').AuditLogEntry[]>(`/api/audit-log${qs ? `?${qs}` : ''}`, {}, token);
+  },
+
   // --- Database-overzicht (sysadmin-only, /dbstat) ---
   dbStat: (token: string) => request<import('./types').DbStatTenant[]>('/api/dbstat', {}, token),
 

@@ -12,6 +12,7 @@ export default function PickerPage({
   onSubscriptionRequestsRequest,
   onAccountsRequest,
   onLicensesRequest,
+  onCustomersRequest,
   onHelpRequest,
   onChangePasswordRequest,
   onMySecurityRequest,
@@ -25,6 +26,7 @@ export default function PickerPage({
   onSubscriptionRequestsRequest: () => void;
   onAccountsRequest: () => void;
   onLicensesRequest: () => void;
+  onCustomersRequest: () => void;
   onHelpRequest: () => void;
   onChangePasswordRequest: () => void;
   onMySecurityRequest: () => void;
@@ -94,6 +96,7 @@ export default function PickerPage({
               user={user}
               onAccountsRequest={onAccountsRequest}
               onLicensesRequest={onLicensesRequest}
+              onCustomersRequest={onCustomersRequest}
               onChangePasswordRequest={onChangePasswordRequest}
               onMySecurityRequest={onMySecurityRequest}
               onLogoutRequest={onLogoutRequest}
@@ -141,6 +144,7 @@ function UserMenu({
   user,
   onAccountsRequest,
   onLicensesRequest,
+  onCustomersRequest,
   onChangePasswordRequest,
   onMySecurityRequest,
   onLogoutRequest,
@@ -148,6 +152,7 @@ function UserMenu({
   user: User;
   onAccountsRequest: () => void;
   onLicensesRequest: () => void;
+  onCustomersRequest: () => void;
   onChangePasswordRequest: () => void;
   onMySecurityRequest: () => void;
   onLogoutRequest: () => void;
@@ -210,6 +215,18 @@ function UserMenu({
               }}
             >
               Licentiebeheer
+            </button>
+          )}
+          {user.isSysadmin && (
+            <button
+              role="menuitem"
+              style={styles.dropdownItem}
+              onClick={() => {
+                setOpen(false);
+                onCustomersRequest();
+              }}
+            >
+              Klantbeheer
             </button>
           )}
           {user.isSysadmin && (

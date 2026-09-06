@@ -118,15 +118,35 @@ export type SessionInfo = {
 // doelenboomName/userEmail zijn null zodra het gekoppelde account/tenant/boom
 // inmiddels verwijderd is (on delete set null) — de logregel zelf blijft dan
 // gewoon bestaan.
+export type AuditEventType =
+  | 'doelenboom_view'
+  | 'tenant_settings_changed'
+  | 'mfa_verified'
+  | 'mfa_failed'
+  | 'tenant_contact_changed'
+  | 'tenant_customer_info_changed'
+  | 'tenant_subscription_changed';
+
 export type AuditLogEntry = {
   id: number;
-  eventType: 'doelenboom_view' | 'tenant_settings_changed' | 'mfa_verified' | 'mfa_failed';
+  eventType: AuditEventType;
   createdAt: string;
   role: string | null;
   detail: Record<string, unknown>;
   userEmail: string | null;
   tenantName: string | null;
   doelenboomName: string | null;
+};
+
+// Ongefilterde/ongejoinde vorm — gebruikt door de klantbeheer-geschiedenis-
+// routes (GET /api/tenants/:tenantId/contacts/history, en het generieke
+// GET /api/audit-log?tenantId=&eventType=), die zelf al op één tenant
+// filteren en dus geen tenantName/doelenboomName hoeven mee te geven.
+export type TenantAuditLogEntry = {
+  id: number;
+  createdAt: string;
+  userEmail: string | null;
+  detail: Record<string, unknown>;
 };
 
 export type WipeCandidate = {
@@ -166,6 +186,13 @@ export type TenantSummary = {
   // license.ts/routes/tenants.ts LICENSE_END_DATE_SELECT. Gebruikt door
   // TenantManagementPage om per tenant een kleurindicatie te tonen.
   license_end_date: string | null;
+  // ISO-timestamp of null — zie api/src/tenantRetention.ts. Niet null: de
+  // tenant is beëindigd (abonnement opgezegd/tenant verwijderd) en wordt
+  // TENANT_RETENTION_MONTHS (12) hierna automatisch definitief verwijderd.
+  // Alleen aanwezig/relevant voor een sysadmin (zie routes/tenants.ts) — een
+  // beëindigde tenant komt voor gewone leden helemaal niet meer in hun lijst
+  // voor.
+  terminated_at: string | null;
 };
 
 // Basisvorm zoals POST/PUT /api/doelenbomen die teruggeven (geen tenant-join
@@ -538,6 +565,50 @@ export type TenantLicense = {
     activeBomen: number;
     lifetimeBomenAangemaakt: number;
   };
+};
+
+// --- Klantbeheer (zie db/migrations/0033_customer_management.sql en
+// api/src/routes/customerManagement.ts) — sysadmin-only. ---
+
+export type TenantContactRole = 'tenant_admin' | 'ciso' | 'overig';
+
+export type TenantContact = {
+  id: number;
+  tenantId: number;
+  name: string;
+  email: string;
+  phone: string | null;
+  role: TenantContactRole;
+  isPrimary: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type TenantCustomerInfo = {
+  tenantId: number;
+  customerSince: string | null;
+  kvkNumber: string | null;
+  vatNumber: string | null;
+  billingAddress: string | null;
+  tags: string[];
+  contractReference: string | null;
+  contractDate: string | null;
+  contractUrl: string | null;
+  updatedAt: string | null;
+};
+
+export type TenantHealthStatus = 'gezond' | 'aandacht' | 'risico';
+
+export type TenantHealth = {
+  status: TenantHealthStatus;
+  reasons: string[];
+  terminated: boolean;
+  licenseExpired: boolean;
+  licenseEndDate: string | null;
+  daysUntilLicenseEnd: number | null;
+  lastActivityAt: string | null;
+  daysSinceActivity: number | null;
+  usage: { activeAdmins: number; maxAdmins: number | null; activeBomen: number; maxBomen: number | null } | null;
 };
 
 export type ImportSummary = {

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { requireAuth } from '../auth.js';
+import { requireAuth, AuthedRequest } from '../auth.js';
 import { requireSysadmin, requireTenantRoleForTenantParam } from '../rbac.js';
 import * as license from '../license.js';
 import * as offers from '../offers.js';
@@ -285,14 +285,14 @@ function parseTierId(raw: unknown): number | null | undefined {
   return undefined;
 }
 
-licensesRouter.put('/tenants/:tenantId/license/tier', requireSysadmin, async (req, res) => {
+licensesRouter.put('/tenants/:tenantId/license/tier', requireSysadmin, async (req: AuthedRequest, res) => {
   const b = (req.body ?? {}) as Record<string, unknown>;
   const tierId = parseTierId(b.tierId);
   if (tierId === undefined) {
     return res.status(400).json({ error: 'tierId moet een getal, numerieke tekst, of null zijn.' });
   }
   try {
-    await license.setTenantTier(req.params.tenantId, tierId);
+    await license.setTenantTier(req.params.tenantId, tierId, req.user!.id);
     res.json(await license.getTenantLicense(req.params.tenantId));
   } catch (err) {
     if (err instanceof license.LicenseLimitError) return res.status(409).json({ error: err.message });
@@ -302,10 +302,10 @@ licensesRouter.put('/tenants/:tenantId/license/tier', requireSysadmin, async (re
 
 // PUT .../license/modules/:moduleKey — { active: boolean }. Sysadmin-only,
 // zelfde reden als hierboven.
-licensesRouter.put('/tenants/:tenantId/license/modules/:moduleKey', requireSysadmin, async (req, res) => {
+licensesRouter.put('/tenants/:tenantId/license/modules/:moduleKey', requireSysadmin, async (req: AuthedRequest, res) => {
   const active = (req.body ?? {}).active === true;
   try {
-    await license.setTenantModuleActive(req.params.tenantId, req.params.moduleKey, active);
+    await license.setTenantModuleActive(req.params.tenantId, req.params.moduleKey, active, req.user!.id);
     res.json(await license.getTenantLicense(req.params.tenantId));
   } catch (err) {
     res.status(400).json({ error: (err as Error).message });
@@ -316,12 +316,12 @@ licensesRouter.put('/tenants/:tenantId/license/modules/:moduleKey', requireSysad
 // zelfde reden als tier/modules hierboven (commerciële beslissing, geen
 // zelfbedieningsactie). null = geen einddatum ingesteld (nooit verlopen) —
 // zie license.ts setTenantLicenseEndDate/isLicenseExpired.
-licensesRouter.put('/tenants/:tenantId/license/end-date', requireSysadmin, async (req, res) => {
+licensesRouter.put('/tenants/:tenantId/license/end-date', requireSysadmin, async (req: AuthedRequest, res) => {
   const raw = (req.body ?? {}).endDate;
   if (raw !== null && !(typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw))) {
     return res.status(400).json({ error: 'endDate moet "YYYY-MM-DD" of null zijn.' });
   }
-  await license.setTenantLicenseEndDate(req.params.tenantId, raw);
+  await license.setTenantLicenseEndDate(req.params.tenantId, raw, req.user!.id);
   res.json(await license.getTenantLicense(req.params.tenantId));
 });
 

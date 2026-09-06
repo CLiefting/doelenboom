@@ -27,6 +27,7 @@ import { announcementRouter } from './routes/announcement.js';
 import { subscriptionsRouter } from './routes/subscriptions.js';
 import { legalRouter } from './routes/legal.js';
 import { systemSbomRouter } from './routes/systemSbom.js';
+import { customerManagementRouter } from './routes/customerManagement.js';
 import { pool } from './db.js';
 
 // Bouwt de Express-app zonder 'm te starten (geen app.listen, geen idle-sweep-
@@ -171,6 +172,10 @@ export function createApp() {
   // Definieert zelf zowel '/tiers'/'/modules' als '/tenants/:tenantId/license/...'
   // — vandaar op '/api' gemount, net als doelenbomenRouter hierboven.
   app.use('/api', licensesRouter);
+  // Definieert zelf '/tenants/:tenantId/contacts', '/contacts/:id',
+  // '/tenants/:tenantId/customer-info' en '/tenants/:tenantId/health' —
+  // vandaar op '/api' gemount, net als licensesRouter hierboven.
+  app.use('/api', customerManagementRouter);
   app.use('/api/dbstat', dbstatRouter);
   app.use('/api/sessions', sessionsRouter);
   app.use('/api/audit-log', auditLogRouter);

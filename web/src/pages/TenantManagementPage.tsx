@@ -158,7 +158,7 @@ export default function TenantManagementPage({
                   textAlign: 'left',
                   ...(licenseBorder ? { borderColor: licenseBorder, borderWidth: 2 } : {}),
                 }}
-                title={licenseBorderTitle(t.license_end_date)}
+                title={t.terminated_at ? terminatedTitle(t.terminated_at) : licenseBorderTitle(t.license_end_date)}
               >
                 {t.name} <span style={{ opacity: 0.6, fontSize: 12 }}>({t.slug})</span>
                 {t.open_access_role && (
@@ -168,6 +168,9 @@ export default function TenantManagementPage({
                   >
                     🔓
                   </span>
+                )}
+                {t.terminated_at && (
+                  <span style={{ marginLeft: 6, fontSize: 11, opacity: 0.75 }}>⏳ beëindigd</span>
                 )}
               </button>
             );
@@ -206,6 +209,23 @@ export default function TenantManagementPage({
           {(() => {
             const t = manageableTenants.find((x) => x.id === selectedTenantId);
             if (!t) return null;
+            if (t.terminated_at) {
+              // Beëindigde tenant (zie api/src/tenantRetention.ts): voor
+              // gewone leden al onzichtbaar/ontoegankelijk geworden (zie
+              // rbac.ts) — hier voor de sysadmin nog puur informatief, geen
+              // instellingenformulier meer (de tenant is alleen-lezen en
+              // wordt sowieso na de bewaartermijn definitief verwijderd).
+              return (
+                <div style={styles.muted}>
+                  <p>
+                    Deze tenant is beëindigd op {formatDateTimeNL(t.terminated_at)}. De gegevens staan nog
+                    alleen-lezen en zijn alleen voor een sysadmin te raadplegen; gewone leden hebben er al geen
+                    toegang meer toe. Rond {formatDateTimeNL(addMonths(t.terminated_at, 12))} worden de tenant en
+                    alle bijbehorende doelenbomen automatisch definitief verwijderd.
+                  </p>
+                </div>
+              );
+            }
             return (
               <>
                 <TenantSettingsForm
@@ -226,9 +246,10 @@ export default function TenantManagementPage({
                       style={btnStyle('danger-text')}
                       onClick={async () => {
                         const ok = window.confirm(
-                          `Tenant "${t.name}" volledig verwijderen? Alle doelenbomen, elementen, relaties, ` +
-                          `tags, organisatieonderdelen, imports en leden hiervan gaan dan ook verloren. ` +
-                          `Dit kan niet ongedaan worden gemaakt.`
+                          `Tenant "${t.name}" beëindigen? Alle leden verliezen meteen alle toegang tot deze ` +
+                          `tenant en zijn doelenbomen. De gegevens blijven daarna nog 12 maanden alleen-lezen ` +
+                          `bewaard en zijn in die periode uitsluitend voor een sysadmin te raadplegen; pas ` +
+                          `daarna worden ze automatisch definitief verwijderd.`
                         );
                         if (!ok) return;
                         setBusy(true);
@@ -245,7 +266,7 @@ export default function TenantManagementPage({
                         }
                       }}
                     >
-                      Tenant verwijderen
+                      Tenant beëindigen
                     </button>
                   </div>
                 )}
@@ -406,6 +427,28 @@ function formatDateNL(dateStr: string): string {
   if (!m) return dateStr;
   const [, y, mo, d] = m;
   return `${d}-${mo}-${y}`;
+}
+
+// Zelfde "dd-mm-jjjj"-conventie als formatDateNL hierboven, maar dan voor een
+// volledige ISO-timestamp (zoals tenants.terminated_at) i.p.v. een kale
+// "YYYY-MM-DD"-datum.
+function formatDateTimeNL(isoStr: string): string {
+  return formatDateNL(isoStr.slice(0, 10));
+}
+
+// N maanden bij een ISO-timestamp optellen — gebruikt om de (indicatieve)
+// automatische-verwijderdatum te tonen: terminated_at + TENANT_RETENTION_MONTHS
+// (zie api/src/tenantRetention.ts; hier hardgecodeerd als 12 voor de weergave,
+// de daadwerkelijke sweep-logica staat en beslist op de server).
+function addMonths(isoStr: string, months: number): string {
+  const d = new Date(isoStr);
+  d.setUTCMonth(d.getUTCMonth() + months);
+  return d.toISOString();
+}
+
+function terminatedTitle(terminatedAt: string): string {
+  return `Beëindigd op ${formatDateTimeNL(terminatedAt)} — alleen-lezen, sysadmin-only, wordt rond ` +
+    `${formatDateTimeNL(addMonths(terminatedAt, 12))} definitief verwijderd.`;
 }
 
 function MemberTable({

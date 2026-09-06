@@ -606,6 +606,52 @@ alter table tenants add column if not exists entry_popup_message text not null d
 -- aan, dan is MFA voor die gebruiker bij élke login verplicht.
 alter table tenants add column if not exists mfa_required boolean not null default false;
 
+-- Bewaartermijn na beëindiging van een tenant/abonnement (CISO-aandachtspunt,
+-- zie db/migrations/0032_tenant_retention.sql voor de volledige toelichting).
+-- Niet null: de tenant/het abonnement is beëindigd (wanneer) — vanaf dat
+-- moment voor gewone leden ontoegankelijk/onzichtbaar en voor een sysadmin
+-- alleen-lezen (zie api/src/rbac.ts), tot de periodieke sweep
+-- (api/src/tenantRetention.ts, TENANT_RETENTION_MONTHS = 12) de tenant
+-- definitief verwijdert.
+alter table tenants add column if not exists terminated_at timestamptz;
+create index if not exists idx_tenants_terminated_at on tenants(terminated_at) where terminated_at is not null;
+
+-- Klantbeheer (zie db/migrations/0033_customer_management.sql voor de
+-- volledige toelichting) — contactpersonen los van app-accounts, overige
+-- klantbeheervelden (facturatie, tags, contractreferentie, "klant sinds"),
+-- en een reminder-vlag voor de verlengingsherinnering-sweep
+-- (api/src/licenseRenewalReminder.ts).
+create table if not exists tenant_contacts (
+  id bigserial primary key,
+  tenant_id bigint not null references tenants(id) on delete cascade,
+  name text not null,
+  email text not null,
+  phone text,
+  role text not null check (role in ('tenant_admin', 'ciso', 'overig')),
+  is_primary boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create unique index if not exists idx_tenant_contacts_one_primary
+  on tenant_contacts(tenant_id) where is_primary;
+create index if not exists idx_tenant_contacts_tenant on tenant_contacts(tenant_id, role);
+
+create table if not exists tenant_customer_info (
+  tenant_id bigint primary key references tenants(id) on delete cascade,
+  customer_since date,
+  kvk_number text,
+  vat_number text,
+  billing_address text,
+  tags text[] not null default '{}',
+  contract_reference text,
+  contract_date date,
+  contract_url text,
+  updated_at timestamptz not null default now()
+);
+create index if not exists idx_tenant_customer_info_tags on tenant_customer_info using gin(tags);
+
+alter table tenants add column if not exists license_renewal_reminder_sent_at timestamptz;
+
 -- Generiek, uitbreidbaar auditlogboek (CISO-aandachtspunt: "wie heeft wat
 -- gedaan, wanneer"). Zelfde event_type+detail-jsonb-opzet als
 -- account_retention_events hierboven, i.p.v. een aparte tabel per
@@ -623,7 +669,8 @@ alter table tenants add column if not exists mfa_required boolean not null defau
 create table if not exists audit_log (
   id bigserial primary key,
   event_type text not null check (event_type in (
-    'doelenboom_view', 'tenant_settings_changed', 'mfa_verified', 'mfa_failed'
+    'doelenboom_view', 'tenant_settings_changed', 'mfa_verified', 'mfa_failed',
+    'tenant_contact_changed', 'tenant_customer_info_changed', 'tenant_subscription_changed'
   )),
   user_id bigint references users(id) on delete set null,
   tenant_id bigint references tenants(id) on delete set null,
@@ -1003,6 +1050,23 @@ create table if not exists account_retention_events (
 );
 create index if not exists idx_retention_events_user on account_retention_events(user_id);
 create index if not exists idx_retention_events_created on account_retention_events(created_at desc);
+
+-- Zelfde opzet als account_retention_events hierboven, maar dan voor de
+-- bewaartermijn na beëindiging van een tenant (zie db/migrations/
+-- 0032_tenant_retention.sql en api/src/tenantRetention.ts). Eigen tabel i.p.v.
+-- het generieke audit_log: dat log is voor door mensen uitgevoerde acties
+-- binnen een (nog bestaande) tenant, terwijl 'purged' hier volledig
+-- automatisch gebeurt (geen actor) en pas nadat de tenant al niet meer
+-- bestaat.
+create table if not exists tenant_retention_events (
+  id bigserial primary key,
+  tenant_id bigint references tenants(id) on delete set null,
+  event_type text not null check (event_type in ('terminated', 'purged')),
+  actor_user_id bigint references users(id) on delete set null,
+  detail jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_tenant_retention_events_tenant on tenant_retention_events(tenant_id, created_at desc);
 
 -- Gebruiksvoorwaarden v0.3, letterlijk overgenomen -- zie de toelichting bij
 -- migratie 0017. Status 'draft' (niet 'published'): de tekst is zelf nog een

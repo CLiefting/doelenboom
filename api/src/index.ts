@@ -1,7 +1,9 @@
 import { createApp } from './app.js';
 import { sweepIdleTenants } from './tenantWipe.js';
 import { sweepAccountRetention } from './accountRetention.js';
+import { sweepTenantRetention } from './tenantRetention.js';
 import { sweepDependencyHealthCheck } from './dependencyHealth.js';
+import { sweepLicenseRenewalReminders } from './licenseRenewalReminder.js';
 
 // Laatste vangnet: een onafgevangen fout in een async route-handler (een
 // await die afwijst zonder eigen try/catch) crasht in Node.js standaard het
@@ -59,6 +61,17 @@ setInterval(() => {
   });
 }, ACCOUNT_RETENTION_SWEEP_INTERVAL_MS);
 
+// Tenantretentie-sweep (definitief verwijderen van tenants die meer dan
+// TENANT_RETENTION_MONTHS geleden beëindigd zijn, zie tenantRetention.ts) —
+// zelfde dag-granulaire beleidscontrole en interval als de accountretentie-
+// sweep hierboven.
+const TENANT_RETENTION_SWEEP_INTERVAL_MS = 60 * 60_000;
+setInterval(() => {
+  sweepTenantRetention().catch((err) => {
+    console.error('Tenantretentie-sweep mislukt:', err);
+  });
+}, TENANT_RETENTION_SWEEP_INTERVAL_MS);
+
 // Dependency-health-sweep (SBOM/kwetsbaarheden-cache verversen, zie
 // dependencyHealth.ts) — zelfde in-process setInterval-patroon als hierboven.
 // sweepDependencyHealthCheck() bewaakt zelf de "hooguit 1x/24u"-regel via
@@ -71,3 +84,13 @@ setInterval(() => {
     console.error('Dependency-health-sweep mislukt:', err);
   });
 }, DEPENDENCY_HEALTH_SWEEP_INTERVAL_MS);
+
+// Verlengingsherinnering-sweep (Klantbeheer, zie licenseRenewalReminder.ts) —
+// zelfde dag-granulaire beleidscontrole en interval als de accountretentie-/
+// tenantretentie-sweeps hierboven.
+const LICENSE_RENEWAL_REMINDER_SWEEP_INTERVAL_MS = 60 * 60_000;
+setInterval(() => {
+  sweepLicenseRenewalReminders().catch((err) => {
+    console.error('Verlengingsherinnering-sweep mislukt:', err);
+  });
+}, LICENSE_RENEWAL_REMINDER_SWEEP_INTERVAL_MS);

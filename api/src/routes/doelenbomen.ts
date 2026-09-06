@@ -59,8 +59,9 @@ doelenbomenRouter.get('/doelenbomen', async (req: AuthedRequest, res) => {
     `select ${DOELENBOOM_FIELDS}, ${TENANT_JOIN_FIELDS}
      from doelenbomen d
      join tenants t on t.id = d.tenant_id
-     where t.open_access_role is not null
-        or exists (select 1 from tenant_users tu where tu.tenant_id = t.id and tu.user_id = $1)
+     where t.terminated_at is null
+       and (t.open_access_role is not null
+        or exists (select 1 from tenant_users tu where tu.tenant_id = t.id and tu.user_id = $1))
      order by t.name, d.name`,
     [req.user!.id]
   );

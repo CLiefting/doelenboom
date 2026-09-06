@@ -378,7 +378,8 @@ async function fetchTenantRoles(userId: number) {
             coalesce(tu.role, t.open_access_role) as role
      from tenants t
      left join tenant_users tu on tu.tenant_id = t.id and tu.user_id = $1
-     where tu.user_id is not null or t.open_access_role is not null
+     where (tu.user_id is not null or t.open_access_role is not null)
+       and t.terminated_at is null
      order by t.name`,
     [userId]
   );

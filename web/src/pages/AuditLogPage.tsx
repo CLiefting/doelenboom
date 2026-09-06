@@ -41,6 +41,12 @@ const EVENT_LABELS: Record<AuditLogEntry['eventType'], string> = {
   tenant_settings_changed: 'Tenant-instellingen gewijzigd',
   mfa_verified: 'MFA geverifieerd (login)',
   mfa_failed: 'MFA-poging mislukt',
+  // Klantbeheer (zie routes/customerManagement.ts en license.ts) — dezelfde
+  // {changes: {veld: {from,to}}}-vorm als tenant_settings_changed hierboven,
+  // zie formatDetail.
+  tenant_contact_changed: 'Contactpersoon gewijzigd',
+  tenant_customer_info_changed: 'Klantgegevens gewijzigd',
+  tenant_subscription_changed: 'Abonnement gewijzigd',
 };
 
 function eventLabel(eventType: AuditLogEntry['eventType']): string {
@@ -48,9 +54,30 @@ function eventLabel(eventType: AuditLogEntry['eventType']): string {
 }
 
 function formatDetail(entry: AuditLogEntry): string {
-  if (entry.eventType === 'tenant_settings_changed') {
+  if (
+    entry.eventType === 'tenant_settings_changed' ||
+    entry.eventType === 'tenant_customer_info_changed' ||
+    entry.eventType === 'tenant_subscription_changed'
+  ) {
     const changes = (entry.detail as { changes?: Record<string, { from: unknown; to: unknown }> }).changes ?? {};
     const parts = Object.entries(changes).map(([field, { from, to }]) => `${field}: ${JSON.stringify(from)} → ${JSON.stringify(to)}`);
+    return parts.join(', ');
+  }
+  if (entry.eventType === 'tenant_contact_changed') {
+    const d = entry.detail as {
+      action?: string;
+      contact?: { name?: string };
+      primaryTransfer?: { from: { name: string } | null; to: { name: string } };
+    };
+    const parts: string[] = [];
+    if (d.action) parts.push(`${d.action}${d.contact?.name ? ` (${d.contact.name})` : ''}`);
+    if (d.primaryTransfer) {
+      parts.push(
+        d.primaryTransfer.from
+          ? `primair contact: ${d.primaryTransfer.from.name} → ${d.primaryTransfer.to.name}`
+          : `primair contact: ${d.primaryTransfer.to.name}`
+      );
+    }
     return parts.join(', ');
   }
   if (entry.eventType === 'mfa_failed') {
@@ -134,6 +161,15 @@ function AuditLogContent({ token }: { token: string }) {
           </button>
           <button onClick={() => setFilter('mfa_failed')} style={filter === 'mfa_failed' ? styles.toggleBtnActive : styles.toggleBtn}>
             MFA mislukt
+          </button>
+          <button onClick={() => setFilter('tenant_contact_changed')} style={filter === 'tenant_contact_changed' ? styles.toggleBtnActive : styles.toggleBtn}>
+            Contactpersoon
+          </button>
+          <button onClick={() => setFilter('tenant_customer_info_changed')} style={filter === 'tenant_customer_info_changed' ? styles.toggleBtnActive : styles.toggleBtn}>
+            Klantgegevens
+          </button>
+          <button onClick={() => setFilter('tenant_subscription_changed')} style={filter === 'tenant_subscription_changed' ? styles.toggleBtnActive : styles.toggleBtn}>
+            Abonnement
           </button>
         </div>
       )}

@@ -1,5 +1,6 @@
 import { PoolClient } from 'pg';
 import { pool } from './db.js';
+import { logAuditEvent } from './auditLog.js';
 
 // Licentiemodel — zie doelenboom_licentiemodel.md en
 // doelenboom_licentie_datamodel.drawio in het Doelenboom-project voor het
@@ -285,30 +286,86 @@ export async function isLicenseExpired(tenantId: number | string): Promise<boole
   return r.rows[0]?.expired ?? false;
 }
 
+// Is deze tenant beëindigd (tenants.terminated_at gezet, zie
+// tenantRetention.ts terminateTenant)? Net als isLicenseExpired hierboven de
+// enforcement-plek in rbac.ts — maar strenger: een verlopen licentie maakt de
+// tenant read-only voor iedereen die al toegang had; een beëindigde tenant is
+// voor gewone leden helemaal ontoegankelijk/onzichtbaar geworden en alleen
+// nog (read-only) voor een sysadmin te raadplegen, zie rbac.ts.
+export async function isTenantTerminated(tenantId: number | string): Promise<boolean> {
+  const r = await pool.query('select terminated_at is not null as terminated from tenants where id = $1', [tenantId]);
+  return r.rows[0]?.terminated ?? false;
+}
+
 // Sysadmin-only (zie routes/licenses.ts) — een licentie verlengen/wijzigen,
 // of de einddatum wissen (endDate = null, "nooit verlopen"). Geen
 // limiet-check nodig hier (in tegenstelling tot setTenantTier): een
 // einddatum wijzigen kan een tenant hooguit read-only maken of dat weer
 // opheffen, nooit een tier-limiet overschrijden.
-export async function setTenantLicenseEndDate(tenantId: number | string, endDate: string | null): Promise<void> {
-  await pool.query('update tenants set license_end_date = $1 where id = $2', [endDate, tenantId]);
+//
+// actorUserId: wie deze wijziging deed — gelogd als 'tenant_subscription_changed'
+// (audit_log), zelfde diff-vorm {from, to} als tenant_settings_changed in
+// routes/tenants.ts. Ook: een gewijzigde einddatum zet de
+// verlengingsherinnering-vlag terug naar null (zie licenseRenewalReminder.ts)
+// zodat een nieuwe/verlengde einddatum weer zijn eigen herinneringscyclus
+// krijgt i.p.v. stil te blijven omdat de vórige einddatum al een herinnering
+// kreeg.
+export async function setTenantLicenseEndDate(
+  tenantId: number | string,
+  endDate: string | null,
+  actorUserId: number | string
+): Promise<void> {
+  const before = await pool.query(
+    `select to_char(license_end_date, 'YYYY-MM-DD') as end_date from tenants where id = $1`,
+    [tenantId]
+  );
+  const beforeEndDate = before.rows[0]?.end_date ?? null;
+  await pool.query(
+    'update tenants set license_end_date = $1, license_renewal_reminder_sent_at = null where id = $2',
+    [endDate, tenantId]
+  );
+  if (beforeEndDate !== endDate) {
+    await logAuditEvent({
+      eventType: 'tenant_subscription_changed',
+      userId: actorUserId,
+      tenantId,
+      role: null,
+      detail: { changes: { license_end_date: { from: beforeEndDate, to: endDate } } },
+    });
+  }
 }
 
 export async function setTenantModuleActive(
   tenantId: number | string,
   moduleKey: string,
-  active: boolean
+  active: boolean,
+  actorUserId: number | string
 ): Promise<void> {
   const moduleRow = await pool.query('select id from modules where key = $1', [moduleKey]);
   if (!moduleRow.rows[0]) throw new Error(`Module "${moduleKey}" bestaat niet.`);
   const moduleId = moduleRow.rows[0].id;
+  let changed = false;
   if (active) {
-    await pool.query(
-      'insert into tenant_modules (tenant_id, module_id) values ($1,$2) on conflict do nothing',
+    const r = await pool.query(
+      'insert into tenant_modules (tenant_id, module_id) values ($1,$2) on conflict do nothing returning tenant_id',
       [tenantId, moduleId]
     );
+    changed = (r.rowCount ?? 0) > 0;
   } else {
-    await pool.query('delete from tenant_modules where tenant_id = $1 and module_id = $2', [tenantId, moduleId]);
+    const r = await pool.query('delete from tenant_modules where tenant_id = $1 and module_id = $2 returning tenant_id', [
+      tenantId,
+      moduleId,
+    ]);
+    changed = (r.rowCount ?? 0) > 0;
+  }
+  if (changed) {
+    await logAuditEvent({
+      eventType: 'tenant_subscription_changed',
+      userId: actorUserId,
+      tenantId,
+      role: null,
+      detail: { changes: { module: { key: moduleKey, active } } },
+    });
   }
 }
 
@@ -332,9 +389,24 @@ export async function assertTierFits(tenantId: number | string, tierId: number |
   }
 }
 
-export async function setTenantTier(tenantId: number | string, tierId: number | null): Promise<void> {
+export async function setTenantTier(
+  tenantId: number | string,
+  tierId: number | null,
+  actorUserId: number | string
+): Promise<void> {
   await assertTierFits(tenantId, tierId);
+  const before = await pool.query('select tier_id from tenants where id = $1', [tenantId]);
+  const beforeTierId = before.rows[0]?.tier_id ?? null;
   await pool.query('update tenants set tier_id = $1 where id = $2', [tierId, tenantId]);
+  if (beforeTierId !== tierId) {
+    await logAuditEvent({
+      eventType: 'tenant_subscription_changed',
+      userId: actorUserId,
+      tenantId,
+      role: null,
+      detail: { changes: { tier_id: { from: beforeTierId, to: tierId } } },
+    });
+  }
 }
 
 // Gooit LicenseLimitError als er al een admin bij komt terwijl de tenant geen

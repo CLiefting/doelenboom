@@ -5,6 +5,7 @@ import { requireSysadmin, requireTenantRoleForTenantParam } from '../rbac.js';
 import { createTenantDefaultConfig } from '../columnConfig.js';
 import { assertCanAddAdmin, computeDefaultLicenseEndDate, LicenseLimitError } from '../license.js';
 import { logAuditEvent } from '../auditLog.js';
+import { terminateTenant } from '../tenantRetention.js';
 
 export const tenantsRouter = Router();
 tenantsRouter.use(requireAuth);
@@ -15,7 +16,7 @@ function isUniqueViolation(err: unknown): boolean {
 
 const TENANT_SELECT_FIELDS =
   'id, slug, name, wipe_on_empty, session_timeout_minutes, nightly_export_enabled, open_access_role, ' +
-  'entry_popup_enabled, entry_popup_message, mfa_required, created_at';
+  'entry_popup_enabled, entry_popup_message, mfa_required, created_at, terminated_at';
 
 // Licentie-einddatum als losse, expliciet met to_char geformatteerde kolom
 // ("YYYY-MM-DD" of null) — bewust NIET in TENANT_SELECT_FIELDS hierboven,
@@ -26,11 +27,16 @@ const TENANT_SELECT_FIELDS =
 // de pg-driver hier een DATE-kolom als JS Date-object teruggeeft.
 const LICENSE_END_DATE_SELECT = `to_char(license_end_date, 'YYYY-MM-DD') as license_end_date`;
 
-// Sysadmin ziet alle tenants; iedereen anders alleen de tenants waar hij/zij lid
-// van is (nodig voor bv. "in welke tenant mag ik een doelenboom aanmaken" of het
-// eigen ledenbeheer-scherm van een tenant-admin). license_end_date gaat mee
-// zodat Tenantbeheer per tenant een kleurindicatie kan tonen (zie
-// TenantManagementPage.tsx licenseBorderColor).
+// Sysadmin ziet alle tenants (inclusief beëindigde — terminated_at gaat mee
+// zodat Tenantbeheer kan tonen sinds wanneer en de resterende bewaartermijn
+// kan afleiden, zie tenantRetention.ts); iedereen anders alleen de tenants
+// waar hij/zij lid van is (nodig voor bv. "in welke tenant mag ik een
+// doelenboom aanmaken" of het eigen ledenbeheer-scherm van een tenant-admin)
+// ÉN die niet beëindigd zijn — een beëindigde tenant is voor gewone leden
+// volledig onzichtbaar geworden (zie rbac.ts), dus expliciet uitgefilterd
+// i.p.v. te vertrouwen op de rbac-check die pas bij een specifieke doelenboom
+// zou toeslaan. license_end_date gaat mee zodat Tenantbeheer per tenant een
+// kleurindicatie kan tonen (zie TenantManagementPage.tsx licenseBorderColor).
 tenantsRouter.get('/', async (req: AuthedRequest, res) => {
   if (req.user!.isSysadmin) {
     const result = await pool.query(`select ${TENANT_SELECT_FIELDS}, ${LICENSE_END_DATE_SELECT} from tenants order by name`);
@@ -40,7 +46,7 @@ tenantsRouter.get('/', async (req: AuthedRequest, res) => {
     `select t.${TENANT_SELECT_FIELDS.split(', ').join(', t.')}, tu.role as my_role,
             to_char(t.license_end_date, 'YYYY-MM-DD') as license_end_date
      from tenants t join tenant_users tu on tu.tenant_id = t.id
-     where tu.user_id = $1
+     where tu.user_id = $1 and t.terminated_at is null
      order by t.name`,
     [req.user!.id]
   );
@@ -254,14 +260,22 @@ tenantsRouter.put('/:id', requireTenantRoleForTenantParam('admin', 'id'), async 
   }
 });
 
-// DELETE /api/tenants/:id — sysadmin-only. Cascade (db/init.sql) ruimt
-// tenant_users, doelenbomen en al hun inhoud (elementen/relaties/tags/
-// organisatieonderdelen/imports) van deze tenant automatisch mee op. Bewust
+// DELETE /api/tenants/:id — sysadmin-only. Beëindigt de tenant (was voorheen
+// een onmiddellijke harde delete): zet tenants.terminated_at, waarna de
+// tenant met al zijn doelenbomen/inhoud voor gewone leden meteen
+// ontoegankelijk/onzichtbaar wordt en voor een sysadmin alleen-lezen blijft
+// (zie rbac.ts) — TENANT_RETENTION_MONTHS (12) later ruimt de periodieke
+// sweep (tenantRetention.ts sweepTenantRetention, aangeroepen vanuit
+// index.ts) 'm dan alsnog definitief op, inclusief cascade naar tenant_users/
+// doelenbomen/elementen/relaties/tags/organisatieonderdelen/imports. Bewust
 // géén requireTenantRoleForTenantParam hier: een tenant-admin mag zijn eigen
-// tenant niet kunnen wegvagen, alleen een sysadmin.
-tenantsRouter.delete('/:id', requireSysadmin, async (req, res) => {
-  const result = await pool.query('delete from tenants where id = $1 returning id', [req.params.id]);
-  if (result.rowCount === 0) return res.status(404).json({ error: 'Tenant niet gevonden.' });
+// tenant niet kunnen beëindigen, alleen een sysadmin. Idempotent: een tenant
+// die al beëindigd is geeft gewoon een 404 (er is niets meer te beëindigen —
+// zie terminateTenant, die bewust niet opnieuw op een reeds gezette
+// terminated_at schrijft).
+tenantsRouter.delete('/:id', requireSysadmin, async (req: AuthedRequest, res) => {
+  const terminated = await terminateTenant(req.params.id, req.user!.id);
+  if (!terminated) return res.status(404).json({ error: 'Tenant niet gevonden (of al beëindigd).' });
   res.status(204).send();
 });
 

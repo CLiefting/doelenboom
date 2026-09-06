@@ -11,7 +11,7 @@ import { requireSysadmin } from '../rbac.js';
 export const auditLogRouter = Router();
 auditLogRouter.use(requireAuth, requireSysadmin);
 
-const LIST_QUERY = `
+const LIST_QUERY_BASE = `
   select
     a.id,
     a.event_type,
@@ -27,8 +27,42 @@ const LIST_QUERY = `
   left join users u on u.id = a.user_id
   left join tenants t on t.id = a.tenant_id
   left join doelenbomen d on d.id = a.doelenboom_id
-  order by a.created_at desc
 `;
+
+// Nederlandse labels voor de export — als Record i.p.v. de eerdere binaire
+// ternary (die was fout: alles wat geen 'doelenboom_view' was werd
+// 'Tenant-instellingen gewijzigd', óók mfa_verified/mfa_failed). Eén centrale
+// plek zodat een nieuw event_type hier niet vergeten kan worden zonder dat
+// de export het stilzwijgend verkeerd labelt.
+const EVENT_TYPE_LABELS: Record<string, string> = {
+  doelenboom_view: 'Boom bekeken',
+  tenant_settings_changed: 'Tenant-instellingen gewijzigd',
+  mfa_verified: 'MFA geverifieerd',
+  mfa_failed: 'MFA mislukt',
+  tenant_contact_changed: 'Contactpersoon gewijzigd',
+  tenant_customer_info_changed: 'Klantgegevens gewijzigd',
+  tenant_subscription_changed: 'Abonnement gewijzigd',
+};
+
+// Optioneel filteren op tenantId en/of eventType via query-string — voor de
+// klantbeheerpagina (wijzigingslog per klant) en een gerichter overzicht in
+// het algemene auditlogscherm. Zonder filters: ongewijzigd het volledige log.
+function buildFilteredQuery(query: Record<string, unknown>): { text: string; values: unknown[] } {
+  const conditions: string[] = [];
+  const values: unknown[] = [];
+  const tenantId = query.tenantId;
+  const eventType = query.eventType;
+  if (typeof tenantId === 'string' && tenantId.length > 0) {
+    values.push(tenantId);
+    conditions.push(`a.tenant_id = $${values.length}`);
+  }
+  if (typeof eventType === 'string' && eventType.length > 0) {
+    values.push(eventType);
+    conditions.push(`a.event_type = $${values.length}`);
+  }
+  const where = conditions.length > 0 ? `where ${conditions.join(' and ')}` : '';
+  return { text: `${LIST_QUERY_BASE} ${where} order by a.created_at desc`, values };
+}
 
 // Tenant- en doelenboomnamen zijn NIET uniek (twee tenants of twee bomen
 // kunnen best dezelfde naam hebben, zie het "twee tenants heten allebei
@@ -54,9 +88,10 @@ function mapRow(row: Record<string, unknown>) {
 }
 
 // Geen limit: dit is een volledig audit-overzicht, zelfde conventie als
-// GET /api/sessions hierboven.
-auditLogRouter.get('/', async (_req, res) => {
-  const result = await pool.query(LIST_QUERY);
+// GET /api/sessions hierboven. ?tenantId= en/of ?eventType= filteren desgewenst.
+auditLogRouter.get('/', async (req, res) => {
+  const { text, values } = buildFilteredQuery(req.query as Record<string, unknown>);
+  const result = await pool.query(text, values);
   res.json(result.rows.map(mapRow));
 });
 
@@ -76,8 +111,9 @@ auditLogRouter.get('/', async (_req, res) => {
 // als formule — geverifieerd door een testbestand te genereren en de ruwe
 // sheet-XML te inspecteren. Alleen een expliciet `{formula: ...}`-object zou
 // hier een formule opleveren, en dat gebeurt nergens in deze route.
-auditLogRouter.get('/export', async (_req, res) => {
-  const result = await pool.query(LIST_QUERY);
+auditLogRouter.get('/export', async (req, res) => {
+  const { text, values } = buildFilteredQuery(req.query as Record<string, unknown>);
+  const result = await pool.query(text, values);
   const rows = result.rows.map(mapRow);
 
   const workbook = new ExcelJS.Workbook();
@@ -95,7 +131,7 @@ auditLogRouter.get('/export', async (_req, res) => {
   for (const row of rows) {
     sheet.addRow({
       createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
-      eventType: row.eventType === 'doelenboom_view' ? 'Boom bekeken' : 'Tenant-instellingen gewijzigd',
+      eventType: EVENT_TYPE_LABELS[row.eventType as string] ?? (row.eventType as string),
       userEmail: row.userEmail ?? '(verwijderd account)',
       tenantName: row.tenantName ?? '(verwijderde tenant)',
       doelenboomName: row.doelenboomName ?? '',
