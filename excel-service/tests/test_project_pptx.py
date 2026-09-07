@@ -1,13 +1,13 @@
 """Tests voor app/project_pptx.py -- bouwt de Project-PowerPoint-rapportage
-voor één project en controleert de slide-structuur/inhoud door het resultaat
-weer in te laden met python-pptx zelf."""
+voor één project en controleert de (dynamische) slide-structuur/inhoud door
+het resultaat weer in te laden met python-pptx zelf."""
 from __future__ import annotations
 
 import io
 
 from pptx import Presentation
 
-from app.project_pptx import _fmt_date, build_project_pptx
+from app.project_pptx import _fmt_date, _month_range_label, _paginate, _truncate, build_project_pptx
 
 from .test_project_workbook import make_data, make_meta
 
@@ -24,6 +24,10 @@ def all_text(slide) -> str:
     return '\n'.join(parts)
 
 
+def full_text(prs: Presentation) -> str:
+    return '\n'.join(all_text(s) for s in prs.slides)
+
+
 class TestFmtDate:
     def test_geldige_datum(self):
         assert _fmt_date('2026-09-15') == '15 sep 2026'
@@ -36,13 +40,36 @@ class TestFmtDate:
         assert _fmt_date('onzin') == 'onzin'
 
 
-class TestBuildProjectPptx:
-    def test_bouwt_vier_slides(self):
-        content = build_project_pptx(make_data(), make_meta())
-        prs = Presentation(io.BytesIO(content))
-        assert len(prs.slides) == 4
+class TestTruncate:
+    def test_korte_tekst_blijft_ongewijzigd(self):
+        assert _truncate('kort', 10) == 'kort'
 
-    def test_slide_1_toont_projectnaam_code_en_status(self):
+    def test_lange_tekst_wordt_afgekapt_met_ellipsis(self):
+        result = _truncate('a' * 20, 10)
+        assert len(result) == 10
+        assert result.endswith('…')
+
+
+class TestPaginate:
+    def test_lege_lijst_geeft_lege_lijst(self):
+        assert _paginate([], 5) == []
+
+    def test_deelt_op_in_stukken(self):
+        assert _paginate(list(range(7)), 3) == [[0, 1, 2], [3, 4, 5], [6]]
+
+
+class TestMonthRangeLabel:
+    def test_zelfde_jaar(self):
+        from datetime import date
+        assert _month_range_label(date(2026, 9, 1), date(2026, 10, 1)) == 'Sep – Okt 2026'
+
+    def test_jaarwisseling(self):
+        from datetime import date
+        assert _month_range_label(date(2026, 12, 1), date(2027, 1, 1)) == 'Dec 2026 – Jan 2027'
+
+
+class TestBuildProjectPptx:
+    def test_slide_1_toont_projectnaam_code_status_en_tijdlijn(self):
         content = build_project_pptx(make_data(), make_meta())
         prs = Presentation(io.BytesIO(content))
         text = all_text(prs.slides[0])
@@ -50,41 +77,19 @@ class TestBuildProjectPptx:
         assert 'NP37' in text
         assert 'Groen' in text  # RAG-label, title-cased vanaf 'groen'
         assert 'actief' in text.lower()  # fixture levert lowercase 'actief'
-
-    def test_slide_2_toont_deliverable_tabel_en_business_value(self):
-        content = build_project_pptx(make_data(), make_meta())
-        prs = Presentation(io.BytesIO(content))
-        text = all_text(prs.slides[1])
-        # Adviesrapport is nog niet opgeleverd (geen werkelijkeDatum) en heeft
-        # dus een rij in de "eerstvolgende deliverables"-tabel; PID is al
-        # opgeleverd (werkelijkeDatum gezet) en hoort daar niet meer in thuis.
-        assert 'Adviesrapport' in text
-        assert 'PID' not in text
-        assert '1 van 3 opgeleverd' in text
-
-    def test_slide_2_toont_projecttijdlijn_met_markers_en_legenda(self):
-        # make_data()'s producten hebben allemaal een verwachte/werkelijke
-        # datum of deadline, dus hoort de tijdlijn (as + 'vandaag'-lijn +
-        # legenda) getekend te worden -- geteld via de vorm van de shapes
-        # (cirkel/ruit/driehoek), niet via tekst (die staat alleen in de
-        # legenda-labels en maandkoppen, niet los per marker).
-        from pptx.enum.shapes import MSO_SHAPE_TYPE
-
-        content = build_project_pptx(make_data(), make_meta())
-        prs = Presentation(io.BytesIO(content))
-        slide = prs.slides[1]
-        text = all_text(slide)
+        # Aandachtspunten (voorheen losse slide) staan nu ook op slide 1.
+        assert 'Op schema' in text
+        assert 'IGO' in text
+        assert 'HRB-S' in text
+        # Projecttijdlijn: make_data()'s producten hebben allemaal een
+        # verwachte/werkelijke datum of deadline, dus hoort de tijdlijn (as +
+        # 'vandaag'-lijn + legenda) getekend te worden.
         assert 'vandaag' in text
         assert 'Deliverable · verwacht' in text
-        assert 'Deliverable · opgeleverd' in text
         assert 'Mijlpaal · gehaald' in text
         assert 'Deadline' in text
-        assert 'Sep 2026' in text or 'Okt 2026' in text  # maandkoppen onder de as
 
-        auto_shapes = [s for s in slide.shapes if s.shape_type == MSO_SHAPE_TYPE.AUTO_SHAPE]
-        assert len(auto_shapes) > 5  # as-lijn, vandaag-lijn, markers, legenda-iconen
-
-    def test_geen_gedateerde_producten_geeft_geen_tijdlijn(self):
+    def test_geen_gedateerde_producten_geeft_geen_tijdlijn_op_slide_1(self):
         data = make_data()
         for p in data['products']:
             p['verwachteDatum'] = None
@@ -92,37 +97,27 @@ class TestBuildProjectPptx:
             p['deadline'] = None
         content = build_project_pptx(data, make_meta())
         prs = Presentation(io.BytesIO(content))
-        text = all_text(prs.slides[1])
+        text = all_text(prs.slides[0])
         assert 'vandaag' not in text
-        # De tabel moet dan gewoon op zijn oorspronkelijke, hogere positie
-        # blijven staan -- geen lege ruimte waar de tijdlijn had gestaan.
-        assert 'GO/NO-GO' in text
-
-    def test_slide_3_toont_activiteiten_in_de_juiste_categorie(self):
-        # make_data()'s activiteiten (2026-08-01 t/m 2026-08-11) liggen beide
-        # vóór meta.exportedAt (2026-08-27) -- horen dus in "recent afgerond"
-        # (binnen het venster van 30 dagen), niet in "loopt nu"/"gepland".
-        content = build_project_pptx(make_data(), make_meta())
-        prs = Presentation(io.BytesIO(content))
-        text = all_text(prs.slides[2])
-        assert 'Taak A' in text
-        assert 'Taak B' in text
-        assert 'RECENT AFGEROND' in text
-
-    def test_slide_4_toont_toelichting_tags_en_organisatieonderdelen(self):
-        content = build_project_pptx(make_data(), make_meta())
-        prs = Presentation(io.BytesIO(content))
-        text = all_text(prs.slides[3])
+        # Aandachtspunten moeten dan gewoon een stuk omhoog geschoven zijn,
+        # niet verdwijnen.
         assert 'Op schema' in text
-        assert 'IGO' in text
-        assert 'HRB-S' in text
 
-    def test_lege_data_crasht_niet(self):
-        content = build_project_pptx({}, {})
+    def test_openstaande_deliverables_tabel_bevat_alleen_niet_opgeleverde(self):
+        content = build_project_pptx(make_data(), make_meta())
         prs = Presentation(io.BytesIO(content))
-        assert len(prs.slides) == 4
+        text = all_text(prs.slides[1])
+        # Adviesrapport en GO/NO-GO zijn nog niet opgeleverd (geen
+        # werkelijkeDatum); PID is al opgeleverd en hoort hier niet meer bij.
+        assert 'Adviesrapport' in text
+        assert 'GO/NO-GO' in text
+        assert 'PID' not in text
+        assert 'Openstaande deliverables' in text
 
-    def test_veel_deliverables_wordt_afgekapt_met_teller(self):
+    def test_alle_openstaande_deliverables_worden_getoond_over_meerdere_slides(self):
+        # Vroeger werd dit afgekapt tot een top-6 met "+N meer" -- nu horen
+        # ALLE openstaande deliverables ergens in de presentatie te staan,
+        # desnoods over meerdere gepagineerde slides.
         data = make_data()
         data['products'] = [
             {
@@ -131,9 +126,94 @@ class TestBuildProjectPptx:
                 'businessValue': None, 'omschrijving': '', 'deadline': None, 'duur': None,
                 'duurEenheid': 'd', 'opmerking': '',
             }
-            for i in range(1, 11)
+            for i in range(1, 26)
         ]
         content = build_project_pptx(data, make_meta())
         prs = Presentation(io.BytesIO(content))
-        text = all_text(prs.slides[1])
-        assert '+ 4 andere' in text
+        text = full_text(prs)
+        for i in range(1, 26):
+            assert f'D{i}' in text
+        assert '+ ' not in text or 'andere' not in text  # geen "+N meer"-teller meer
+
+    def test_gepland_komende_2_maanden_slide_toont_alleen_deliverables_in_die_periode(self):
+        data = make_data()
+        meta = make_meta()
+        meta['exportedAt'] = '2026-08-27T19:00:00Z'  # 'vandaag' = 27 aug 2026
+        content = build_project_pptx(data, meta)
+        prs = Presentation(io.BytesIO(content))
+        # Adviesrapport (2026-08-29) valt in aug/sep 2026 -> hoort erbij.
+        # GO/NO-GO (2027-04-01) valt daar ver buiten -> hoort er niet bij.
+        gepland_slide = next(s for s in prs.slides if 'komende 2 maanden' in all_text(s))
+        text = all_text(gepland_slide)
+        assert 'Adviesrapport' in text
+        assert 'GO/NO-GO' not in text
+
+    def test_deliverables_als_tiles_toont_badges_en_scheiding_open_opgeleverd(self):
+        content = build_project_pptx(make_data(), make_meta())
+        prs = Presentation(io.BytesIO(content))
+        tile_slides = [s for s in prs.slides if 'Deliverables' in all_text(s) and 'gereed' in all_text(s)]
+        assert tile_slides
+        combined = '\n'.join(all_text(s) for s in tile_slides)
+        assert 'Adviesrapport' in combined
+        assert 'PID' in combined
+        assert 'gereed' in combined  # voortgangspercentage op de tile
+        assert 'Opgeleverd / gehaald' in combined
+
+    def test_activiteiten_gantt_toont_ook_deliverables_met_duur_en_afhankelijkheid(self):
+        # make_data(): 'Adviesrapport' heeft een ingevulde duur (10 maanden)
+        # -> hoort als doorlooptijd-balkje op de Activiteiten-Gantt te staan,
+        # net als op het scherm (activityGanttHtml in tree.html). 'PID' en
+        # 'GO/NO-GO' hebben geen duur, maar zitten wel in een
+        # productDependency -> horen als "lite" rij met afhankelijkheid-
+        # badge te verschijnen, ook al hebben ze zelf geen balkje.
+        content = build_project_pptx(make_data(), make_meta())
+        prs = Presentation(io.BytesIO(content))
+        gantt_slides = [s for s in prs.slides if all_text(s).startswith('PLANNING\nActiviteiten')]
+        text = '\n'.join(all_text(s) for s in gantt_slides)
+        assert 'Adviesrapport' in text
+        assert 'PID' in text
+        assert 'GO/NO-GO' in text
+        assert 'deliverable(s) met doorlooptijd/afhankelijkheid' in text
+        # Eén van beide badge-varianten moet zijn getekend (afhankelijk van
+        # of de testdata toevallig een planningsconflict oplevert of niet).
+        assert ('🔗' in text) or ('⚠' in text)
+
+    def test_activiteiten_gantt_toont_alle_activiteiten_en_vandaag_lijn(self):
+        content = build_project_pptx(make_data(), make_meta())
+        prs = Presentation(io.BytesIO(content))
+        gantt_slide = next(s for s in prs.slides if all_text(s).startswith('PLANNING\nActiviteiten'))
+        text = all_text(gantt_slide)
+        assert 'Taak A' in text
+        assert 'Taak B' in text
+        assert 'vandaag' in text
+
+    def test_veel_activiteiten_pagineert_over_meerdere_gantt_slides(self):
+        data = make_data()
+        data['activities'] = [
+            {
+                'id': 100 + i, 'name': f'Taak {i}', 'startDate': f'2026-{(i % 12) + 1:02d}-01',
+                'endDate': f'2026-{(i % 12) + 1:02d}-10', 'omschrijving': '', 'isMilestone': False, 'isSummary': False,
+            }
+            for i in range(1, 25)
+        ]
+        content = build_project_pptx(data, make_meta())
+        prs = Presentation(io.BytesIO(content))
+        gantt_slides = [s for s in prs.slides if all_text(s).startswith('PLANNING\nActiviteiten')]
+        assert len(gantt_slides) > 1
+        combined = '\n'.join(all_text(s) for s in gantt_slides)
+        for i in range(1, 25):
+            assert f'Taak {i}' in combined
+
+    def test_lege_data_crasht_niet(self):
+        content = build_project_pptx({}, {})
+        prs = Presentation(io.BytesIO(content))
+        assert len(prs.slides) >= 1
+        assert 'Project' in all_text(prs.slides[0])
+
+    def test_geen_deliverables_en_geen_activiteiten_toont_lege_staat_meldingen(self):
+        data = {'project': make_data()['project'], 'products': [], 'activities': []}
+        content = build_project_pptx(data, make_meta())
+        prs = Presentation(io.BytesIO(content))
+        text = full_text(prs)
+        assert 'Nog geen deliverables vastgelegd voor dit project.' in text
+        assert 'Nog geen activiteiten of deliverables met een doorlooptijd vastgelegd voor dit project.' in text
