@@ -159,6 +159,25 @@ class TestBuildProjectPptx:
         assert 'gereed' in combined  # voortgangspercentage op de tile
         assert 'Opgeleverd / gehaald' in combined
 
+    def test_activiteiten_gantt_toont_ook_deliverables_met_duur_en_afhankelijkheid(self):
+        # make_data(): 'Adviesrapport' heeft een ingevulde duur (10 maanden)
+        # -> hoort als doorlooptijd-balkje op de Activiteiten-Gantt te staan,
+        # net als op het scherm (activityGanttHtml in tree.html). 'PID' en
+        # 'GO/NO-GO' hebben geen duur, maar zitten wel in een
+        # productDependency -> horen als "lite" rij met afhankelijkheid-
+        # badge te verschijnen, ook al hebben ze zelf geen balkje.
+        content = build_project_pptx(make_data(), make_meta())
+        prs = Presentation(io.BytesIO(content))
+        gantt_slides = [s for s in prs.slides if all_text(s).startswith('PLANNING\nActiviteiten')]
+        text = '\n'.join(all_text(s) for s in gantt_slides)
+        assert 'Adviesrapport' in text
+        assert 'PID' in text
+        assert 'GO/NO-GO' in text
+        assert 'deliverable(s) met doorlooptijd/afhankelijkheid' in text
+        # Eén van beide badge-varianten moet zijn getekend (afhankelijk van
+        # of de testdata toevallig een planningsconflict oplevert of niet).
+        assert ('🔗' in text) or ('⚠' in text)
+
     def test_activiteiten_gantt_toont_alle_activiteiten_en_vandaag_lijn(self):
         content = build_project_pptx(make_data(), make_meta())
         prs = Presentation(io.BytesIO(content))
@@ -197,4 +216,4 @@ class TestBuildProjectPptx:
         prs = Presentation(io.BytesIO(content))
         text = full_text(prs)
         assert 'Nog geen deliverables vastgelegd voor dit project.' in text
-        assert 'Nog geen activiteiten vastgelegd voor dit project.' in text
+        assert 'Nog geen activiteiten of deliverables met een doorlooptijd vastgelegd voor dit project.' in text

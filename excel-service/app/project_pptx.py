@@ -37,6 +37,7 @@ from typing import Any
 
 from pptx import Presentation
 from pptx.dml.color import RGBColor
+from pptx.enum.dml import MSO_PATTERN_TYPE
 from pptx.enum.shapes import MSO_SHAPE
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.util import Emu, Inches, Pt
@@ -654,6 +655,14 @@ LABEL_COL_W = Inches(2.6)
 GANTT_DONE_COLOR = RGBColor(0xA6, 0xAD, 0xB8)
 GANTT_ACTIVE_COLOR = RGBColor(0x00, 0x28, 0x55)
 GANTT_FUTURE_COLOR = RGBColor(0xB7, 0xC6, 0xE6)
+GANTT_DEP_COLOR = RGBColor(0x2F, 0x55, 0x97)  # zelfde blauw als het schakel-icoontje in tree.html
+GANTT_DEP_VIOLATED_COLOR = RGBColor(0xDC, 0x35, 0x45)
+
+# Zelfde omrekening/labels als DUUR_EENHEID_DAYS/-LABELS in tree.html, nodig
+# om een product met een ingevulde duur als "doorlooptijd"-balkje te tonen
+# (_product_bar_info hieronder).
+DUUR_EENHEID_DAYS = {'d': 1, 'w': 7, 'm': 30, 'y': 365}
+DUUR_EENHEID_LABELS = {'d': 'dagen', 'w': 'weken', 'm': 'maanden', 'y': 'jaar'}
 
 
 def _activity_dates(activities: list[dict[str, Any]]) -> list[date]:
@@ -668,19 +677,189 @@ def _activity_dates(activities: list[dict[str, Any]]) -> list[date]:
     return dates
 
 
+def _gantt_axis_bounds(products: list[dict[str, Any]], real_activities: list[dict[str, Any]], today: date) -> tuple[bool, list[date]]:
+    """Zelfde voorrang als activityGanttHtml in tree.html: als het project
+    gedateerde producten heeft, is de projecttijdlijn-as (zelfde as als
+    slide 1) LEIDEND, zodat beide vergelijkbaar blijven -- alleen als geen
+    enkel product een bruikbare datum heeft valt dit terug op het eigen
+    bereik van de activiteiten."""
+    markers = _build_timeline_markers(products)
+    if markers:
+        return _axis_bounds([m['t'] for m in markers], today)
+    return _axis_bounds(_activity_dates(real_activities), today)
+
+
 def _gantt_x_for(d: date, axis_start: date, span_days: int, inner_left: int, inner_w: int) -> int:
+    # Geclipt binnen het zichtbare as-bereik -- zelfde aanpak als pctFor in
+    # tree.html: een balkje/marker die (deels) buiten de as valt komt tegen
+    # de rand te staan i.p.v. de as op te rekken. Nodig omdat een product-
+    # balkje (_product_bar_info) een AFGELEIDE startdatum kan hebben die ver
+    # vóór het as-bereik ligt (bv. een lange 'duur' terwijl de as zelf op de
+    # opleverdata/deadlines is gebaseerd) -- zonder clip zou zo'n balkje tot
+    # ver buiten/over de labelkolom heen getekend worden.
     frac = (d - axis_start).days / span_days
+    frac = min(max(frac, 0.0), 1.0)
     return int(inner_left + inner_w * frac)
 
 
-def _gantt_row_color(a: dict[str, Any], today: date) -> RGBColor:
-    start = _parse_iso_date(a.get('startDate'))
-    end = _parse_iso_date(a.get('endDate')) or start
+def _gantt_status_color(start: date | None, end: date | None, today: date) -> RGBColor:
     if end and end < today:
         return GANTT_DONE_COLOR
     if start and start <= today and (end is None or end >= today):
         return GANTT_ACTIVE_COLOR
     return GANTT_FUTURE_COLOR
+
+
+def _gantt_row_color(a: dict[str, Any], today: date) -> RGBColor:
+    start = _parse_iso_date(a.get('startDate'))
+    end = _parse_iso_date(a.get('endDate')) or start
+    return _gantt_status_color(start, end, today)
+
+
+# ---- Deliverables/mijlpalen mét een ingevulde duur (of een afhankelijkheid)
+# op de Activiteiten-Gantt -- zelfde opzet als productDeliverableBarInfo/
+# productDependencyViolated/deliverableRowsHtml in tree.html: op het scherm
+# staan deze producten OOK in de "Activiteiten"-sectie (als gestreept
+# balkje, met de afgeleide doorlooptijd en de afhankelijkheid-relaties),
+# dus horen ze ook op deze slide, niet alleen de losse `activities`-rijen.
+
+def _product_bar_info(p: dict[str, Any]) -> dict[str, Any] | None:
+    if not p.get('duur'):
+        return None
+    end = _parse_iso_date(p.get('werkelijkeDatum') or p.get('verwachteDatum'))
+    if end is None:
+        return None
+    duur = _num(p.get('duur')) or 0
+    days = duur * DUUR_EENHEID_DAYS.get(p.get('duurEenheid'), 1)
+    if not days > 0:
+        return None
+    eenheid = p.get('duurEenheid')
+    return {
+        'start': end - timedelta(days=days),
+        'end': end,
+        'type': 'mijlpaal' if p.get('type') == 'mijlpaal' else 'deliverable',
+        'verwacht': _parse_iso_date(p.get('verwachteDatum')),
+        'werkelijk': _parse_iso_date(p.get('werkelijkeDatum')),
+        'deadline': _parse_iso_date(p.get('deadline')),
+        'duration_label': f"{p.get('duur')} {DUUR_EENHEID_LABELS.get(eenheid, eenheid or '')}",
+    }
+
+
+def _product_single_point(p: dict[str, Any]) -> date | None:
+    return _parse_iso_date(p.get('werkelijkeDatum') or p.get('verwachteDatum'))
+
+
+def _product_dependency_violated(pred: dict[str, Any] | None, succ: dict[str, Any] | None, dep: dict[str, Any]) -> bool | None:
+    """Zelfde toetsing als productDependencyViolated() in tree.html: de
+    opvolger mag niet beginnen vóór het einde van de voorganger + de
+    vertraging van de afhankelijkheid."""
+    if not pred or not succ:
+        return None
+    pred_end = _product_single_point(pred)
+    if pred_end is None:
+        return None
+    lag_days = (dep.get('lagAmount') or 0) * DUUR_EENHEID_DAYS.get(dep.get('lagEenheid'), 1)
+    required = pred_end + timedelta(days=lag_days)
+    succ_info = _product_bar_info(succ)
+    succ_start = succ_info['start'] if succ_info else _product_single_point(succ)
+    if succ_start is None:
+        return None
+    return succ_start < required
+
+
+def _annotate_product_dependencies(product_dependencies: list[dict[str, Any]], products: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Voegt 'violated' toe aan elke productafhankelijkheid (None als niet te
+    bepalen) -- eenmalig berekend, gedeeld door zowel de rij-badges
+    (_build_product_dep_index) als de pijl-kleur bij het tekenen."""
+    products_by_id = {p.get('id'): p for p in products}
+    result = []
+    for d in product_dependencies or []:
+        pred = products_by_id.get(d.get('predecessorId'))
+        succ = products_by_id.get(d.get('successorId'))
+        result.append({**d, 'violated': _product_dependency_violated(pred, succ, d)})
+    return result
+
+
+def _build_product_dep_index(annotated_product_dependencies: list[dict[str, Any]]) -> dict[Any, list[dict[str, Any]]]:
+    index: dict[Any, list[dict[str, Any]]] = {}
+    for d in annotated_product_dependencies:
+        entry = {'violated': d.get('violated')}
+        index.setdefault(d.get('predecessorId'), []).append(entry)
+        index.setdefault(d.get('successorId'), []).append(entry)
+    return index
+
+
+def _build_gantt_rows(
+    real_activities: list[dict[str, Any]], products: list[dict[str, Any]], annotated_product_dependencies: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Combineert echte activiteiten en deliverables/mijlpalen (mét een
+    ingevulde duur, of -- zonder duur -- mét een afhankelijkheid) tot één
+    gezamenlijke rijenlijst, zelfde opzet als activityGanttHtml in
+    tree.html (rowsHtml gevolgd door deliverableRowsHtml)."""
+    dep_index = _build_product_dep_index(annotated_product_dependencies)
+    rows: list[dict[str, Any]] = [{'kind': 'activity', 'ref': a} for a in real_activities]
+    for p in products:
+        info = _product_bar_info(p)
+        dep_entries = dep_index.get(p.get('id'))
+        if not info and not dep_entries:
+            continue
+        rows.append({'kind': 'product', 'ref': p, 'info': info, 'dep_entries': dep_entries})
+    return rows
+
+
+def _add_point_marker(slide, cx: int, cy: int, size: int, mso, *, filled: bool, color: RGBColor = TIMELINE_MARKER_COLOR):
+    half = size // 2
+    shape = slide.shapes.add_shape(mso, cx - half, cy - half, size, size)
+    shape.shadow.inherit = False
+    shape.line.color.rgb = color
+    shape.line.width = Pt(1.25)
+    shape.fill.solid()
+    shape.fill.fore_color.rgb = color if filled else WHITE
+    return shape
+
+
+def _add_deadline_marker(slide, cx: int, cy: int, size: int):
+    half = size // 2
+    shape = slide.shapes.add_shape(MSO_SHAPE.ISOSCELES_TRIANGLE, cx - half, cy - half, size, size)
+    shape.rotation = 180
+    shape.shadow.inherit = False
+    shape.fill.solid()
+    shape.fill.fore_color.rgb = TIMELINE_DEADLINE_COLOR
+    shape.line.color.rgb = TIMELINE_DEADLINE_COLOR
+    return shape
+
+
+def _draw_gantt_dependency(slide, layout: dict[Any, dict[str, int]], pred_key, succ_key, dep_type: str, *, violated: bool):
+    """Tekent één afhankelijkheid als "elleboog"-pijl (twee horizontale
+    segmenten + één verticale, plus pijlpunt) van het ankerpunt van de
+    voorganger naar dat van de opvolger -- zelfde opzet als
+    dependencyArrowsHtml in tree.html. Ontbreekt de voorganger en/of de
+    opvolger in `layout` (bv. omdat die rij op een andere Gantt-pagina
+    staat, of geen bruikbare datum had), dan wordt de pijl stilzwijgend
+    overgeslagen -- zelfde aanpak als op het scherm."""
+    pred = layout.get(pred_key)
+    succ = layout.get(succ_key)
+    if not pred or not succ:
+        return
+    color = GANTT_DEP_VIOLATED_COLOR if violated else GANTT_DEP_COLOR
+    pred_x = pred['left'] if dep_type in ('SS', 'SF') else pred['right']
+    succ_x = succ['right'] if dep_type in ('FF', 'SF') else succ['left']
+    y1, y2 = pred['mid_y'], succ['mid_y']
+    stub = int(Inches(0.12))
+    direction = 1 if succ_x >= pred_x else -1
+    mid_x = pred_x + stub * direction
+    thickness = int(Pt(1.5))
+    half_t = thickness // 2
+    _add_rect(slide, min(pred_x, mid_x), y1 - half_t, max(abs(mid_x - pred_x), thickness), thickness, color)
+    _add_rect(slide, mid_x - half_t, min(y1, y2), thickness, max(abs(y2 - y1), thickness), color)
+    _add_rect(slide, min(mid_x, succ_x), y2 - half_t, max(abs(succ_x - mid_x), thickness), thickness, color)
+    arrow_size = int(Inches(0.09))
+    arrow = slide.shapes.add_shape(MSO_SHAPE.ISOSCELES_TRIANGLE, succ_x - arrow_size // 2, y2 - arrow_size // 2, arrow_size, arrow_size)
+    arrow.rotation = 90 if succ_x >= mid_x else -90
+    arrow.shadow.inherit = False
+    arrow.fill.solid()
+    arrow.fill.fore_color.rgb = color
+    arrow.line.fill.background()
 
 
 def _add_gantt_axis(slide, top, bottom, bounds: list[date], quarterly: bool, today: date, inner_left: int, inner_w: int, axis_start: date, span_days: int):
@@ -707,7 +886,9 @@ def _add_gantt_axis(slide, top, bottom, bounds: list[date], quarterly: bool, tod
 def _slide_activiteiten_gantt(
     prs: Presentation, project: dict[str, Any], meta: dict[str, Any], page: int,
     rows_page: list[dict[str, Any]], bounds: list[date], quarterly: bool,
-    axis_start: date, span_days: int, today: date, subtitle: str | None,
+    axis_start: date, span_days: int, today: date,
+    activity_dependencies: list[dict[str, Any]], annotated_product_dependencies: list[dict[str, Any]],
+    subtitle: str | None,
 ):
     slide = _blank_slide(prs)
     _slide_header(slide, 'Planning', 'Activiteiten')
@@ -733,33 +914,112 @@ def _slide_activiteiten_gantt(
     chart_bottom = int(rows_top) + row_height * len(rows_page)
     _add_gantt_axis(slide, axis_top, chart_bottom, bounds, quarterly, today, inner_left, inner_w, axis_start, span_days)
 
-    for i, a in enumerate(rows_page):
-        row_top = rows_top + i * row_height
-        label = ('◆ ' if a.get('isMilestone') else '') + _truncate(a.get('name') or '', 40)
-        _add_text(
-            slide, MARGIN, row_top, LABEL_COL_W - Inches(0.15), row_height, label,
-            size=10, color=DARK, anchor=MSO_ANCHOR.MIDDLE,
-        )
+    # dbId (met 'a'/'p'-prefix, net als layoutByDbId in tree.html) ->
+    # ankerpunt voor de afhankelijkheid-pijlen hieronder.
+    layout: dict[Any, dict[str, int]] = {}
+    marker_size = int(Inches(0.13))
 
-        color = _gantt_row_color(a, today)
-        start = _parse_iso_date(a.get('startDate')) or today
-        end = _parse_iso_date(a.get('endDate')) or start
+    for i, row in enumerate(rows_page):
+        row_top = rows_top + i * row_height
         bar_h = row_height // 2
         bar_top = row_top + (row_height - bar_h) // 2
+        mid_y = bar_top + bar_h // 2
 
-        if a.get('isMilestone'):
-            cx = _gantt_x_for(start, axis_start, span_days, inner_left, inner_w)
-            half = bar_h // 2
-            shape = slide.shapes.add_shape(MSO_SHAPE.DIAMOND, cx - half, bar_top, bar_h, bar_h)
-            shape.shadow.inherit = False
-            shape.fill.solid()
-            shape.fill.fore_color.rgb = color
-            shape.line.fill.background()
-        else:
-            x0 = _gantt_x_for(start, axis_start, span_days, inner_left, inner_w)
-            x1 = _gantt_x_for(end, axis_start, span_days, inner_left, inner_w)
+        if row['kind'] == 'activity':
+            a = row['ref']
+            label = ('◆ ' if a.get('isMilestone') else '') + _truncate(a.get('name') or '', 40)
+            _add_text(
+                slide, MARGIN, row_top, LABEL_COL_W - Inches(0.15), row_height, label,
+                size=10, color=DARK, anchor=MSO_ANCHOR.MIDDLE,
+            )
+            color = _gantt_row_color(a, today)
+            start = _parse_iso_date(a.get('startDate')) or today
+            end = _parse_iso_date(a.get('endDate')) or start
+            if a.get('isMilestone'):
+                cx = _gantt_x_for(start, axis_start, span_days, inner_left, inner_w)
+                half = bar_h // 2
+                shape = slide.shapes.add_shape(MSO_SHAPE.DIAMOND, cx - half, bar_top, bar_h, bar_h)
+                shape.shadow.inherit = False
+                shape.fill.solid()
+                shape.fill.fore_color.rgb = color
+                shape.line.fill.background()
+                layout[('a', a.get('id'))] = {'left': cx, 'right': cx, 'mid_y': mid_y}
+            else:
+                x0 = _gantt_x_for(start, axis_start, span_days, inner_left, inner_w)
+                x1 = _gantt_x_for(end, axis_start, span_days, inner_left, inner_w)
+                width = max(x1 - x0, int(Pt(3)))
+                _add_rect(slide, x0, bar_top, width, bar_h, color)
+                layout[('a', a.get('id'))] = {'left': x0, 'right': x1, 'mid_y': mid_y}
+            continue
+
+        # kind == 'product' -- deliverable/mijlpaal mét duur (balkje) en/of
+        # een afhankelijkheid (badge + evt. puur een puntmarker); zie
+        # _build_gantt_rows/productDeliverableBarInfo hierboven.
+        p = row['ref']
+        info = row['info']
+        dep_entries = row['dep_entries']
+        any_violated = bool(dep_entries) and any(e['violated'] for e in dep_entries)
+        badge = '⚠ ' if any_violated else ('🔗 ' if dep_entries else '')
+        is_mijlpaal = (info['type'] == 'mijlpaal') if info else (p.get('type') == 'mijlpaal')
+        label = ('◆ ' if is_mijlpaal else '') + badge + _truncate(p.get('name') or '', 34)
+        _add_text(
+            slide, MARGIN, row_top, LABEL_COL_W - Inches(0.15), row_height, label,
+            size=10, bold=bool(dep_entries), color=(GANTT_DEP_VIOLATED_COLOR if any_violated else DARK),
+            anchor=MSO_ANCHOR.MIDDLE,
+        )
+
+        if info:
+            x0 = _gantt_x_for(info['start'], axis_start, span_days, inner_left, inner_w)
+            x1 = _gantt_x_for(info['end'], axis_start, span_days, inner_left, inner_w)
             width = max(x1 - x0, int(Pt(3)))
-            _add_rect(slide, x0, bar_top, width, bar_h, color)
+            color = _gantt_status_color(info['start'], info['end'], today)
+            # Gestreept (i.p.v. effen) i.p.v. het effen navy van een echte
+            # activiteit -- zelfde onderscheid als .activity-deliverable-bar
+            # t.o.v. .activity-bar in tree.html: dit is een AFGELEIDE
+            # doorlooptijd (uit 'duur'), geen eigen geplande periode.
+            bar = _add_rect(slide, x0, bar_top, width, bar_h, None)
+            bar.fill.patterned()
+            bar.fill.pattern = MSO_PATTERN_TYPE.LIGHT_DOWNWARD_DIAGONAL
+            bar.fill.fore_color.rgb = color
+            bar.fill.back_color.rgb = WHITE
+            if info['werkelijk'] is not None:
+                cx = _gantt_x_for(info['werkelijk'], axis_start, span_days, inner_left, inner_w)
+                _add_point_marker(slide, cx, mid_y, marker_size, MSO_SHAPE.DIAMOND if is_mijlpaal else MSO_SHAPE.OVAL, filled=True)
+            if info['verwacht'] is not None:
+                cx = _gantt_x_for(info['verwacht'], axis_start, span_days, inner_left, inner_w)
+                _add_point_marker(slide, cx, mid_y, marker_size, MSO_SHAPE.DIAMOND if is_mijlpaal else MSO_SHAPE.OVAL, filled=False)
+            if info['deadline'] is not None:
+                cx = _gantt_x_for(info['deadline'], axis_start, span_days, inner_left, inner_w)
+                _add_deadline_marker(slide, cx, mid_y, marker_size)
+            layout[('p', p.get('id'))] = {'left': x0, 'right': x1, 'mid_y': mid_y}
+        else:
+            point = _product_single_point(p)
+            if point is not None:
+                cx = _gantt_x_for(point, axis_start, span_days, inner_left, inner_w)
+                _add_point_marker(
+                    slide, cx, mid_y, marker_size, MSO_SHAPE.DIAMOND if is_mijlpaal else MSO_SHAPE.OVAL,
+                    filled=bool(p.get('werkelijkeDatum')),
+                )
+                layout[('p', p.get('id'))] = {'left': cx, 'right': cx, 'mid_y': mid_y}
+            # Geen enkele bruikbare datum: rij blijft zonder ankerpunt --
+            # een pijl ernaartoe wordt hieronder stilzwijgend overgeslagen,
+            # zelfde aanpak als tree.html (zie _draw_gantt_dependency).
+
+    # Afhankelijkheid-pijlen -- alleen tussen twee ankers die BEIDEN op
+    # deze pagina staan: een relatie die een andere Gantt-pagina overspant
+    # kan in een statische PPTX niet als doorlopende pijl getekend worden,
+    # dus die wordt hier stilzwijgend overgeslagen (zelfde aanpak als
+    # tree.html al hanteert voor een ontbrekend ankerpunt).
+    for dep in activity_dependencies or []:
+        _draw_gantt_dependency(
+            slide, layout, ('a', dep.get('predecessorId')), ('a', dep.get('successorId')),
+            dep.get('type') or 'FS', violated=False,
+        )
+    for dep in annotated_product_dependencies or []:
+        _draw_gantt_dependency(
+            slide, layout, ('p', dep.get('predecessorId')), ('p', dep.get('successorId')),
+            dep.get('type') or 'FS', violated=bool(dep.get('violated')),
+        )
 
     _footer(slide, project, meta, page)
     return slide
@@ -769,6 +1029,8 @@ def build_project_pptx(data: dict[str, Any], meta: dict[str, Any]) -> bytes:
     project = data.get('project') or {}
     products = data.get('products') or []
     activities = data.get('activities') or []
+    activity_dependencies = data.get('activityDependencies') or []
+    product_dependencies = data.get('productDependencies') or []
 
     prs = _new_presentation()
     page = 1
@@ -855,23 +1117,35 @@ def build_project_pptx(data: dict[str, Any], meta: dict[str, Any]) -> bytes:
             _slide_tiles(prs, project, meta, page, kicker='Deliverables', title='Deliverables', subtitle=subtitle, items=chunk, today_iso=today_iso)
             page += 1
 
-    # Laatste slide(s): activiteiten als Gantt-tijdsbalken
+    # Laatste slide(s): activiteiten als Gantt-tijdsbalken -- inclusief
+    # deliverables/mijlpalen met een ingevulde duur (doorlooptijd) en de
+    # afhankelijkheid-relaties, want die staan op het scherm ook in de
+    # "Activiteiten"-Gantt (zie _build_gantt_rows hierboven).
     real_activities = [a for a in activities if not a.get('isSummary')]
     real_activities.sort(key=lambda a: (a.get('startDate') or '', a.get('endDate') or ''))
-    if real_activities:
-        quarterly, bounds = _axis_bounds(_activity_dates(real_activities), today_date)
+    annotated_product_dependencies = _annotate_product_dependencies(product_dependencies, products)
+    gantt_rows = _build_gantt_rows(real_activities, products, annotated_product_dependencies)
+    if gantt_rows:
+        quarterly, bounds = _gantt_axis_bounds(products, real_activities, today_date)
         axis_start, axis_end = bounds[0], bounds[-1]
         span_days = (axis_end - axis_start).days or 1
-        activity_pages = _paginate(real_activities, GANTT_ROWS_PER_SLIDE)
-        n = len(activity_pages)
-        for i, chunk in enumerate(activity_pages):
-            subtitle = f'{len(real_activities)} activiteit(en)' + (f' — pagina {i + 1}/{n}' if n > 1 else '')
-            _slide_activiteiten_gantt(prs, project, meta, page, chunk, bounds, quarterly, axis_start, span_days, today_date, subtitle)
+        gantt_pages = _paginate(gantt_rows, GANTT_ROWS_PER_SLIDE)
+        n = len(gantt_pages)
+        n_products_with_row = sum(1 for r in gantt_rows if r['kind'] == 'product')
+        for i, chunk in enumerate(gantt_pages):
+            bits = [f'{len(real_activities)} activiteit(en)']
+            if n_products_with_row:
+                bits.append(f'{n_products_with_row} deliverable(s) met doorlooptijd/afhankelijkheid')
+            subtitle = ' · '.join(bits) + (f' — pagina {i + 1}/{n}' if n > 1 else '')
+            _slide_activiteiten_gantt(
+                prs, project, meta, page, chunk, bounds, quarterly, axis_start, span_days, today_date,
+                activity_dependencies, annotated_product_dependencies, subtitle,
+            )
             page += 1
     else:
         _slide_empty_list(
             prs, project, meta, page, kicker='Planning', title='Activiteiten',
-            message='Nog geen activiteiten vastgelegd voor dit project.',
+            message='Nog geen activiteiten of deliverables met een doorlooptijd vastgelegd voor dit project.',
         )
         page += 1
 
