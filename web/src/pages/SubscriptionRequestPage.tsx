@@ -29,6 +29,17 @@ export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBac
   const [quote, setQuote] = useState<PriceQuote | null>(null);
   const selectedTier = tiers?.find((t) => t.id === tierId) ?? null;
 
+  // Wissel je van periode terwijl een tier geselecteerd staat die in de
+  // NIEUWE periode geen prijs heeft (bv. Single-Use: jaar-only) — zonder
+  // deze guard bleef die tier "geselecteerd" met een lege prijs, en kon het
+  // formulier alsnog worden ingediend voor een niet-bestaande prijs.
+  useEffect(() => {
+    if (selectedTier && selectedTier.currentPriceEur[billingPeriod] == null) {
+      setTierId(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [billingPeriod]);
+
   useEffect(() => {
     if (tierId == null) {
       setQuote(null);
@@ -97,6 +108,9 @@ export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBac
     e.preventDefault();
     setError(null);
     if (tierId == null) return setError('Kies een abonnement.');
+    if (selectedTier?.currentPriceEur[billingPeriod] == null) {
+      return setError(`Dit abonnement is niet ${PERIOD_LABEL[billingPeriod]}lijks beschikbaar — kies een andere periode of een ander abonnement.`);
+    }
     if (password.length < 8) return setError('Wachtwoord moet minstens 8 tekens zijn.');
     if (password !== confirmPassword) return setError('Wachtwoord en bevestiging komen niet overeen.');
 
@@ -123,15 +137,28 @@ export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBac
   function renderTierCard(t: PublicTier) {
     const accent = tierAccent(t.name);
     const selected = tierId === t.id;
+    const priceStr = t.currentPriceEur[billingPeriod];
+    // Een tier zonder prijs voor de op dit moment gekozen periode (bv.
+    // Single-Use/Evaluatie: bewust jaar-only, zie
+    // doelenboom_licentiemodel.md §9.2 v3) is hier niet aanvraagbaar — zonder
+    // deze guard bleef de kaart gewoon klikbaar met een lege plek waar de
+    // prijs hoort te staan, en ging het formulier bij indienen gewoon door
+    // zonder enige prijs aan het contract te hangen (zie ook de bijbehorende
+    // backend-validatie in createSubscriptionRequest).
+    const available = priceStr != null;
+    const otherPeriod: BillingPeriod = billingPeriod === 'jaar' ? 'maand' : 'jaar';
     return (
       <button
         type="button"
         key={t.id}
-        onClick={() => setTierId(t.id)}
+        disabled={!available}
+        onClick={() => available && setTierId(t.id)}
+        title={available ? undefined : `Dit abonnement is alleen ${PERIOD_LABEL[otherPeriod]}lijks beschikbaar.`}
         style={{
           ...styles.tierCard,
           ...(accent ? { borderTopColor: accent.border, background: selected ? styles.tierCardSelected.background : accent.bg } : {}),
           ...(selected ? styles.tierCardSelected : {}),
+          ...(available ? {} : styles.tierCardDisabled),
         }}
       >
         <div style={{ ...styles.tierName, ...(accent ? { color: accent.text } : {}) }}>{t.name}</div>
@@ -152,9 +179,7 @@ export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBac
             )}
           </div>
         )}
-        {(() => {
-          const priceStr = t.currentPriceEur[billingPeriod];
-          if (priceStr == null) return null;
+        {available ? (() => {
           const price = Number(priceStr);
           return price === 0 ? (
             <div style={{ ...styles.tierPriceFree, ...(accent ? { color: accent.text } : {}) }}>Gratis</div>
@@ -166,7 +191,9 @@ export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBac
               </div>
             </>
           );
-        })()}
+        })() : (
+          <div style={styles.tierUnavailableNote}>Alleen {PERIOD_LABEL[otherPeriod]}lijks beschikbaar</div>
+        )}
       </button>
     );
   }
@@ -453,6 +480,14 @@ const styles: Record<string, React.CSSProperties> = {
   // verkoopargument, dat mag zichtbaar zwaarder wegen dan een gewoon bedrag.
   tierPriceFree: { fontSize: 16, fontWeight: 700, color: '#2F9E44', marginTop: 4 },
   tierPriceBtw: { fontSize: 10.5, color: '#9aa0a8' },
+  // Voor een tier zonder prijs in de op dit moment gekozen periode (bv.
+  // Single-Use/Evaluatie: bewust alleen jaarlijks, zie
+  // doelenboom_licentiemodel.md §9.2 v3) — de kaart blijft zichtbaar (welke
+  // limieten hij heeft blijft relevant), maar wordt niet-selecteerbaar en
+  // grijs, met een expliciete reden i.p.v. gewoon een lege plek waar de
+  // prijs zou staan.
+  tierCardDisabled: { cursor: 'not-allowed', opacity: 0.55, filter: 'grayscale(0.4)' },
+  tierUnavailableNote: { fontSize: 11, color: '#9aa0a8', fontStyle: 'italic', marginTop: 4 },
   priceBox: { background: '#f4f5f7', borderRadius: 8, padding: '0.75rem 1rem' },
   priceLineItem: { fontSize: 12, color: '#6c6f76' },
   priceStrike: { fontSize: 13, color: '#9aa0a8', textDecoration: 'line-through' },

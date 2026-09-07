@@ -232,6 +232,19 @@ export async function createSubscriptionRequest(input: {
   const today = requestedAt.slice(0, 10);
   const quote = await quotePrice(tier.id, moduleKeys, input.billingPeriod, today);
   if (!quote) throw new SubscriptionRequestError('Onbekende tier.'); // kan hier niet echt gebeuren (tier hierboven al gevonden)
+  // Niet elke tier heeft een prijs in elke periode — Single-Use/Evaluatie
+  // zijn bewust jaar-only gebleven bij de invoering van maandelijkse
+  // facturatie (zie doelenboom_licentiemodel.md §9.2 v3). De aanvraagpagina
+  // blokkeert dit al zelf (SubscriptionRequestPage.tsx: kaart wordt
+  // niet-selecteerbaar), maar zonder deze check hier kon een verzoek zonder
+  // die UI-guard (of met een verouderde/gemanipuleerde client) alsnog een
+  // contract aanmaken voor een tier+periode-combinatie zonder enige prijs
+  // (quote.tierPriceEur is dan null, quote zelf niet).
+  if (quote.tierPriceEur == null) {
+    throw new SubscriptionRequestError(
+      `Deze tier heeft geen ${input.billingPeriod === 'maand' ? 'maand' : 'jaar'}prijs — kies een andere facturatieperiode.`
+    );
+  }
 
   const client = await pool.connect();
   try {
