@@ -7,7 +7,14 @@ import io
 
 from pptx import Presentation
 
-from app.project_pptx import _fmt_date, _month_range_label, _paginate, _truncate, build_project_pptx
+from app.project_pptx import (
+    _build_timeline_markers,
+    _fmt_date,
+    _month_range_label,
+    _paginate,
+    _truncate,
+    build_project_pptx,
+)
 
 from .test_project_workbook import make_data, make_meta
 
@@ -68,6 +75,48 @@ class TestMonthRangeLabel:
         assert _month_range_label(date(2026, 12, 1), date(2027, 1, 1)) == 'Dec 2026 – Jan 2027'
 
 
+class TestBuildTimelineMarkers:
+    """Spiegelt de tijdlijn-toggle 'Geplande datum bij opgeleverde items' uit
+    tree.html (showPlannedForDelivered): standaard (True) blijft de
+    geplande/verwachte datum altijd naast een eventuele werkelijke datum
+    staan; uitgezet vervalt de geplande datum zodra er ook een werkelijke
+    datum is, maar blijft die leidend zolang er nog geen werkelijke datum
+    is."""
+
+    def _product(self, **overrides):
+        base = {
+            'type': 'deliverable', 'verwachteDatum': '2026-09-15',
+            'werkelijkeDatum': '2026-09-10', 'deadline': None,
+        }
+        base.update(overrides)
+        return base
+
+    def test_standaard_toont_geplande_en_werkelijke_datum_naast_elkaar(self):
+        # markers zijn op datum gesorteerd (werkelijk 10 sep vóór verwacht 15
+        # sep), dus op 'filled' checken i.p.v. op volgorde.
+        markers = _build_timeline_markers([self._product()])
+        assert len(markers) == 2
+        assert {m['filled'] for m in markers} == {True, False}
+
+    def test_uitgezet_en_al_werkelijke_datum_laat_alleen_werkelijke_marker_staan(self):
+        markers = _build_timeline_markers([self._product()], show_planned_for_delivered=False)
+        assert len(markers) == 1
+        assert markers[0]['filled']
+
+    def test_uitgezet_zonder_werkelijke_datum_blijft_geplande_datum_leidend(self):
+        markers = _build_timeline_markers(
+            [self._product(werkelijkeDatum=None)], show_planned_for_delivered=False,
+        )
+        assert len(markers) == 1
+        assert not markers[0]['filled']
+
+    def test_deadline_blijft_altijd_los_van_de_toggle(self):
+        markers = _build_timeline_markers(
+            [self._product(deadline='2026-10-01')], show_planned_for_delivered=False,
+        )
+        assert any(m['is_deadline'] for m in markers)
+
+
 class TestBuildProjectPptx:
     def test_slide_1_toont_projectnaam_code_status_en_tijdlijn(self):
         content = build_project_pptx(make_data(), make_meta())
@@ -88,6 +137,33 @@ class TestBuildProjectPptx:
         assert 'Deliverable · verwacht' in text
         assert 'Mijlpaal · gehaald' in text
         assert 'Deadline' in text
+
+    def test_toggle_showplannedfordelivered_uit_toont_minder_tijdlijnmarkers(self):
+        # PID (make_data()) heeft zowel een verwachte als een werkelijke
+        # datum -- met de toggle uit hoort de geplande-datummarker daarvan te
+        # vervallen, dus minder tekenvormen op de tijdlijn dan met de toggle
+        # aan (het aantal shapes op de slide is de enige praktische manier om
+        # dit via de gerenderde PPTX zelf te controleren; de exacte
+        # markerlogica zelf wordt al gedekt door TestBuildTimelineMarkers).
+        meta_aan = make_meta()
+        meta_aan['showPlannedForDelivered'] = True
+        meta_uit = make_meta()
+        meta_uit['showPlannedForDelivered'] = False
+        prs_aan = Presentation(io.BytesIO(build_project_pptx(make_data(), meta_aan)))
+        prs_uit = Presentation(io.BytesIO(build_project_pptx(make_data(), meta_uit)))
+        n_aan = len(prs_aan.slides[0].shapes)
+        n_uit = len(prs_uit.slides[0].shapes)
+        assert n_uit < n_aan
+
+    def test_toggle_ontbreekt_in_meta_gedraagt_zich_als_aan(self):
+        # Geen showPlannedForDelivered in meta (bv. oudere clients) -- moet
+        # zich hetzelfde gedragen als expliciet True, niet als False.
+        meta_zonder = make_meta()
+        meta_expliciet_aan = make_meta()
+        meta_expliciet_aan['showPlannedForDelivered'] = True
+        prs_zonder = Presentation(io.BytesIO(build_project_pptx(make_data(), meta_zonder)))
+        prs_aan = Presentation(io.BytesIO(build_project_pptx(make_data(), meta_expliciet_aan)))
+        assert len(prs_zonder.slides[0].shapes) == len(prs_aan.slides[0].shapes)
 
     def test_geen_gedateerde_producten_geeft_geen_tijdlijn_op_slide_1(self):
         data = make_data()

@@ -136,6 +136,29 @@ describe('project-export/project-import-parse (Excel voor één project)', () =>
     assert.ok(buf.byteLength > 0);
   });
 
+  it('GET project-pptx met showPlannedForDelivered=false geeft een ander (kleiner) bestand terug', async (t) => {
+    // PID heeft zowel een verwachte als een werkelijke datum -- met de
+    // toggle uit hoort de PowerPoint-tijdlijn één marker minder te tekenen
+    // dan de standaardstand (zie de uitgebreide dekking van de markerlogica
+    // zelf in excel-service/tests/test_project_pptx.py::TestBuildTimelineMarkers).
+    // Hier alleen een smoke test dat de querystring wordt doorgegeven en tot
+    // een geldig, ander bestand leidt.
+    if (!excelServiceReachable) return t.skip('excel-service niet bereikbaar — zie EXCEL_SERVICE_URL');
+    const resAan = await rawReq(
+      'GET', `/api/doelenbomen/${doelenboomId}/elements/P1/project-pptx?showPlannedForDelivered=true`, { token: adminToken }
+    );
+    const resUit = await rawReq(
+      'GET', `/api/doelenbomen/${doelenboomId}/elements/P1/project-pptx?showPlannedForDelivered=false`, { token: adminToken }
+    );
+    assert.equal(resAan.status, 200);
+    assert.equal(resUit.status, 200);
+    const bufAan = await resAan.arrayBuffer();
+    const bufUit = await resUit.arrayBuffer();
+    assert.ok(bufAan.byteLength > 0);
+    assert.ok(bufUit.byteLength > 0);
+    assert.notEqual(bufAan.byteLength, bufUit.byteLength);
+  });
+
   it('GET project-pptx zonder toegang -> 401', async () => {
     const res = await rawReq('GET', `/api/doelenbomen/${doelenboomId}/elements/P1/project-pptx`, {});
     assert.equal(res.status, 401);

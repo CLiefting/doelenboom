@@ -248,17 +248,24 @@ def _parse_iso_date(value: Any) -> date | None:
         return None
 
 
-def _build_timeline_markers(products: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _build_timeline_markers(
+    products: list[dict[str, Any]], show_planned_for_delivered: bool = True
+) -> list[dict[str, Any]]:
     """Zelfde opzet als buildTimelineMarkers() in tree.html: per product een
     marker voor de verwachte datum, de werkelijke (opgeleverde) datum en de
-    deadline -- elk optioneel, een product kan dus 0 tot 3 markers leveren."""
+    deadline -- elk optioneel, een product kan dus 0 tot 3 markers leveren.
+    show_planned_for_delivered spiegelt de gelijknamige toggle op het scherm
+    (de tijdlijn-checkbox "Geplande datum bij opgeleverde items"): staat die
+    uit, dan vervalt de open "verwacht"-marker zodra er ook al een werkelijke
+    (opgeleverde) datum is -- zonder werkelijke datum blijft de geplande
+    datum sowieso de enige/leidende marker, ongeacht de toggle."""
     markers: list[dict[str, Any]] = []
     for p in products:
         marker_type = 'mijlpaal' if p.get('type') == 'mijlpaal' else 'deliverable'
         verwacht = _parse_iso_date(p.get('verwachteDatum'))
-        if verwacht:
-            markers.append({'t': verwacht, 'type': marker_type, 'filled': False, 'is_deadline': False})
         werkelijk = _parse_iso_date(p.get('werkelijkeDatum'))
+        if verwacht and (show_planned_for_delivered or not werkelijk):
+            markers.append({'t': verwacht, 'type': marker_type, 'filled': False, 'is_deadline': False})
         if werkelijk:
             markers.append({'t': werkelijk, 'type': marker_type, 'filled': True, 'is_deadline': False})
         deadline = _parse_iso_date(p.get('deadline'))
@@ -296,12 +303,14 @@ def _axis_bounds(dates: list[date], today: date) -> tuple[bool, list[date]]:
     return quarterly, bounds
 
 
-def _add_project_timeline(slide, top, products: list[dict[str, Any]], today_iso: str):
+def _add_project_timeline(
+    slide, top, products: list[dict[str, Any]], today_iso: str, show_planned_for_delivered: bool = True
+):
     """Tekent de projecttijdlijn en geeft de Y-positie net onder de tijdlijn
     terug, zodat de aanroeper de inhoud eronder kan plaatsen -- of None als
     geen enkel product een verwachte/werkelijke datum of deadline heeft (dan
     is er niets te plotten, zelfde als productTimelineHtml() '' in tree.html)."""
-    markers = _build_timeline_markers(products)
+    markers = _build_timeline_markers(products, show_planned_for_delivered)
     if not markers:
         return None
 
@@ -447,7 +456,8 @@ def _slide_overview(prs: Presentation, project: dict[str, Any], products: list[d
     # product) -- geeft None terug als geen enkel product een datum heeft;
     # de aandachtspunten hieronder schuiven dan gewoon een stuk omhoog i.p.v.
     # een lege ruimte over te laten (graceful degradation).
-    timeline_bottom = _add_project_timeline(slide, y, products, _today_iso(meta))
+    show_planned_for_delivered = bool(meta.get('showPlannedForDelivered', True))
+    timeline_bottom = _add_project_timeline(slide, y, products, _today_iso(meta), show_planned_for_delivered)
     y = (timeline_bottom + Inches(0.12)) if timeline_bottom else (y + Inches(0.1))
 
     # Aandachtspunten (toelichting/tags/organisatieonderdelen/cluster) --
@@ -677,13 +687,16 @@ def _activity_dates(activities: list[dict[str, Any]]) -> list[date]:
     return dates
 
 
-def _gantt_axis_bounds(products: list[dict[str, Any]], real_activities: list[dict[str, Any]], today: date) -> tuple[bool, list[date]]:
+def _gantt_axis_bounds(
+    products: list[dict[str, Any]], real_activities: list[dict[str, Any]], today: date,
+    show_planned_for_delivered: bool = True,
+) -> tuple[bool, list[date]]:
     """Zelfde voorrang als activityGanttHtml in tree.html: als het project
     gedateerde producten heeft, is de projecttijdlijn-as (zelfde as als
     slide 1) LEIDEND, zodat beide vergelijkbaar blijven -- alleen als geen
     enkel product een bruikbare datum heeft valt dit terug op het eigen
     bereik van de activiteiten."""
-    markers = _build_timeline_markers(products)
+    markers = _build_timeline_markers(products, show_planned_for_delivered)
     if markers:
         return _axis_bounds([m['t'] for m in markers], today)
     return _axis_bounds(_activity_dates(real_activities), today)
@@ -1031,6 +1044,13 @@ def build_project_pptx(data: dict[str, Any], meta: dict[str, Any]) -> bytes:
     activities = data.get('activities') or []
     activity_dependencies = data.get('activityDependencies') or []
     product_dependencies = data.get('productDependencies') or []
+    # Spiegelt de tijdlijn-toggle "Geplande datum bij opgeleverde items" op
+    # het scherm (showPlannedForDelivered in tree.html) -- meegegeven door de
+    # export-knop (zie api/src/routes/projectExcel.ts), standaard aan zoals
+    # ook de standaardstand van de checkbox. Gebruikt op zowel slide 1
+    # (_slide_overview/_add_project_timeline) als de Activiteiten-Gantt-as
+    # (_gantt_axis_bounds) hieronder, voor eenzelfde as/markers op beide.
+    show_planned_for_delivered = bool(meta.get('showPlannedForDelivered', True))
 
     prs = _new_presentation()
     page = 1
@@ -1126,7 +1146,7 @@ def build_project_pptx(data: dict[str, Any], meta: dict[str, Any]) -> bytes:
     annotated_product_dependencies = _annotate_product_dependencies(product_dependencies, products)
     gantt_rows = _build_gantt_rows(real_activities, products, annotated_product_dependencies)
     if gantt_rows:
-        quarterly, bounds = _gantt_axis_bounds(products, real_activities, today_date)
+        quarterly, bounds = _gantt_axis_bounds(products, real_activities, today_date, show_planned_for_delivered)
         axis_start, axis_end = bounds[0], bounds[-1]
         span_days = (axis_end - axis_start).days or 1
         gantt_pages = _paginate(gantt_rows, GANTT_ROWS_PER_SLIDE)
