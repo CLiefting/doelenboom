@@ -42,7 +42,20 @@
 
 -- --- 1. max_admins -> max_editors, nieuwe bomen-limieten ---
 
-alter table tiers rename column max_admins to max_editors;
+-- Alleen hernoemen als de oude kolomnaam nog bestaat: "rename column" heeft
+-- geen "if exists"-variant in Postgres, en op een db die deze migratie al
+-- eerder draaide (bv. bij het opnieuw afspelen van de volledige
+-- db/migrations/*.sql-reeks, zie scripts/doelenboom-cli.sh) heet de kolom
+-- dan al max_editors — een kale rename zou daar op een tweede run breken.
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_name = 'tiers' and column_name = 'max_admins'
+  ) then
+    alter table tiers rename column max_admins to max_editors;
+  end if;
+end $$;
 
 update tiers set max_bomen = 3 where name = 'Brons' and max_bomen = 10;
 update tiers set max_bomen = 10 where name = 'Zilver' and max_bomen = 25;
@@ -56,14 +69,21 @@ create index if not exists idx_tier_prices_tier on tier_prices(tier_id, period);
 
 -- Sluit de lopende 2026-jaarprijs van Brons/Zilver/Goud/Diamant af per
 -- gisteren (deze migratie draait 7 september 2026) — laat 'm verder intact
--- staan als geschiedenis.
+-- staan als geschiedenis. "and tp.valid_from < current_date" is cruciaal
+-- voor herhaalbaarheid: zonder die voorwaarde pakt een tweede run van dit
+-- bestand (zelfde dag of later, zie scripts/doelenboom-cli.sh) óók de rij
+-- die de insert hieronder zelf al eerder aanmaakte (valid_from = vandaag,
+-- valid_until = 2026-12-31, die voldoet óók aan "valid_until >= current_date")
+-- en zet die dan terug naar valid_until = gisteren < valid_from = vandaag —
+-- een ongeldige combinatie die de tier_prices_check-constraint schendt.
 update tier_prices tp
 set valid_until = (current_date - 1)
 from tiers t
 where tp.tier_id = t.id
   and t.name in ('Brons', 'Zilver', 'Goud', 'Diamant')
   and tp.period = 'jaar'
-  and tp.valid_until >= current_date;
+  and tp.valid_until >= current_date
+  and tp.valid_from < current_date;
 
 -- Nieuwe jaar- en maandprijzen vanaf vandaag t/m 31-12-2026 (zelfde
 -- kalenderjaar-periodisering als de rest van dit prijsmodel). Voor Goud is

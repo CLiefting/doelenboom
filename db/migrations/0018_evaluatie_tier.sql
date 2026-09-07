@@ -40,9 +40,21 @@
 alter table tiers add column if not exists trial_days integer;
 alter table tiers add column if not exists all_modules_included boolean not null default false;
 
-insert into tiers (name, max_admins, max_bomen, sort_order, trial_days, all_modules_included) values
-  ('Evaluatie', 1, 2, -1, 30, true)
-on conflict (name) do nothing;
+-- In een do-blok i.p.v. een kale insert: db/migrations/0037_editor_role_rename.sql
+-- (later) hernoemt tiers.max_admins naar max_editors. Op een db die al
+-- voorbij 0037 is, bestaat de kolom max_admins niet meer, en "on conflict do
+-- nothing" alleen voorkomt geen parse-fout op een kolom die niet bestaat —
+-- de where-not-exists-guard zorgt dat de insert alleen daadwerkelijk
+-- gebonden/uitgevoerd wordt als de Evaluatie-rij er nog niet is, d.w.z.
+-- alleen bij een verse installatie vóórdat 0037 ooit gedraaid heeft (zie
+-- dezelfde redenering in 0002_licenses.sql).
+do $$
+begin
+  if not exists (select 1 from tiers where name = 'Evaluatie') then
+    insert into tiers (name, max_admins, max_bomen, sort_order, trial_days, all_modules_included) values
+      ('Evaluatie', 1, 2, -1, 30, true);
+  end if;
+end $$;
 
 insert into tier_prices (tier_id, price_eur, valid_from, valid_until)
 select t.id, 0, '2026-01-01', '2026-12-31'
