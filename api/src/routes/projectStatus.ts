@@ -13,9 +13,9 @@ import { diffFields, logProjectHistory } from '../projectHistory.js';
 export const projectStatusRouter = Router();
 projectStatusRouter.use(requireAuth);
 // Per route meegeven (niet via router.use()) — zie toelichting in elements.ts.
-// minRole='gebruiker': projectstatus is "losse boom-inhoud" bij een element,
+// minRole='editor': projectstatus is "losse boom-inhoud" bij een element,
 // net als elementen/relaties/tags-koppelingen/producten.
-const requireEditor = requireWritableDoelenboom('id', 'gebruiker');
+const requireEditor = requireWritableDoelenboom('id', 'editor');
 // Projectstatus hoort bij de "Projecten"-module — zie de toelichting bij
 // requireProjectenModule in routes/products.ts.
 const requireProjectenModule = requireModule('projecten', 'id');
@@ -225,7 +225,7 @@ projectStatusRouter.get(
     );
 
     const isEditorRole = await getEffectiveRoleForDoelenboom(req.user!.id, req.params.id).then(
-      (role) => role === 'admin' || role === 'gebruiker'
+      (role) => role === 'admin' || role === 'editor'
     );
     const rows = isEditorRole
       ? result.rows

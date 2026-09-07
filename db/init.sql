@@ -114,14 +114,17 @@ create table if not exists tenants (
 -- users-tabel). Sysadmins hebben hier bewust geen rij voor nodig — hun toegang
 -- volgt uit users.is_sysadmin en geldt voor alle tenants.
 -- Rolmodel (zie api/src/rbac.ts): 'admin' (boom-inhoud + instellingen),
--- 'gebruiker' (alleen losse boom-inhoud: elementen/relaties/tags-koppelingen/
--- projectstatus/producten, geen kolommen/instellingen/import), 'bezoeker'
--- (alleen lezen).
+-- 'editor' (tot 7 september 2026 'gebruiker' geheten, zie
+-- db/migrations/0037_editor_role_rename.sql — alleen losse boom-inhoud:
+-- elementen/relaties/tags-koppelingen/projectstatus/producten, geen
+-- kolommen/instellingen/import), 'bezoeker' (alleen lezen). 'admin' en
+-- 'editor' tellen samen mee voor de licentielimiet (tiers.max_editors, zie
+-- license.ts) — 'bezoeker' niet.
 create table if not exists tenant_users (
   id bigserial primary key,
   tenant_id bigint not null references tenants(id) on delete cascade,
   user_id bigint not null references users(id) on delete cascade,
-  role text not null check (role in ('admin', 'gebruiker', 'bezoeker')),
+  role text not null check (role in ('admin', 'editor', 'bezoeker')),
   created_at timestamptz not null default now(),
   unique (tenant_id, user_id)
 );
@@ -176,7 +179,7 @@ create table if not exists doelenbomen (
 create table if not exists doelenboom_user_roles (
   doelenboom_id bigint not null references doelenbomen(id) on delete cascade,
   user_id bigint not null references users(id) on delete cascade,
-  role text not null check (role in ('admin', 'gebruiker', 'bezoeker')),
+  role text not null check (role in ('admin', 'editor', 'bezoeker')),
   primary key (doelenboom_id, user_id)
 );
 
@@ -529,7 +532,11 @@ create index if not exists idx_imports_doelenboom on excel_imports(doelenboom_id
 create table if not exists tiers (
   id bigserial primary key,
   name text not null unique,
-  max_admins integer not null check (max_admins > 0),
+  -- Tot 7 september 2026 'max_admins' geheten (zie
+  -- db/migrations/0037_editor_role_rename.sql) — sinds de prijsstrategie-
+  -- herziening van diezelfde dag tellen 'admin' ÉN 'editor' (het vroegere
+  -- 'gebruiker') samen tegen deze limiet, zie license.ts countActiveEditors.
+  max_editors integer not null check (max_editors > 0),
   max_bomen integer not null check (max_bomen > 0),
   sort_order integer not null default 0,
   -- Generieke velden voor een "gratis proeftier" zoals Evaluatie (zie
@@ -587,7 +594,7 @@ alter table tenants add column if not exists license_end_date date;
 -- specifiek toegekende rol verlagen, alleen een ondergrens bieden voor wie
 -- geen eigen rij heeft.
 alter table tenants add column if not exists open_access_role text
-  check (open_access_role in ('admin', 'gebruiker', 'bezoeker'));
+  check (open_access_role in ('admin', 'editor', 'bezoeker'));
 
 -- Popup-melding bij het openen van een doelenboom binnen deze tenant (zie
 -- db/migrations/0027_tenant_entry_popup.sql, PUT /api/tenants/:id in
@@ -848,20 +855,33 @@ alter table doelenbomen add column if not exists archived_at timestamptz;
 create index if not exists idx_doelenbomen_tenant_active
   on doelenbomen(tenant_id) where archived_at is null;
 
-insert into tiers (name, max_admins, max_bomen, sort_order) values
+-- Brons/Zilver/Goud/Diamant: cijfers uit de prijsstrategie-notitie van
+-- Charles (7 september 2026, zie doelenboom_licentiemodel.md §2 v3) — Goud
+-- blijft op 100 bomen (praktisch maximum voor de boomweergave), Diamant naar
+-- 250 (expliciet bevestigd, i.p.v. de "onbeperkt" uit de notitie zelf).
+insert into tiers (name, max_editors, max_bomen, sort_order) values
   ('Single-Use', 1, 5, 0),
-  ('Brons', 2, 10, 1),
-  ('Zilver', 5, 25, 2),
+  ('Brons', 2, 3, 1),
+  ('Zilver', 5, 10, 2),
   ('Goud', 10, 100, 3),
-  ('Diamant', 25, 100, 4)
+  ('Diamant', 25, 250, 4)
 on conflict (name) do nothing;
 
 -- Evaluatie: gratis proeftier (zie db/migrations/0018_evaluatie_tier.sql) —
--- 1 admin, 2 bomen, 30 dagen proefperiode, alle modules automatisch aan.
+-- 1 editor, 2 bomen, 30 dagen proefperiode, alle modules automatisch aan.
 -- sort_order -1 zet 'm vóór Single-Use in de tier-lijst/aanvraagpagina.
-insert into tiers (name, max_admins, max_bomen, sort_order, trial_days, all_modules_included) values
+insert into tiers (name, max_editors, max_bomen, sort_order, trial_days, all_modules_included) values
   ('Evaluatie', 1, 2, -1, 30, true)
 on conflict (name) do nothing;
+
+-- Bestaande installaties (vóór 7 september 2026) hadden al Brons/Zilver/
+-- Diamant-rijen met de oude bomen-limieten (10/25/100) — de inserts hierboven
+-- raken die niet (on conflict do nothing). Idempotente correctie, alleen als
+-- de kolom nog exact de oude waarde heeft (een sysadmin die 'm intussen zelf
+-- al aanpaste, wordt niet overschreven).
+update tiers set max_bomen = 3 where name = 'Brons' and max_bomen = 10;
+update tiers set max_bomen = 10 where name = 'Zilver' and max_bomen = 25;
+update tiers set max_bomen = 250 where name = 'Diamant' and max_bomen = 100;
 
 insert into modules (key, name, description) values
   (
@@ -888,9 +908,15 @@ on conflict (key) do nothing;
 -- overlap wint de meest recent gestarte periode (zie getCurrentTierPrice/
 -- getCurrentModuleSurcharge) — de UI markeert duidelijk welke op dit moment
 -- geldig is.
+-- period (sinds 7 september 2026, db/migrations/0038_billing_period.sql):
+-- een tier heeft sindsdien zowel een jaar- als een maandprijs (de aanvrager
+-- kiest zelf, zie subscription_requests.billing_period) — geen afgeleide
+-- formule (bv. "jaar = 10x maand") maar los per periode ingevoerd/beheerd,
+-- zelfde vrijheid als de rest van deze prijsgeschiedenis.
 create table if not exists tier_prices (
   id bigserial primary key,
   tier_id bigint not null references tiers(id) on delete cascade,
+  period text not null default 'jaar' check (period in ('maand', 'jaar')),
   price_eur numeric(10,2) not null,
   valid_from date not null,
   valid_until date not null,
@@ -898,7 +924,7 @@ create table if not exists tier_prices (
   updated_at timestamptz not null default now(),
   check (valid_until >= valid_from)
 );
-create index if not exists idx_tier_prices_tier on tier_prices(tier_id);
+create index if not exists idx_tier_prices_tier on tier_prices(tier_id, period);
 
 create table if not exists module_surcharges (
   id bigserial primary key,
@@ -911,6 +937,31 @@ create table if not exists module_surcharges (
   check (valid_until >= valid_from)
 );
 create index if not exists idx_module_surcharges_module on module_surcharges(module_id);
+
+-- Tier-specifieke, VASTE module-opslag (i.p.v. het percentage hierboven) —
+-- sinds 7 september 2026 voor Projecten, zie doelenboom_licentiemodel.md §3
+-- v3: de notitie geeft per tier een vast bedrag (Brons/Zilver/Goud) resp.
+-- "inbegrepen" (Diamant, price_eur = 0), i.p.v. één percentage voor alle
+-- tiers. quotePrice (subscriptions.ts) gebruikt, per module, deze tabel als
+-- er een geldige rij is voor de gekozen tier+periode; anders valt hij terug
+-- op het generieke percentage in module_surcharges hierboven (zo blijven
+-- Single-Use en Evaluatie, die geen eigen rij hier hebben, gewoon op de
+-- 20%-regel werken). price_eur = 0 is dus iets anders dan "geen rij": dat
+-- betekent expliciet "inbegrepen bij deze tier", geen module die simpelweg
+-- niet meetelt.
+create table if not exists module_tier_surcharges (
+  id bigserial primary key,
+  module_id bigint not null references modules(id) on delete cascade,
+  tier_id bigint not null references tiers(id) on delete cascade,
+  period text not null check (period in ('maand', 'jaar')),
+  price_eur numeric(10,2) not null check (price_eur >= 0),
+  valid_from date not null,
+  valid_until date not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  check (valid_until >= valid_from)
+);
+create index if not exists idx_module_tier_surcharges_lookup on module_tier_surcharges(module_id, tier_id, period);
 
 -- Tijdelijke aanbiedingen (bv. "eerste jaar 33% korting", "nu zonder BTW"),
 -- per tier instelbaar (offer_tiers). kind='percentage' → value is een
@@ -955,6 +1006,13 @@ create table if not exists subscription_requests (
   applicant_phone text,
   requested_modules jsonb not null default '[]'::jsonb,
   status text not null default 'proef' check (status in ('proef', 'actief', 'afgewezen')),
+  -- Gekozen facturatieperiode (sinds 7 september 2026, db/migrations/
+  -- 0038_billing_period.sql) — bepaalt zowel welke tier_prices/module_tier_
+  -- surcharges-periode gebruikt wordt (quotePrice) als de contractcadans bij
+  -- betaling/verlenging (+1 maand resp. +12 maanden, zie subscriptions.ts
+  -- registerPayment/registerRenewal). Default 'jaar' voor bestaande rijen
+  -- (alles vóór deze wijziging was impliciet jaarlijks).
+  billing_period text not null default 'jaar' check (billing_period in ('maand', 'jaar')),
   requested_at timestamptz not null default now(),
   price_at_request numeric(10,2),
   applied_offer_id bigint references offers(id) on delete set null,
@@ -993,30 +1051,68 @@ create table if not exists license_events (
 create index if not exists idx_license_events_tenant on license_events(tenant_id);
 create index if not exists idx_license_events_created on license_events(created_at desc);
 
--- Eerste geldige prijsperiode per tier (2026 kalenderjaar, bevestigde
--- tarieven — zie doelenboom_licentiemodel.md §2). "not exists"-guard i.p.v.
--- "on conflict" (er is geen unique constraint op tier_id — meerdere periodes
--- per tier zijn juist bedoeld) zodat dit blok alleen bij een verse tier-rij
--- zonder enige prijs iets invoegt, nooit een dubbele seed bij herhaald draaien.
-insert into tier_prices (tier_id, price_eur, valid_from, valid_until)
-select t.id, v.price_eur, '2026-01-01', '2026-12-31'
+-- Eerste geldige prijsperiode per tier (2026 kalenderjaar). Single-Use/
+-- Evaluatie: de bevestigde tarieven van 29 augustus 2026 (jaar-only, deze
+-- twee tiers vallen buiten de commerciële ladder van de prijsstrategie-
+-- notitie). Brons/Zilver/Goud/Diamant: de cijfers uit die notitie (7
+-- september 2026, zie doelenboom_licentiemodel.md §2/§9 v3) — voor Goud is
+-- de ondergrens van de in de notitie nog open marge (€89–99) aangehouden,
+-- definitief bepalen is vervolgstap 3 uit diezelfde notitie. "not
+-- exists"-guard i.p.v. "on conflict" (er is geen unique constraint op
+-- tier_id — meerdere periodes per tier zijn juist bedoeld) zodat dit blok
+-- alleen bij een verse tier-rij zonder enige prijs voor die periode iets
+-- invoegt, nooit een dubbele seed bij herhaald draaien.
+insert into tier_prices (tier_id, period, price_eur, valid_from, valid_until)
+select t.id, v.period, v.price_eur, '2026-01-01', '2026-12-31'
 from tiers t
-join (values ('Single-Use', 125), ('Brons', 250), ('Zilver', 500), ('Goud', 1000), ('Diamant', 2000), ('Evaluatie', 0)) as v(name, price_eur)
+join (values
+  ('Single-Use', 'jaar', 125), ('Evaluatie', 'jaar', 0),
+  ('Brons', 'jaar', 190), ('Brons', 'maand', 19),
+  ('Zilver', 'jaar', 490), ('Zilver', 'maand', 49),
+  ('Goud', 'jaar', 890), ('Goud', 'maand', 89),
+  ('Diamant', 'jaar', 2490), ('Diamant', 'maand', 249)
+) as v(name, period, price_eur)
   on v.name = t.name
-where not exists (select 1 from tier_prices tp where tp.tier_id = t.id);
+where not exists (select 1 from tier_prices tp where tp.tier_id = t.id and tp.period = v.period);
 
--- Initiële module-opslagpercentages (doelenboom_licentiemodel.md §3):
--- Projecten 20%. Templating (10%, per het document) heeft nog geen eigen rij
--- in `modules` (de Sjablonenbeheer-feature is nu nog los van het
--- licentiemodel) — die opslag zaaien we pas zodra die module-rij bestaat.
--- KPI/Backup/Auditing: nog niet bepaald, bewust geen rij (zo'n module telt
--- dan simpelweg niet mee in de aanvraagprijs, zie moduleSurcharges.ts).
+-- Initiële module-opslagpercentages (doelenboom_licentiemodel.md §3) — het
+-- generieke percentage-mechanisme, nu alleen nog de terugvaloptie voor tiers
+-- zonder eigen module_tier_surcharges-rij (Single-Use/Evaluatie, zie
+-- hieronder). Projecten 20%. Templating (10%, per het document) heeft nog
+-- geen eigen rij in `modules` (de Sjablonenbeheer-feature is nu nog los van
+-- het licentiemodel) — die opslag zaaien we pas zodra die module-rij
+-- bestaat. KPI/Backup/Auditing: nog niet bepaald, bewust geen rij (zo'n
+-- module telt dan simpelweg niet mee in de aanvraagprijs, zie
+-- moduleSurcharges.ts).
 insert into module_surcharges (module_id, surcharge_pct, valid_from, valid_until)
 select m.id, v.surcharge_pct, '2026-01-01', '2026-12-31'
 from modules m
 join (values ('projecten', 20)) as v(key, surcharge_pct)
   on v.key = m.key
 where not exists (select 1 from module_surcharges ms where ms.module_id = m.id);
+
+-- Vaste Projecten-opslag per tier (doelenboom_licentiemodel.md §3 v3, uit de
+-- prijsstrategie-notitie): Brons/Zilver/Goud een vast bedrag, Diamant
+-- inbegrepen (€ 0). Overrult, voor Brons/Zilver/Goud/Diamant, de generieke
+-- 20%-regel hierboven (zie module_tier_surcharges-toelichting bij de tabel
+-- zelf) — Single-Use/Evaluatie hebben bewust geen rij hier en blijven op die
+-- 20%-regel draaien.
+insert into module_tier_surcharges (module_id, tier_id, period, price_eur, valid_from, valid_until)
+select m.id, t.id, v.period, v.price_eur, '2026-01-01', '2026-12-31'
+from modules m
+join tiers t on true
+join (values
+  ('Brons', 'jaar', 100), ('Brons', 'maand', 10),
+  ('Zilver', 'jaar', 200), ('Zilver', 'maand', 20),
+  ('Goud', 'jaar', 300), ('Goud', 'maand', 30),
+  ('Diamant', 'jaar', 0), ('Diamant', 'maand', 0)
+) as v(tier_name, period, price_eur)
+  on v.tier_name = t.name
+where m.key = 'projecten'
+  and not exists (
+    select 1 from module_tier_surcharges mts
+    where mts.module_id = m.id and mts.tier_id = t.id and mts.period = v.period
+  );
 
 -- Eén systeembrede mededeling (bv. een onderhoudsaankondiging), door een
 -- sysadmin aan/uit te zetten met een eigen tekst — zie routes/announcement.ts.

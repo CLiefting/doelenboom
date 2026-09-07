@@ -17,7 +17,7 @@ describe('project-export/project-import-parse (Excel voor één project)', () =>
   let doelenboomId: number;
   let tenantId: number;
   let adminToken: string;
-  let gebruikerToken: string;
+  let editorToken: string;
   let bezoekerToken: string;
 
   before(async () => {
@@ -32,7 +32,7 @@ describe('project-export/project-import-parse (Excel voor één project)', () =>
     const email = `${PREFIX}-sysadmin@test.local`;
     await createSysadminUser(email, 'wachtwoord123');
     const sysadminToken = await login(email, 'wachtwoord123');
-    ({ doelenboomId, tenantId, adminToken, gebruikerToken, bezoekerToken } = await setupWritableDoelenboom(sysadminToken, PREFIX));
+    ({ doelenboomId, tenantId, adminToken, editorToken, bezoekerToken } = await setupWritableDoelenboom(sysadminToken, PREFIX));
 
     await req('PUT', `/api/tenants/${tenantId}/license/modules/projecten`, {
       token: sysadminToken, body: { active: true },

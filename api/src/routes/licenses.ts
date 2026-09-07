@@ -5,6 +5,8 @@ import * as license from '../license.js';
 import * as offers from '../offers.js';
 import * as tierPrices from '../tierPrices.js';
 import * as moduleSurcharges from '../moduleSurcharges.js';
+import * as moduleTierSurcharges from '../moduleTierSurcharges.js';
+import { isBillingPeriod } from '../subscriptions.js';
 
 // Licentiebeheer — zie doelenboom_licentiemodel.md in het Doelenboom-project.
 // Twee niveaus:
@@ -48,7 +50,7 @@ function parseTrialDays(raw: unknown): { trialDays: number | null } | { error: s
 licensesRouter.post('/tiers', requireSysadmin, async (req, res) => {
   const b = (req.body ?? {}) as Record<string, unknown>;
   const name = typeof b.name === 'string' ? b.name.trim() : '';
-  const maxAdmins = Number(b.maxAdmins);
+  const maxEditors = Number(b.maxEditors);
   const maxBomen = Number(b.maxBomen);
   const sortOrder = Number.isFinite(Number(b.sortOrder)) ? Number(b.sortOrder) : 0;
   const allModulesIncluded = b.allModulesIncluded === true;
@@ -56,7 +58,7 @@ licensesRouter.post('/tiers', requireSysadmin, async (req, res) => {
 
   const errors: string[] = [];
   if (!name) errors.push('Naam is verplicht.');
-  if (!Number.isFinite(maxAdmins) || maxAdmins <= 0) errors.push('maxAdmins moet een positief getal zijn.');
+  if (!Number.isFinite(maxEditors) || maxEditors <= 0) errors.push('maxEditors moet een positief getal zijn.');
   if (!Number.isFinite(maxBomen) || maxBomen <= 0) errors.push('maxBomen moet een positief getal zijn.');
   if ('error' in trialDaysParsed) errors.push(trialDaysParsed.error);
   if (errors.length) return res.status(400).json({ error: errors.join(' ') });
@@ -64,7 +66,7 @@ licensesRouter.post('/tiers', requireSysadmin, async (req, res) => {
   try {
     const tier = await license.createTier({
       name,
-      maxAdmins,
+      maxEditors,
       maxBomen,
       sortOrder,
       trialDays: (trialDaysParsed as { trialDays: number | null }).trialDays,
@@ -80,15 +82,15 @@ licensesRouter.post('/tiers', requireSysadmin, async (req, res) => {
 licensesRouter.put('/tiers/:id', requireSysadmin, async (req, res) => {
   const b = (req.body ?? {}) as Record<string, unknown>;
   const name = typeof b.name === 'string' && b.name.trim() ? b.name.trim() : undefined;
-  const maxAdmins = typeof b.maxAdmins === 'number' && Number.isFinite(b.maxAdmins) && b.maxAdmins > 0 ? b.maxAdmins : undefined;
+  const maxEditors = typeof b.maxEditors === 'number' && Number.isFinite(b.maxEditors) && b.maxEditors > 0 ? b.maxEditors : undefined;
   const maxBomen = typeof b.maxBomen === 'number' && Number.isFinite(b.maxBomen) && b.maxBomen > 0 ? b.maxBomen : undefined;
   const sortOrder = typeof b.sortOrder === 'number' && Number.isFinite(b.sortOrder) ? b.sortOrder : undefined;
   const allModulesIncluded = typeof b.allModulesIncluded === 'boolean' ? b.allModulesIncluded : undefined;
   const hasTrialDays = b.trialDays !== undefined;
   const trialDaysParsed = hasTrialDays ? parseTrialDays(b.trialDays) : null;
 
-  if (b.maxAdmins !== undefined && maxAdmins === undefined) {
-    return res.status(400).json({ error: 'maxAdmins moet een positief getal zijn.' });
+  if (b.maxEditors !== undefined && maxEditors === undefined) {
+    return res.status(400).json({ error: 'maxEditors moet een positief getal zijn.' });
   }
   if (b.maxBomen !== undefined && maxBomen === undefined) {
     return res.status(400).json({ error: 'maxBomen moet een positief getal zijn.' });
@@ -100,7 +102,7 @@ licensesRouter.put('/tiers/:id', requireSysadmin, async (req, res) => {
   try {
     const tier = await license.updateTier(req.params.id, {
       name,
-      maxAdmins,
+      maxEditors,
       maxBomen,
       sortOrder,
       allModulesIncluded,
@@ -122,9 +124,17 @@ licensesRouter.put('/tiers/:id', requireSysadmin, async (req, res) => {
 // subscriptions.ts, en om in het licentiebeheerscherm te tonen), wijzigen is
 // sysadmin-only. ---
 
-function parseTierPriceBody(b: Record<string, unknown>): { priceEur: number; validFrom: string; validUntil: string } | { error: string } {
+// period ('maand'/'jaar', sinds 7 september 2026 — zie
+// db/migrations/0038_prijsstrategie_v3.sql) is, net als tierId, IMMUTABLE na
+// aanmaken (updateTierPrice hieronder kan 'm niet wijzigen — een andere
+// periode is een nieuwe prijsperiode-rij, geen bewerking van een bestaande).
+// Daarom hier optioneel: verplicht bij POST (nieuwe rij), genegeerd bij PUT.
+function parseTierPriceBody(b: Record<string, unknown>): { priceEur: number; period?: 'maand' | 'jaar'; validFrom: string; validUntil: string } | { error: string } {
   if (typeof b.priceEur !== 'number' || !Number.isFinite(b.priceEur) || b.priceEur < 0) {
     return { error: 'priceEur is verplicht (niet-negatief getal).' };
+  }
+  if (b.period !== undefined && !isBillingPeriod(b.period)) {
+    return { error: 'period moet "maand" of "jaar" zijn.' };
   }
   if (typeof b.validFrom !== 'string' || !DATE_RE.test(b.validFrom)) {
     return { error: 'validFrom moet "YYYY-MM-DD" zijn.' };
@@ -133,7 +143,7 @@ function parseTierPriceBody(b: Record<string, unknown>): { priceEur: number; val
     return { error: 'validUntil moet "YYYY-MM-DD" zijn.' };
   }
   if (b.validUntil < b.validFrom) return { error: 'validUntil mag niet vóór validFrom liggen.' };
-  return { priceEur: b.priceEur, validFrom: b.validFrom, validUntil: b.validUntil };
+  return { priceEur: b.priceEur, period: b.period as 'maand' | 'jaar' | undefined, validFrom: b.validFrom, validUntil: b.validUntil };
 }
 
 licensesRouter.get('/tiers/:tierId/prices', async (req, res) => {
@@ -143,7 +153,8 @@ licensesRouter.get('/tiers/:tierId/prices', async (req, res) => {
 licensesRouter.post('/tiers/:tierId/prices', requireSysadmin, async (req, res) => {
   const parsed = parseTierPriceBody((req.body ?? {}) as Record<string, unknown>);
   if ('error' in parsed) return res.status(400).json({ error: parsed.error });
-  const price = await tierPrices.createTierPrice({ tierId: Number(req.params.tierId), ...parsed });
+  if (!parsed.period) return res.status(400).json({ error: 'period is verplicht ("maand" of "jaar").' });
+  const price = await tierPrices.createTierPrice({ tierId: Number(req.params.tierId), ...parsed, period: parsed.period });
   res.status(201).json(price);
 });
 
@@ -252,6 +263,76 @@ licensesRouter.put('/module-surcharges/:id', requireSysadmin, async (req, res) =
 
 licensesRouter.delete('/module-surcharges/:id', requireSysadmin, async (req, res) => {
   const ok = await moduleSurcharges.deleteModuleSurcharge(req.params.id);
+  if (!ok) return res.status(404).json({ error: 'Opslagperiode niet gevonden.' });
+  res.status(204).send();
+});
+
+// --- Vaste, tier-specifieke module-opslag (sinds 7 september 2026) — zie
+// moduleTierSurcharges.ts en doelenboom_licentiemodel.md §3 v3. Overrult, per
+// tier+periode, het generieke percentage hierboven (bv. Projecten: Brons
+// +€10/maand, Diamant €0/inbegrepen). Zelfde toegangsmodel als de andere
+// prijsresources: lezen mag iedereen ingelogd, wijzigen is sysadmin-only. ---
+
+function parseModuleTierSurchargeBody(
+  b: Record<string, unknown>
+): { tierId: number; period: 'maand' | 'jaar'; priceEur: number; validFrom: string; validUntil: string } | { error: string } {
+  const tierId = typeof b.tierId === 'number' && Number.isInteger(b.tierId) && b.tierId > 0
+    ? b.tierId
+    : typeof b.tierId === 'string' && /^[1-9][0-9]*$/.test(b.tierId)
+      ? Number(b.tierId)
+      : null;
+  if (!tierId) return { error: 'tierId is verplicht (positief getal of numerieke tekst).' };
+  if (!isBillingPeriod(b.period)) return { error: 'period is verplicht ("maand" of "jaar").' };
+  if (typeof b.priceEur !== 'number' || !Number.isFinite(b.priceEur) || b.priceEur < 0) {
+    return { error: 'priceEur is verplicht (niet-negatief getal — 0 betekent "inbegrepen").' };
+  }
+  if (typeof b.validFrom !== 'string' || !DATE_RE.test(b.validFrom)) {
+    return { error: 'validFrom moet "YYYY-MM-DD" zijn.' };
+  }
+  if (typeof b.validUntil !== 'string' || !DATE_RE.test(b.validUntil)) {
+    return { error: 'validUntil moet "YYYY-MM-DD" zijn.' };
+  }
+  if (b.validUntil < b.validFrom) return { error: 'validUntil mag niet vóór validFrom liggen.' };
+  return { tierId, period: b.period, priceEur: b.priceEur, validFrom: b.validFrom, validUntil: b.validUntil };
+}
+
+licensesRouter.get('/modules/:moduleId/tier-surcharges', async (req, res) => {
+  res.json(await moduleTierSurcharges.listModuleTierSurcharges(req.params.moduleId));
+});
+
+licensesRouter.post('/modules/:moduleId/tier-surcharges', requireSysadmin, async (req, res) => {
+  const parsed = parseModuleTierSurchargeBody((req.body ?? {}) as Record<string, unknown>);
+  if ('error' in parsed) return res.status(400).json({ error: parsed.error });
+  const surcharge = await moduleTierSurcharges.createModuleTierSurcharge({
+    moduleId: Number(req.params.moduleId),
+    ...parsed,
+  });
+  res.status(201).json(surcharge);
+});
+
+licensesRouter.put('/module-tier-surcharges/:id', requireSysadmin, async (req, res) => {
+  const b = (req.body ?? {}) as Record<string, unknown>;
+  if (typeof b.priceEur !== 'number' || !Number.isFinite(b.priceEur) || b.priceEur < 0) {
+    return res.status(400).json({ error: 'priceEur is verplicht (niet-negatief getal).' });
+  }
+  if (typeof b.validFrom !== 'string' || !DATE_RE.test(b.validFrom)) {
+    return res.status(400).json({ error: 'validFrom moet "YYYY-MM-DD" zijn.' });
+  }
+  if (typeof b.validUntil !== 'string' || !DATE_RE.test(b.validUntil)) {
+    return res.status(400).json({ error: 'validUntil moet "YYYY-MM-DD" zijn.' });
+  }
+  if (b.validUntil < b.validFrom) return res.status(400).json({ error: 'validUntil mag niet vóór validFrom liggen.' });
+  const surcharge = await moduleTierSurcharges.updateModuleTierSurcharge(req.params.id, {
+    priceEur: b.priceEur,
+    validFrom: b.validFrom,
+    validUntil: b.validUntil,
+  });
+  if (!surcharge) return res.status(404).json({ error: 'Opslagperiode niet gevonden.' });
+  res.json(surcharge);
+});
+
+licensesRouter.delete('/module-tier-surcharges/:id', requireSysadmin, async (req, res) => {
+  const ok = await moduleTierSurcharges.deleteModuleTierSurcharge(req.params.id);
   if (!ok) return res.status(404).json({ error: 'Opslagperiode niet gevonden.' });
   res.status(204).send();
 });

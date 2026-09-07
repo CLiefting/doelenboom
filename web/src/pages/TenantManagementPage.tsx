@@ -119,7 +119,7 @@ export default function TenantManagementPage({
         {tenants && manageableTenants.length === 0 && <p style={styles.muted}>Geen tenants om te beheren.</p>}
         {tenants && manageableTenants.length > 0 && (
           <>
-            <p style={styles.muted}>Klik op een tenant om de leden (rol admin/gebruiker/bezoeker) te beheren.</p>
+            <p style={styles.muted}>Klik op een tenant om de leden (rol admin/editor/bezoeker) te beheren.</p>
             <div style={styles.tenantSearchWrap}>
               <input
                 type="text"
@@ -529,7 +529,7 @@ function MemberTable({
                 style={styles.select}
               >
                 <option value="admin">admin</option>
-                <option value="gebruiker">gebruiker</option>
+                <option value="editor">editor</option>
                 <option value="bezoeker">bezoeker</option>
               </select>
             </td>
@@ -564,7 +564,7 @@ function AddMemberForm({
 }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [role, setRole] = useState<TenantRoleName>('gebruiker');
+  const [role, setRole] = useState<TenantRoleName>('editor');
   const [licenseWarning, setLicenseWarning] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -578,7 +578,7 @@ function AddMemberForm({
       await api.addTenantMember(token, tenantId, { email, password: password || undefined, role });
       setEmail('');
       setPassword('');
-      setRole('gebruiker');
+      setRole('editor');
       onAdded();
     } catch (err) {
       const licMsg = licenseLimitMessage(err);
@@ -609,7 +609,7 @@ function AddMemberForm({
         />
         <select style={styles.select} value={role} onChange={(e) => setRole(e.target.value as TenantRoleName)}>
           <option value="admin">admin</option>
-          <option value="gebruiker">gebruiker</option>
+          <option value="editor">editor</option>
           <option value="bezoeker">bezoeker</option>
         </select>
         <button style={btnStyle('primary')} type="submit" disabled={busy}>
@@ -1129,7 +1129,7 @@ function DoelenboomMemberRolesSection({
               >
                 <option value="">(zelfde als tenant: {r.tenantRole})</option>
                 <option value="admin">Admin (op deze doelenboom)</option>
-                <option value="gebruiker">Gebruiker (op deze doelenboom)</option>
+                <option value="editor">Editor (op deze doelenboom)</option>
                 <option value="bezoeker">Bezoeker (op deze doelenboom)</option>
               </select>
             </div>
@@ -1483,7 +1483,7 @@ function TenantSettingsForm({
         >
           <option value="">Uit — alleen expliciete leden</option>
           <option value="bezoeker">Aan — iedereen: bezoeker</option>
-          <option value="gebruiker">Aan — iedereen: gebruiker</option>
+          <option value="editor">Aan — iedereen: editor</option>
           <option value="admin">Aan — iedereen: admin</option>
         </select>
       </label>
@@ -1518,7 +1518,7 @@ function TenantSettingsForm({
         Tweestapsverificatie (MFA) verplicht voor alle leden van deze tenant
       </label>
       <p style={{ margin: '-4px 0 0 26px', fontSize: 12, color: '#9aa0a8' }}>
-        Geldt voor elk lid (admin/gebruiker/bezoeker) van deze tenant, bij elke login, ongeacht ieders eigen
+        Geldt voor elk lid (admin/editor/bezoeker) van deze tenant, bij elke login, ongeacht ieders eigen
         MFA-instelling in "Mijn beveiliging" — net als bij sysadmins is er geen individuele opt-out. Heeft iemand
         toegang tot meerdere tenants, dan volstaat één tenant met deze instelling aan om MFA voor die persoon
         overal verplicht te maken.

@@ -10,7 +10,7 @@ const PREFIX = unique('orgunits');
 describe('org-units CRUD + koppelen aan elementen', () => {
   let doelenboomId: number;
   let adminToken: string;
-  let gebruikerToken: string;
+  let editorToken: string;
   let bezoekerToken: string;
 
   before(async () => {
@@ -18,7 +18,7 @@ describe('org-units CRUD + koppelen aan elementen', () => {
     const email = `${PREFIX}-sysadmin@test.local`;
     await createSysadminUser(email, 'wachtwoord123');
     const sysadminToken = await login(email, 'wachtwoord123');
-    ({ doelenboomId, adminToken, gebruikerToken, bezoekerToken } = await setupWritableDoelenboom(sysadminToken, PREFIX));
+    ({ doelenboomId, adminToken, editorToken, bezoekerToken } = await setupWritableDoelenboom(sysadminToken, PREFIX));
     await req('POST', `/api/doelenbomen/${doelenboomId}/elements`, {
       token: adminToken, body: { code: 'OB1', type: 'Operationele benefit', name: 'OB 1' },
     });
@@ -31,7 +31,7 @@ describe('org-units CRUD + koppelen aan elementen', () => {
   });
 
   it('POST zonder code genereert automatisch O1, O2, ...; gebruiker mag niet', async () => {
-    const gebruiker = await req('POST', `/api/doelenbomen/${doelenboomId}/org-units`, { token: gebruikerToken, body: { name: 'x' } });
+    const gebruiker = await req('POST', `/api/doelenbomen/${doelenboomId}/org-units`, { token: editorToken, body: { name: 'x' } });
     assert.equal(gebruiker.status, 403);
 
     const o1 = await req('POST', `/api/doelenbomen/${doelenboomId}/org-units`, { token: adminToken, body: { name: 'Eerste OE' } });
@@ -104,12 +104,12 @@ describe('org-units CRUD + koppelen aan elementen', () => {
     assert.equal(bezoekerLink.status, 403);
 
     const gebruikerLink = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/OB1/org-units`, {
-      token: gebruikerToken, body: { orgCode },
+      token: editorToken, body: { orgCode },
     });
     assert.equal(gebruikerLink.status, 201);
 
     const gebruikerUnlink = await req('DELETE', `/api/doelenbomen/${doelenboomId}/elements/OB1/org-units/${orgCode}`, {
-      token: gebruikerToken,
+      token: editorToken,
     });
     assert.equal(gebruikerUnlink.status, 204);
   });

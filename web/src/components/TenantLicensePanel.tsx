@@ -123,15 +123,15 @@ export default function TenantLicensePanel({ token, tenantId }: { token: string;
           <option value="">— geen licentie (onbeperkt) —</option>
           {tiers.map((t) => (
             <option key={t.id} value={t.id}>
-              {t.name} (max {t.maxAdmins} admin{t.maxAdmins === 1 ? '' : 's'}, max {t.maxBomen} bomen)
+              {t.name} (max {t.maxEditors} admin/editor{t.maxEditors === 1 ? '' : 's'}, max {t.maxBomen} bomen)
             </option>
           ))}
         </select>
         <p style={styles.muted}>
           {license.tier
-            ? `Gebruik: ${license.usage.activeAdmins}/${license.tier.maxAdmins} actieve admins, ` +
+            ? `Gebruik: ${license.usage.activeEditors}/${license.tier.maxEditors} actieve admins/editors, ` +
               `${license.usage.activeBomen}/${license.tier.maxBomen} actieve doelenbomen.`
-            : `Geen tier ingesteld — geen limiet op aantal admins/doelenbomen.`}
+            : `Geen tier ingesteld — geen limiet op aantal admins/editors/doelenbomen.`}
           {' '}
           <span style={{ opacity: 0.75 }}>
             ({license.usage.lifetimeBomenAangemaakt} doelenb{license.usage.lifetimeBomenAangemaakt === 1 ? 'oom' : 'omen'}{' '}

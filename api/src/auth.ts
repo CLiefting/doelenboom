@@ -403,7 +403,7 @@ async function fetchTenantRoles(userId: number) {
     tenantId: r.tenant_id,
     tenantSlug: r.tenant_slug,
     tenantName: r.tenant_name,
-    role: r.role as 'admin' | 'gebruiker' | 'bezoeker',
+    role: r.role as 'admin' | 'editor' | 'bezoeker',
   }));
 }
 

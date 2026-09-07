@@ -75,17 +75,17 @@ export default function HelpPage({ onBack }: { onBack: () => void }) {
 }
 
 // Rij in de "Mogelijkheden per rol"-tabel: label + drie ✓/– vlaggen (bezoeker/
-// gebruiker/admin), volgorde van smal naar breed — zelfde volgorde als de
+// editor/admin), volgorde van smal naar breed — zelfde volgorde als de
 // rangorde in api/src/rbac.ts (ROLE_RANK). Sysadmin staat bewust niet als
 // vierde kolom in dezelfde tabel: die rol werkt categorisch anders (zie de
 // toelichting direct onder de tabel).
-function roleRow(label: string, bezoeker: boolean, gebruiker: boolean, admin: boolean) {
+function roleRow(label: string, bezoeker: boolean, editor: boolean, admin: boolean) {
   const flag = (v: boolean) => (v ? '✓' : '–');
   return (
     <tr key={label}>
       <td style={styles.td}>{label}</td>
       <td style={styles.tdCenter}>{flag(bezoeker)}</td>
-      <td style={styles.tdCenter}>{flag(gebruiker)}</td>
+      <td style={styles.tdCenter}>{flag(editor)}</td>
       <td style={styles.tdCenter}>{flag(admin)}</td>
     </tr>
   );
@@ -146,7 +146,7 @@ const SECTIONS: { id: string; title: string; content: JSX.Element }[] = [
       <>
         <p style={styles.note}>
           Een korte, praktische route naar de meestgebruikte handelingen. De meeste hiervan vereisen minimaal
-          de rol <strong>gebruiker</strong> — zie "Rollen en rechten" en "Mogelijkheden per rol" verderop voor
+          de rol <strong>editor</strong> — zie "Rollen en rechten" en "Mogelijkheden per rol" verderop voor
           de precieze grens per actie.
         </p>
         <p style={styles.p}>
@@ -217,14 +217,14 @@ const SECTIONS: { id: string; title: string; content: JSX.Element }[] = [
     content: (
       <>
         <p style={styles.p}>
-          Met schrijfrechten (rol gebruiker, admin of sysadmin — zie "Rollen en rechten" verderop) kun je losse
+          Met schrijfrechten (rol editor, admin of sysadmin — zie "Rollen en rechten" verderop) kun je losse
           wijzigingen direct doorvoeren, zonder Excel: "+ Nieuw element" in de knoppenbalk, en
           "Bewerken"/"Verwijderen" in het detailpaneel dat verschijnt als je dubbelklikt op een element.
           Datzelfde detailpaneel toont ook alle inkomende en uitgaande relaties van dat element, met een
           "+ Relatie"-knop om er een toe te voegen.
         </p>
         <p style={styles.p}>
-          Tags en organisatieonderdelen aan een element koppelen kan al met de rol gebruiker; de catalogus zelf
+          Tags en organisatieonderdelen aan een element koppelen kan al met de rol editor; de catalogus zelf
           (een nieuwe tag/organisatieonderdeel aanmaken) beheer je als admin via de "Beheer"-knop naast het
           filtermenu — daar staan beide stamlijsten naast elkaar, elk met een overzicht en een formulier om
           iets nieuws toe te voegen. Wijzigingen hier zijn direct zichtbaar, zonder rapport of publiceerstap.
@@ -309,7 +309,7 @@ const SECTIONS: { id: string; title: string; content: JSX.Element }[] = [
           toont dit eerst een wijzigingsoverzicht (nieuw/gewijzigd/te verwijderen, per rij aan- of uit te
           vinken); pas na bevestiging wordt het toegepast, en altijd <strong>additief per rij</strong> — nooit
           een volledige vervanging zoals bij "Importeer Excel" hierboven. Deze actie mag ook met de rol
-          gebruiker.
+          editor.
         </p>
         <p style={styles.p}>
           Los daarvan kun je de boom ook <strong>als SVG</strong> exporteren (het icoon links in de topbar, óók
@@ -341,7 +341,7 @@ const SECTIONS: { id: string; title: string; content: JSX.Element }[] = [
           Excel-import/publiceren, tenant-instellingen en leden beheren). Geen toegang tot andere tenants.
         </p>
         <p style={styles.p}>
-          <strong>Tenant-gebruiker</strong> (rol "gebruiker") — mag lezen én de "losse boom-inhoud" wijzigen:
+          <strong>Tenant-editor</strong> (rol "editor") — mag lezen én de "losse boom-inhoud" wijzigen:
           elementen en relaties, tags/organisatieonderdelen aan een element koppelen (niet de catalogus zelf
           beheren), en — als de Projecten-module actief is — projectstatus, producten/deliverables en
           activiteiten (incl. het exporteren/importeren van één project als Excel). Mag niet de
@@ -375,7 +375,7 @@ const SECTIONS: { id: string; title: string; content: JSX.Element }[] = [
             <tr>
               <th style={styles.th}>Actie</th>
               <th style={styles.th}>Bezoeker</th>
-              <th style={styles.th}>Gebruiker</th>
+              <th style={styles.th}>Editor</th>
               <th style={styles.th}>Tenant-admin</th>
             </tr>
           </thead>

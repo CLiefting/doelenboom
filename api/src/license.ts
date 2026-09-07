@@ -7,8 +7,9 @@ import { logAuditEvent } from './auditLog.js';
 // volledige ontwerp, en db/migrations/0002_licenses.sql voor de tabellen.
 // Bundelt alle databasetoegang tot tiers/modules/tenant_modules en de
 // bijbehorende limiet-enforcement, gebruikt door routes/licenses.ts,
-// routes/tenants.ts (admin-limiet), routes/doelenbomen.ts (bomen-limiet) en
-// rbac.ts (requireModule, voor de "Projecten"-module-gating).
+// routes/tenants.ts (admin/editor-limiet, samen tegen max_editors), routes/
+// doelenbomen.ts (bomen-limiet) en rbac.ts (requireModule, voor de
+// "Projecten"-module-gating).
 
 // Prijs staat sinds 30 augustus 2026 NIET meer op de tier zelf — een
 // abonnement heeft meerdere prijzen door de tijd heen (bv. € 125/jaar in
@@ -19,7 +20,7 @@ import { logAuditEvent } from './auditLog.js';
 export interface Tier {
   id: number;
   name: string;
-  maxAdmins: number;
+  maxEditors: number;
   maxBomen: number;
   sortOrder: number;
   // Zie db/migrations/0018_evaluatie_tier.sql: generieke velden voor een
@@ -67,7 +68,7 @@ export interface TenantLicense {
   // volledige data voor het beheerscherm.
   moduleAssignments: TenantModuleAssignment[];
   usage: {
-    activeAdmins: number;
+    activeEditors: number;
     activeBomen: number;
     lifetimeBomenAangemaakt: number;
   };
@@ -84,7 +85,7 @@ export class LicenseLimitError extends Error {
 }
 
 const TIER_SELECT_FIELDS =
-  'id, name, max_admins as "maxAdmins", max_bomen as "maxBomen", sort_order as "sortOrder", ' +
+  'id, name, max_editors as "maxEditors", max_bomen as "maxBomen", sort_order as "sortOrder", ' +
   'trial_days as "trialDays", all_modules_included as "allModulesIncluded"';
 const MODULE_SELECT_FIELDS = 'id, key, name, description';
 
@@ -97,19 +98,19 @@ export async function listTiers(): Promise<Tier[]> {
 
 export async function createTier(input: {
   name: string;
-  maxAdmins: number;
+  maxEditors: number;
   maxBomen: number;
   sortOrder: number;
   trialDays?: number | null;
   allModulesIncluded?: boolean;
 }): Promise<Tier> {
   const r = await pool.query(
-    `insert into tiers (name, max_admins, max_bomen, sort_order, trial_days, all_modules_included)
+    `insert into tiers (name, max_editors, max_bomen, sort_order, trial_days, all_modules_included)
      values ($1,$2,$3,$4,$5,$6)
      returning ${TIER_SELECT_FIELDS}`,
     [
       input.name,
-      input.maxAdmins,
+      input.maxEditors,
       input.maxBomen,
       input.sortOrder,
       input.trialDays ?? null,
@@ -123,7 +124,7 @@ export async function updateTier(
   id: number | string,
   input: {
     name?: string;
-    maxAdmins?: number;
+    maxEditors?: number;
     maxBomen?: number;
     sortOrder?: number;
     trialDays?: number | null;
@@ -134,7 +135,7 @@ export async function updateTier(
   const r = await pool.query(
     `update tiers set
        name = coalesce($1, name),
-       max_admins = coalesce($2, max_admins),
+       max_editors = coalesce($2, max_editors),
        max_bomen = coalesce($3, max_bomen),
        sort_order = coalesce($4, sort_order),
        trial_days = case when $5 then $6 else trial_days end,
@@ -144,7 +145,7 @@ export async function updateTier(
      returning ${TIER_SELECT_FIELDS}`,
     [
       input.name ?? null,
-      input.maxAdmins ?? null,
+      input.maxEditors ?? null,
       input.maxBomen ?? null,
       input.sortOrder ?? null,
       !!input.hasTrialDays,
@@ -208,9 +209,14 @@ export async function deleteModule(id: number | string): Promise<boolean> {
 
 // --- Per-tenant licentie: tier-toewijzing, modules, gebruik. ---
 
-async function countActiveAdmins(tenantId: number | string): Promise<number> {
+// Sinds de prijsstrategie-herziening van 7 september 2026 (zie
+// doelenboom_licentiemodel.md §5 v3): 'admin' én 'editor' (tot dan
+// 'gebruiker' geheten) tellen SAMEN tegen de licentielimiet — 'bezoeker'
+// blijft onbeperkt. Naam bewust "Editors" (niet "ActiveAdmins") om dat
+// duidelijk te maken; de kolom heet nu ook tiers.max_editors.
+async function countActiveEditors(tenantId: number | string): Promise<number> {
   const r = await pool.query(
-    `select count(*)::int as n from tenant_users where tenant_id = $1 and role = 'admin'`,
+    `select count(*)::int as n from tenant_users where tenant_id = $1 and role in ('admin', 'editor')`,
     [tenantId]
   );
   return r.rows[0].n;
@@ -309,10 +315,10 @@ export async function getTenantLicense(tenantId: number | string): Promise<Tenan
     tierId == null
       ? null
       : ((await pool.query(`select ${TIER_SELECT_FIELDS} from tiers where id = $1`, [tierId])).rows[0] ?? null);
-  const [activeModules, moduleAssignments, activeAdmins, activeBomen] = await Promise.all([
+  const [activeModules, moduleAssignments, activeEditors, activeBomen] = await Promise.all([
     getActiveModuleKeys(tenantId),
     getTenantModuleAssignments(tenantId),
-    countActiveAdmins(tenantId),
+    countActiveEditors(tenantId),
     countActiveBomen(tenantId),
   ]);
   const datePassed = row.date_passed as boolean;
@@ -329,7 +335,7 @@ export async function getTenantLicense(tenantId: number | string): Promise<Tenan
     subscriptionRequestStatus: requestStatus,
     moduleAssignments,
     usage: {
-      activeAdmins,
+      activeEditors,
       activeBomen,
       lifetimeBomenAangemaakt: row.lifetime_trees_created,
     },
@@ -337,20 +343,30 @@ export async function getTenantLicense(tenantId: number | string): Promise<Tenan
 }
 
 // Standaard-einddatum bij het aanmaken van een NIEUWE tenant (zie
-// routes/tenants.ts POST /): einde van de aanmaakmaand + 12 maanden, dus een
-// jaarlicentie die netjes op een maandgrens afloopt. Bijvoorbeeld: aangemaakt
-// op 25 augustus 2026 -> einde van augustus 2026 (31 aug) -> +12 maanden ->
-// 31 augustus 2027. Werkt op UTC-kalenderdata (los van tijdzone van de
-// server) omdat het hier om een kalenderdatum gaat, geen tijdstip.
-// Date.UTC(jaar, maand+1, 0) is de laatste dag van "maand" (dag 0 van de
-// volgende maand rolt automatisch terug) — hetzelfde trucje voor de
-// maand-overflow bij +12 maanden (bv. 29 feb in een schrikkeljaar +12
-// maanden rolt netjes door naar 1 maart het jaar erna, er bestaat dan geen
-// 29 feb).
-export function computeDefaultLicenseEndDate(from: Date): string {
+// routes/tenants.ts POST /) of een zelfbedieningscontract (subscriptions.ts
+// registerPayment/registerRenewal): einde van de startmaand + `months`
+// maanden, dus een licentie die netjes op een maandgrens afloopt.
+// Bijvoorbeeld: aangemaakt op 25 augustus 2026, months=12 -> einde van
+// augustus 2026 (31 aug) -> +12 maanden -> 31 augustus 2027. `months`
+// default 12 (jaarlicentie, ongewijzigd gedrag voor routes/tenants.ts en
+// jaarlijkse zelfbedieningscontracten) — sinds de maandelijkse facturatie
+// van 7 september 2026 (doelenboom_licentiemodel.md §9.2 v3) geeft
+// subscriptions.ts hier ook months=1 door voor een maandcontract. Werkt op
+// UTC-kalenderdata (los van tijdzone van de server) omdat het hier om een
+// kalenderdatum gaat, geen tijdstip. Date.UTC(jaar, maand+1, 0) is de
+// laatste dag van "maand" (dag 0 van de volgende maand rolt automatisch
+// terug) — hetzelfde trucje voor de maand-overflow bij +N maanden (bv. 29
+// feb in een schrikkeljaar +12 maanden rolt netjes door naar 1 maart het
+// jaar erna, er bestaat dan geen 29 feb).
+export function computeDefaultLicenseEndDate(from: Date, months = 12): string {
   const endOfCreationMonth = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth() + 1, 0));
+  const totalMonths = endOfCreationMonth.getUTCMonth() + months;
   const endDate = new Date(
-    Date.UTC(endOfCreationMonth.getUTCFullYear() + 1, endOfCreationMonth.getUTCMonth(), endOfCreationMonth.getUTCDate())
+    Date.UTC(
+      endOfCreationMonth.getUTCFullYear() + Math.floor(totalMonths / 12),
+      totalMonths % 12,
+      endOfCreationMonth.getUTCDate()
+    )
   );
   return endDate.toISOString().slice(0, 10);
 }
@@ -638,9 +654,9 @@ export async function assertTierFits(tenantId: number | string, tierId: number |
   const tierRow = await pool.query(`select ${TIER_SELECT_FIELDS} from tiers where id = $1`, [tierId]);
   const tier = tierRow.rows[0] as Tier | undefined;
   if (!tier) throw new Error('Tier niet gevonden.');
-  const [activeAdmins, activeBomen] = await Promise.all([countActiveAdmins(tenantId), countActiveBomen(tenantId)]);
+  const [activeEditors, activeBomen] = await Promise.all([countActiveEditors(tenantId), countActiveBomen(tenantId)]);
   const problems: string[] = [];
-  if (activeAdmins > tier.maxAdmins) problems.push(`${activeAdmins} actieve admins (max ${tier.maxAdmins})`);
+  if (activeEditors > tier.maxEditors) problems.push(`${activeEditors} actieve admins/editors (max ${tier.maxEditors})`);
   if (activeBomen > tier.maxBomen) problems.push(`${activeBomen} actieve doelenbomen (max ${tier.maxBomen})`);
   if (problems.length) {
     throw new LicenseLimitError(
@@ -669,14 +685,18 @@ export async function setTenantTier(
   }
 }
 
-// Gooit LicenseLimitError als er al een admin bij komt terwijl de tenant geen
-// tier heeft dat nog toelaat. Alleen relevant bij het TOEVOEGEN van een nieuwe
-// admin (routes/tenants.ts roept dit alleen aan als de gebruiker nog geen
-// admin van deze tenant was) — een bestaande admin diens rol ongewijzigd
+// Gooit LicenseLimitError als er een admin ÓF editor bij komt terwijl de
+// tenant geen tier heeft dat nog toelaat — sinds 7 september 2026 tellen
+// beide rollen samen tegen tiers.max_editors (zie countActiveEditors
+// hierboven en doelenboom_licentiemodel.md §5 v3: "admin telt mee als
+// editor"). Alleen relevant bij het TOEVOEGEN van een lidmaatschap dat nog
+// niet meetelde (routes/tenants.ts roept dit alleen aan als de gebruiker nog
+// geen admin/editor van deze tenant was) — iemands rol wijzigen tussen admin
+// en editor (allebei tellen al mee) of een bestaande admin/editor ongewijzigd
 // laten mag altijd, ongeacht de limiet (anders zou een tenant die toevallig
 // al over de limiet zit — bv. na een downgrade-poging die faalde, of een
 // handmatige databasewijziging — muurvast komen te zitten).
-export async function assertCanAddAdmin(tenantId: number | string): Promise<void> {
+export async function assertCanAddEditor(tenantId: number | string): Promise<void> {
   const tenantRow = await pool.query('select tier_id from tenants where id = $1', [tenantId]);
   const tierId = tenantRow.rows[0]?.tier_id as number | null | undefined;
   if (tierId == null) return; // geen tier ingesteld = onbeperkt
@@ -684,11 +704,11 @@ export async function assertCanAddAdmin(tenantId: number | string): Promise<void
     | Tier
     | undefined;
   if (!tier) return;
-  const activeAdmins = await countActiveAdmins(tenantId);
-  if (activeAdmins >= tier.maxAdmins) {
+  const activeEditors = await countActiveEditors(tenantId);
+  if (activeEditors >= tier.maxEditors) {
     throw new LicenseLimitError(
-      `Limiet van tier "${tier.name}" bereikt: maximaal ${tier.maxAdmins} admin(s). ` +
-        'Verwijder eerst een bestaande admin of vraag een sysadmin om te upgraden.'
+      `Limiet van tier "${tier.name}" bereikt: maximaal ${tier.maxEditors} admin(s)/editor(s) samen. ` +
+        'Verwijder eerst een bestaand lid met de rol admin of editor, of vraag een sysadmin om te upgraden.'
     );
   }
 }

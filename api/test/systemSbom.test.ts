@@ -19,7 +19,7 @@ const PREFIX = unique('sysinfo-sbom');
 
 describe('systemSbom (Softwarecomponenten/SBOM, sysadmin-only)', () => {
   let sysadminToken: string;
-  let gebruikerToken: string;
+  let editorToken: string;
   let buildId: number;
 
   let sysadminUserId: number;
@@ -30,9 +30,9 @@ describe('systemSbom (Softwarecomponenten/SBOM, sysadmin-only)', () => {
     sysadminUserId = await createSysadminUser(sysadminEmail, 'wachtwoord123');
     sysadminToken = await login(sysadminEmail, 'wachtwoord123');
 
-    const gebruikerEmail = `${PREFIX}-gebruiker@test.local`;
+    const gebruikerEmail = `${PREFIX}-editor@test.local`;
     await createUser(gebruikerEmail, 'wachtwoord123');
-    gebruikerToken = await login(gebruikerEmail, 'wachtwoord123');
+    editorToken = await login(gebruikerEmail, 'wachtwoord123');
   });
 
   after(async () => {
@@ -51,11 +51,11 @@ describe('systemSbom (Softwarecomponenten/SBOM, sysadmin-only)', () => {
   });
 
   it('alle vijf endpoints zijn sysadmin-only', async () => {
-    assert.equal((await req('GET', '/api/system/sbom/summary', { token: gebruikerToken })).status, 403);
-    assert.equal((await req('GET', '/api/system/sbom/components', { token: gebruikerToken })).status, 403);
-    assert.equal((await req('GET', '/api/system/sbom/vulnerabilities', { token: gebruikerToken })).status, 403);
-    assert.equal((await req('POST', '/api/system/sbom/refresh', { token: gebruikerToken })).status, 403);
-    assert.equal((await rawReq('GET', '/api/system/sbom/download', { token: gebruikerToken })).status, 403);
+    assert.equal((await req('GET', '/api/system/sbom/summary', { token: editorToken })).status, 403);
+    assert.equal((await req('GET', '/api/system/sbom/components', { token: editorToken })).status, 403);
+    assert.equal((await req('GET', '/api/system/sbom/vulnerabilities', { token: editorToken })).status, 403);
+    assert.equal((await req('POST', '/api/system/sbom/refresh', { token: editorToken })).status, 403);
+    assert.equal((await rawReq('GET', '/api/system/sbom/download', { token: editorToken })).status, 403);
 
     // Zonder token: 401 (requireAuth), niet 403.
     assert.equal((await req('GET', '/api/system/sbom/summary')).status, 401);

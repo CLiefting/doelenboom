@@ -10,7 +10,7 @@ const PREFIX = unique('tags');
 describe('tags CRUD + koppelen aan elementen', () => {
   let doelenboomId: number;
   let adminToken: string;
-  let gebruikerToken: string;
+  let editorToken: string;
   let bezoekerToken: string;
 
   before(async () => {
@@ -18,7 +18,7 @@ describe('tags CRUD + koppelen aan elementen', () => {
     const email = `${PREFIX}-sysadmin@test.local`;
     await createSysadminUser(email, 'wachtwoord123');
     const sysadminToken = await login(email, 'wachtwoord123');
-    ({ doelenboomId, adminToken, gebruikerToken, bezoekerToken } = await setupWritableDoelenboom(sysadminToken, PREFIX));
+    ({ doelenboomId, adminToken, editorToken, bezoekerToken } = await setupWritableDoelenboom(sysadminToken, PREFIX));
     await req('POST', `/api/doelenbomen/${doelenboomId}/elements`, {
       token: adminToken, body: { code: 'P1', type: 'Project', name: 'Project 1' },
     });
@@ -41,7 +41,7 @@ describe('tags CRUD + koppelen aan elementen', () => {
     const missingName = await req('POST', `/api/doelenbomen/${doelenboomId}/tags`, { token: adminToken, body: {} });
     assert.equal(missingName.status, 400);
 
-    const gebruiker = await req('POST', `/api/doelenbomen/${doelenboomId}/tags`, { token: gebruikerToken, body: { name: 'x' } });
+    const gebruiker = await req('POST', `/api/doelenbomen/${doelenboomId}/tags`, { token: editorToken, body: { name: 'x' } });
     assert.equal(gebruiker.status, 403);
   });
 
@@ -109,12 +109,12 @@ describe('tags CRUD + koppelen aan elementen', () => {
     assert.equal(bezoekerLink.status, 403);
 
     const gebruikerLink = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P1/tags`, {
-      token: gebruikerToken, body: { tagCode },
+      token: editorToken, body: { tagCode },
     });
     assert.equal(gebruikerLink.status, 201);
 
     const gebruikerUnlink = await req('DELETE', `/api/doelenbomen/${doelenboomId}/elements/P1/tags/${tagCode}`, {
-      token: gebruikerToken,
+      token: editorToken,
     });
     assert.equal(gebruikerUnlink.status, 204);
   });

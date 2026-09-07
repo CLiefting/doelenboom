@@ -16,9 +16,9 @@ tagsRouter.use(requireAuth);
 // in de stamlijst) blijft admin-only, net als de overige "instellingen"-laag —
 // zie requireAdmin hieronder. Een tag aan een element KOPPELEN/ontkoppelen
 // (element_tags, onderaan dit bestand) is "losse boom-inhoud" en mag ook door
-// de rol 'gebruiker' — zie requireEditor.
+// de rol 'editor' — zie requireEditor.
 const requireAdmin = requireWritableDoelenboom('id');
-const requireEditor = requireWritableDoelenboom('id', 'gebruiker');
+const requireEditor = requireWritableDoelenboom('id', 'editor');
 
 function isUniqueViolation(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { code?: string }).code === '23505';

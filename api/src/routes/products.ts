@@ -13,9 +13,9 @@ import { diffFields, logProjectHistory, touchProjectStatusUpdated } from '../pro
 export const productsRouter = Router();
 productsRouter.use(requireAuth);
 // Per route meegeven (niet via router.use()) — zie toelichting in elements.ts.
-// minRole='gebruiker': producten/deliverables zijn "losse boom-inhoud" bij een
+// minRole='editor': producten/deliverables zijn "losse boom-inhoud" bij een
 // element, net als elementen/relaties/tags-koppelingen.
-const requireEditor = requireWritableDoelenboom('id', 'gebruiker');
+const requireEditor = requireWritableDoelenboom('id', 'editor');
 // Producten/deliverables horen bij de "Projecten"-module (zie
 // doelenboom_licentiemodel.md §3) — GET .../tree levert al lege data als de
 // module ontbreekt (routes/tree.ts), dit hier blokkeert daarnaast expliciet

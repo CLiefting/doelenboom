@@ -45,11 +45,11 @@ describe('doelenboom-templates', () => {
     });
     const adminToken = await login(adminEmail, 'wachtwoord123');
 
-    const gebruikerEmail = `${PREFIX}-t2-gebruiker@test.local`;
+    const gebruikerEmail = `${PREFIX}-t2-editor@test.local`;
     await req('POST', `/api/tenants/${tenantId}/members`, {
-      token: sysadminToken, body: { email: gebruikerEmail, password: 'wachtwoord123', role: 'gebruiker' },
+      token: sysadminToken, body: { email: gebruikerEmail, password: 'wachtwoord123', role: 'editor' },
     });
-    const gebruikerToken = await login(gebruikerEmail, 'wachtwoord123');
+    const editorToken = await login(gebruikerEmail, 'wachtwoord123');
 
     // Een boom om als bron te gebruiken — de generieke voorbeeldboom (via het
     // Batenboom-sjabloon, want dit is een net aangemaakte tenant) volstaat.
@@ -59,7 +59,7 @@ describe('doelenboom-templates', () => {
     const doelenboomId = boom.body.id;
 
     const asGebruiker = await req('POST', `/api/doelenbomen/${doelenboomId}/save-as-template`, {
-      token: gebruikerToken, body: { name: 'Mijn sjabloon', description: '', scope: 'tenant' },
+      token: editorToken, body: { name: 'Mijn sjabloon', description: '', scope: 'tenant' },
     });
     assert.equal(asGebruiker.status, 403);
 
@@ -256,11 +256,11 @@ describe('doelenboom-templates', () => {
     });
     const adminToken = await login(adminEmail, 'wachtwoord123');
 
-    const gebruikerEmail = `${PREFIX}-t7-gebruiker@test.local`;
+    const gebruikerEmail = `${PREFIX}-t7-editor@test.local`;
     await req('POST', `/api/tenants/${tenantId}/members`, {
-      token: sysadminToken, body: { email: gebruikerEmail, password: 'wachtwoord123', role: 'gebruiker' },
+      token: sysadminToken, body: { email: gebruikerEmail, password: 'wachtwoord123', role: 'editor' },
     });
-    const gebruikerToken = await login(gebruikerEmail, 'wachtwoord123');
+    const editorToken = await login(gebruikerEmail, 'wachtwoord123');
 
     const boom = await req('POST', `/api/tenants/${tenantId}/doelenbomen`, {
       token: adminToken, body: { slug: 'bron', name: 'Bronboom' },
@@ -281,7 +281,7 @@ describe('doelenboom-templates', () => {
 
     // Gewone gebruiker (geen tenant-admin, geen sysadmin): geen enkel
     // beheerbaar sjabloon zichtbaar via deze aggregerende lijst.
-    const asGebruiker = await req('GET', '/api/doelenboom-templates', { token: gebruikerToken });
+    const asGebruiker = await req('GET', '/api/doelenboom-templates', { token: editorToken });
     assert.equal(asGebruiker.status, 200);
     assert.ok(!asGebruiker.body.some((t: any) => t.id === eigenSjabloon.body.id));
 
@@ -352,11 +352,11 @@ describe('doelenboom-templates', () => {
       token: sysadminToken, body: { email: adminEmail, password: 'wachtwoord123', role: 'admin' },
     });
     const adminToken = await login(adminEmail, 'wachtwoord123');
-    const gebruikerEmail = `${PREFIX}-t9-gebruiker@test.local`;
+    const gebruikerEmail = `${PREFIX}-t9-editor@test.local`;
     await req('POST', `/api/tenants/${tenantId}/members`, {
-      token: sysadminToken, body: { email: gebruikerEmail, password: 'wachtwoord123', role: 'gebruiker' },
+      token: sysadminToken, body: { email: gebruikerEmail, password: 'wachtwoord123', role: 'editor' },
     });
-    const gebruikerToken = await login(gebruikerEmail, 'wachtwoord123');
+    const editorToken = await login(gebruikerEmail, 'wachtwoord123');
 
     const boom = await req('POST', `/api/tenants/${tenantId}/doelenbomen`, {
       token: adminToken, body: { slug: 'bron', name: 'Bronboom' },
@@ -366,7 +366,7 @@ describe('doelenboom-templates', () => {
     });
     const templateId = sjabloon.body.id;
 
-    const asGebruiker = await req('GET', `/api/doelenboom-templates/${templateId}/column-config`, { token: gebruikerToken });
+    const asGebruiker = await req('GET', `/api/doelenboom-templates/${templateId}/column-config`, { token: editorToken });
     assert.equal(asGebruiker.status, 403);
 
     const current = await req('GET', `/api/doelenboom-templates/${templateId}/column-config`, { token: adminToken });

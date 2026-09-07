@@ -283,7 +283,7 @@ describe('mfa', () => {
 
     const memberEmail = `${PREFIX}-tenantmfa-lid@test.local`;
     await req('POST', `/api/tenants/${tenantId}/members`, {
-      token: sysadminToken, body: { email: memberEmail, password: 'geheim1234', role: 'gebruiker' },
+      token: sysadminToken, body: { email: memberEmail, password: 'geheim1234', role: 'editor' },
     });
 
     // Geen sysadmin, mfa_enabled staat niet aan — toch moet /login een code
@@ -321,7 +321,7 @@ describe('mfa', () => {
 
     const memberEmail = `${PREFIX}-tenantnomfa-lid@test.local`;
     await req('POST', `/api/tenants/${tenantId}/members`, {
-      token: sysadminToken, body: { email: memberEmail, password: 'geheim1234', role: 'gebruiker' },
+      token: sysadminToken, body: { email: memberEmail, password: 'geheim1234', role: 'editor' },
     });
 
     const loginResult = await req('POST', '/api/auth/login', { body: { email: memberEmail, password: 'geheim1234' } });

@@ -27,9 +27,9 @@ import { diffFields, logProjectHistory, touchProjectStatusUpdated } from '../pro
 export const activitiesRouter = Router();
 activitiesRouter.use(requireAuth);
 // Per route meegeven (niet via router.use()) — zie toelichting in elements.ts.
-// minRole='gebruiker': activiteiten zijn "losse boom-inhoud" bij een element,
+// minRole='editor': activiteiten zijn "losse boom-inhoud" bij een element,
 // net als elementen/relaties/tags-koppelingen/producten.
-const requireEditor = requireWritableDoelenboom('id', 'gebruiker');
+const requireEditor = requireWritableDoelenboom('id', 'editor');
 // Activiteiten horen bij de "Projecten"-module (zie doelenboom_licentiemodel.md
 // §3), net als products.ts — GET .../tree levert al lege data als de module
 // ontbreekt (routes/tree.ts), dit hier blokkeert daarnaast expliciet de

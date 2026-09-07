@@ -10,7 +10,7 @@ const PREFIX = unique('auditlog');
 
 describe('audit log (sysadmin-only, append-only)', () => {
   let sysadminToken: string;
-  let gebruikerToken: string;
+  let editorToken: string;
 
   before(async () => {
     await startTestServer();
@@ -18,10 +18,10 @@ describe('audit log (sysadmin-only, append-only)', () => {
     await createSysadminUser(sysadminEmail, 'wachtwoord123');
     sysadminToken = await login(sysadminEmail, 'wachtwoord123');
 
-    const gebruikerEmail = `${PREFIX}-gebruiker@test.local`;
+    const gebruikerEmail = `${PREFIX}-editor@test.local`;
     await createSysadminUser(gebruikerEmail, 'wachtwoord123'); // eenvoudigst: los account, alleen voor de 403-check
     await pool.query('update users set is_sysadmin = false where email = $1', [gebruikerEmail]);
-    gebruikerToken = await login(gebruikerEmail, 'wachtwoord123');
+    editorToken = await login(gebruikerEmail, 'wachtwoord123');
   });
 
   after(async () => {
@@ -31,10 +31,10 @@ describe('audit log (sysadmin-only, append-only)', () => {
   });
 
   it('GET /api/audit-log en /api/audit-log/export zijn sysadmin-only', async () => {
-    const listAsGebruiker = await req('GET', '/api/audit-log', { token: gebruikerToken });
+    const listAsGebruiker = await req('GET', '/api/audit-log', { token: editorToken });
     assert.equal(listAsGebruiker.status, 403);
 
-    const exportAsGebruiker = await rawReq('GET', '/api/audit-log/export', { token: gebruikerToken });
+    const exportAsGebruiker = await rawReq('GET', '/api/audit-log/export', { token: editorToken });
     assert.equal(exportAsGebruiker.status, 403);
 
     const listAsSysadmin = await req('GET', '/api/audit-log', { token: sysadminToken });
@@ -55,7 +55,7 @@ describe('audit log (sysadmin-only, append-only)', () => {
   it('het openen van een boom (GET .../tree) legt een doelenboom_view-regel vast', async () => {
     const fixture = await setupWritableDoelenboom(sysadminToken, `${PREFIX}-view`);
 
-    const treeRes = await req('GET', `/api/doelenbomen/${fixture.doelenboomId}/tree`, { token: fixture.gebruikerToken });
+    const treeRes = await req('GET', `/api/doelenbomen/${fixture.doelenboomId}/tree`, { token: fixture.editorToken });
     assert.equal(treeRes.status, 200);
 
     const logRes = await req('GET', '/api/audit-log', { token: sysadminToken });
@@ -70,8 +70,8 @@ describe('audit log (sysadmin-only, append-only)', () => {
         e.tenantName === `${PREFIX}-view (${fixture.tenantId})`
     );
     assert.ok(entry, 'verwacht een doelenboom_view-logregel voor deze boom');
-    assert.equal(entry.userEmail, `${PREFIX}-view-gebruiker@test.local`);
-    assert.equal(entry.role, 'gebruiker');
+    assert.equal(entry.userEmail, `${PREFIX}-view-editor@test.local`);
+    assert.equal(entry.role, 'editor');
   });
 
   it('een tenant-instellingen-wijziging legt een tenant_settings_changed-regel vast met changes-diff', async () => {

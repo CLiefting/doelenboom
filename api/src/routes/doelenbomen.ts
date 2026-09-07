@@ -347,7 +347,7 @@ doelenbomenRouter.get(
   }
 );
 
-// PUT /api/doelenbomen/:id/member-roles/:userId — { role: 'admin' | 'gebruiker' | 'bezoeker' | null }.
+// PUT /api/doelenbomen/:id/member-roles/:userId — { role: 'admin' | 'editor' | 'bezoeker' | null }.
 // null verwijdert de override (terug naar de tenant-rol). De gebruiker moet
 // wél lid zijn van de tenant van deze doelenboom — een override kan geen
 // toegang geven aan iemand die geen tenant-lid is, alleen de rol bijstellen
@@ -361,9 +361,9 @@ doelenbomenRouter.put(
   async (req, res) => {
     const b = (req.body ?? {}) as Record<string, unknown>;
     const role =
-      b.role === 'admin' || b.role === 'gebruiker' || b.role === 'bezoeker' ? b.role : b.role === null ? null : undefined;
+      b.role === 'admin' || b.role === 'editor' || b.role === 'bezoeker' ? b.role : b.role === null ? null : undefined;
     if (role === undefined) {
-      return res.status(400).json({ error: 'role moet "admin", "gebruiker", "bezoeker" of null zijn.' });
+      return res.status(400).json({ error: 'role moet "admin", "editor", "bezoeker" of null zijn.' });
     }
 
     const member = await pool.query(

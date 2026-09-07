@@ -183,14 +183,17 @@ export async function cleanupByPrefix(prefix: string): Promise<void> {
 }
 
 // Veelgebruikte fixture voor de CRUD-testbestanden (elements/tags/orgUnits/
-// edges/products/projectStatus): een tenant met een admin-, een gebruiker- en
+// edges/products/projectStatus): een tenant met een admin-, een editor- en
 // een bezoeker-account, plus één schrijfbare (niet read-only) doelenboom erin
 // — allemaal via de echte API-routes aangemaakt (sysadmin -> tenant -> leden
 // -> doelenboom), zodat elk testbestand niet zelf steeds dezelfde requests
 // hoeft te herhalen vóór het de route kan testen waar het eigenlijk om gaat.
-// Rolmodel (zie api/src/rbac.ts): 'gebruiker' mag losse boom-inhoud wijzigen
-// (elementen/relaties/tags-koppelingen/projectstatus/producten), niet de
-// kolommen/instellingen/import — 'bezoeker' mag alleen lezen.
+// Rolmodel (zie api/src/rbac.ts): 'editor' (tot 7 september 2026 'editor'
+// geheten) mag losse boom-inhoud wijzigen (elementen/relaties/tags-
+// koppelingen/projectstatus/producten), niet de kolommen/instellingen/
+// import — 'bezoeker' mag alleen lezen. Gebruikt hier het Brons-tier-niveau
+// (2 editors) niet expliciet — deze fixture zet zelf geen tier, dus de
+// tenant heeft geen licentielimiet (tier_id = null = onbeperkt).
 export async function setupWritableDoelenboom(sysadminToken: string, prefix: string) {
   const tenant = await req('POST', '/api/tenants', { token: sysadminToken, body: { slug: prefix, name: prefix } });
   if (tenant.status !== 201) {
@@ -218,11 +221,11 @@ export async function setupWritableDoelenboom(sysadminToken: string, prefix: str
   });
   const adminToken = await login(adminEmail, 'wachtwoord123');
 
-  const gebruikerEmail = `${prefix}-gebruiker@test.local`;
+  const editorEmail = `${prefix}-editor@test.local`;
   await req('POST', `/api/tenants/${tenantId}/members`, {
-    token: sysadminToken, body: { email: gebruikerEmail, password: 'wachtwoord123', role: 'gebruiker' },
+    token: sysadminToken, body: { email: editorEmail, password: 'wachtwoord123', role: 'editor' },
   });
-  const gebruikerToken = await login(gebruikerEmail, 'wachtwoord123');
+  const editorToken = await login(editorEmail, 'wachtwoord123');
 
   const bezoekerEmail = `${prefix}-bezoeker@test.local`;
   await req('POST', `/api/tenants/${tenantId}/members`, {
@@ -242,5 +245,5 @@ export async function setupWritableDoelenboom(sysadminToken: string, prefix: str
   }
   const doelenboomId = boom.body.id as number;
 
-  return { tenantId, doelenboomId, adminToken, gebruikerToken, bezoekerToken };
+  return { tenantId, doelenboomId, adminToken, editorToken, bezoekerToken };
 }

@@ -226,14 +226,14 @@ describe('automatische accountretentie (inactieve accounts)', () => {
     await createSysadminUser(sysadminEmail, 'wachtwoord123');
     const sysadminToken = await login(sysadminEmail, 'wachtwoord123');
 
-    const { tenantId, doelenboomId, gebruikerToken } = await setupWritableDoelenboom(sysadminToken, `${PREFIX}-org`);
-    void gebruikerToken;
-    const gebruikerEmail = `${PREFIX}-org-gebruiker@test.local`;
+    const { tenantId, doelenboomId, editorToken } = await setupWritableDoelenboom(sysadminToken, `${PREFIX}-org`);
+    void editorToken;
+    const gebruikerEmail = `${PREFIX}-org-editor@test.local`;
 
-    // Maak organisatie-inhoud aan namens het 'gebruiker'-account, zodat er
+    // Maak organisatie-inhoud aan namens het 'editor'-account, zodat er
     // ook daadwerkelijk iets te controleren valt na diens verwijdering.
     const el = await req('POST', `/api/doelenbomen/${doelenboomId}/elements`, {
-      token: gebruikerToken,
+      token: editorToken,
       body: { column: 'project', name: `${PREFIX}-element` },
     });
     // Niet elk elementen-endpoint/kolomschema is hier relevant -- als het

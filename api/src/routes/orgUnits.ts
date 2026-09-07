@@ -14,9 +14,9 @@ orgUnitsRouter.use(requireAuth);
 // ook tenant-admins zodra de doelenboom op read-only staat (zie rbac.ts).
 // Twee niveaus, zelfde opzet als tags.ts: de org-unit-CATALOGUS zelf blijft
 // admin-only, een org-unit aan een element KOPPELEN (ob_org_relations,
-// onderaan dit bestand) mag ook door de rol 'gebruiker'.
+// onderaan dit bestand) mag ook door de rol 'editor'.
 const requireAdmin = requireWritableDoelenboom('id');
-const requireEditor = requireWritableDoelenboom('id', 'gebruiker');
+const requireEditor = requireWritableDoelenboom('id', 'editor');
 
 function isUniqueViolation(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { code?: string }).code === '23505';

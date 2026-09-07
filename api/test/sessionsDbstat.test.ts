@@ -9,7 +9,7 @@ const PREFIX = unique('sessdb');
 
 describe('sessions + dbstat (sysadmin-only diagnostiek)', () => {
   let sysadminToken: string;
-  let gebruikerToken: string;
+  let editorToken: string;
 
   before(async () => {
     await startTestServer();
@@ -17,12 +17,12 @@ describe('sessions + dbstat (sysadmin-only diagnostiek)', () => {
     await createSysadminUser(sysadminEmail, 'wachtwoord123');
     sysadminToken = await login(sysadminEmail, 'wachtwoord123');
 
-    const gebruikerEmail = `${PREFIX}-gebruiker@test.local`;
+    const gebruikerEmail = `${PREFIX}-editor@test.local`;
     await createSysadminUser(gebruikerEmail, 'wachtwoord123'); // eenvoudigst: los account, alleen voor de 403-check hieronder
     // Zet 'm expliciet terug naar niet-sysadmin (createSysadminUser is hier alleen
     // gebruikt als generieke "los account aanmaken"-helper).
     await pool.query('update users set is_sysadmin = false where email = $1', [gebruikerEmail]);
-    gebruikerToken = await login(gebruikerEmail, 'wachtwoord123');
+    editorToken = await login(gebruikerEmail, 'wachtwoord123');
   });
 
   after(async () => {
@@ -32,7 +32,7 @@ describe('sessions + dbstat (sysadmin-only diagnostiek)', () => {
   });
 
   it('GET /api/sessions is sysadmin-only en toont deze sessie', async () => {
-    const asGebruiker = await req('GET', '/api/sessions', { token: gebruikerToken });
+    const asGebruiker = await req('GET', '/api/sessions', { token: editorToken });
     assert.equal(asGebruiker.status, 403);
 
     const asSysadmin = await req('GET', '/api/sessions', { token: sysadminToken });
@@ -42,7 +42,7 @@ describe('sessions + dbstat (sysadmin-only diagnostiek)', () => {
   });
 
   it('GET /api/dbstat is sysadmin-only en groepeert per tenant', async () => {
-    const asGebruiker = await req('GET', '/api/dbstat', { token: gebruikerToken });
+    const asGebruiker = await req('GET', '/api/dbstat', { token: editorToken });
     assert.equal(asGebruiker.status, 403);
 
     const asSysadmin = await req('GET', '/api/dbstat', { token: sysadminToken });

@@ -40,7 +40,7 @@ export default function TreePage({
   // laden — de daadwerkelijke autorisatie wordt sowieso altijd server-side
   // afgedwongen, ongeacht wat hier staat. Altijd 'bezoeker' als gok, ook voor
   // sysadmin: sysadmin heeft standaard GEEN toegang tot boom-inhoud (privacy,
-  // zie rbac.ts) tenzij zelf als admin/gebruiker/bezoeker aan deze tenant
+  // zie rbac.ts) tenzij zelf als admin/editor/bezoeker aan deze tenant
   // gekoppeld — 'admin' gokken zou hier dus vaker fout dan goed zijn.
   const role: 'bezoeker' = 'bezoeker';
 

@@ -8,28 +8,37 @@ import { pool } from './db.js';
 // ook met overlappende periodes (de sysadmin is verantwoordelijk voor een
 // zinnige, aaneensluitende geschiedenis — de UI markeert alleen duidelijk
 // welke rij op dit moment geldig is, zie getCurrentTierPrice hieronder).
+//
+// period ('maand' | 'jaar', sinds 7 september 2026 — zie
+// db/migrations/0038_prijsstrategie_v3.sql): een tier heeft sindsdien zowel
+// een jaar- als een maandprijs, los van elkaar beheerd (geen afgeleide
+// formule) — de aanvrager kiest de periode op de aanvraagpagina
+// (subscription_requests.billing_period).
 
 export interface TierPrice {
   id: number;
   tierId: number;
+  period: 'maand' | 'jaar';
   priceEur: string;
   validFrom: string;
   validUntil: string;
 }
 
 const TIER_PRICE_SELECT_FIELDS =
-  'id, tier_id as "tierId", price_eur as "priceEur", ' +
+  'id, tier_id as "tierId", period, price_eur as "priceEur", ' +
   'to_char(valid_from, \'YYYY-MM-DD\') as "validFrom", to_char(valid_until, \'YYYY-MM-DD\') as "validUntil"';
 
 export async function listTierPrices(tierId?: number | string): Promise<TierPrice[]> {
   if (tierId != null) {
     const r = await pool.query(
-      `select ${TIER_PRICE_SELECT_FIELDS} from tier_prices where tier_id = $1 order by valid_from desc`,
+      `select ${TIER_PRICE_SELECT_FIELDS} from tier_prices where tier_id = $1 order by period, valid_from desc`,
       [tierId]
     );
     return r.rows;
   }
-  const r = await pool.query(`select ${TIER_PRICE_SELECT_FIELDS} from tier_prices order by tier_id, valid_from desc`);
+  const r = await pool.query(
+    `select ${TIER_PRICE_SELECT_FIELDS} from tier_prices order by tier_id, period, valid_from desc`
+  );
   return r.rows;
 }
 
@@ -38,32 +47,37 @@ export async function getTierPrice(id: number | string): Promise<TierPrice | nul
   return r.rows[0] ?? null;
 }
 
-// De op datum `onDate` geldige prijs voor één tier — als meerdere rijen die
-// datum overlappen (zou niet moeten voorkomen bij een nette geschiedenis,
-// maar is niet hard afgedwongen) wordt de meest recent GESTARTE periode
-// gebruikt. Puur leeswerk, gebruikt door zowel de publieke aanvraagpagina
-// (subscriptions.ts) als het licentiebeheerscherm (om "huidig geldig" te
-// markeren).
-export async function getCurrentTierPrice(tierId: number | string, onDate: string): Promise<TierPrice | null> {
+// De op datum `onDate` geldige prijs voor één tier + facturatieperiode — als
+// meerdere rijen die datum overlappen (zou niet moeten voorkomen bij een
+// nette geschiedenis, maar is niet hard afgedwongen) wordt de meest recent
+// GESTARTE periode gebruikt. Puur leeswerk, gebruikt door zowel de publieke
+// aanvraagpagina (subscriptions.ts) als het licentiebeheerscherm (om "huidig
+// geldig" te markeren).
+export async function getCurrentTierPrice(
+  tierId: number | string,
+  period: 'maand' | 'jaar',
+  onDate: string
+): Promise<TierPrice | null> {
   const r = await pool.query(
     `select ${TIER_PRICE_SELECT_FIELDS} from tier_prices
-     where tier_id = $1 and valid_from <= $2 and valid_until >= $2
+     where tier_id = $1 and period = $2 and valid_from <= $3 and valid_until >= $3
      order by valid_from desc limit 1`,
-    [tierId, onDate]
+    [tierId, period, onDate]
   );
   return r.rows[0] ?? null;
 }
 
 export async function createTierPrice(input: {
   tierId: number;
+  period: 'maand' | 'jaar';
   priceEur: number;
   validFrom: string;
   validUntil: string;
 }): Promise<TierPrice> {
   const r = await pool.query(
-    `insert into tier_prices (tier_id, price_eur, valid_from, valid_until) values ($1,$2,$3,$4)
+    `insert into tier_prices (tier_id, period, price_eur, valid_from, valid_until) values ($1,$2,$3,$4,$5)
      returning ${TIER_PRICE_SELECT_FIELDS}`,
-    [input.tierId, input.priceEur, input.validFrom, input.validUntil]
+    [input.tierId, input.period, input.priceEur, input.validFrom, input.validUntil]
   );
   return r.rows[0];
 }

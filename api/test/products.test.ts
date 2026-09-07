@@ -11,7 +11,7 @@ const PREFIX = unique('products');
 describe('products (planning items) CRUD', () => {
   let doelenboomId: number;
   let adminToken: string;
-  let gebruikerToken: string;
+  let editorToken: string;
   let bezoekerToken: string;
 
   before(async () => {
@@ -20,7 +20,7 @@ describe('products (planning items) CRUD', () => {
     await createSysadminUser(email, 'wachtwoord123');
     const sysadminToken = await login(email, 'wachtwoord123');
     let tenantId: number;
-    ({ tenantId, doelenboomId, adminToken, gebruikerToken, bezoekerToken } = await setupWritableDoelenboom(sysadminToken, PREFIX));
+    ({ tenantId, doelenboomId, adminToken, editorToken, bezoekerToken } = await setupWritableDoelenboom(sysadminToken, PREFIX));
     // Producten horen bij de "Projecten"-module (zie license.ts/routes/products.ts
     // requireModule) — dit testbestand dateert van vóór het licentiemodel en test
     // puur de CRUD-mechaniek zelf, dus activeren we de module hier expliciet i.p.v.
@@ -68,17 +68,17 @@ describe('products (planning items) CRUD', () => {
 
   it('gebruiker mag producten aanmaken/wijzigen/verwijderen (losse boom-inhoud)', async () => {
     const created = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P1/products`, {
-      token: gebruikerToken, body: { name: 'Door gebruiker' },
+      token: editorToken, body: { name: 'Door gebruiker' },
     });
     assert.equal(created.status, 201);
 
     const updated = await req('PUT', `/api/doelenbomen/${doelenboomId}/elements/P1/products/${created.body.id}`, {
-      token: gebruikerToken, body: { name: 'Door gebruiker gewijzigd', pctGereed: 25 },
+      token: editorToken, body: { name: 'Door gebruiker gewijzigd', pctGereed: 25 },
     });
     assert.equal(updated.status, 200);
 
     const del = await req('DELETE', `/api/doelenbomen/${doelenboomId}/elements/P1/products/${created.body.id}`, {
-      token: gebruikerToken,
+      token: editorToken,
     });
     assert.equal(del.status, 204);
   });
@@ -183,7 +183,7 @@ describe('products (planning items) CRUD', () => {
   it('een product-wijziging bumpt project_status.updatedAt en komt in de gecombineerde historie terecht', async () => {
     const before = new Date();
     const created = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P1/products`, {
-      token: gebruikerToken, body: { name: 'Historie-deliverable' },
+      token: editorToken, body: { name: 'Historie-deliverable' },
     });
     assert.equal(created.status, 201);
     const productId = created.body.id;
@@ -191,7 +191,7 @@ describe('products (planning items) CRUD', () => {
     const treeAfterCreate = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: adminToken });
     assert.ok(treeAfterCreate.body.projectStatus['P1'].updatedAt, 'aanmaken van een deliverable zet project_status.updatedAt');
     assert.ok(new Date(treeAfterCreate.body.projectStatus['P1'].updatedAt).getTime() >= before.getTime() - 1000);
-    assert.equal(treeAfterCreate.body.projectStatus['P1'].updatedByEmail, `${PREFIX}-gebruiker@test.local`);
+    assert.equal(treeAfterCreate.body.projectStatus['P1'].updatedByEmail, `${PREFIX}-editor@test.local`);
 
     await req('PUT', `/api/doelenbomen/${doelenboomId}/elements/P1/products/${productId}`, {
       token: adminToken, body: { name: 'Historie-deliverable', pctGereed: 40 },
