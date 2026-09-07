@@ -92,13 +92,32 @@ create index if not exists idx_doelenbomen_tenant_active
 -- doelenboom_licentiemodel.md §2) en de eerste module ("Projecten" — status/
 -- RAG/producten/planning, zie routes/products.ts, routes/projectStatus.ts en
 -- de gating in routes/tree.ts).
-insert into tiers (name, max_admins, max_bomen, sort_order) values
-  ('Single-Use', 1, 5, 0),
-  ('Brons', 2, 10, 1),
-  ('Zilver', 5, 25, 2),
-  ('Goud', 10, 100, 3),
-  ('Diamant', 25, 100, 4)
-on conflict (name) do nothing;
+--
+-- In een do-blok i.p.v. een kale insert: elke migratie hier is bewust
+-- idempotent (zie scripts/doelenboom-cli.sh — "doelenboom -local -rebuild"
+-- speelt bij élke rebuild alle db/migrations/*.sql opnieuw af, zonder eigen
+-- "welke migraties zijn al toegepast"-boekhouding), maar db/migrations/
+-- 0037_editor_role_rename.sql hernoemt de kolom max_admins later naar
+-- max_editors. Op een db die al voorbij 0037 is (elke normale, langer
+-- lopende lokale/productie-omgeving) bestaat de kolom max_admins dan niet
+-- meer, en zou een kale "insert into tiers (..., max_admins, ...)" hier een
+-- parse-fout geven zodra dit bestand opnieuw wordt afgespeeld — ook al zou
+-- er toch niets gebeuren (tiers heeft al rijen). De if-not-exists-guard
+-- zorgt dat de insert alleen daadwerkelijk uitgevoerd (en dus gebonden aan
+-- de tiers-kolommen) wordt op een lege tiers-tabel, d.w.z. alleen bij een
+-- echt verse installatie vóórdat 0037 ooit gedraaid heeft.
+do $$
+begin
+  if not exists (select 1 from tiers) then
+    insert into tiers (name, max_admins, max_bomen, sort_order) values
+      ('Single-Use', 1, 5, 0),
+      ('Brons', 2, 10, 1),
+      ('Zilver', 5, 25, 2),
+      ('Goud', 10, 100, 3),
+      ('Diamant', 25, 100, 4)
+    on conflict (name) do nothing;
+  end if;
+end $$;
 
 insert into modules (key, name, description) values
   (
