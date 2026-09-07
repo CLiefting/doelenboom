@@ -228,6 +228,21 @@ describe('zelfbedieningsaanvraag', () => {
       });
       assert.equal(geenBillingPeriod.status, 400);
       assert.match(geenBillingPeriod.body.error, /billingPeriod/);
+
+      // makeTier zaait alleen een jaarprijs (zie de helper hierboven) — een
+      // aanvraag voor 'maand' op zo'n tier moet geweigerd worden i.p.v.
+      // stilzwijgend een contract zonder maandprijs aan te maken (bv. het
+      // reële geval Single-Use/Evaluatie, bewust jaar-only sinds de
+      // invoering van maandelijkse facturatie, zie doelenboom_licentiemodel.md
+      // §9.2 v3).
+      const periodeZonderPrijs = await req('POST', '/api/subscription-requests', {
+        body: {
+          organizationName: 'Test BV', applicantName: 'Jan', applicantEmail: `${PREFIX}-geenmaand@test.local`,
+          password: 'wachtwoord123', tierId: tier.id, moduleKeys: [], billingPeriod: 'maand',
+        },
+      });
+      assert.equal(periodeZonderPrijs.status, 400, JSON.stringify(periodeZonderPrijs.body));
+      assert.match(periodeZonderPrijs.body.error, /maandprijs|facturatieperiode/);
     });
 
     it('een geslaagde aanvraag maakt tenant + proefaccount (14 dagen) + snapshot van de prijs, en logt "aangevraagd"', async () => {
