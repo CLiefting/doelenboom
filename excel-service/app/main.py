@@ -135,8 +135,9 @@ async def project_export(body: dict[str, Any] = Body(...)):
 
 @app.post('/project-pptx')
 async def project_pptx(body: dict[str, Any] = Body(...)):
-    """Bouwt een PowerPoint-rapportage (4 slides: status, voortgang,
-    activiteiten, aandachtspunten) voor één project (zie project_pptx.py) --
+    """Bouwt een PowerPoint-rapportage (dynamisch aantal slides: overzicht,
+    openstaande deliverables, gepland komende 2 maanden, deliverables als
+    tiles, activiteiten als Gantt -- zie project_pptx.py) voor één project --
     aangeroepen door api/src/routes/projectExcel.ts
     (GET .../elements/:code/project-pptx), dat dezelfde 'data'/'meta'-vorm
     aanlevert als /project-export hierboven. Puur export, geen import."""

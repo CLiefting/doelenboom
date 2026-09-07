@@ -1,7 +1,6 @@
 """
 Export van de gegevens van ÉÉN project (Project-element) als PowerPoint-
-presentatie -- vier slides (status, voortgang/deliverables, activiteiten,
-aandachtspunten), bedoeld als kant-en-klare rapportage voor een klant/externe
+presentatie, bedoeld als kant-en-klare rapportage voor een klant/externe
 stakeholder buiten de applicatie. Hergebruikt exact dezelfde 'data'/'meta'-
 vorm als build_project_workbook() in project_workbook.py hiernaast (zie de
 toelichting daar, en api/src/routes/projectExcel.ts::buildProjectExportData
@@ -11,6 +10,22 @@ i.p.v. een .xlsx.
 Puur een export, geen import/round-trip: dit is een leesbaar eindresultaat,
 geen brondocument om later weer in te lezen (in tegenstelling tot het
 Excel-formaat hiernaast).
+
+Slide-structuur (aantal slides is dynamisch -- de lijst-/tile-/Gantt-
+secties pagineren over zoveel slides als nodig, zie _paginate hieronder):
+  1.  Overzicht -- status/RAG/projectstatus, projecttijdlijn en
+      aandachtspunten (toelichting/tags/organisatieonderdelen/cluster) samen
+      op één slide (voorheen losse status- en aandachtspunten-slides).
+  2+. Openstaande deliverables -- ALLE nog niet opgeleverde deliverables/
+      mijlpalen als tabel, niet langer afgekapt tot een top-6 met "+N meer".
+  N+1 Gepland -- komende 2 maanden -- subset van bovenstaande met een
+      verwachte datum in de huidige of eerstvolgende kalendermaand (alleen
+      deliverables, geen activiteiten -- zo afgesproken).
+  N+2+ Deliverables als tiles -- alle producten in dezelfde kaartvorm als
+      de projectkaart in de app (productCardHtml in tree.html), open eerst,
+      dan een aparte sectie "Opgeleverd / gehaald".
+  Laatste Activiteiten -- horizontale tijdsbalken per activiteit op een
+      gedeelde datum-as (vervangt de eerdere 3-kolommen bullet-lijst).
 
 Aangeroepen door api/src/routes/projectExcel.ts (POST .../project-pptx).
 """
@@ -48,7 +63,15 @@ CONTENT_W = SLIDE_W - 2 * MARGIN
 
 MAANDEN_KORT = ['jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec']
 
-MAX_ITEMS_PER_LIJST = 6
+# Paginering: elke lijst-/tile-/Gantt-sectie hieronder loopt over zoveel
+# slides als nodig (zie _paginate) i.p.v. eerder een vaste top-N met "+N
+# meer" -- deze constanten bepalen puur hoeveel er per slide past, geen
+# inhoudelijke limiet.
+DELIVERABLES_ROWS_PER_SLIDE = 11
+TILE_COLS = 3
+TILE_ROWS_PER_SLIDE = 3
+TILES_PER_SLIDE = TILE_COLS * TILE_ROWS_PER_SLIDE
+GANTT_ROWS_PER_SLIDE = 9
 
 
 def _fmt_date(value: Any) -> str:
@@ -64,22 +87,15 @@ def _fmt_date(value: Any) -> str:
 
 
 def _today_iso(meta: dict[str, Any]) -> str:
-    # 'Vandaag' voor het indelen van activiteiten in "loopt nu"/"gepland" —
-    # meta.exportedAt (het moment van genereren) is hier leidend i.p.v. de
-    # servertijd zelf, zodat een handmatig later gedraaide her-export met een
-    # meegegeven exportedAt reproduceerbaar blijft.
+    # 'Vandaag' voor het indelen van deliverables/activiteiten in
+    # openstaand/gepland/lopend -- meta.exportedAt (het moment van
+    # genereren) is hier leidend i.p.v. de servertijd zelf, zodat een
+    # handmatig later gedraaide her-export met een meegegeven exportedAt
+    # reproduceerbaar blijft.
     exported_at = meta.get('exportedAt')
     if isinstance(exported_at, str) and exported_at:
         return exported_at[:10]
     return date.today().isoformat()
-
-
-def _add_days_iso(iso_date: str, days: int) -> str:
-    try:
-        y, m, d = (int(part) for part in iso_date[:10].split('-'))
-        return (date(y, m, d) + timedelta(days=days)).isoformat()
-    except (ValueError, IndexError):
-        return iso_date
 
 
 def _pct(value: Any) -> int:
@@ -96,6 +112,20 @@ def _num(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _truncate(text: str, max_len: int) -> str:
+    text = text.strip()
+    return text if len(text) <= max_len else text[: max_len - 1].rstrip() + '…'
+
+
+def _paginate(items: list[Any], size: int) -> list[list[Any]]:
+    """Deelt items op in aaneengesloten stukken van maximaal `size` -- lege
+    lijst geeft lege lijst terug (dus GEEN losse slide met alleen een
+    lege-staat-melding; de aanroeper beslist zelf of zo'n slide gewenst is)."""
+    if not items:
+        return []
+    return [items[i:i + size] for i in range(0, len(items), size)]
 
 
 def _new_presentation() -> Presentation:
@@ -148,26 +178,29 @@ def _add_text(
     return box
 
 
-def _add_bullets(
-    slide, left, top, width, height, lines: list[str], *, size: int = 14,
-    color: RGBColor = DARK, bullet: str = '•  ',
-):
-    box = slide.shapes.add_textbox(left, top, width, height)
-    tf = box.text_frame
-    tf.word_wrap = True
+def _add_badge(slide, left, top, text: str, *, bg: RGBColor, fg: RGBColor = WHITE, h=Inches(0.22)):
+    """Klein gekleurd label (bv. 'Mijlpaal', 'Te laat', 'BV 100'), zoals de
+    badges bovenaan een projectkaart in de app (productCardHtml in
+    tree.html). Breedte wordt geschat op tekstlengte; geeft de x-positie
+    terug waar het volgende badge kan beginnen, zodat badges op een rij
+    gestapeld kunnen worden."""
+    w = int(Inches(0.1)) * len(text) + int(Inches(0.24))
+    shape = _add_rect(slide, left, top, w, h, bg)
+    tf = shape.text_frame
     tf.margin_left = 0
     tf.margin_right = 0
     tf.margin_top = 0
     tf.margin_bottom = 0
-    for i, line in enumerate(lines):
-        p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
-        p.space_after = Pt(6)
-        run = p.add_run()
-        run.text = bullet + line
-        run.font.size = Pt(size)
-        run.font.color.rgb = color
-        run.font.name = 'Calibri'
-    return box
+    tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+    p = tf.paragraphs[0]
+    p.alignment = PP_ALIGN.CENTER
+    run = p.add_run()
+    run.text = text
+    run.font.size = Pt(8)
+    run.font.bold = True
+    run.font.color.rgb = fg
+    run.font.name = 'Calibri'
+    return left + w + int(Inches(0.08))
 
 
 def _slide_header(slide, kicker: str, title: str):
@@ -240,11 +273,13 @@ def _add_months(d: date, months: int) -> date:
     return date(y, m + 1, 1)
 
 
-def _timeline_bounds(markers: list[dict[str, Any]], today: date) -> tuple[bool, list[date]]:
+def _axis_bounds(dates: list[date], today: date) -> tuple[bool, list[date]]:
     """Zelfde as-logica als timelineBandBoundaries()/computeProjectTimelineBounds()
     in tree.html: 'vandaag' telt altijd mee in het bereik, bij een spanne van
-    meer dan ~460 dagen worden het kwartalen i.p.v. maanden."""
-    all_dates = [m['t'] for m in markers] + [today]
+    meer dan ~460 dagen worden het kwartalen i.p.v. maanden. Gedeeld door de
+    projecttijdlijn (markers) en de activiteiten-Gantt (start/einddata)
+    hieronder, zodat beide dezelfde as-conventie gebruiken."""
+    all_dates = dates + [today]
     raw_min, raw_max = min(all_dates), max(all_dates)
     if raw_min == raw_max:
         raw_min -= timedelta(days=1)
@@ -270,7 +305,7 @@ def _add_project_timeline(slide, top, products: list[dict[str, Any]], today_iso:
         return None
 
     today = _parse_iso_date(today_iso) or date.today()
-    quarterly, bounds = _timeline_bounds(markers, today)
+    quarterly, bounds = _axis_bounds([m['t'] for m in markers], today)
     axis_start, axis_end = bounds[0], bounds[-1]
     span_days = (axis_end - axis_start).days or 1
 
@@ -365,98 +400,144 @@ def _add_project_timeline(slide, top, products: list[dict[str, Any]], today_iso:
     return legend_y + Inches(0.35)
 
 
-def _slide_status(prs: Presentation, project: dict[str, Any], meta: dict[str, Any]):
+# ---- Slide 1: Overzicht (status/RAG + projecttijdlijn + aandachtspunten) --
+
+def _slide_overview(prs: Presentation, project: dict[str, Any], products: list[dict[str, Any]], meta: dict[str, Any]):
     slide = _blank_slide(prs)
     _add_rect(slide, 0, 0, SLIDE_W, SLIDE_H, LIGHT_BG)
     _add_rect(slide, 0, 0, SLIDE_W, Inches(0.18), ACCENT)
 
     _add_text(
-        slide, MARGIN, Inches(0.9), CONTENT_W, Inches(0.35),
+        slide, MARGIN, Inches(0.42), CONTENT_W, Inches(0.3),
         (meta.get('doelenboom') or '').upper() + ('  ·  ' + (project.get('code') or '') if project.get('code') else ''),
-        size=13, bold=True, color=ACCENT,
+        size=12, bold=True, color=ACCENT,
     )
-    _add_text(slide, MARGIN, Inches(1.3), CONTENT_W, Inches(1.2), project.get('name') or 'Project', size=40, bold=True, color=DARK)
+    _add_text(slide, MARGIN, Inches(0.75), CONTENT_W, Inches(0.55), project.get('name') or 'Project', size=28, bold=True, color=DARK)
 
     description = (project.get('description') or '').strip()
+    y = Inches(1.38)
     if description:
-        _add_text(slide, MARGIN, Inches(2.35), CONTENT_W, Inches(0.9), description, size=15, color=MUTED)
+        _add_text(slide, MARGIN, y, CONTENT_W, Inches(0.4), _truncate(description, 160), size=13, color=MUTED)
+        y += Inches(0.42)
 
     status = project.get('status') or {}
     rag = status.get('rag') or ''
     projectstatus = status.get('projectstatus') or 'Onbekend'
     rag_label = rag.title() if rag else 'Niet gerapporteerd'
 
-    badge_w, badge_h = Inches(3.4), Inches(1.3)
-    badge_top = Inches(3.6)
+    badge_top = y + Inches(0.08)
+    badge_w, badge_h = Inches(2.3), Inches(0.85)
     _add_rect(slide, MARGIN, badge_top, badge_w, badge_h, _rag_color(rag))
-    _add_text(
-        slide, MARGIN, badge_top + Inches(0.18), badge_w, Inches(0.5), rag_label,
-        size=24, bold=True, color=WHITE, align=PP_ALIGN.CENTER,
-    )
-    _add_text(
-        slide, MARGIN, badge_top + Inches(0.72), badge_w, Inches(0.4), 'RAG-status',
-        size=12, color=WHITE, align=PP_ALIGN.CENTER,
-    )
+    _add_text(slide, MARGIN, badge_top + Inches(0.12), badge_w, Inches(0.4), rag_label, size=18, bold=True, color=WHITE, align=PP_ALIGN.CENTER)
+    _add_text(slide, MARGIN, badge_top + Inches(0.52), badge_w, Inches(0.28), 'RAG-status', size=10, color=WHITE, align=PP_ALIGN.CENTER)
 
-    info_left = MARGIN + badge_w + Inches(0.5)
-    info_w = CONTENT_W - badge_w - Inches(0.5)
-    _add_text(slide, info_left, badge_top, info_w, Inches(0.35), 'PROJECTSTATUS', size=11, bold=True, color=MUTED)
-    _add_text(slide, info_left, badge_top + Inches(0.32), info_w, Inches(0.5), projectstatus, size=22, bold=True, color=DARK)
+    info_left = MARGIN + badge_w + Inches(0.4)
+    info_w = CONTENT_W - badge_w - Inches(0.4)
+    _add_text(slide, info_left, badge_top, info_w, Inches(0.28), 'PROJECTSTATUS', size=10, bold=True, color=MUTED)
+    _add_text(slide, info_left, badge_top + Inches(0.26), info_w, Inches(0.36), projectstatus, size=18, bold=True, color=DARK)
     _add_text(
-        slide, info_left, badge_top + Inches(0.9), info_w, Inches(0.35),
-        'Gerapporteerd op ' + _fmt_date(status.get('gerapporteerdOp')), size=13, color=MUTED,
+        slide, info_left, badge_top + Inches(0.64), info_w, Inches(0.28),
+        'Gerapporteerd op ' + _fmt_date(status.get('gerapporteerdOp')), size=11, color=MUTED,
     )
 
-    _footer(slide, project, meta, 1)
-
-
-def _slide_voortgang(prs: Presentation, project: dict[str, Any], products: list[dict[str, Any]], meta: dict[str, Any]):
-    slide = _blank_slide(prs)
-    _slide_header(slide, 'Voortgang', 'Oplevering & deliverables')
-
-    total = len(products)
-    delivered = sum(1 for p in products if p.get('werkelijkeDatum'))
-    weighted_bv = 0.0
-    total_bv = 0.0
-    for p in products:
-        bv = _num(p.get('businessValue'))
-        if bv is None:
-            continue
-        total_bv += bv
-        weighted_bv += bv * (_pct(p.get('pctGereed')) / 100)
-
-    summary_bits = [f'{delivered} van {total} opgeleverd']
-    if total_bv > 0:
-        summary_bits.append(f'business value {round(weighted_bv)} / {round(total_bv)} gerealiseerd')
-    _add_text(slide, MARGIN, Inches(1.55), CONTENT_W, Inches(0.4), '  •  '.join(summary_bits), size=15, bold=True, color=ACCENT)
+    y = badge_top + badge_h + Inches(0.2)
 
     # Projecttijdlijn (verwachte/werkelijke opleverdatum + deadline per
-    # product) -- zelfde as/markers als op de projectkaart in de app. Geeft
-    # None terug als geen enkel product een datum heeft; dan blijft de tabel
-    # hieronder op zijn oorspronkelijke, hogere positie staan.
-    timeline_bottom = _add_project_timeline(slide, Inches(1.95), products, _today_iso(meta))
+    # product) -- geeft None terug als geen enkel product een datum heeft;
+    # de aandachtspunten hieronder schuiven dan gewoon een stuk omhoog i.p.v.
+    # een lege ruimte over te laten (graceful degradation).
+    timeline_bottom = _add_project_timeline(slide, y, products, _today_iso(meta))
+    y = (timeline_bottom + Inches(0.12)) if timeline_bottom else (y + Inches(0.1))
 
-    # Eerstvolgende, nog niet opgeleverde deliverables/mijlpalen, op
-    # verwachte datum -- dat is voor een externe lezer relevanter dan een
-    # volledige, mogelijk lange lijst van alles wat al klaar is.
-    upcoming = [p for p in products if not p.get('werkelijkeDatum')]
-    upcoming.sort(key=lambda p: p.get('verwachteDatum') or '9999-99-99')
-    shown = upcoming[:MAX_ITEMS_PER_LIJST]
+    # Aandachtspunten (toelichting/tags/organisatieonderdelen/cluster) --
+    # wat resteert aan verticale ruimte tot de voettekst bepaalt hoeveel
+    # tekst er getoond wordt; de toelichting zelf vervalt nooit, alleen de
+    # lengte ervan en de losse chips-regel eronder passen zich aan.
+    footer_y = SLIDE_H - Inches(0.72)
+    available = int(footer_y) - int(y)
+    if available > int(Inches(0.3)):
+        _add_text(slide, MARGIN, y, CONTENT_W, Inches(0.25), 'AANDACHTSPUNTEN', size=10, bold=True, color=MUTED)
+        y += Inches(0.28)
 
-    rows = len(shown) + 1
-    table_top = timeline_bottom + Inches(0.2) if timeline_bottom else Inches(2.15)
+        toelichting = (status.get('toelichting') or '').strip() or 'Geen toelichting vastgelegd bij de huidige status.'
+        max_chars = 320 if available > int(Inches(1.3)) else 170
+        _add_text(slide, MARGIN, y, CONTENT_W, Inches(0.75), _truncate(toelichting, max_chars), size=12, color=DARK)
+        y += Inches(0.7) if available > int(Inches(1.0)) else Inches(0.5)
+
+        remaining = int(footer_y) - int(y)
+        if remaining > int(Inches(0.22)):
+            parts = []
+            tags = project.get('tags') or []
+            if tags:
+                parts.append('Tags: ' + ', '.join(tags))
+            orgs = project.get('orgs') or []
+            if orgs:
+                parts.append('Organisaties: ' + ', '.join(f"{o.get('name', '')} ({o.get('relatietype', '')})" for o in orgs))
+            if status.get('clusterPpt'):
+                parts.append('Cluster PPT: ' + status['clusterPpt'])
+            if parts:
+                _add_text(slide, MARGIN, y, CONTENT_W, Inches(0.5), '   ·   '.join(parts), size=10, color=MUTED)
+
+    generated_by = meta.get('exportedBy') or 'onbekend'
+    generated_at = _fmt_date(meta.get('exportedAt'))
+    _add_text(
+        slide, MARGIN, SLIDE_H - Inches(0.72), CONTENT_W, Inches(0.25),
+        f'Automatisch gegenereerd op {generated_at} door {generated_by} vanuit Doelenboom.', size=9, color=MUTED,
+    )
+    _footer(slide, project, meta, 1)
+    return slide
+
+
+# ---- Slides 2..N / N+1: deliverable-tabellen (openstaand + komende 2 mnd) --
+
+DELIVERABLE_HEADERS = ['Deliverable', 'Type', 'Verwachte datum', '% gereed']
+
+
+def _deliverable_col_widths() -> list[int]:
+    c0, c1, c2 = Inches(6.3), Inches(1.9), Inches(2.3)
+    return [c0, c1, c2, int(CONTENT_W) - c0 - c1 - c2]
+
+
+def _product_row(p: dict[str, Any]) -> list[str]:
+    type_label = 'Mijlpaal' if p.get('type') == 'mijlpaal' else 'Deliverable'
+    return [p.get('name') or '', type_label, _fmt_date(p.get('verwachteDatum')), f"{_pct(p.get('pctGereed'))}%"]
+
+
+def _month_range_label(start: date, second_month_start: date) -> str:
+    if start.year == second_month_start.year:
+        return f'{MAANDEN_KORT[start.month - 1].capitalize()} – {MAANDEN_KORT[second_month_start.month - 1].capitalize()} {start.year}'
+    return (
+        f'{MAANDEN_KORT[start.month - 1].capitalize()} {start.year} – '
+        f'{MAANDEN_KORT[second_month_start.month - 1].capitalize()} {second_month_start.year}'
+    )
+
+
+def _slide_table(
+    prs: Presentation, project: dict[str, Any], meta: dict[str, Any], page: int, *,
+    kicker: str, title: str, headers: list[str], col_widths: list[int],
+    rows: list[list[str]], subtitle: str | None = None,
+):
+    """Generieke, gepagineerde tabel-slide -- gebruikt voor zowel de
+    openstaande-deliverables- als de komende-2-maanden-slide(s), zodat beide
+    exact dezelfde opmaak/kolommen delen."""
+    slide = _blank_slide(prs)
+    _slide_header(slide, kicker, title)
+
+    top = Inches(1.55)
+    if subtitle:
+        _add_text(slide, MARGIN, top, CONTENT_W, Inches(0.3), subtitle, size=12, color=MUTED)
+        top += Inches(0.4)
+
+    n_rows = len(rows) + 1
     row_height = Inches(0.4)
-    table_height = row_height * rows
-    gfx = slide.shapes.add_table(rows, 4, MARGIN, table_top, CONTENT_W, table_height)
+    table_height = row_height * n_rows
+    gfx = slide.shapes.add_table(n_rows, len(headers), MARGIN, top, CONTENT_W, table_height)
     table = gfx.table
     for row in table.rows:
         row.height = row_height
-    table.columns[0].width = Inches(6.3)
-    table.columns[1].width = Inches(2.2)
-    table.columns[2].width = Inches(2.4)
-    table.columns[3].width = int(CONTENT_W) - Inches(6.3) - Inches(2.2) - Inches(2.4)
+    for c, w in enumerate(col_widths):
+        table.columns[c].width = w
 
-    headers = ['Deliverable', 'Type', 'Verwachte datum', '% gereed']
     for c, h in enumerate(headers):
         cell = table.cell(0, c)
         cell.text = h
@@ -466,9 +547,7 @@ def _slide_voortgang(prs: Presentation, project: dict[str, Any], products: list[
         cell.fill.fore_color.rgb = ACCENT
         cell.text_frame.paragraphs[0].font.color.rgb = WHITE
 
-    for r, p in enumerate(shown, start=1):
-        type_label = 'Mijlpaal' if p.get('type') == 'mijlpaal' else 'Deliverable'
-        values = [p.get('name') or '', type_label, _fmt_date(p.get('verwachteDatum')), f"{_pct(p.get('pctGereed'))}%"]
+    for r, values in enumerate(rows, start=1):
         for c, v in enumerate(values):
             cell = table.cell(r, c)
             cell.text = v
@@ -476,127 +555,214 @@ def _slide_voortgang(prs: Presentation, project: dict[str, Any], products: list[
             cell.fill.solid()
             cell.fill.fore_color.rgb = WHITE if r % 2 else LIGHT_BG
 
-    if not shown:
-        _add_text(
-            slide, MARGIN, table_top, CONTENT_W, Inches(0.4),
-            'Geen openstaande deliverables.' if total else 'Nog geen deliverables vastgelegd voor dit project.',
-            size=13, color=MUTED,
-        )
-    elif len(upcoming) > len(shown):
-        _add_text(
-            slide, MARGIN, table_top + table_height + Inches(0.1), CONTENT_W, Inches(0.3),
-            f'+ {len(upcoming) - len(shown)} andere nog te leveren deliverable(s)', size=11, color=MUTED,
-        )
-
-    _footer(slide, project, meta, 2)
+    _footer(slide, project, meta, page)
+    return slide
 
 
-AFGEROND_VENSTER_DAGEN = 30
-
-
-def _slide_activiteiten(prs: Presentation, project: dict[str, Any], activities: list[dict[str, Any]], meta: dict[str, Any]):
+def _slide_empty_list(prs: Presentation, project: dict[str, Any], meta: dict[str, Any], page: int, *, kicker: str, title: str, message: str):
     slide = _blank_slide(prs)
-    _slide_header(slide, 'Planning', 'Wat gebeurt er nu en wat komt eraan')
+    _slide_header(slide, kicker, title)
+    _add_text(slide, MARGIN, Inches(1.8), CONTENT_W, Inches(0.5), message, size=14, color=MUTED)
+    _footer(slide, project, meta, page)
+    return slide
 
-    today = _today_iso(meta)
-    # Fase/samenvattende rijen zijn in de app inklapbare groep-headers, geen
-    # losse werkitems -- die laten we hier buiten beschouwing (zelfde als
-    # hoe project_workbook.py ze wél opneemt voor round-trip, maar dit is
-    # geen brondocument).
-    real = [a for a in activities if not a.get('isSummary')]
 
-    def end_of(a: dict[str, Any]) -> str:
-        return a.get('endDate') or a.get('startDate') or ''
+# ---- Deliverables als tiles (zelfde kaartvorm als productCardHtml op het
+# scherm in de app: badges, naam, voortgangsbalk, datums) --
 
-    def start_of(a: dict[str, Any]) -> str:
-        return a.get('startDate') or ''
+def _add_product_tile(slide, left, top, w, h, p: dict[str, Any], today_iso: str):
+    _add_rect(slide, left, top, w, h, WHITE, line=True)
+    pad = Inches(0.14)
+    inner_left = left + pad
+    inner_w = w - 2 * pad
+    cy = top + pad
 
-    # Drie categorieën t.o.v. 'vandaag' (zie _today_iso) -- i.p.v. alleen
-    # "loopt nu"/"gepland": een activiteit die net vóór het rapportagemoment
-    # is afgerond hoort ook in een statusrapportage thuis, en zonder deze
-    # categorie zou de slide leeg kunnen blijven als er toevallig niets exact
-    # over 'vandaag' loopt.
-    afgerond_grens = _add_days_iso(today, -AFGEROND_VENSTER_DAGEN)
-    afgerond = [a for a in real if end_of(a) < today and end_of(a) >= afgerond_grens]
-    lopend = [a for a in real if start_of(a) <= today <= end_of(a)]
-    gepland = [a for a in real if start_of(a) > today]
-    afgerond.sort(key=end_of, reverse=True)
-    lopend.sort(key=end_of)
-    gepland.sort(key=start_of)
+    badge_h = Inches(0.22)
+    bx = inner_left
+    type_label = 'Mijlpaal' if p.get('type') == 'mijlpaal' else 'Deliverable'
+    bx = _add_badge(slide, bx, cy, type_label, bg=ACCENT, h=badge_h)
 
-    def line_for(a: dict[str, Any]) -> str:
-        marker = '◆ ' if a.get('isMilestone') else ''
-        start, end = _fmt_date(a.get('startDate')), _fmt_date(a.get('endDate'))
-        when = start if a.get('isMilestone') or start == end else f'{start} — {end}'
-        return f'{marker}{a.get("name") or ""}  ({when})'
+    delivered = bool(p.get('werkelijkeDatum'))
+    verwacht = _parse_iso_date(p.get('verwachteDatum'))
+    today = _parse_iso_date(today_iso) or date.today()
+    overdue = (not delivered) and verwacht is not None and verwacht < today
+    if overdue:
+        bx = _add_badge(slide, bx, cy, 'Te laat', bg=RAG_COLORS['rood'], h=badge_h)
 
-    gap = Inches(0.4)
-    col_w = (CONTENT_W - 2 * gap) / 3
-    content_top = Inches(1.65)
-    columns = [
-        (f'RECENT AFGEROND ({len(afgerond)})', afgerond, 'Geen recent afgeronde activiteiten.'),
-        (f'LOOPT NU ({len(lopend)})', lopend, 'Geen lopende activiteiten.'),
-        (f'GEPLAND ({len(gepland)})', gepland, 'Geen geplande activiteiten.'),
-    ]
-    for i, (label, items, empty_text) in enumerate(columns):
-        col_left = MARGIN + i * (col_w + gap)
-        _add_text(slide, col_left, content_top, col_w, Inches(0.35), label, size=13, bold=True, color=ACCENT)
-        if items:
-            _add_bullets(
-                slide, col_left, content_top + Inches(0.45), col_w, Inches(4.5),
-                [line_for(a) for a in items[:MAX_ITEMS_PER_LIJST]], size=12,
+    bv = _num(p.get('businessValue'))
+    if bv is not None:
+        bv_text = f'BV {int(bv)}' if bv == int(bv) else f'BV {bv}'
+        bx = _add_badge(slide, bx, cy, bv_text, bg=MUTED, h=badge_h)
+
+    cy += badge_h + Inches(0.1)
+
+    name = _truncate(p.get('name') or '', 46)
+    _add_text(slide, inner_left, cy, inner_w, Inches(0.4), name, size=12, bold=True, color=DARK)
+    cy += Inches(0.44)
+
+    pct = _pct(p.get('pctGereed'))
+    bar_h = Inches(0.09)
+    _add_rect(slide, inner_left, cy, inner_w, bar_h, LIGHT_BG)
+    if pct > 0:
+        fill_w = max(int(inner_w * pct / 100), int(Pt(2)))
+        _add_rect(slide, inner_left, cy, fill_w, bar_h, ACCENT)
+    _add_text(slide, inner_left, cy + Inches(0.13), inner_w, Inches(0.2), f'{pct}% gereed', size=9, color=MUTED)
+    cy += Inches(0.4)
+
+    if delivered:
+        date_line = f"Opgeleverd: {_fmt_date(p.get('werkelijkeDatum'))}"
+    else:
+        date_line = f"Verwacht: {_fmt_date(p.get('verwachteDatum'))}"
+    _add_text(slide, inner_left, cy, inner_w, Inches(0.2), date_line, size=9, color=MUTED)
+    cy += Inches(0.22)
+
+    if not delivered and p.get('deadline'):
+        _add_text(slide, inner_left, cy, inner_w, Inches(0.2), f"Deadline: {_fmt_date(p.get('deadline'))}", size=9, color=TIMELINE_DEADLINE_COLOR)
+
+
+def _slide_tiles(
+    prs: Presentation, project: dict[str, Any], meta: dict[str, Any], page: int, *,
+    kicker: str, title: str, subtitle: str | None, items: list[dict[str, Any]], today_iso: str,
+):
+    slide = _blank_slide(prs)
+    _slide_header(slide, kicker, title)
+
+    top0 = Inches(1.5)
+    if subtitle:
+        _add_text(slide, MARGIN, top0, CONTENT_W, Inches(0.3), subtitle, size=12, color=MUTED)
+        top0 += Inches(0.35)
+
+    gap = Inches(0.22)
+    tile_w = (int(CONTENT_W) - (TILE_COLS - 1) * int(gap)) // TILE_COLS
+    area_bottom = SLIDE_H - Inches(0.55)
+    tile_h = (int(area_bottom) - int(top0) - (TILE_ROWS_PER_SLIDE - 1) * int(gap)) // TILE_ROWS_PER_SLIDE
+
+    for i, p in enumerate(items[:TILES_PER_SLIDE]):
+        row, col = divmod(i, TILE_COLS)
+        left = MARGIN + col * (tile_w + gap)
+        top = top0 + row * (tile_h + gap)
+        _add_product_tile(slide, left, top, tile_w, tile_h, p, today_iso)
+
+    _footer(slide, project, meta, page)
+    return slide
+
+
+# ---- Laatste slide(s): activiteiten als Gantt-tijdsbalken op een gezamen-
+# lijke datum-as (vervangt de eerdere 3-kolommen bullet-lijst) --
+
+LABEL_COL_W = Inches(2.6)
+GANTT_DONE_COLOR = RGBColor(0xA6, 0xAD, 0xB8)
+GANTT_ACTIVE_COLOR = RGBColor(0x00, 0x28, 0x55)
+GANTT_FUTURE_COLOR = RGBColor(0xB7, 0xC6, 0xE6)
+
+
+def _activity_dates(activities: list[dict[str, Any]]) -> list[date]:
+    dates: list[date] = []
+    for a in activities:
+        start = _parse_iso_date(a.get('startDate'))
+        end = _parse_iso_date(a.get('endDate')) or start
+        if start:
+            dates.append(start)
+        if end:
+            dates.append(end)
+    return dates
+
+
+def _gantt_x_for(d: date, axis_start: date, span_days: int, inner_left: int, inner_w: int) -> int:
+    frac = (d - axis_start).days / span_days
+    return int(inner_left + inner_w * frac)
+
+
+def _gantt_row_color(a: dict[str, Any], today: date) -> RGBColor:
+    start = _parse_iso_date(a.get('startDate'))
+    end = _parse_iso_date(a.get('endDate')) or start
+    if end and end < today:
+        return GANTT_DONE_COLOR
+    if start and start <= today and (end is None or end >= today):
+        return GANTT_ACTIVE_COLOR
+    return GANTT_FUTURE_COLOR
+
+
+def _add_gantt_axis(slide, top, bottom, bounds: list[date], quarterly: bool, today: date, inner_left: int, inner_w: int, axis_start: date, span_days: int):
+    for i in range(len(bounds) - 1):
+        gx = _gantt_x_for(bounds[i], axis_start, span_days, inner_left, inner_w)
+        if i > 0:
+            _add_rect(slide, gx, top, Pt(1), bottom - top, TIMELINE_AXIS_COLOR)
+        next_gx = _gantt_x_for(bounds[i + 1], axis_start, span_days, inner_left, inner_w)
+        if next_gx - gx >= int(Inches(0.55)):
+            label = (
+                f'K{(bounds[i].month - 1) // 3 + 1} {bounds[i].year}' if quarterly
+                else f'{MAANDEN_KORT[bounds[i].month - 1].capitalize()} {bounds[i].year}'
             )
-        else:
-            _add_text(slide, col_left, content_top + Inches(0.45), col_w, Inches(0.4), empty_text, size=11, color=MUTED)
+            _add_text(slide, gx, top - Inches(0.24), next_gx - gx, Inches(0.22), label, size=9, color=MUTED, align=PP_ALIGN.CENTER)
+    if bounds[0] <= today <= bounds[-1]:
+        today_x = _gantt_x_for(today, axis_start, span_days, inner_left, inner_w)
+        _add_rect(slide, today_x, top, Pt(1.25), bottom - top, ACCENT)
+        # Eigen regel bóven de maandkoppen (i.p.v. ernaast) zodat 'vandaag'
+        # nooit overlapt met een maandlabel dat toevallig vlak naast de
+        # 'vandaag'-lijn valt (bv. begin van de maand).
+        _add_text(slide, today_x - Inches(0.35), top - Inches(0.46), Inches(0.7), Inches(0.2), 'vandaag', size=8, bold=True, color=ACCENT, align=PP_ALIGN.CENTER)
 
-    if any(len(items) > MAX_ITEMS_PER_LIJST for _, items, _ in columns):
+
+def _slide_activiteiten_gantt(
+    prs: Presentation, project: dict[str, Any], meta: dict[str, Any], page: int,
+    rows_page: list[dict[str, Any]], bounds: list[date], quarterly: bool,
+    axis_start: date, span_days: int, today: date, subtitle: str | None,
+):
+    slide = _blank_slide(prs)
+    _slide_header(slide, 'Planning', 'Activiteiten')
+
+    top0 = Inches(1.5)
+    if subtitle:
+        _add_text(slide, MARGIN, top0, CONTENT_W, Inches(0.3), subtitle, size=12, color=MUTED)
+        top0 += Inches(0.3)
+
+    pad = Inches(0.05)
+    inner_left = MARGIN + LABEL_COL_W + pad
+    inner_w = CONTENT_W - LABEL_COL_W - 2 * pad
+
+    axis_top = top0 + Inches(0.5)
+    rows_top = axis_top + Inches(0.15)
+    footer_y = SLIDE_H - Inches(0.55)
+    # Rijhoogte is altijd gebaseerd op GANTT_ROWS_PER_SLIDE (niet op het
+    # daadwerkelijke aantal rijen op déze pagina), zodat alle Gantt-slides
+    # dezelfde rijhoogte gebruiken -- een laatste, minder volle pagina laat
+    # dan gewoon lege ruimte onderaan i.p.v. uitgerekte balken.
+    row_height = (int(footer_y) - int(rows_top)) // GANTT_ROWS_PER_SLIDE
+
+    chart_bottom = int(rows_top) + row_height * len(rows_page)
+    _add_gantt_axis(slide, axis_top, chart_bottom, bounds, quarterly, today, inner_left, inner_w, axis_start, span_days)
+
+    for i, a in enumerate(rows_page):
+        row_top = rows_top + i * row_height
+        label = ('◆ ' if a.get('isMilestone') else '') + _truncate(a.get('name') or '', 40)
         _add_text(
-            slide, MARGIN, SLIDE_H - Inches(0.75), CONTENT_W, Inches(0.3),
-            '◆ = mijlpaal — niet alle activiteiten passen op deze slide, zie de volledige planning in de app.',
-            size=10, color=MUTED,
+            slide, MARGIN, row_top, LABEL_COL_W - Inches(0.15), row_height, label,
+            size=10, color=DARK, anchor=MSO_ANCHOR.MIDDLE,
         )
 
-    _footer(slide, project, meta, 3)
+        color = _gantt_row_color(a, today)
+        start = _parse_iso_date(a.get('startDate')) or today
+        end = _parse_iso_date(a.get('endDate')) or start
+        bar_h = row_height // 2
+        bar_top = row_top + (row_height - bar_h) // 2
 
+        if a.get('isMilestone'):
+            cx = _gantt_x_for(start, axis_start, span_days, inner_left, inner_w)
+            half = bar_h // 2
+            shape = slide.shapes.add_shape(MSO_SHAPE.DIAMOND, cx - half, bar_top, bar_h, bar_h)
+            shape.shadow.inherit = False
+            shape.fill.solid()
+            shape.fill.fore_color.rgb = color
+            shape.line.fill.background()
+        else:
+            x0 = _gantt_x_for(start, axis_start, span_days, inner_left, inner_w)
+            x1 = _gantt_x_for(end, axis_start, span_days, inner_left, inner_w)
+            width = max(x1 - x0, int(Pt(3)))
+            _add_rect(slide, x0, bar_top, width, bar_h, color)
 
-def _slide_aandachtspunten(prs: Presentation, project: dict[str, Any], meta: dict[str, Any]):
-    slide = _blank_slide(prs)
-    _slide_header(slide, 'Aandachtspunten', 'Toelichting & vervolg')
-
-    status = project.get('status') or {}
-    toelichting = (status.get('toelichting') or '').strip()
-    _add_text(
-        slide, MARGIN, Inches(1.6), CONTENT_W, Inches(2.2),
-        toelichting or 'Geen toelichting vastgelegd bij de huidige status.',
-        size=16, color=DARK,
-    )
-
-    chip_top = Inches(4.1)
-    tags = project.get('tags') or []
-    if tags:
-        _add_text(slide, MARGIN, chip_top, CONTENT_W, Inches(0.3), 'TAGS', size=11, bold=True, color=MUTED)
-        _add_text(slide, MARGIN, chip_top + Inches(0.3), CONTENT_W, Inches(0.4), '  ·  '.join(tags), size=13, color=DARK)
-        chip_top += Inches(0.85)
-
-    orgs = project.get('orgs') or []
-    if orgs:
-        _add_text(slide, MARGIN, chip_top, CONTENT_W, Inches(0.3), 'ORGANISATIEONDERDELEN', size=11, bold=True, color=MUTED)
-        org_line = '  ·  '.join(f"{o.get('name', '')} ({o.get('relatietype', '')})" for o in orgs)
-        _add_text(slide, MARGIN, chip_top + Inches(0.3), CONTENT_W, Inches(0.4), org_line, size=13, color=DARK)
-        chip_top += Inches(0.85)
-
-    if status.get('clusterPpt'):
-        _add_text(slide, MARGIN, chip_top, CONTENT_W, Inches(0.3), 'CLUSTER PPT', size=11, bold=True, color=MUTED)
-        _add_text(slide, MARGIN, chip_top + Inches(0.3), CONTENT_W, Inches(0.4), status['clusterPpt'], size=13, color=DARK)
-
-    generated_by = meta.get('exportedBy') or 'onbekend'
-    generated_at = _fmt_date(meta.get('exportedAt'))
-    _add_text(
-        slide, MARGIN, SLIDE_H - Inches(0.75), CONTENT_W, Inches(0.3),
-        f'Automatisch gegenereerd op {generated_at} door {generated_by} vanuit Doelenboom.',
-        size=10, color=MUTED,
-    )
-    _footer(slide, project, meta, 4)
+    _footer(slide, project, meta, page)
+    return slide
 
 
 def build_project_pptx(data: dict[str, Any], meta: dict[str, Any]) -> bytes:
@@ -605,10 +771,109 @@ def build_project_pptx(data: dict[str, Any], meta: dict[str, Any]) -> bytes:
     activities = data.get('activities') or []
 
     prs = _new_presentation()
-    _slide_status(prs, project, meta)
-    _slide_voortgang(prs, project, products, meta)
-    _slide_activiteiten(prs, project, activities, meta)
-    _slide_aandachtspunten(prs, project, meta)
+    page = 1
+
+    # Slide 1: overzicht (status/RAG, projecttijdlijn, aandachtspunten)
+    _slide_overview(prs, project, products, meta)
+    page += 1
+
+    # Slides 2..N: ALLE openstaande deliverables/mijlpalen (geen top-N meer)
+    open_products = [p for p in products if not p.get('werkelijkeDatum')]
+    open_products.sort(key=lambda p: p.get('verwachteDatum') or '9999-99-99')
+    open_pages = _paginate(open_products, DELIVERABLES_ROWS_PER_SLIDE)
+    if open_pages:
+        n = len(open_pages)
+        for i, chunk in enumerate(open_pages):
+            subtitle = f'{len(open_products)} openstaande deliverable(s)' + (f' — pagina {i + 1}/{n}' if n > 1 else '')
+            _slide_table(
+                prs, project, meta, page,
+                kicker='Voortgang', title='Openstaande deliverables',
+                headers=DELIVERABLE_HEADERS, col_widths=_deliverable_col_widths(),
+                rows=[_product_row(p) for p in chunk], subtitle=subtitle,
+            )
+            page += 1
+    else:
+        message = 'Alle deliverables zijn opgeleverd.' if products else 'Nog geen deliverables vastgelegd voor dit project.'
+        _slide_empty_list(prs, project, meta, page, kicker='Voortgang', title='Openstaande deliverables', message=message)
+        page += 1
+
+    # Slide N+1: gepland -- komende 2 maanden (alleen deliverables, geen
+    # activiteiten -- zo afgesproken)
+    today_date = _parse_iso_date(_today_iso(meta)) or date.today()
+    range_start = date(today_date.year, today_date.month, 1)
+    next_month_start = _add_months(range_start, 1)
+    range_end_excl = _add_months(range_start, 2)
+    label = _month_range_label(range_start, next_month_start)
+    gepland = [
+        p for p in open_products
+        if (d := _parse_iso_date(p.get('verwachteDatum'))) is not None and range_start <= d < range_end_excl
+    ]
+    gepland.sort(key=lambda p: p.get('verwachteDatum') or '')
+    gepland_pages = _paginate(gepland, DELIVERABLES_ROWS_PER_SLIDE)
+    if gepland_pages:
+        n = len(gepland_pages)
+        for i, chunk in enumerate(gepland_pages):
+            subtitle = f'{label} — {len(gepland)} deliverable(s)' + (f' — pagina {i + 1}/{n}' if n > 1 else '')
+            _slide_table(
+                prs, project, meta, page,
+                kicker='Planning', title='Gepland — komende 2 maanden',
+                headers=DELIVERABLE_HEADERS, col_widths=_deliverable_col_widths(),
+                rows=[_product_row(p) for p in chunk], subtitle=subtitle,
+            )
+            page += 1
+    else:
+        _slide_empty_list(
+            prs, project, meta, page, kicker='Planning', title='Gepland — komende 2 maanden',
+            message=f'Geen deliverables gepland in {label}.',
+        )
+        page += 1
+
+    # Slides N+2+: alle deliverables als tiles (open eerst, dan een aparte
+    # sectie "opgeleverd/gehaald")
+    delivered_products = [p for p in products if p.get('werkelijkeDatum')]
+    delivered_products.sort(key=lambda p: p.get('werkelijkeDatum') or '', reverse=True)
+    today_iso = _today_iso(meta)
+
+    open_tile_pages = _paginate(open_products, TILES_PER_SLIDE)
+    delivered_tile_pages = _paginate(delivered_products, TILES_PER_SLIDE)
+
+    if not open_tile_pages and not delivered_tile_pages:
+        _slide_empty_list(
+            prs, project, meta, page, kicker='Deliverables', title='Deliverables',
+            message='Nog geen deliverables vastgelegd voor dit project.',
+        )
+        page += 1
+    else:
+        n = len(open_tile_pages)
+        for i, chunk in enumerate(open_tile_pages):
+            subtitle = f'Openstaand — {len(open_products)} deliverable(s)' + (f' — pagina {i + 1}/{n}' if n > 1 else '')
+            _slide_tiles(prs, project, meta, page, kicker='Deliverables', title='Deliverables', subtitle=subtitle, items=chunk, today_iso=today_iso)
+            page += 1
+        n = len(delivered_tile_pages)
+        for i, chunk in enumerate(delivered_tile_pages):
+            subtitle = f'Opgeleverd / gehaald ({len(delivered_products)})' + (f' — pagina {i + 1}/{n}' if n > 1 else '')
+            _slide_tiles(prs, project, meta, page, kicker='Deliverables', title='Deliverables', subtitle=subtitle, items=chunk, today_iso=today_iso)
+            page += 1
+
+    # Laatste slide(s): activiteiten als Gantt-tijdsbalken
+    real_activities = [a for a in activities if not a.get('isSummary')]
+    real_activities.sort(key=lambda a: (a.get('startDate') or '', a.get('endDate') or ''))
+    if real_activities:
+        quarterly, bounds = _axis_bounds(_activity_dates(real_activities), today_date)
+        axis_start, axis_end = bounds[0], bounds[-1]
+        span_days = (axis_end - axis_start).days or 1
+        activity_pages = _paginate(real_activities, GANTT_ROWS_PER_SLIDE)
+        n = len(activity_pages)
+        for i, chunk in enumerate(activity_pages):
+            subtitle = f'{len(real_activities)} activiteit(en)' + (f' — pagina {i + 1}/{n}' if n > 1 else '')
+            _slide_activiteiten_gantt(prs, project, meta, page, chunk, bounds, quarterly, axis_start, span_days, today_date, subtitle)
+            page += 1
+    else:
+        _slide_empty_list(
+            prs, project, meta, page, kicker='Planning', title='Activiteiten',
+            message='Nog geen activiteiten vastgelegd voor dit project.',
+        )
+        page += 1
 
     buf = io.BytesIO()
     prs.save(buf)
