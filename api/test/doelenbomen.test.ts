@@ -57,6 +57,16 @@ describe('doelenbomen', () => {
     assert.equal(dup.status, 409);
   });
 
+  // Regressietest: zie de gelijknamige test in tenants.test.ts — dezelfde
+  // "niet-numerieke :tenantId hangt i.p.v. te falen"-klasse fout, hier voor
+  // de doelenboom-aanmaakroute (routes/doelenbomen.ts).
+  it('POST /api/tenants/:tenantId/doelenbomen met een niet-numerieke :tenantId geeft 400 i.p.v. te hangen', async () => {
+    const asSysadmin = await req('POST', '/api/tenants/undefined/doelenbomen', {
+      token: sysadminToken, body: { slug: 'boom-ongeldig', name: 'Boom ongeldig' },
+    });
+    assert.equal(asSysadmin.status, 400);
+  });
+
   it('GET /api/doelenbomen/:id/tree geeft effectiveRole/canWrite/canWriteContent correct terug', async () => {
     const { tenantId, adminToken } = await makeTenantWithAdmin(sysadminToken, `${PREFIX}-t2`, `${PREFIX}-t2-admin@test.local`);
     const boom = await req('POST', `/api/tenants/${tenantId}/doelenbomen`, {

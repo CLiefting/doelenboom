@@ -292,6 +292,27 @@ describe('tenants', () => {
     assert.equal(removedAgain.status, 404);
   });
 
+  // Regressietest: een niet-numerieke :tenantId (bv. "undefined", door een
+  // client die de status van een vorige aanroep niet controleerde — zie de
+  // toelichting in routes/tenants.ts en test/helpers.ts setupWritableDoelenboom)
+  // moet een nette 400 geven. Vóór deze validatie belandde zo'n waarde
+  // ongefilterd in een SQL-query ("invalid input syntax for type bigint"),
+  // een onafgevangen fout die de aanvraag onbeantwoord liet hangen i.p.v. te
+  // falen — precies de oorzaak van een reeks CI-timeouts in licenses.test.ts
+  // en customerManagement.test.ts (beide bleken een dubbel-gebruikte
+  // tenant-slug te hebben, wat dezelfde 'undefined'-keten veroorzaakte).
+  it('POST/PUT /api/tenants/:tenantId/members met een niet-numerieke :tenantId geeft 400 i.p.v. te hangen', async () => {
+    const asSysadmin = await req('POST', '/api/tenants/undefined/members', {
+      token: sysadminToken, body: { email: `${PREFIX}-ongeldig@test.local`, password: 'wachtwoord123', role: 'admin' },
+    });
+    assert.equal(asSysadmin.status, 400);
+
+    const putAsSysadmin = await req('PUT', '/api/tenants/undefined/members/1', {
+      token: sysadminToken, body: { role: 'admin' },
+    });
+    assert.equal(putAsSysadmin.status, 400);
+  });
+
   it('DELETE /api/tenants/:id is sysadmin-only, ook voor de eigen tenant-admin', async () => {
     const slug = `${PREFIX}-t6`;
     const created = await req('POST', '/api/tenants', { token: sysadminToken, body: { slug, name: 'Test tenant 6' } });

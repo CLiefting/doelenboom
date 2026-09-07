@@ -268,9 +268,17 @@ describe('klantbeheer (contactpersonen, klantgegevens, klantgezondheid)', () => 
   });
 
   it('sweepLicenseRenewalReminders: signaleert een bijna-verlopen licentie precies één keer', async () => {
+    // t3, niet t2: die slug is al in gebruik door de vorige test hierboven
+    // ("klantnummer: los van tenant-ID...") — dezelfde slug hergebruiken gaf
+    // hier een 409 i.p.v. 201, en dus (via setupWritableDoelenboom-achtige
+    // code die niet op de status controleerde) een tenant2Id van undefined,
+    // wat de PUT hieronder liet hangen i.p.v. netjes falen. Zie ook de
+    // status-check die nu in test/helpers.ts setupWritableDoelenboom zit
+    // voor hetzelfde patroon.
     const tenant2 = await req('POST', '/api/tenants', {
-      token: sysadminToken, body: { slug: `${PREFIX}-t2`, name: `${PREFIX}-t2` },
+      token: sysadminToken, body: { slug: `${PREFIX}-t3`, name: `${PREFIX}-t3` },
     });
+    assert.equal(tenant2.status, 201, `tenant-aanmaak mislukt: ${JSON.stringify(tenant2.body)}`);
     const tenant2Id = tenant2.body.id as number;
 
     const soonEndDate = new Date(Date.now() + (LICENSE_RENEWAL_REMINDER_DAYS - 1) * 24 * 3600 * 1000)
