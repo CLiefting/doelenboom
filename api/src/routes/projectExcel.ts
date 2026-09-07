@@ -97,11 +97,21 @@ async function downloadProjectDocument(
   if (!data) return void res.status(404).json({ error: 'Project niet gevonden' });
 
   const exportedAt = new Date();
+  // showPlannedForDelivered: spiegelt de tijdlijn-toggle "Geplande datum bij
+  // opgeleverde items" in tree.html (showPlannedForDelivered) — de knop
+  // stuurt de huidige stand van die (sessie-only, client-side) toggle mee
+  // als querystring, zodat de PowerPoint-tijdlijn/-Gantt-as er hetzelfde
+  // uitziet als wat de gebruiker op het scherm had ingesteld op het moment
+  // van exporteren. Standaard aan (querystring ontbreekt of onbekende
+  // waarde), alleen expliciet 'false'/'0' zet 'm uit — alleen relevant voor
+  // de PowerPoint-export, maar onschadelijk om altijd mee te geven.
+  const showPlannedForDelivered = req.query.showPlannedForDelivered !== 'false' && req.query.showPlannedForDelivered !== '0';
   const meta = {
     doelenboom: tree.doelenboom.name,
     tenant: tree.doelenboom.tenant.name,
     exportedAt: exportedAt.toISOString(),
     exportedBy: req.user?.email ?? 'onbekend',
+    showPlannedForDelivered,
   };
 
   let upstream: Response;

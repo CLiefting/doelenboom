@@ -6868,8 +6868,14 @@ function runApp(data) {
     const originalLabel = btn ? btn.textContent : '';
     if (btn) { btn.disabled = true; btn.textContent = 'Bezig…'; }
     try {
+      // showPlannedForDelivered: geeft de huidige stand van de tijdlijn-
+      // toggle mee, zodat de PowerPoint-tijdlijn/-Gantt-as er hetzelfde
+      // uitziet als wat er op het scherm te zien was op het moment van
+      // exporteren (zie showPlannedForDelivered/buildTimelineMarkers
+      // hierboven en projectExcel.ts::downloadProjectDocument).
       const res = await fetch(
-        apiUrl + '/api/doelenbomen/' + doelenboomId + '/elements/' + encodeURIComponent(code) + '/project-pptx',
+        apiUrl + '/api/doelenbomen/' + doelenboomId + '/elements/' + encodeURIComponent(code) +
+          '/project-pptx?showPlannedForDelivered=' + (showPlannedForDelivered ? 'true' : 'false'),
         { headers: { Authorization: 'Bearer ' + authToken } }
       );
       if (!res.ok) {
