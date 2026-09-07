@@ -479,7 +479,7 @@ export type ModuleSurcharge = {
 // Publieke module-listing (GET /api/subscription-modules) — ModuleDef + de op
 // dit moment geldige opslag (null = nog niet bepaald, telt dan niet mee in
 // de aanvraagprijs).
-export type PublicModule = ModuleDef & { currentSurchargePct: string | null };
+export type PublicModule = ModuleDef & { currentSurchargePct: string | null; pricingVariesByTier: boolean };
 
 // Vaste, tier-specifieke module-opslag (sinds 7 september 2026) — overrult
 // per tier+periode het generieke percentage hierboven (bv. Projecten: Brons
