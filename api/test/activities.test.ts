@@ -15,7 +15,7 @@ const EXCEL_SERVICE_URL = process.env.EXCEL_SERVICE_URL ?? 'http://localhost:800
 describe('activities (activiteiten-planning) CRUD', () => {
   let doelenboomId: number;
   let adminToken: string;
-  let gebruikerToken: string;
+  let editorToken: string;
   let bezoekerToken: string;
 
   before(async () => {
@@ -24,7 +24,7 @@ describe('activities (activiteiten-planning) CRUD', () => {
     await createSysadminUser(email, 'wachtwoord123');
     const sysadminToken = await login(email, 'wachtwoord123');
     let tenantId: number;
-    ({ tenantId, doelenboomId, adminToken, gebruikerToken, bezoekerToken } = await setupWritableDoelenboom(sysadminToken, PREFIX));
+    ({ tenantId, doelenboomId, adminToken, editorToken, bezoekerToken } = await setupWritableDoelenboom(sysadminToken, PREFIX));
     // Activiteiten horen, net als products, bij de "Projecten"-module (zie
     // license.ts/routes/activities.ts requireModule).
     await req('PUT', `/api/tenants/${tenantId}/license/modules/projecten`, {
@@ -70,14 +70,14 @@ describe('activities (activiteiten-planning) CRUD', () => {
 
   it('gebruiker mag activiteiten aanmaken/wijzigen/verwijderen (losse boom-inhoud)', async () => {
     const created = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P1/activities`, {
-      token: gebruikerToken, body: { name: 'Door gebruiker', startDate: '2026-09-01', endDate: '2026-09-15' },
+      token: editorToken, body: { name: 'Door gebruiker', startDate: '2026-09-01', endDate: '2026-09-15' },
     });
     assert.equal(created.status, 201);
     assert.equal(created.body.startDate, '2026-09-01');
     assert.equal(created.body.endDate, '2026-09-15');
 
     const updated = await req('PUT', `/api/doelenbomen/${doelenboomId}/elements/P1/activities/${created.body.id}`, {
-      token: gebruikerToken,
+      token: editorToken,
       body: { name: 'Door gebruiker gewijzigd', startDate: '2026-09-02', endDate: '2026-09-20', omschrijving: 'bijgewerkt' },
     });
     assert.equal(updated.status, 200);
@@ -85,11 +85,11 @@ describe('activities (activiteiten-planning) CRUD', () => {
     assert.equal(updated.body.omschrijving, 'bijgewerkt');
 
     const del = await req('DELETE', `/api/doelenbomen/${doelenboomId}/elements/P1/activities/${created.body.id}`, {
-      token: gebruikerToken,
+      token: editorToken,
     });
     assert.equal(del.status, 204);
     const delAgain = await req('DELETE', `/api/doelenbomen/${doelenboomId}/elements/P1/activities/${created.body.id}`, {
-      token: gebruikerToken,
+      token: editorToken,
     });
     assert.equal(delAgain.status, 404);
   });
@@ -469,7 +469,7 @@ describe('activities (activiteiten-planning) CRUD', () => {
     it('aanmaken/wijzigen/verwijderen bumpt project_status.updatedAt en komt in de gecombineerde historie terecht', async () => {
       const before = new Date();
       const created = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P5/activities`, {
-        token: gebruikerToken,
+        token: editorToken,
         body: { name: 'Historie-activiteit', startDate: '2026-09-01', endDate: '2026-09-05', mppUid: 'task-historie' },
       });
       assert.equal(created.status, 201);
@@ -478,7 +478,7 @@ describe('activities (activiteiten-planning) CRUD', () => {
       const treeAfterCreate = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: adminToken });
       assert.ok(treeAfterCreate.body.projectStatus['P5'].updatedAt, 'aanmaken van een activiteit zet project_status.updatedAt');
       assert.ok(new Date(treeAfterCreate.body.projectStatus['P5'].updatedAt).getTime() >= before.getTime() - 1000);
-      assert.equal(treeAfterCreate.body.projectStatus['P5'].updatedByEmail, `${PREFIX}-gebruiker@test.local`);
+      assert.equal(treeAfterCreate.body.projectStatus['P5'].updatedByEmail, `${PREFIX}-editor@test.local`);
 
       await req('PUT', `/api/doelenbomen/${doelenboomId}/elements/P5/activities/${activityId}`, {
         token: adminToken,

@@ -471,7 +471,7 @@ customerManagementRouter.get('/tenants/:tenantId/health', async (req, res) => {
   const lastSeenAt = lastActivity.rows[0]?.last_seen_at ?? null;
   const daysSinceActivity = lastSeenAt != null ? Math.floor((Date.now() - new Date(lastSeenAt).getTime()) / (24 * 3600 * 1000)) : null;
 
-  const adminUsagePct = license?.tier ? license.usage.activeAdmins / license.tier.maxAdmins : null;
+  const editorUsagePct = license?.tier ? license.usage.activeEditors / license.tier.maxEditors : null;
   const bomenUsagePct = license?.tier ? license.usage.activeBomen / license.tier.maxBomen : null;
 
   // Simpel stoplicht: beëindigd/verlopen (of verlopen-zonder-opzegging) of al
@@ -512,7 +512,7 @@ customerManagementRouter.get('/tenants/:tenantId/health', async (req, res) => {
       if (status !== 'risico') status = 'aandacht';
       reasons.push(`Licentie loopt over ${daysUntilLicenseEnd} dag(en) af.`);
     }
-    if ((adminUsagePct !== null && adminUsagePct >= 0.9) || (bomenUsagePct !== null && bomenUsagePct >= 0.9)) {
+    if ((editorUsagePct !== null && editorUsagePct >= 0.9) || (bomenUsagePct !== null && bomenUsagePct >= 0.9)) {
       if (status !== 'risico') status = 'aandacht';
       reasons.push('Gebruik zit dicht tegen de tierlimiet aan.');
     }
@@ -530,7 +530,7 @@ customerManagementRouter.get('/tenants/:tenantId/health', async (req, res) => {
     lastActivityAt: lastSeenAt,
     daysSinceActivity,
     usage: license
-      ? { activeAdmins: license.usage.activeAdmins, maxAdmins: license.tier?.maxAdmins ?? null, activeBomen: license.usage.activeBomen, maxBomen: license.tier?.maxBomen ?? null }
+      ? { activeEditors: license.usage.activeEditors, maxEditors: license.tier?.maxEditors ?? null, activeBomen: license.usage.activeBomen, maxBomen: license.tier?.maxBomen ?? null }
       : null,
   });
 });

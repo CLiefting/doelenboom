@@ -14,9 +14,9 @@ edgesRouter.use(requireAuth);
 // Per route meegeven (niet via router.use()) — zie toelichting in elements.ts.
 // requireWritableDoelenboom i.p.v. requireTenantRoleForDoelenboomParam: blokkeert
 // ook tenant-admins zodra de doelenboom op read-only staat (zie rbac.ts).
-// minRole='gebruiker': relaties zijn, net als elementen, "losse boom-inhoud" —
+// minRole='editor': relaties zijn, net als elementen, "losse boom-inhoud" —
 // niet alleen admin.
-const requireEditor = requireWritableDoelenboom('id', 'gebruiker');
+const requireEditor = requireWritableDoelenboom('id', 'editor');
 
 const WEIGHTS = ['primair', 'ondersteunend'];
 

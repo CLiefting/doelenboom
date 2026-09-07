@@ -27,16 +27,20 @@ import { hasModule, isLicenseExpired, isTenantTerminated } from './license.js';
 //   ÉN de "instellingen"-laag: kolomconfiguratie, doelenboom-instellingen
 //   (naam/slug/alleen-lezen/archiveren), tenant-instellingen, leden van die
 //   tenant. Mag geen tenants aanmaken en geen andere tenants beheren.
-// - gebruiker (tenant_users.role = 'gebruiker'): mag lezen én de "losse
-//   boom-inhoud" wijzigen binnen die tenant — elementen aanmaken/bewerken/
-//   verwijderen, relaties tussen elementen, tags/organisatieonderdelen aan
-//   een element koppelen (niet de tag/org-catalogus zelf beheren), en
-//   projectstatus/producten. Mag NIET de kolomconfiguratie of overige
-//   instellingen wijzigen, geen Excel importeren, en geen leden/tenants
-//   beheren — dat blijft admin/sysadmin (zie requireWritableDoelenboom's
-//   minRole-param hieronder voor de precieze knip per route).
+// - editor (tenant_users.role = 'editor', tot 7 september 2026 'gebruiker'
+//   geheten — zie db/migrations/0037_editor_role_rename.sql): mag lezen én
+//   de "losse boom-inhoud" wijzigen binnen die tenant — elementen aanmaken/
+//   bewerken/verwijderen, relaties tussen elementen, tags/organisatie-
+//   onderdelen aan een element koppelen (niet de tag/org-catalogus zelf
+//   beheren), en projectstatus/producten. Mag NIET de kolomconfiguratie of
+//   overige instellingen wijzigen, geen Excel importeren, en geen leden/
+//   tenants beheren — dat blijft admin/sysadmin (zie requireWritableDoelenboom's
+//   minRole-param hieronder voor de precieze knip per route). Telt, net als
+//   admin, mee voor de licentielimiet op het aantal editors (zie license.ts
+//   en doelenboom_licentiemodel.md §5 — "editor" is bewust dezelfde rol als
+//   waarmee de prijsstrategie rekent, geen nieuw concept).
 // - bezoeker (tenant_users.role = 'bezoeker'): alleen lezen binnen die
-//   tenant — geen enkele schrijfactie.
+//   tenant — geen enkele schrijfactie, telt niet mee voor de licentielimiet.
 //
 // Open toegang (tenants.open_access_role, zie db/init.sql): een tenant kan
 // ingesteld worden om IEDER account met een login minstens een bepaalde rol
@@ -46,12 +50,12 @@ import { hasModule, isLicenseExpired, isTenantTerminated } from './license.js';
 // account" — een tenant die dit aanzet kiest daar bewust voor, dat is geen
 // impliciete uitzondering op de privacy-afspraak hierboven (die gaat over
 // tenants die dit NIET hebben aangezet).
-export type TenantRole = 'admin' | 'gebruiker' | 'bezoeker';
+export type TenantRole = 'admin' | 'editor' | 'bezoeker';
 
 // Rangorde voor "minimaal deze rol nodig"-checks hieronder — hoger getal =
 // meer rechten. sysadmin zit hier bewust buiten (die mag altijd door, los
 // van deze rangorde, zie elke functie hieronder).
-const ROLE_RANK: Record<TenantRole, number> = { bezoeker: 0, gebruiker: 1, admin: 2 };
+const ROLE_RANK: Record<TenantRole, number> = { bezoeker: 0, editor: 1, admin: 2 };
 
 function roleAtLeast(role: TenantRole, minRole: TenantRole): boolean {
   return ROLE_RANK[role] >= ROLE_RANK[minRole];
@@ -122,7 +126,7 @@ export function requireSysadmin(req: AuthedRequest, res: Response, next: NextFun
 // (dat de tenant afleidt uit bv. req.params.id / req.params.tenantId) de rol van
 // deze gebruiker in die tenant opgezocht, en vergeleken tegen minRole via de
 // rangorde hierboven (ROLE_RANK) — minRole='bezoeker' betekent "moet lid zijn"
-// (lezen mag, elke rol volstaat), minRole='gebruiker' betekent "moet gebruiker
+// (lezen mag, elke rol volstaat), minRole='editor' betekent "moet editor
 // of admin zijn", minRole='admin' betekent "moet tenant-admin zijn" (schrijven).
 export function requireTenantRole(
   minRole: TenantRole,
@@ -154,7 +158,7 @@ export function requireTenantRole(
 // Voor routes met :id = doelenboom-id (elements/tags/orgUnits/edges/imports/exports/
 // tree, en de doelenboom-instellingen zelf). Gebruikt de EFFECTIEVE rol (tenant-rol,
 // tenzij overruled voor déze doelenboom via doelenboom_user_roles) — dus een
-// tenant-admin die op deze ene doelenboom is teruggezet naar 'gebruiker' verliest
+// tenant-admin die op deze ene doelenboom is teruggezet naar 'editor' verliest
 // hier ook de rechten om 'm te hernoemen/verwijderen/op read-only te zetten.
 //
 // opts.allowSysadmin (default false): sysadmin mag hier NIET automatisch door —
@@ -218,7 +222,7 @@ export function requireTenantRoleForTenantParam(minRole: TenantRole, paramName =
 // beheren). Voor de "losse boom-inhoud" (elementen, relaties, tags/org-
 // koppelingen ÓP een element, projectstatus/producten — zie routes/elements.ts,
 // edges.ts, tags.ts, orgUnits.ts, products.ts, projectStatus.ts) geven die
-// routes hier expliciet minRole='gebruiker' mee, zodat ook de rol 'gebruiker'
+// routes hier expliciet minRole='editor' mee, zodat ook de rol 'editor'
 // (niet alleen 'admin') erdoorheen mag — de read-only/licentie-check hieronder
 // blijft in beide gevallen gelden.
 //
@@ -253,7 +257,7 @@ export function requireWritableDoelenboom(
         error:
           minRole === 'admin'
             ? 'Alleen een admin (tenant- of doelenboom-specifiek) mag dit wijzigen.'
-            : 'Alleen een admin of gebruiker (tenant- of doelenboom-specifiek) mag dit wijzigen.',
+            : 'Alleen een admin of editor (tenant- of doelenboom-specifiek) mag dit wijzigen.',
       });
     }
 

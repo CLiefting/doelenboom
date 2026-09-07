@@ -9,6 +9,7 @@ import {
   countPendingSubscriptionActions,
   createSubscriptionRequest,
   getSubscriptionRequestById,
+  isBillingPeriod,
   listLicenseEventsForTenant,
   listSubscriptionRequests,
   listTenantSubscriptionOverview,
@@ -30,18 +31,27 @@ import {
 export const subscriptionsRouter = Router();
 
 subscriptionsRouter.get('/subscription-tiers', async (_req, res) => {
-  // Alleen tiers met een op dit moment geldige prijs — de aanvraagpagina kan
-  // met een tier zonder (geldige) prijs sowieso niks tonen/aanvragen. De
-  // huidige prijs wordt meegegeven als "currentPriceEur" (geen los endpoint
-  // nodig per tier alleen om de tegel te vullen) — het volledige, met modules/
-  // aanbieding verdisconteerde tarief blijft via .../price hieronder.
+  // Alleen tiers met een op dit moment geldige prijs voor MINSTENS ÉÉN
+  // periode — de aanvraagpagina kan met een tier zonder enige geldige prijs
+  // sowieso niks tonen/aanvragen. Sinds de maandelijkse facturatie van 7
+  // september 2026 (doelenboom_licentiemodel.md §9.2 v3) wordt de huidige
+  // prijs per periode meegegeven als "currentPriceEur": { maand, jaar } (was
+  // vóór die datum één enkel bedrag) — een tier kan bv. wel een jaarprijs
+  // hebben maar (nog) geen maandprijs, of andersom. Het volledige, met
+  // modules/aanbieding verdisconteerde tarief blijft via .../price hieronder.
   const [tiers] = await Promise.all([listTiers()]);
   const today = new Date().toISOString().slice(0, 10);
   const withPrice = (
     await Promise.all(
-      tiers.map(async (t) => ({ ...t, currentPriceEur: (await getCurrentTierPrice(t.id, today))?.priceEur ?? null }))
+      tiers.map(async (t) => ({
+        ...t,
+        currentPriceEur: {
+          maand: (await getCurrentTierPrice(t.id, 'maand', today))?.priceEur ?? null,
+          jaar: (await getCurrentTierPrice(t.id, 'jaar', today))?.priceEur ?? null,
+        },
+      }))
     )
-  ).filter((t) => t.currentPriceEur != null);
+  ).filter((t) => t.currentPriceEur.maand != null || t.currentPriceEur.jaar != null);
   res.json(withPrice);
 });
 
@@ -68,11 +78,18 @@ subscriptionsRouter.get('/subscription-offers', async (_req, res) => {
 });
 
 // ?modules=projecten,templating — optioneel, om de opslag van geselecteerde
-// modules mee te laten wegen in de prijsopgave (zie subscriptions.ts quotePrice).
+// modules mee te laten wegen in de prijsopgave (zie subscriptions.ts
+// quotePrice). ?period=maand|jaar — verplicht sinds 7 september 2026 (de
+// aanvrager kiest de facturatieperiode, zie doelenboom_licentiemodel.md
+// §9.2 v3).
 subscriptionsRouter.get('/subscription-tiers/:tierId/price', async (req, res) => {
   const rawModules = typeof req.query.modules === 'string' ? req.query.modules : '';
   const moduleKeys = rawModules.split(',').map((k) => k.trim()).filter(Boolean);
-  const quote = await quotePrice(req.params.tierId, moduleKeys);
+  const period = req.query.period;
+  if (!isBillingPeriod(period)) {
+    return res.status(400).json({ error: 'period moet "maand" of "jaar" zijn.' });
+  }
+  const quote = await quotePrice(req.params.tierId, moduleKeys, period);
   if (!quote) return res.status(404).json({ error: 'Tier niet gevonden.' });
   res.json(quote);
 });
@@ -88,6 +105,7 @@ subscriptionsRouter.post('/subscription-requests', async (req, res) => {
   const password = typeof b.password === 'string' ? b.password : '';
   const tierId = Number(b.tierId);
   const moduleKeys = Array.isArray(b.moduleKeys) ? b.moduleKeys.filter((x): x is string => typeof x === 'string') : [];
+  const billingPeriod = b.billingPeriod;
 
   const errors: string[] = [];
   if (!organizationName) errors.push('Organisatienaam is verplicht.');
@@ -95,6 +113,7 @@ subscriptionsRouter.post('/subscription-requests', async (req, res) => {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(applicantEmail)) errors.push('Geldig e-mailadres is verplicht.');
   if (!password || password.length < 8) errors.push('Wachtwoord (min. 8 tekens) is verplicht.');
   if (!Number.isFinite(tierId) || tierId <= 0) errors.push('Kies een geldige tier.');
+  if (!isBillingPeriod(billingPeriod)) errors.push('billingPeriod moet "maand" of "jaar" zijn.');
   if (errors.length) return res.status(400).json({ error: errors.join(' ') });
 
   try {
@@ -106,6 +125,7 @@ subscriptionsRouter.post('/subscription-requests', async (req, res) => {
       password,
       tierId,
       moduleKeys,
+      billingPeriod: billingPeriod as 'maand' | 'jaar',
     });
     res.status(201).json(result);
   } catch (err) {

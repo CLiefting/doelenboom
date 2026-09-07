@@ -326,8 +326,8 @@ treeRouter.get('/:id/tree', requireTenantRoleForDoelenboomParam('bezoeker', 'id'
   const canWrite = effectiveRole === 'admin' && !blocked;
   // canWriteContent: mag de "losse boom-inhoud" wijzigen (elementen, relaties,
   // tags/org-koppelingen op een element, projectstatus/producten) — nieuw,
-  // ook waar voor de rol 'gebruiker'. Elke canWrite-gebruiker kan ook dit.
-  const canWriteContent = (effectiveRole === 'admin' || effectiveRole === 'gebruiker') && !blocked;
+  // ook waar voor de rol 'editor'. Elke canWrite-gebruiker kan ook dit.
+  const canWriteContent = (effectiveRole === 'admin' || effectiveRole === 'editor') && !blocked;
   // "Wie heeft dit project voor het laatst bijgewerkt" is alleen zichtbaar
   // voor rollen die ook mogen bewerken (gebruiker/admin) — zie het interview
   // met Charles (31 augustus 2026): het "wanneer" mag breed zichtbaar zijn
@@ -336,7 +336,7 @@ treeRouter.get('/:id/tree', requireTenantRoleForDoelenboomParam('bezoeker', 'id'
   // canWriteContent/blocked hierboven: dit is een privacy-vraag over wélke
   // rol iemand heeft, geen schrijfrechten-vraag — een read-only-gezette boom
   // mag voor een admin/gebruiker het e-mailadres gewoon blijven tonen.
-  const isEditorRole = effectiveRole === 'admin' || effectiveRole === 'gebruiker';
+  const isEditorRole = effectiveRole === 'admin' || effectiveRole === 'editor';
   const projectStatus = isEditorRole
     ? tree.projectStatus
     : Object.fromEntries(

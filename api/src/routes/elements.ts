@@ -14,13 +14,13 @@ export const elementsRouter = Router();
 elementsRouter.use(requireAuth);
 
 // Alle schrijfacties hieronder (create/update/delete) vereisen minimaal de rol
-// 'gebruiker' (of hoger: admin/sysadmin) — elementen zijn "losse boom-inhoud",
+// 'editor' (of hoger: admin/sysadmin) — elementen zijn "losse boom-inhoud",
 // zie rbac.ts requireWritableDoelenboom. De doelenboom mag niet op read-only
 // staan (zie rbac.ts) — lezen gebeurt via routes/tree.ts, dat zijn eigen
 // (lichtere) check heeft. Let op: dit moet per route meegegeven worden (niet
 // via router.use()), omdat :id op het moment van een path-loze .use() nog niet
 // gevuld is.
-const requireEditor = requireWritableDoelenboom('id', 'gebruiker');
+const requireEditor = requireWritableDoelenboom('id', 'editor');
 
 // Welke types geldig zijn, hangt sinds de configureerbare kolommen (zie
 // docs/kolommen-configuratie-ontwerp.md) af van de columns-configuratie van

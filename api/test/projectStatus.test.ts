@@ -10,7 +10,7 @@ const PREFIX = unique('projstat');
 describe('project-status (PUT upsert + DELETE)', () => {
   let doelenboomId: number;
   let adminToken: string;
-  let gebruikerToken: string;
+  let editorToken: string;
   let bezoekerToken: string;
 
   before(async () => {
@@ -19,7 +19,7 @@ describe('project-status (PUT upsert + DELETE)', () => {
     await createSysadminUser(email, 'wachtwoord123');
     const sysadminToken = await login(email, 'wachtwoord123');
     let tenantId: number;
-    ({ tenantId, doelenboomId, adminToken, gebruikerToken, bezoekerToken } = await setupWritableDoelenboom(sysadminToken, PREFIX));
+    ({ tenantId, doelenboomId, adminToken, editorToken, bezoekerToken } = await setupWritableDoelenboom(sysadminToken, PREFIX));
     // Projectstatus hoort bij de "Projecten"-module (zie license.ts/
     // routes/projectStatus.ts requireModule) — dit testbestand dateert van
     // vóór het licentiemodel en test puur de CRUD-mechaniek zelf, dus
@@ -65,12 +65,12 @@ describe('project-status (PUT upsert + DELETE)', () => {
 
   it('gebruiker mag projectstatus zetten en wissen (losse boom-inhoud)', async () => {
     const set = await req('PUT', `/api/doelenbomen/${doelenboomId}/elements/P1/project-status`, {
-      token: gebruikerToken, body: { projectstatus: 'Actief', rag: 'Groen' },
+      token: editorToken, body: { projectstatus: 'Actief', rag: 'Groen' },
     });
     assert.equal(set.status, 200);
     assert.equal(set.body.projectstatus, 'Actief');
 
-    const del = await req('DELETE', `/api/doelenbomen/${doelenboomId}/elements/P1/project-status`, { token: gebruikerToken });
+    const del = await req('DELETE', `/api/doelenbomen/${doelenboomId}/elements/P1/project-status`, { token: editorToken });
     assert.equal(del.status, 204);
   });
 
@@ -109,16 +109,16 @@ describe('project-status (PUT upsert + DELETE)', () => {
   it('PUT zet automatisch updatedAt/updatedByEmail ("laatst bijgewerkt door wie, wanneer")', async () => {
     const before = new Date();
     const res = await req('PUT', `/api/doelenbomen/${doelenboomId}/elements/P1/project-status`, {
-      token: gebruikerToken, body: { projectstatus: 'Actief' },
+      token: editorToken, body: { projectstatus: 'Actief' },
     });
     assert.equal(res.status, 200);
     assert.ok(res.body.updatedAt, 'updatedAt moet gezet zijn');
     assert.ok(new Date(res.body.updatedAt).getTime() >= before.getTime() - 1000);
-    assert.equal(res.body.updatedByEmail, `${PREFIX}-gebruiker@test.local`);
+    assert.equal(res.body.updatedByEmail, `${PREFIX}-editor@test.local`);
 
     const tree = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: adminToken });
     assert.ok(tree.body.projectStatus['P1'].updatedAt);
-    assert.equal(tree.body.projectStatus['P1'].updatedByEmail, `${PREFIX}-gebruiker@test.local`);
+    assert.equal(tree.body.projectStatus['P1'].updatedByEmail, `${PREFIX}-editor@test.local`);
   });
 
   it('een bezoeker ziet updatedAt wel, updatedByEmail niet (privacy, zie routes/tree.ts)', async () => {
@@ -139,14 +139,14 @@ describe('project-status (PUT upsert + DELETE)', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 20));
     const touch = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P1/project-status/touch`, {
-      token: gebruikerToken,
+      token: editorToken,
     });
     assert.equal(touch.status, 200);
     assert.equal(touch.body.projectstatus, 'On-hold');
     assert.equal(touch.body.rag, 'Oranje');
     assert.equal(touch.body.toelichting, 'nog bezig');
     assert.ok(new Date(touch.body.updatedAt).getTime() > new Date(first.body.updatedAt).getTime());
-    assert.equal(touch.body.updatedByEmail, `${PREFIX}-gebruiker@test.local`);
+    assert.equal(touch.body.updatedByEmail, `${PREFIX}-editor@test.local`);
   });
 
   it('touch is ook een upsert (project zonder project_status-rij) en bezoeker/geen-module krijgen 403', async () => {
@@ -172,12 +172,12 @@ describe('project-status (PUT upsert + DELETE)', () => {
     assert.equal(first.status, 200);
 
     const second = await req('PUT', `/api/doelenbomen/${doelenboomId}/elements/P2/project-status`, {
-      token: gebruikerToken, body: { projectstatus: 'On-hold', rag: 'Oranje', toelichting: 'Start' },
+      token: editorToken, body: { projectstatus: 'On-hold', rag: 'Oranje', toelichting: 'Start' },
     });
     assert.equal(second.status, 200);
 
     const touch = await req('POST', `/api/doelenbomen/${doelenboomId}/elements/P2/project-status/touch`, {
-      token: gebruikerToken,
+      token: editorToken,
     });
     assert.equal(touch.status, 200);
 
@@ -202,7 +202,7 @@ describe('project-status (PUT upsert + DELETE)', () => {
     assert.equal(touchRow.kind, 'status');
     assert.equal(touchRow.action, 'touch');
     assert.deepEqual(touchRow.changes, {}, 'touch: geen inhoudelijke wijziging, dus lege changes');
-    assert.equal(touchRow.changedByEmail, `${PREFIX}-gebruiker@test.local`);
+    assert.equal(touchRow.changedByEmail, `${PREFIX}-editor@test.local`);
 
     assert.equal(secondRow.kind, 'status');
     assert.equal(secondRow.action, 'update');

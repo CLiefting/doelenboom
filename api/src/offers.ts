@@ -134,14 +134,19 @@ export async function deleteOffer(id: number | string): Promise<boolean> {
   return (r.rowCount ?? 0) > 0;
 }
 
-// Eén geselecteerde module in de prijsopgave: het bedrag is altijd het
-// percentage van de tier-BASISPRIJS (niet van het subtotaal/de vorige
-// module) — zie doelenboom_licentiemodel.md §3 ("opslag als percentage van
-// de tier-basisprijs").
+// Eén geselecteerde module in de prijsopgave. Sinds 7 september 2026 (zie
+// doelenboom_licentiemodel.md §3 v3) kan een module zijn opslag op twee
+// manieren bepalen: 'fixed' — een vast, tier- en periode-specifiek bedrag
+// (moduleTierSurcharges.ts, bv. Projecten) — of 'percentage' — het
+// generieke percentage van de tier-BASISPRIJS, voor tiers zonder eigen vaste
+// rij (moduleSurcharges.ts, de oorspronkelijke, nog steeds geldende regel
+// voor Single-Use/Evaluatie). surchargePct is alleen gezet bij
+// surchargeType 'percentage'.
 export interface ModuleSurchargeLine {
   moduleKey: string;
   moduleName: string;
-  surchargePct: number;
+  surchargeType: 'fixed' | 'percentage';
+  surchargePct: number | null;
   amountEur: number;
 }
 

@@ -13,7 +13,7 @@ describe('elements CRUD', () => {
   let tenantId: number;
   let doelenboomId: number;
   let adminToken: string;
-  let gebruikerToken: string;
+  let editorToken: string;
   let bezoekerToken: string;
 
   before(async () => {
@@ -21,7 +21,7 @@ describe('elements CRUD', () => {
     sysadminEmail = `${PREFIX}-sysadmin@test.local`;
     await createSysadminUser(sysadminEmail, 'wachtwoord123');
     sysadminToken = await login(sysadminEmail, 'wachtwoord123');
-    ({ tenantId, doelenboomId, adminToken, gebruikerToken, bezoekerToken } = await setupWritableDoelenboom(sysadminToken, PREFIX));
+    ({ tenantId, doelenboomId, adminToken, editorToken, bezoekerToken } = await setupWritableDoelenboom(sysadminToken, PREFIX));
   });
 
   after(async () => {
@@ -37,7 +37,7 @@ describe('elements CRUD', () => {
     assert.equal(bezoeker.status, 403);
 
     const gebruiker = await req('POST', `/api/doelenbomen/${doelenboomId}/elements`, {
-      token: gebruikerToken, body: { code: 'X2', type: 'Project', name: 'Mag wel' },
+      token: editorToken, body: { code: 'X2', type: 'Project', name: 'Mag wel' },
     });
     assert.equal(gebruiker.status, 201);
     assert.equal(gebruiker.body.code, 'X2');
@@ -108,7 +108,7 @@ describe('elements CRUD', () => {
     // sysadmin-only toegankelijk, zie rbac.ts) — dan werkt schrijven gewoon,
     // precies zoals voor elke andere gebruiker met die rol.
     const link = await req('POST', `/api/tenants/${tenantId}/members`, {
-      token: sysadminToken, body: { email: sysadminEmail, password: 'wachtwoord123', role: 'gebruiker' },
+      token: sysadminToken, body: { email: sysadminEmail, password: 'wachtwoord123', role: 'editor' },
     });
     assert.equal(link.status, 201);
     // De JWT bevat geen tenant-rollen (die worden live opgezocht, zie

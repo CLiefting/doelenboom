@@ -1,4 +1,6 @@
-export type TenantRoleName = 'admin' | 'gebruiker' | 'bezoeker';
+// 'gebruiker' heette tot 7 september 2026 zo — sindsdien 'editor' (zie
+// api/src/rbac.ts).
+export type TenantRoleName = 'admin' | 'editor' | 'bezoeker';
 
 export type UserTenantRole = {
   tenantId: number;
@@ -388,7 +390,7 @@ export type TreeResponse = {
     canWrite: boolean;
     // canWriteContent: mag de "losse boom-inhoud" wijzigen (elementen,
     // relaties, tags/org-koppelingen op een element, projectstatus/producten/
-    // activiteiten) — admin/sysadmin én de rol 'gebruiker'. Zie api/src/routes/tree.ts.
+    // activiteiten) — admin/sysadmin én de rol 'editor'. Zie api/src/routes/tree.ts.
     canWriteContent: boolean;
     tenant: { id: number; slug: string; name: string };
   };
@@ -419,10 +421,15 @@ export type TreeResponse = {
 
 // --- Licentiemodel (zie doelenboom_licentiemodel.md) ---
 
+export type BillingPeriod = 'maand' | 'jaar';
+
 export type Tier = {
   id: number;
   name: string;
-  maxAdmins: number;
+  // maxEditors: limiet voor admin + editor SAMEN (sinds 7 september 2026 —
+  // "admin telt mee als editor", zie doelenboom_licentiemodel.md §5 v3). Heette
+  // hiervoor maxAdmins en telde alleen admins.
+  maxEditors: number;
   maxBomen: number;
   sortOrder: number;
   // Zie db/migrations/0018_evaluatie_tier.sql — generieke velden voor een
@@ -433,21 +440,24 @@ export type Tier = {
 };
 
 // Eén prijsperiode van een tier — een abonnement heeft door de tijd heen
-// meerdere prijzen (bv. € 125/jaar in 2026, een ander tarief in 2027), dus
-// dit is een eigen geschiedenis i.p.v. een enkel prijsveld op Tier zelf. Zie
-// doelenboom_licentiemodel.md §9.
+// meerdere prijzen (bv. € 125/jaar in 2026, een ander tarief in 2027), en
+// sinds 7 september 2026 ook per facturatieperiode (maand/jaar, zie
+// doelenboom_licentiemodel.md §9.2 v3) — dus dit is een eigen geschiedenis
+// i.p.v. een enkel prijsveld op Tier zelf.
 export type TierPrice = {
   id: number;
   tierId: number;
   priceEur: string;
+  period: BillingPeriod;
   validFrom: string;
   validUntil: string;
 };
 
 // Publieke tier-listing (GET /api/subscription-tiers) — Tier + de op dit
-// moment geldige prijs (null-tiers worden al server-side weggefilterd, dus
-// dit veld is hier altijd gezet).
-export type PublicTier = Tier & { currentPriceEur: string };
+// moment geldige prijs PER PERIODE (maand en/of jaar — een tier kan bv. wel
+// een jaarprijs hebben maar (nog) geen maandprijs, of andersom; null = geen
+// geldige prijs voor die periode).
+export type PublicTier = Tier & { currentPriceEur: { maand: string | null; jaar: string | null } };
 
 export type ModuleDef = {
   id: number;
@@ -471,6 +481,20 @@ export type ModuleSurcharge = {
 // de aanvraagprijs).
 export type PublicModule = ModuleDef & { currentSurchargePct: string | null };
 
+// Vaste, tier-specifieke module-opslag (sinds 7 september 2026) — overrult
+// per tier+periode het generieke percentage hierboven (bv. Projecten: Brons
+// +€10/maand, Diamant €0/inbegrepen). Zie api/src/moduleTierSurcharges.ts en
+// doelenboom_licentiemodel.md §3 v3.
+export type ModuleTierSurcharge = {
+  id: number;
+  moduleId: number;
+  tierId: number;
+  period: BillingPeriod;
+  priceEur: string;
+  validFrom: string;
+  validUntil: string;
+};
+
 export type OfferKind = 'percentage' | 'fixed_amount' | 'btw_vrij';
 
 export type Offer = {
@@ -486,7 +510,12 @@ export type Offer = {
 export type PriceQuoteModuleLine = {
   moduleKey: string;
   moduleName: string;
-  surchargePct: number;
+  // 'fixed' = vast bedrag voor deze tier+periode (moduleTierSurcharges.ts,
+  // sinds 7 september 2026 — surchargePct dan null), 'percentage' = generiek
+  // percentage van de tier-basisprijs (de oorspronkelijke regel, nu de
+  // fallback).
+  surchargeType: 'fixed' | 'percentage';
+  surchargePct: number | null;
   amountEur: number;
 };
 
@@ -514,6 +543,9 @@ export type SubscriptionRequest = {
   applicantPhone: string | null;
   requestedModules: string[];
   status: SubscriptionRequestStatus;
+  // Facturatieperiode ('maand'/'jaar', sinds 7 september 2026) — bepaalt de
+  // contractcadans bij betaling/verlenging (zie subscriptions.ts CONTRACT_MONTHS).
+  billingPeriod: BillingPeriod;
   requestedAt: string;
   priceAtRequest: string | null;
   contractEndDate: string | null;
@@ -577,7 +609,9 @@ export type TenantLicense = {
   // inactief zijn door een opzegging + gepasseerde einddatum).
   moduleAssignments: TenantModuleAssignment[];
   usage: {
-    activeAdmins: number;
+    // Admin + editor samen (zie Tier.maxEditors hierboven) — heette hiervoor
+    // activeAdmins en telde alleen admins.
+    activeEditors: number;
     activeBomen: number;
     lifetimeBomenAangemaakt: number;
   };
@@ -649,7 +683,7 @@ export type TenantHealth = {
   daysUntilLicenseEnd: number | null;
   lastActivityAt: string | null;
   daysSinceActivity: number | null;
-  usage: { activeAdmins: number; maxAdmins: number | null; activeBomen: number; maxBomen: number | null } | null;
+  usage: { activeEditors: number; maxEditors: number | null; activeBomen: number; maxBomen: number | null } | null;
 };
 
 export type ImportSummary = {

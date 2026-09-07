@@ -270,7 +270,7 @@ export const api = {
   deleteTenant: (token: string, tenantId: number) =>
     request<void>(`/api/tenants/${tenantId}`, { method: 'DELETE' }, token),
 
-  // --- Tenant-leden (rol admin/gebruiker binnen één tenant) ---
+  // --- Tenant-leden (rol admin/editor binnen één tenant) ---
   tenantMembers: (token: string, tenantId: number) =>
     request<import('./types').TenantMember[]>(`/api/tenants/${tenantId}/members`, {}, token),
 
@@ -348,7 +348,7 @@ export const api = {
     token: string,
     body: {
       name: string;
-      maxAdmins: number;
+      maxEditors: number;
       maxBomen: number;
       sortOrder: number;
       trialDays?: number | null;
@@ -361,7 +361,7 @@ export const api = {
     tierId: number,
     body: Partial<{
       name: string;
-      maxAdmins: number;
+      maxEditors: number;
       maxBomen: number;
       sortOrder: number;
       trialDays: number | null;
@@ -376,7 +376,12 @@ export const api = {
   tierPrices: (token: string, tierId: number) =>
     request<import('./types').TierPrice[]>(`/api/tiers/${tierId}/prices`, {}, token),
 
-  createTierPrice: (token: string, tierId: number, body: { priceEur: number; validFrom: string; validUntil: string }) =>
+  // period is verplicht bij aanmaken (immutable daarna, zie routes/licenses.ts).
+  createTierPrice: (
+    token: string,
+    tierId: number,
+    body: { priceEur: number; period: import('./types').BillingPeriod; validFrom: string; validUntil: string }
+  ) =>
     request<import('./types').TierPrice>(`/api/tiers/${tierId}/prices`, { method: 'POST', body: JSON.stringify(body) }, token),
 
   updateTierPrice: (token: string, priceId: number, body: { priceEur: number; validFrom: string; validUntil: string }) =>
@@ -409,6 +414,38 @@ export const api = {
 
   deleteModuleSurcharge: (token: string, surchargeId: number) =>
     request<void>(`/api/module-surcharges/${surchargeId}`, { method: 'DELETE' }, token),
+
+  // --- Vaste, tier-specifieke module-opslag (sinds 7 september 2026) — zie
+  // doelenboom_licentiemodel.md §3 v3. Overrult per tier+periode het generieke
+  // percentage hierboven. ---
+
+  moduleTierSurcharges: (token: string, moduleId: number) =>
+    request<import('./types').ModuleTierSurcharge[]>(`/api/modules/${moduleId}/tier-surcharges`, {}, token),
+
+  createModuleTierSurcharge: (
+    token: string,
+    moduleId: number,
+    body: { tierId: number; period: import('./types').BillingPeriod; priceEur: number; validFrom: string; validUntil: string }
+  ) =>
+    request<import('./types').ModuleTierSurcharge>(
+      `/api/modules/${moduleId}/tier-surcharges`,
+      { method: 'POST', body: JSON.stringify(body) },
+      token
+    ),
+
+  updateModuleTierSurcharge: (
+    token: string,
+    surchargeId: number,
+    body: { priceEur: number; validFrom: string; validUntil: string }
+  ) =>
+    request<import('./types').ModuleTierSurcharge>(
+      `/api/module-tier-surcharges/${surchargeId}`,
+      { method: 'PUT', body: JSON.stringify(body) },
+      token
+    ),
+
+  deleteModuleTierSurcharge: (token: string, surchargeId: number) =>
+    request<void>(`/api/module-tier-surcharges/${surchargeId}`, { method: 'DELETE' }, token),
 
   // --- Aanbiedingen (offers) — zie doelenboom_licentiemodel.md §9 ---
 
@@ -453,9 +490,11 @@ export const api = {
 
   // moduleKeys: de aangevinkte modules — hun (op dit moment geldige) opslag
   // wordt meegerekend in tierPriceEur/subtotalEur (zie offers.ts computeOfferedPrice).
-  subscriptionPriceForTier: (tierId: number, moduleKeys: string[] = []) =>
+  // period is verplicht sinds de maandelijkse facturatie (7 september 2026).
+  subscriptionPriceForTier: (tierId: number, period: import('./types').BillingPeriod, moduleKeys: string[] = []) =>
     request<import('./types').PriceQuote>(
-      `/api/subscription-tiers/${tierId}/price${moduleKeys.length ? `?modules=${moduleKeys.map(encodeURIComponent).join(',')}` : ''}`
+      `/api/subscription-tiers/${tierId}/price?period=${period}` +
+        (moduleKeys.length ? `&modules=${moduleKeys.map(encodeURIComponent).join(',')}` : '')
     ),
 
   createSubscriptionRequest: (body: {
@@ -466,6 +505,7 @@ export const api = {
     password: string;
     tierId: number;
     moduleKeys: string[];
+    billingPeriod: import('./types').BillingPeriod;
   }) =>
     request<{ tenantId: number; tenantSlug: string; requestId: number }>('/api/subscription-requests', {
       method: 'POST',

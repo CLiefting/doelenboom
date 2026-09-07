@@ -365,7 +365,7 @@ function CustomerDetail({
             </ul>
             {health.usage && (
               <p style={styles.muted}>
-                Gebruik: {health.usage.activeAdmins}/{health.usage.maxAdmins ?? '∞'} admins,{' '}
+                Gebruik: {health.usage.activeEditors}/{health.usage.maxEditors ?? '∞'} admins/editors,{' '}
                 {health.usage.activeBomen}/{health.usage.maxBomen ?? '∞'} doelenbomen.
                 {health.daysSinceActivity != null && ` Laatste activiteit ${health.daysSinceActivity} dag(en) geleden.`}
               </p>
@@ -907,7 +907,7 @@ function SubscriptionPanel({ token, tenantId, onChanged }: { token: string; tena
         </div>
       )}
       <p style={styles.muted}>
-        Gebruik: {license.usage.activeAdmins}/{license.tier?.maxAdmins ?? '∞'} admins, {license.usage.activeBomen}/{license.tier?.maxBomen ?? '∞'} bomen.
+        Gebruik: {license.usage.activeEditors}/{license.tier?.maxEditors ?? '∞'} admins/editors, {license.usage.activeBomen}/{license.tier?.maxBomen ?? '∞'} bomen.
       </p>
     </div>
   );

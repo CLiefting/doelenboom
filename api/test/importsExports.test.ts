@@ -22,7 +22,7 @@ describe('imports/exports (Excel round-trip via excel-service)', () => {
   let doelenboomId: number;
   let tenantId: number;
   let adminToken: string;
-  let gebruikerToken: string;
+  let editorToken: string;
 
   before(async () => {
     await startTestServer();
@@ -36,7 +36,7 @@ describe('imports/exports (Excel round-trip via excel-service)', () => {
     const email = `${PREFIX}-sysadmin@test.local`;
     await createSysadminUser(email, 'wachtwoord123');
     const sysadminToken = await login(email, 'wachtwoord123');
-    ({ doelenboomId, tenantId, adminToken, gebruikerToken } = await setupWritableDoelenboom(sysadminToken, PREFIX));
+    ({ doelenboomId, tenantId, adminToken, editorToken } = await setupWritableDoelenboom(sysadminToken, PREFIX));
 
     // Dit testbestand dateert van vóór het licentiemodel (module-gating, zie
     // license.ts/rbac.ts requireModule) — een verse tenant start met geen
@@ -143,17 +143,17 @@ describe('imports/exports (Excel round-trip via excel-service)', () => {
     await pool.query('delete from excel_imports where id = $1', [r.rows[0].id]);
   });
 
-  // Bulk Excel-import blijft admin-only, ook al mag de rol 'gebruiker' inmiddels
+  // Bulk Excel-import blijft admin-only, ook al mag de rol 'editor' inmiddels
   // losse boom-inhoud (elementen/relaties/...) rechtstreeks bewerken — een
   // import vervangt de hele doelenboom in één keer, dat is bewust een zwaardere
   // actie. Deze check zit in de rbac-middleware, vóór de excel-service wordt
   // aangeroepen, dus onafhankelijk van excelServiceReachable.
-  it('Excel-import (upload) is admin-only, ook voor de rol "gebruiker"', async () => {
+  it('Excel-import (upload) is admin-only, ook voor de rol "editor"', async () => {
     const form = new FormData();
     form.append('file', new Blob([new Uint8Array([1, 2, 3])]), 'x.xlsx');
     const res = await fetch(`${getBaseUrl()}/api/doelenbomen/${doelenboomId}/imports`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${gebruikerToken}` },
+      headers: { Authorization: `Bearer ${editorToken}` },
       body: form,
     });
     assert.equal(res.status, 403);

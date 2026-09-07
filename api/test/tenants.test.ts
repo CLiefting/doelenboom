@@ -219,7 +219,7 @@ describe('tenants', () => {
     const memberEmail = `${PREFIX}-lid@test.local`;
     const addMember = await req('POST', `/api/tenants/${tenantId}/members`, {
       token: sysadminToken,
-      body: { email: memberEmail, password: 'lidwachtwoord1', role: 'gebruiker' },
+      body: { email: memberEmail, password: 'lidwachtwoord1', role: 'editor' },
     });
     assert.equal(addMember.status, 201);
     const memberToken = await login(memberEmail, 'lidwachtwoord1');
@@ -231,7 +231,7 @@ describe('tenants', () => {
     const asMember = await req('GET', '/api/tenants', { token: memberToken });
     assert.equal(asMember.status, 200);
     assert.ok(asMember.body.every((t: any) => t.slug === slug));
-    assert.equal(asMember.body[0].my_role, 'gebruiker');
+    assert.equal(asMember.body[0].my_role, 'editor');
   });
 
   it('PUT /api/tenants/:id vereist tenant-admin, niet enkel lidmaatschap', async () => {
@@ -239,13 +239,13 @@ describe('tenants', () => {
     const created = await req('POST', '/api/tenants', { token: sysadminToken, body: { slug, name: 'Test tenant 4' } });
     const tenantId = created.body.id;
 
-    const gebruikerEmail = `${PREFIX}-t4-gebruiker@test.local`;
+    const gebruikerEmail = `${PREFIX}-t4-editor@test.local`;
     await req('POST', `/api/tenants/${tenantId}/members`, {
-      token: sysadminToken, body: { email: gebruikerEmail, password: 'wachtwoord123', role: 'gebruiker' },
+      token: sysadminToken, body: { email: gebruikerEmail, password: 'wachtwoord123', role: 'editor' },
     });
-    const gebruikerToken = await login(gebruikerEmail, 'wachtwoord123');
+    const editorToken = await login(gebruikerEmail, 'wachtwoord123');
 
-    const asGebruiker = await req('PUT', `/api/tenants/${tenantId}`, { token: gebruikerToken, body: { wipeOnEmpty: true } });
+    const asGebruiker = await req('PUT', `/api/tenants/${tenantId}`, { token: editorToken, body: { wipeOnEmpty: true } });
     assert.equal(asGebruiker.status, 403);
 
     const adminEmail = `${PREFIX}-t4-admin@test.local`;
@@ -265,7 +265,7 @@ describe('tenants', () => {
 
     const email = `${PREFIX}-t5-lid@test.local`;
     const added = await req('POST', `/api/tenants/${tenantId}/members`, {
-      token: sysadminToken, body: { email, password: 'wachtwoord123', role: 'gebruiker' },
+      token: sysadminToken, body: { email, password: 'wachtwoord123', role: 'editor' },
     });
     assert.equal(added.status, 201);
     const userId = added.body.userId;
@@ -277,7 +277,7 @@ describe('tenants', () => {
 
     const members = await req('GET', `/api/tenants/${tenantId}/members`, { token: sysadminToken });
     assert.equal(members.status, 200);
-    assert.ok(members.body.some((m: any) => m.user_id === userId && m.role === 'gebruiker'));
+    assert.ok(members.body.some((m: any) => m.user_id === userId && m.role === 'editor'));
 
     const upgraded = await req('PUT', `/api/tenants/${tenantId}/members/${userId}`, {
       token: sysadminToken, body: { role: 'admin' },
@@ -390,7 +390,7 @@ describe('tenants', () => {
 
     // Expliciet lidmaatschap wint van open_access_role (kan ook OPHOGEN).
     await req('POST', `/api/tenants/${tenantId}/members`, {
-      token: sysadminToken, body: { email: outsiderEmail, role: 'gebruiker' },
+      token: sysadminToken, body: { email: outsiderEmail, role: 'editor' },
     });
     const writeAsGebruiker = await req('POST', `/api/doelenbomen/${doelenboomId}/elements`, {
       token: outsiderToken, body: { code: 'X1', type: 'Project', name: 'Mag nu wel' },
@@ -421,7 +421,7 @@ describe('tenants', () => {
 
     const afterClose = await req('GET', `/api/doelenbomen/${doelenboomId}`, { token: outsider2Token });
     assert.equal(afterClose.status, 403);
-    // De eerste buitenstaander (nu een echt lid met role='gebruiker') houdt
+    // De eerste buitenstaander (nu een echt lid met role='editor') houdt
     // wél gewoon toegang — het uitzetten van open toegang raakt alleen de
     // fallback, niet expliciete lidmaatschappen.
     const outsiderStillOk = await req('GET', `/api/doelenbomen/${doelenboomId}`, { token: outsiderToken });

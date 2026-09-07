@@ -34,14 +34,14 @@ describe('doelenbomen', () => {
   it('tenant-admin kan een doelenboom aanmaken; gebruiker niet', async () => {
     const { tenantId, adminToken } = await makeTenantWithAdmin(sysadminToken, `${PREFIX}-t1`, `${PREFIX}-t1-admin@test.local`);
 
-    const gebruikerEmail = `${PREFIX}-t1-gebruiker@test.local`;
+    const gebruikerEmail = `${PREFIX}-t1-editor@test.local`;
     await req('POST', `/api/tenants/${tenantId}/members`, {
-      token: sysadminToken, body: { email: gebruikerEmail, password: 'wachtwoord123', role: 'gebruiker' },
+      token: sysadminToken, body: { email: gebruikerEmail, password: 'wachtwoord123', role: 'editor' },
     });
-    const gebruikerToken = await login(gebruikerEmail, 'wachtwoord123');
+    const editorToken = await login(gebruikerEmail, 'wachtwoord123');
 
     const asGebruiker = await req('POST', `/api/tenants/${tenantId}/doelenbomen`, {
-      token: gebruikerToken, body: { slug: 'boom1', name: 'Boom 1' },
+      token: editorToken, body: { slug: 'boom1', name: 'Boom 1' },
     });
     assert.equal(asGebruiker.status, 403);
 
@@ -74,11 +74,11 @@ describe('doelenbomen', () => {
     });
     const doelenboomId = boom.body.id;
 
-    const gebruikerEmail = `${PREFIX}-t2-gebruiker@test.local`;
+    const gebruikerEmail = `${PREFIX}-t2-editor@test.local`;
     await req('POST', `/api/tenants/${tenantId}/members`, {
-      token: sysadminToken, body: { email: gebruikerEmail, password: 'wachtwoord123', role: 'gebruiker' },
+      token: sysadminToken, body: { email: gebruikerEmail, password: 'wachtwoord123', role: 'editor' },
     });
-    const gebruikerToken = await login(gebruikerEmail, 'wachtwoord123');
+    const editorToken = await login(gebruikerEmail, 'wachtwoord123');
 
     const bezoekerEmail = `${PREFIX}-t2-bezoeker@test.local`;
     await req('POST', `/api/tenants/${tenantId}/members`, {
@@ -92,12 +92,12 @@ describe('doelenbomen', () => {
     assert.equal(asAdmin.body.doelenboom.canWrite, true);
     assert.equal(asAdmin.body.doelenboom.canWriteContent, true);
 
-    // 'gebruiker' mag geen kolommen/instellingen (canWrite=false), maar wel de
+    // 'editor' mag geen kolommen/instellingen (canWrite=false), maar wel de
     // losse boom-inhoud (canWriteContent=true) — dat is precies het onderscheid
-    // dat de rol 'gebruiker' toevoegt t.o.v. de oude, puur read-only betekenis.
-    const asGebruiker = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: gebruikerToken });
+    // dat de rol 'editor' toevoegt t.o.v. de oude, puur read-only betekenis.
+    const asGebruiker = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: editorToken });
     assert.equal(asGebruiker.status, 200);
-    assert.equal(asGebruiker.body.doelenboom.effectiveRole, 'gebruiker');
+    assert.equal(asGebruiker.body.doelenboom.effectiveRole, 'editor');
     assert.equal(asGebruiker.body.doelenboom.canWrite, false);
     assert.equal(asGebruiker.body.doelenboom.canWriteContent, true);
 
@@ -239,28 +239,28 @@ describe('doelenbomen', () => {
     });
     const doelenboomId = boom.body.id;
 
-    const gebruikerEmail = `${PREFIX}-t4-gebruiker@test.local`;
+    const gebruikerEmail = `${PREFIX}-t4-editor@test.local`;
     const added = await req('POST', `/api/tenants/${tenantId}/members`, {
-      token: sysadminToken, body: { email: gebruikerEmail, password: 'wachtwoord123', role: 'gebruiker' },
+      token: sysadminToken, body: { email: gebruikerEmail, password: 'wachtwoord123', role: 'editor' },
     });
     const gebruikerUserId = added.body.userId;
-    const gebruikerToken = await login(gebruikerEmail, 'wachtwoord123');
+    const editorToken = await login(gebruikerEmail, 'wachtwoord123');
 
-    const before = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: gebruikerToken });
-    assert.equal(before.body.doelenboom.effectiveRole, 'gebruiker');
+    const before = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: editorToken });
+    assert.equal(before.body.doelenboom.effectiveRole, 'editor');
 
     const overrideToAdmin = await req('PUT', `/api/doelenbomen/${doelenboomId}/member-roles/${gebruikerUserId}`, {
       token: adminToken, body: { role: 'admin' },
     });
     assert.equal(overrideToAdmin.status, 204);
 
-    const afterOverride = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: gebruikerToken });
+    const afterOverride = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: editorToken });
     assert.equal(afterOverride.body.doelenboom.effectiveRole, 'admin');
     assert.equal(afterOverride.body.doelenboom.canWrite, true);
 
     const roles = await req('GET', `/api/doelenbomen/${doelenboomId}/member-roles`, { token: adminToken });
     const row = roles.body.find((r: any) => r.userId === gebruikerUserId);
-    assert.equal(row.tenantRole, 'gebruiker');
+    assert.equal(row.tenantRole, 'editor');
     assert.equal(row.overrideRole, 'admin');
     assert.equal(row.effectiveRole, 'admin');
 
@@ -268,8 +268,8 @@ describe('doelenbomen', () => {
       token: adminToken, body: { role: null },
     });
     assert.equal(clearOverride.status, 204);
-    const backToTenantRole = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: gebruikerToken });
-    assert.equal(backToTenantRole.body.doelenboom.effectiveRole, 'gebruiker');
+    const backToTenantRole = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: editorToken });
+    assert.equal(backToTenantRole.body.doelenboom.effectiveRole, 'editor');
   });
 
   it('duplicate kopieert elementen/edges/producten/tags/org-units naar een nieuwe doelenboom', async () => {

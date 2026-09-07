@@ -33,9 +33,9 @@ const PPTX_MEDIA_TYPE = 'application/vnd.openxmlformats-officedocument.presentat
 // Lezen mag iedereen die toegang heeft tot de doelenboom (bezoeker); uploaden
 // (een stap richting schrijven, ook al schrijft déze route zelf niets) vereist
 // dezelfde editor-rol als de routes die de import straks daadwerkelijk
-// toepassen (products.ts/activities.ts: requireWritableDoelenboom('id', 'gebruiker')).
+// toepassen (products.ts/activities.ts: requireWritableDoelenboom('id', 'editor')).
 const requireViewer = requireTenantRoleForDoelenboomParam('bezoeker', 'id');
-const requireEditor = requireWritableDoelenboom('id', 'gebruiker');
+const requireEditor = requireWritableDoelenboom('id', 'editor');
 const requireProjectenModule = requireModule('projecten', 'id');
 
 export const projectExcelRouter = Router();

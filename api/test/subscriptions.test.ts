@@ -53,7 +53,7 @@ describe('zelfbedieningsaanvraag', () => {
   async function makeTier(namePrefix: string, priceEur: number | null, validFrom?: string, validUntil?: string) {
     const r = await req('POST', '/api/tiers', {
       token: sysadminToken,
-      body: { name: `${PREFIX}-${namePrefix}`, maxAdmins: 5, maxBomen: 20, sortOrder: 0 },
+      body: { name: `${PREFIX}-${namePrefix}`, maxEditors: 5, maxBomen: 20, sortOrder: 0 },
     });
     assert.equal(r.status, 201, JSON.stringify(r.body));
     const tier = r.body;
@@ -62,6 +62,7 @@ describe('zelfbedieningsaanvraag', () => {
         token: sysadminToken,
         body: {
           priceEur,
+          period: 'jaar',
           validFrom: validFrom ?? addDaysStr(today(), -30),
           validUntil: validUntil ?? addDaysStr(today(), 30),
         },
@@ -82,7 +83,7 @@ describe('zelfbedieningsaanvraag', () => {
       const geldig = await makeTier('geldig1', 500);
       const verlopen = await makeTier('verlopen1', 500, addDaysStr(today(), -60), addDaysStr(today(), -1));
       const zonderPrijs = await req('POST', '/api/tiers', {
-        token: sysadminToken, body: { name: `${PREFIX}-zonderprijs1`, maxAdmins: 1, maxBomen: 1, sortOrder: 0 },
+        token: sysadminToken, body: { name: `${PREFIX}-zonderprijs1`, maxEditors: 1, maxBomen: 1, sortOrder: 0 },
       });
 
       const anon = await req('GET', '/api/subscription-tiers');
@@ -110,15 +111,18 @@ describe('zelfbedieningsaanvraag', () => {
         validFrom: addDaysStr(today(), -1), validUntil: addDaysStr(today(), 1), tierIds: [tier.id],
       });
 
-      const quote = await req('GET', `/api/subscription-tiers/${tier.id}/price`);
+      const quote = await req('GET', `/api/subscription-tiers/${tier.id}/price?period=jaar`);
       assert.equal(quote.status, 200);
       assert.equal(Number(quote.body.tierPriceEur), 1000);
       assert.equal(quote.body.offer.id, offer.id);
       assert.equal(Number(quote.body.finalPriceEur), 670);
       assert.equal(quote.body.btwVrij, false);
 
-      const missing = await req('GET', '/api/subscription-tiers/999999999/price');
+      const missing = await req('GET', '/api/subscription-tiers/999999999/price?period=jaar');
       assert.equal(missing.status, 404);
+
+      const geenPeriod = await req('GET', `/api/subscription-tiers/${tier.id}/price`);
+      assert.equal(geenPeriod.status, 400, 'period is verplicht sinds de maandelijkse facturatie (7 september 2026)');
     });
 
     it('module-opslagpercentages tellen mee in de aanvraagprijs (subtotaal vóór aanbieding)', async () => {
@@ -135,14 +139,14 @@ describe('zelfbedieningsaanvraag', () => {
       assert.equal(surchargeR.status, 201, JSON.stringify(surchargeR.body));
 
       // Zonder de module geselecteerd: alleen de tierprijs.
-      const zonderModule = await req('GET', `/api/subscription-tiers/${tier.id}/price`);
+      const zonderModule = await req('GET', `/api/subscription-tiers/${tier.id}/price?period=jaar`);
       assert.equal(Number(zonderModule.body.tierPriceEur), 1000);
       assert.deepEqual(zonderModule.body.moduleSurcharges, []);
       assert.equal(Number(zonderModule.body.subtotalEur), 1000);
       assert.equal(Number(zonderModule.body.finalPriceEur), 1000);
 
       // Met de module: 20% opslag over de tierprijs (€ 200) komt bovenop.
-      const metModule = await req('GET', `/api/subscription-tiers/${tier.id}/price?modules=${mod.key}`);
+      const metModule = await req('GET', `/api/subscription-tiers/${tier.id}/price?period=jaar&modules=${mod.key}`);
       assert.equal(metModule.status, 200);
       assert.equal(metModule.body.moduleSurcharges.length, 1);
       assert.equal(metModule.body.moduleSurcharges[0].moduleKey, mod.key);
@@ -156,7 +160,7 @@ describe('zelfbedieningsaanvraag', () => {
       const created = await req('POST', '/api/subscription-requests', {
         body: {
           organizationName: `${PREFIX} MetModule`, applicantName: 'X', applicantEmail: email,
-          password: 'wachtwoord123', tierId: tier.id, moduleKeys: [mod.key],
+          password: 'wachtwoord123', tierId: tier.id, moduleKeys: [mod.key], billingPeriod: 'jaar',
         },
       });
       assert.equal(created.status, 201, JSON.stringify(created.body));
@@ -172,7 +176,7 @@ describe('zelfbedieningsaanvraag', () => {
         validFrom: addDaysStr(today(), -1), validUntil: addDaysStr(today(), 1), tierIds: [tier.id],
       });
 
-      const quote = await req('GET', `/api/subscription-tiers/${tier.id}/price`);
+      const quote = await req('GET', `/api/subscription-tiers/${tier.id}/price?period=jaar`);
       assert.equal(Number(quote.body.finalPriceEur), 800);
       assert.equal(quote.body.btwVrij, true);
     });
@@ -185,7 +189,7 @@ describe('zelfbedieningsaanvraag', () => {
       const badEmail = await req('POST', '/api/subscription-requests', {
         body: {
           organizationName: 'Test BV', applicantName: 'Jan', applicantEmail: 'niet-geldig',
-          password: 'wachtwoord123', tierId: tier.id, moduleKeys: [],
+          password: 'wachtwoord123', tierId: tier.id, moduleKeys: [], billingPeriod: 'jaar',
         },
       });
       assert.equal(badEmail.status, 400);
@@ -193,7 +197,7 @@ describe('zelfbedieningsaanvraag', () => {
       const kortWachtwoord = await req('POST', '/api/subscription-requests', {
         body: {
           organizationName: 'Test BV', applicantName: 'Jan', applicantEmail: `${PREFIX}-kort@test.local`,
-          password: 'kort', tierId: tier.id, moduleKeys: [],
+          password: 'kort', tierId: tier.id, moduleKeys: [], billingPeriod: 'jaar',
         },
       });
       assert.equal(kortWachtwoord.status, 400);
@@ -201,7 +205,7 @@ describe('zelfbedieningsaanvraag', () => {
       const onbekendeTier = await req('POST', '/api/subscription-requests', {
         body: {
           organizationName: 'Test BV', applicantName: 'Jan', applicantEmail: `${PREFIX}-tier@test.local`,
-          password: 'wachtwoord123', tierId: 999999999, moduleKeys: [],
+          password: 'wachtwoord123', tierId: 999999999, moduleKeys: [], billingPeriod: 'jaar',
         },
       });
       assert.equal(onbekendeTier.status, 400);
@@ -210,11 +214,20 @@ describe('zelfbedieningsaanvraag', () => {
       const onbekendeModule = await req('POST', '/api/subscription-requests', {
         body: {
           organizationName: 'Test BV', applicantName: 'Jan', applicantEmail: `${PREFIX}-mod@test.local`,
-          password: 'wachtwoord123', tierId: tier.id, moduleKeys: ['bestaat-niet-echt'],
+          password: 'wachtwoord123', tierId: tier.id, moduleKeys: ['bestaat-niet-echt'], billingPeriod: 'jaar',
         },
       });
       assert.equal(onbekendeModule.status, 400);
       assert.match(onbekendeModule.body.error, /modules bestaan niet/);
+
+      const geenBillingPeriod = await req('POST', '/api/subscription-requests', {
+        body: {
+          organizationName: 'Test BV', applicantName: 'Jan', applicantEmail: `${PREFIX}-nobp@test.local`,
+          password: 'wachtwoord123', tierId: tier.id, moduleKeys: [],
+        },
+      });
+      assert.equal(geenBillingPeriod.status, 400);
+      assert.match(geenBillingPeriod.body.error, /billingPeriod/);
     });
 
     it('een geslaagde aanvraag maakt tenant + proefaccount (14 dagen) + snapshot van de prijs, en logt "aangevraagd"', async () => {
@@ -228,7 +241,7 @@ describe('zelfbedieningsaanvraag', () => {
       const created = await req('POST', '/api/subscription-requests', {
         body: {
           organizationName: `${PREFIX} Organisatie`, applicantName: 'Nieuwe Aanvrager', applicantEmail: email,
-          password: 'wachtwoord123', tierId: tier.id, moduleKeys: ['projecten'],
+          password: 'wachtwoord123', tierId: tier.id, moduleKeys: ['projecten'], billingPeriod: 'jaar',
         },
       });
       assert.equal(created.status, 201, JSON.stringify(created.body));
@@ -239,7 +252,7 @@ describe('zelfbedieningsaanvraag', () => {
       const dup = await req('POST', '/api/subscription-requests', {
         body: {
           organizationName: 'Nog een keer', applicantName: 'Iemand', applicantEmail: email,
-          password: 'wachtwoord123', tierId: tier.id, moduleKeys: [],
+          password: 'wachtwoord123', tierId: tier.id, moduleKeys: [], billingPeriod: 'jaar',
         },
       });
       assert.equal(dup.status, 400);
@@ -258,7 +271,7 @@ describe('zelfbedieningsaanvraag', () => {
       // dezelfde price-quote-endpoint opgevraagd i.p.v. hardgecodeerd, zodat
       // deze test niet breekt op het (elders al gedekte) opslagpercentage van
       // de "projecten"-module, dat zelf ook een eigen, tijdgebonden waarde heeft.
-      const expectedQuote = await req('GET', `/api/subscription-tiers/${tier.id}/price?modules=projecten`);
+      const expectedQuote = await req('GET', `/api/subscription-tiers/${tier.id}/price?period=jaar&modules=projecten`);
       assert.equal(expectedQuote.status, 200);
 
       const list = await req('GET', '/api/subscription-requests', { token: sysadminToken });
@@ -293,7 +306,7 @@ describe('zelfbedieningsaanvraag', () => {
       await req('POST', '/api/subscription-requests', {
         body: {
           organizationName: `${PREFIX} NietSysadmin`, applicantName: 'X', applicantEmail: email,
-          password: 'wachtwoord123', tierId: tier.id, moduleKeys: [],
+          password: 'wachtwoord123', tierId: tier.id, moduleKeys: [], billingPeriod: 'jaar',
         },
       });
       const tenantAdminToken = await login(email, 'wachtwoord123');
@@ -309,7 +322,7 @@ describe('zelfbedieningsaanvraag', () => {
       const created = await req('POST', '/api/subscription-requests', {
         body: {
           organizationName: `${PREFIX}-${prefix} Org`, applicantName: 'Aanvrager', applicantEmail: email,
-          password: 'wachtwoord123', tierId: tier.id, moduleKeys: [],
+          password: 'wachtwoord123', tierId: tier.id, moduleKeys: [], billingPeriod: 'jaar',
         },
       });
       assert.equal(created.status, 201, JSON.stringify(created.body));
@@ -487,7 +500,7 @@ describe('zelfbedieningsaanvraag', () => {
       await req('POST', '/api/subscription-requests', {
         body: {
           organizationName: `${PREFIX} OfferTenantAdmin`, applicantName: 'X', applicantEmail: email,
-          password: 'wachtwoord123', tierId: tier.id, moduleKeys: [],
+          password: 'wachtwoord123', tierId: tier.id, moduleKeys: [], billingPeriod: 'jaar',
         },
       });
       const tenantAdminToken = await login(email, 'wachtwoord123');
@@ -545,7 +558,7 @@ describe('zelfbedieningsaanvraag', () => {
       const r = await req('POST', '/api/tiers', {
         token: sysadminToken,
         body: {
-          name: `${PREFIX}-${namePrefix}`, maxAdmins: 1, maxBomen: 2, sortOrder: -1,
+          name: `${PREFIX}-${namePrefix}`, maxEditors: 1, maxBomen: 2, sortOrder: -1,
           trialDays: opts.trialDays ?? 30, allModulesIncluded: opts.allModulesIncluded ?? true,
         },
       });
@@ -554,7 +567,7 @@ describe('zelfbedieningsaanvraag', () => {
       const priceEur = opts.priceEur ?? 0;
       const priceR = await req('POST', `/api/tiers/${tier.id}/prices`, {
         token: sysadminToken,
-        body: { priceEur, validFrom: addDaysStr(today(), -30), validUntil: addDaysStr(today(), 30) },
+        body: { priceEur, period: 'jaar', validFrom: addDaysStr(today(), -30), validUntil: addDaysStr(today(), 30) },
       });
       assert.equal(priceR.status, 201, JSON.stringify(priceR.body));
       return tier;
@@ -568,7 +581,7 @@ describe('zelfbedieningsaanvraag', () => {
       // Standaard (geen van beide meegegeven): trialDays null, allModulesIncluded false.
       const standaard = await req('POST', '/api/tiers', {
         token: sysadminToken,
-        body: { name: `${PREFIX}-standaardtier`, maxAdmins: 3, maxBomen: 8, sortOrder: 0 },
+        body: { name: `${PREFIX}-standaardtier`, maxEditors: 3, maxBomen: 8, sortOrder: 0 },
       });
       assert.equal(standaard.status, 201, JSON.stringify(standaard.body));
       assert.equal(standaard.body.trialDays, null);
@@ -586,7 +599,7 @@ describe('zelfbedieningsaanvraag', () => {
       assert.equal(updated.body.trialDays, null);
       // Andere velden (incl. allModulesIncluded) blijven ongewijzigd als ze niet meegegeven worden.
       assert.equal(updated.body.allModulesIncluded, true);
-      assert.equal(updated.body.maxAdmins, 1);
+      assert.equal(updated.body.maxEditors, 1);
     });
 
     it('een aanvraag op zo\'n tier krijgt de tier-specifieke proefduur i.p.v. de standaard 14 dagen', async () => {
@@ -595,7 +608,7 @@ describe('zelfbedieningsaanvraag', () => {
       const created = await req('POST', '/api/subscription-requests', {
         body: {
           organizationName: `${PREFIX} Proefduur`, applicantName: 'X', applicantEmail: email,
-          password: 'wachtwoord123', tierId: tier.id, moduleKeys: [],
+          password: 'wachtwoord123', tierId: tier.id, moduleKeys: [], billingPeriod: 'jaar',
         },
       });
       assert.equal(created.status, 201, JSON.stringify(created.body));
@@ -624,7 +637,7 @@ describe('zelfbedieningsaanvraag', () => {
       const created = await req('POST', '/api/subscription-requests', {
         body: {
           organizationName: `${PREFIX} AlleModules`, applicantName: 'X', applicantEmail: email,
-          password: 'wachtwoord123', tierId: tier.id, moduleKeys: [], // bewust leeg — moet toch alles krijgen
+          password: 'wachtwoord123', tierId: tier.id, moduleKeys: [], billingPeriod: 'jaar', // bewust leeg — moet toch alles krijgen
         },
       });
       assert.equal(created.status, 201, JSON.stringify(created.body));
@@ -650,7 +663,7 @@ describe('zelfbedieningsaanvraag', () => {
       const created = await req('POST', '/api/subscription-requests', {
         body: {
           organizationName: `${PREFIX} OnbekendeModules`, applicantName: 'X', applicantEmail: email,
-          password: 'wachtwoord123', tierId: tier.id, moduleKeys: ['bestaat-niet-echt'],
+          password: 'wachtwoord123', tierId: tier.id, moduleKeys: ['bestaat-niet-echt'], billingPeriod: 'jaar',
         },
       });
       assert.equal(created.status, 201, JSON.stringify(created.body), 'allModulesIncluded moet de opgegeven (ongeldige) moduleKeys al overschreven hebben vóór de validatie');
@@ -668,7 +681,7 @@ describe('zelfbedieningsaanvraag', () => {
       const created = await req('POST', '/api/subscription-requests', {
         body: {
           organizationName: `${PREFIX} RegressieStandaard`, applicantName: 'X', applicantEmail: email,
-          password: 'wachtwoord123', tierId: tier.id, moduleKeys: [], // bewust geen modules gekozen
+          password: 'wachtwoord123', tierId: tier.id, moduleKeys: [], billingPeriod: 'jaar', // bewust geen modules gekozen
         },
       });
       assert.equal(created.status, 201, JSON.stringify(created.body));
@@ -695,7 +708,7 @@ describe('zelfbedieningsaanvraag', () => {
       const metTelefoon = await req('POST', '/api/subscription-requests', {
         body: {
           organizationName: `${PREFIX} MetTelefoon`, applicantName: 'Y', applicantEmail: `${PREFIX}-mettel@test.local`,
-          applicantPhone: '06-12345678', password: 'wachtwoord123', tierId: tier.id, moduleKeys: [],
+          applicantPhone: '06-12345678', password: 'wachtwoord123', tierId: tier.id, moduleKeys: [], billingPeriod: 'jaar',
         },
       });
       assert.equal(metTelefoon.status, 201, JSON.stringify(metTelefoon.body));
@@ -703,7 +716,7 @@ describe('zelfbedieningsaanvraag', () => {
       const zonderTelefoon = await req('POST', '/api/subscription-requests', {
         body: {
           organizationName: `${PREFIX} ZonderTelefoon`, applicantName: 'Z', applicantEmail: `${PREFIX}-zondertel@test.local`,
-          password: 'wachtwoord123', tierId: tier.id, moduleKeys: [], // geen applicantPhone meegegeven
+          password: 'wachtwoord123', tierId: tier.id, moduleKeys: [], billingPeriod: 'jaar', // geen applicantPhone meegegeven
         },
       });
       assert.equal(zonderTelefoon.status, 201, JSON.stringify(zonderTelefoon.body));
@@ -730,7 +743,7 @@ describe('zelfbedieningsaanvraag', () => {
       const created = await req('POST', '/api/subscription-requests', {
         body: {
           organizationName: `${PREFIX} Overview`, applicantName: 'Overview Aanvrager', applicantEmail: email,
-          applicantPhone: '020-1234567', password: 'wachtwoord123', tierId: tier.id, moduleKeys: [],
+          applicantPhone: '020-1234567', password: 'wachtwoord123', tierId: tier.id, moduleKeys: [], billingPeriod: 'jaar',
         },
       });
       assert.equal(created.status, 201, JSON.stringify(created.body));
@@ -770,7 +783,7 @@ describe('zelfbedieningsaanvraag', () => {
       const created = await req('POST', '/api/subscription-requests', {
         body: {
           organizationName: `${PREFIX} Bewerken`, applicantName: 'Origineel Naam', applicantEmail: email,
-          applicantPhone: '010-0000000', password: 'wachtwoord123', tierId: tier.id, moduleKeys: [],
+          applicantPhone: '010-0000000', password: 'wachtwoord123', tierId: tier.id, moduleKeys: [], billingPeriod: 'jaar',
         },
       });
       assert.equal(created.status, 201, JSON.stringify(created.body));
@@ -804,7 +817,7 @@ describe('zelfbedieningsaanvraag', () => {
       const created = await req('POST', '/api/subscription-requests', {
         body: {
           organizationName: `${PREFIX} BewerkenValidatie`, applicantName: 'X', applicantEmail: `${PREFIX}-bewval@test.local`,
-          password: 'wachtwoord123', tierId: tier.id, moduleKeys: [],
+          password: 'wachtwoord123', tierId: tier.id, moduleKeys: [], billingPeriod: 'jaar',
         },
       });
       assert.equal(created.status, 201, JSON.stringify(created.body));

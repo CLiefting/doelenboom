@@ -4,6 +4,17 @@ import { computeDefaultLicenseEndDate, listModules, listTiers } from './license.
 import { computeOfferedPrice, listActiveOffersForTier, ModuleSurchargeLine, PriceQuote } from './offers.js';
 import { getCurrentTierPrice } from './tierPrices.js';
 import { getCurrentModuleSurcharge } from './moduleSurcharges.js';
+import { getCurrentModuleTierSurcharge } from './moduleTierSurcharges.js';
+
+export type BillingPeriod = 'maand' | 'jaar';
+export function isBillingPeriod(v: unknown): v is BillingPeriod {
+  return v === 'maand' || v === 'jaar';
+}
+// Aantal maanden per contractcyclus, gebruikt door registerPayment/
+// registerRenewal hieronder (computeDefaultLicenseEndDate's months-param) —
+// zie doelenboom_licentiemodel.md §9.2 v3 (maandelijkse facturatie, 7
+// september 2026).
+const CONTRACT_MONTHS: Record<BillingPeriod, number> = { maand: 1, jaar: 12 };
 
 // Zelfbedieningsaanvraag voor een nieuw abonnement — zie
 // doelenboom_licentiemodel.md §2/§9 (het volledige ontwerp, uit het gesprek
@@ -33,6 +44,7 @@ export interface SubscriptionRequestRow {
   applicantPhone: string | null;
   requestedModules: string[];
   status: 'proef' | 'actief' | 'afgewezen';
+  billingPeriod: BillingPeriod;
   requestedAt: string;
   priceAtRequest: string | null;
   contractEndDate: string | null;
@@ -48,7 +60,7 @@ const REQUEST_SELECT_FIELDS = `
   sr.organization_name as "organizationName", sr.applicant_name as "applicantName",
   sr.applicant_email as "applicantEmail", sr.applicant_phone as "applicantPhone",
   sr.requested_modules as "requestedModules",
-  sr.status, sr.requested_at as "requestedAt", sr.price_at_request as "priceAtRequest",
+  sr.status, sr.billing_period as "billingPeriod", sr.requested_at as "requestedAt", sr.price_at_request as "priceAtRequest",
   to_char(sr.contract_end_date, 'YYYY-MM-DD') as "contractEndDate",
   to_char(t.license_end_date, 'YYYY-MM-DD') as "licenseEndDate",
   sr.payment_registered_at as "paymentRegisteredAt",
@@ -112,14 +124,20 @@ export class SubscriptionRequestError extends Error {
 }
 
 // Prijsopgave voor de publieke aanvraagpagina: het op dit moment geldige
-// tarief van de gekozen tier (zie tierPrices.ts) + de op dit moment geldige
-// opslag van elke gekozen module (moduleSurcharges.ts) + eerst-gevonden
-// lopende aanbieding voor die tier (toegepast op tier + modules samen, zie
-// computeOfferedPrice). Ongeauthenticeerd te gebruiken
-// (routes/subscriptions.ts) — puur leeswerk, geen bijeffecten.
+// tarief van de gekozen tier VOOR DE GEKOZEN FACTURATIEPERIODE (zie
+// tierPrices.ts) + de op dit moment geldige opslag van elke gekozen module +
+// eerst-gevonden lopende aanbieding voor die tier (toegepast op tier +
+// modules samen, zie computeOfferedPrice). Per module wordt eerst een
+// tier-specifieke VASTE opslag gezocht (moduleTierSurcharges.ts, sinds 7
+// september 2026 — bv. Projecten), en pas als die er niet is, teruggevallen
+// op het generieke PERCENTAGE van de tier-basisprijs (moduleSurcharges.ts,
+// de oorspronkelijke regel — nog steeds de enige voor Single-Use/Evaluatie).
+// Ongeauthenticeerd te gebruiken (routes/subscriptions.ts) — puur leeswerk,
+// geen bijeffecten.
 export async function quotePrice(
   tierId: number | string,
   moduleKeys: string[],
+  billingPeriod: BillingPeriod,
   onDate?: string
 ): Promise<PriceQuote | null> {
   const tiers = await listTiers();
@@ -127,7 +145,7 @@ export async function quotePrice(
   if (!tier) return null;
   const today = onDate ?? new Date().toISOString().slice(0, 10);
 
-  const tierPrice = await getCurrentTierPrice(tierId, today);
+  const tierPrice = await getCurrentTierPrice(tierId, billingPeriod, today);
   const tierPriceEur = tierPrice ? Number(tierPrice.priceEur) : null;
 
   const allModules = moduleKeys.length > 0 ? await listModules() : [];
@@ -136,12 +154,26 @@ export async function quotePrice(
     for (const key of moduleKeys) {
       const mod = allModules.find((m) => m.key === key);
       if (!mod) continue;
+
+      const fixed = await getCurrentModuleTierSurcharge(mod.id, tierId, billingPeriod, today);
+      if (fixed) {
+        moduleSurcharges.push({
+          moduleKey: mod.key,
+          moduleName: mod.name,
+          surchargeType: 'fixed',
+          surchargePct: null,
+          amountEur: Number(fixed.priceEur),
+        });
+        continue;
+      }
+
       const surcharge = await getCurrentModuleSurcharge(mod.id, today);
       if (!surcharge) continue; // (nog) geen opslag ingesteld voor deze module -> telt niet mee
       const pct = Number(surcharge.surchargePct);
       moduleSurcharges.push({
         moduleKey: mod.key,
         moduleName: mod.name,
+        surchargeType: 'percentage',
         surchargePct: pct,
         amountEur: Math.round(tierPriceEur * (pct / 100) * 100) / 100,
       });
@@ -166,6 +198,7 @@ export async function createSubscriptionRequest(input: {
   password: string;
   tierId: number;
   moduleKeys: string[];
+  billingPeriod: BillingPeriod;
 }): Promise<{ tenantId: number; tenantSlug: string; requestId: number }> {
   const emailExists = await pool.query('select 1 from users where email = $1', [input.applicantEmail]);
   if (emailExists.rows.length > 0) {
@@ -197,7 +230,7 @@ export async function createSubscriptionRequest(input: {
   const slug = await uniqueSlug(input.organizationName);
 
   const today = requestedAt.slice(0, 10);
-  const quote = await quotePrice(tier.id, moduleKeys, today);
+  const quote = await quotePrice(tier.id, moduleKeys, input.billingPeriod, today);
   if (!quote) throw new SubscriptionRequestError('Onbekende tier.'); // kan hier niet echt gebeuren (tier hierboven al gevonden)
 
   const client = await pool.connect();
@@ -234,8 +267,8 @@ export async function createSubscriptionRequest(input: {
     const requestResult = await client.query(
       `insert into subscription_requests
          (tenant_id, tier_id, organization_name, applicant_name, applicant_email, applicant_phone,
-          requested_modules, status, requested_at, price_at_request, applied_offer_id)
-       values ($1,$2,$3,$4,$5,$6,$7,'proef',$8,$9,$10)
+          requested_modules, status, billing_period, requested_at, price_at_request, applied_offer_id)
+       values ($1,$2,$3,$4,$5,$6,$7,'proef',$8,$9,$10,$11)
        returning id`,
       [
         tenantId,
@@ -245,6 +278,7 @@ export async function createSubscriptionRequest(input: {
         input.applicantEmail,
         input.applicantPhone,
         JSON.stringify(moduleKeys),
+        input.billingPeriod,
         requestedAt,
         quote.finalPriceEur,
         quote.offer?.id ?? null,
@@ -260,6 +294,7 @@ export async function createSubscriptionRequest(input: {
         tierId: tier.id,
         tierName: tier.name,
         modules: moduleKeys,
+        billingPeriod: input.billingPeriod,
         tierPriceEur: quote.tierPriceEur,
         moduleSurcharges: quote.moduleSurcharges,
         subtotalEur: quote.subtotalEur,
@@ -375,17 +410,21 @@ export async function countPendingSubscriptionActions(): Promise<{ pendingReques
 // Betaling van de EERSTE periode registreren (status 'proef' -> 'actief').
 // contract_end_date = computeDefaultLicenseEndDate vanaf de oorspronkelijke
 // AANVRAAGdatum (zie interview: looptijd telt vanaf de aanvraag, niet vanaf
-// de betaaldatum) — "laatste dag van de maand, 12 maanden later".
-// tenants.license_end_date krijgt daar nog eens 30 dagen coulance bovenop
-// (GRACE_DAYS), zodat het abonnement na de contractuele einddatum nog even
-// doorloopt voordat de bestaande license.isLicenseExpired-check de tenant
-// daadwerkelijk blokkeert (zie doelenboom_licentiemodel.md §6 — "verlenging").
+// de betaaldatum) — "laatste dag van de maand, +1 of +12 maanden later"
+// (CONTRACT_MONTHS, afhankelijk van sr.billing_period — zie de
+// maandelijkse-facturatie-toevoeging van 7 september 2026,
+// doelenboom_licentiemodel.md §9.2 v3). tenants.license_end_date krijgt daar
+// nog eens 30 dagen coulance bovenop (GRACE_DAYS, bewust ONGEWIJZIGD voor
+// beide periodes — ook een maandcontract krijgt dus tot een maand coulance),
+// zodat het abonnement na de contractuele einddatum nog even doorloopt
+// voordat de bestaande license.isLicenseExpired-check de tenant daadwerkelijk
+// blokkeert (zie doelenboom_licentiemodel.md §6 — "verlenging").
 export async function registerPayment(
   requestId: number | string,
   performedBy: number
 ): Promise<SubscriptionRequestRow | null> {
   const existing = await pool.query(
-    `select id, tenant_id, status, requested_at from subscription_requests where id = $1`,
+    `select id, tenant_id, status, billing_period, requested_at from subscription_requests where id = $1`,
     [requestId]
   );
   const row = existing.rows[0];
@@ -394,7 +433,8 @@ export async function registerPayment(
     throw new SubscriptionRequestError('Deze aanvraag staat niet (meer) op "proef".');
   }
 
-  const contractEndDate = computeDefaultLicenseEndDate(new Date(row.requested_at));
+  const billingPeriod = (row.billing_period as BillingPeriod) ?? 'jaar';
+  const contractEndDate = computeDefaultLicenseEndDate(new Date(row.requested_at), CONTRACT_MONTHS[billingPeriod]);
   const licenseEndDate = addDays(new Date(`${contractEndDate}T00:00:00Z`), GRACE_DAYS);
 
   const client = await pool.connect();
@@ -410,7 +450,7 @@ export async function registerPayment(
       tenantId: row.tenant_id,
       subscriptionRequestId: Number(requestId),
       eventType: 'betaling_geregistreerd',
-      detail: { contractEndDate, licenseEndDate, renewal: false },
+      detail: { contractEndDate, licenseEndDate, billingPeriod, renewal: false },
       performedBy,
     });
     await client.query('commit');
@@ -423,18 +463,19 @@ export async function registerPayment(
   return getSubscriptionRequestById(requestId);
 }
 
-// Verlenging: contract_end_date +12 maanden (zelfde "laatste dag van de
-// maand"-logica, nu vanaf de HUIDIGE contract_end_date i.p.v. de
-// aanvraagdatum), license_end_date opnieuw met 30 dagen coulance erboven op.
-// Mag alleen op een al 'actief' abonnement (een 'proef'-aanvraag heeft nog
-// geen contract_end_date om vanaf te verlengen — dat is registerPayment
-// hierboven; 'afgewezen' kan niet meer verlengd worden).
+// Verlenging: contract_end_date +1 of +12 maanden (CONTRACT_MONTHS, zelfde
+// billing_period-afhankelijkheid als registerPayment hierboven — zelfde
+// "laatste dag van de maand"-logica, nu vanaf de HUIDIGE contract_end_date
+// i.p.v. de aanvraagdatum), license_end_date opnieuw met 30 dagen coulance
+// erboven op. Mag alleen op een al 'actief' abonnement (een 'proef'-aanvraag
+// heeft nog geen contract_end_date om vanaf te verlengen — dat is
+// registerPayment hierboven; 'afgewezen' kan niet meer verlengd worden).
 export async function registerRenewal(
   requestId: number | string,
   performedBy: number
 ): Promise<SubscriptionRequestRow | null> {
   const existing = await pool.query(
-    `select id, tenant_id, status, to_char(contract_end_date, 'YYYY-MM-DD') as contract_end_date
+    `select id, tenant_id, status, billing_period, to_char(contract_end_date, 'YYYY-MM-DD') as contract_end_date
      from subscription_requests where id = $1`,
     [requestId]
   );
@@ -446,9 +487,13 @@ export async function registerRenewal(
 
   // De huidige contract_end_date is altijd al "laatste dag van een maand"
   // (zie hierboven/registerPayment) — computeDefaultLicenseEndDate rechtstreeks
-  // op déze datum voeden geeft dus "dezelfde maand, +12 maanden" (i.p.v. een
+  // op déze datum voeden geeft dus "dezelfde maand, +N maanden" (i.p.v. een
   // dag erna te nemen, wat de boel een maand zou opschuiven).
-  const newContractEndDate = computeDefaultLicenseEndDate(new Date(`${row.contract_end_date}T00:00:00Z`));
+  const billingPeriod = (row.billing_period as BillingPeriod) ?? 'jaar';
+  const newContractEndDate = computeDefaultLicenseEndDate(
+    new Date(`${row.contract_end_date}T00:00:00Z`),
+    CONTRACT_MONTHS[billingPeriod]
+  );
   const newLicenseEndDate = addDays(new Date(`${newContractEndDate}T00:00:00Z`), GRACE_DAYS);
 
   const client = await pool.connect();
@@ -464,7 +509,12 @@ export async function registerRenewal(
       tenantId: row.tenant_id,
       subscriptionRequestId: Number(requestId),
       eventType: 'verlengd',
-      detail: { previousContractEndDate: row.contract_end_date, contractEndDate: newContractEndDate, licenseEndDate: newLicenseEndDate },
+      detail: {
+        previousContractEndDate: row.contract_end_date,
+        contractEndDate: newContractEndDate,
+        licenseEndDate: newLicenseEndDate,
+        billingPeriod,
+      },
       performedBy,
     });
     await client.query('commit');

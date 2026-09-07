@@ -32,7 +32,7 @@ describe('tenant-beëindiging en -bewaartermijn', () => {
   });
 
   it('DELETE beëindigt (soft) i.p.v. meteen hard te verwijderen: leden verliezen toegang, sysadmin krijgt alleen-lezen', async () => {
-    const { tenantId, doelenboomId, adminToken, gebruikerToken, bezoekerToken } =
+    const { tenantId, doelenboomId, adminToken, editorToken, bezoekerToken } =
       await setupWritableDoelenboom(sysadminToken, `${PREFIX}-t1`);
 
     const terminate = await req('DELETE', `/api/tenants/${tenantId}`, { token: sysadminToken });
@@ -47,7 +47,7 @@ describe('tenant-beëindiging en -bewaartermijn', () => {
     // Gewone leden: volledig ontoegankelijk, alsof de tenant niet meer bestaat.
     const asAdmin = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: adminToken });
     assert.equal(asAdmin.status, 403);
-    const asGebruiker = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: gebruikerToken });
+    const asGebruiker = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: editorToken });
     assert.equal(asGebruiker.status, 403);
     const asBezoeker = await req('GET', `/api/doelenbomen/${doelenboomId}/tree`, { token: bezoekerToken });
     assert.equal(asBezoeker.status, 403);

@@ -10,7 +10,7 @@ const PREFIX = unique('edges');
 describe('edges (relaties tussen elementen)', () => {
   let doelenboomId: number;
   let adminToken: string;
-  let gebruikerToken: string;
+  let editorToken: string;
   let bezoekerToken: string;
 
   before(async () => {
@@ -18,7 +18,7 @@ describe('edges (relaties tussen elementen)', () => {
     const email = `${PREFIX}-sysadmin@test.local`;
     await createSysadminUser(email, 'wachtwoord123');
     const sysadminToken = await login(email, 'wachtwoord123');
-    ({ doelenboomId, adminToken, gebruikerToken, bezoekerToken } = await setupWritableDoelenboom(sysadminToken, PREFIX));
+    ({ doelenboomId, adminToken, editorToken, bezoekerToken } = await setupWritableDoelenboom(sysadminToken, PREFIX));
     await req('POST', `/api/doelenbomen/${doelenboomId}/elements`, {
       token: adminToken, body: { code: 'P1', type: 'Project', name: 'Project 1' },
     });
@@ -82,16 +82,16 @@ describe('edges (relaties tussen elementen)', () => {
 
   it('gebruiker mag relaties aanmaken/wijzigen/verwijderen (losse boom-inhoud)', async () => {
     const created = await req('POST', `/api/doelenbomen/${doelenboomId}/edges`, {
-      token: gebruikerToken, body: { source: 'P1', target: 'C1' },
+      token: editorToken, body: { source: 'P1', target: 'C1' },
     });
     assert.equal(created.status, 201);
 
     const updated = await req('PUT', `/api/doelenbomen/${doelenboomId}/edges/P1/C1`, {
-      token: gebruikerToken, body: { weight: 'primair', toelichting: 'Door gebruiker' },
+      token: editorToken, body: { weight: 'primair', toelichting: 'Door gebruiker' },
     });
     assert.equal(updated.status, 200);
 
-    const del = await req('DELETE', `/api/doelenbomen/${doelenboomId}/edges/P1/C1`, { token: gebruikerToken });
+    const del = await req('DELETE', `/api/doelenbomen/${doelenboomId}/edges/P1/C1`, { token: editorToken });
     assert.equal(del.status, 204);
   });
 });

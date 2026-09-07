@@ -3,7 +3,7 @@ import { pool } from '../db.js';
 import { requireAuth, AuthedRequest } from '../auth.js';
 import { requireSysadmin, requireTenantRoleForTenantParam } from '../rbac.js';
 import { createTenantDefaultConfig } from '../columnConfig.js';
-import { assertCanAddAdmin, computeDefaultLicenseEndDate, LicenseLimitError } from '../license.js';
+import { assertCanAddEditor, computeDefaultLicenseEndDate, LicenseLimitError } from '../license.js';
 import { logAuditEvent } from '../auditLog.js';
 import { terminateTenant } from '../tenantRetention.js';
 
@@ -161,10 +161,10 @@ tenantsRouter.put('/:id', requireTenantRoleForTenantParam('admin', 'id'), async 
     hasOpenAccessRole &&
     openAccessRole !== null &&
     openAccessRole !== 'admin' &&
-    openAccessRole !== 'gebruiker' &&
+    openAccessRole !== 'editor' &&
     openAccessRole !== 'bezoeker'
   ) {
-    return res.status(400).json({ error: 'openAccessRole moet "admin", "gebruiker", "bezoeker" of null zijn.' });
+    return res.status(400).json({ error: 'openAccessRole moet "admin", "editor", "bezoeker" of null zijn.' });
   }
   // De popup-tekst wordt bewust altijd sámen met entryPopupEnabled verwacht
   // (zo verstuurt TenantSettingsForm het ook, net als de andere velden hier)
@@ -317,7 +317,7 @@ tenantsRouter.post('/:tenantId/members', requireTenantRoleForTenantParam('admin'
   const b = (req.body ?? {}) as Record<string, unknown>;
   const email = typeof b.email === 'string' ? b.email.trim().toLowerCase() : '';
   const password = typeof b.password === 'string' ? b.password : '';
-  const role = b.role === 'admin' || b.role === 'gebruiker' || b.role === 'bezoeker' ? b.role : '';
+  const role = b.role === 'admin' || b.role === 'editor' || b.role === 'bezoeker' ? b.role : '';
   if (!email || !role) {
     return res.status(400).json({ error: 'E-mailadres en rol (admin/gebruiker/bezoeker) zijn verplicht.' });
   }
@@ -338,19 +338,20 @@ tenantsRouter.post('/:tenantId/members', requireTenantRoleForTenantParam('admin'
     userId = created.rows[0].id;
   }
 
-  // Licentielimiet (zie license.ts/doelenboom_licentiemodel.md §5): alleen
-  // relevant als deze gebruiker hierdoor NIEUW admin van deze tenant wordt —
-  // een al-bestaande admin (bv. e-mailadres bestond al met role='admin') mag
-  // altijd zonder limiet-check opnieuw als admin worden toegevoegd, dat is
-  // geen extra admin.
-  if (role === 'admin') {
-    const alreadyAdmin = await pool.query(
-      `select 1 from tenant_users where tenant_id = $1 and user_id = $2 and role = 'admin'`,
+  // Licentielimiet (zie license.ts/doelenboom_licentiemodel.md §5 v3): admin
+  // ÉN editor tellen samen tegen tiers.max_editors, dus relevant zodra deze
+  // gebruiker hierdoor NIEUW admin-of-editor van deze tenant wordt — iemand
+  // die al admin of editor was (bv. e-mailadres bestond al met zo'n rol) mag
+  // altijd zonder limiet-check naar de andere van die twee rollen wisselen,
+  // dat is geen extra admin/editor.
+  if (role === 'admin' || role === 'editor') {
+    const alreadyCounted = await pool.query(
+      `select 1 from tenant_users where tenant_id = $1 and user_id = $2 and role in ('admin', 'editor')`,
       [req.params.tenantId, userId]
     );
-    if (alreadyAdmin.rows.length === 0) {
+    if (alreadyCounted.rows.length === 0) {
       try {
-        await assertCanAddAdmin(req.params.tenantId);
+        await assertCanAddEditor(req.params.tenantId);
       } catch (err) {
         if (err instanceof LicenseLimitError) return res.status(403).json({ error: err.message });
         throw err;
@@ -372,18 +373,18 @@ tenantsRouter.put('/:tenantId/members/:userId', requireTenantRoleForTenantParam(
     return res.status(400).json({ error: 'Ongeldig tenantId of userId.' });
   }
   const role = (req.body ?? {}).role;
-  if (role !== 'admin' && role !== 'gebruiker' && role !== 'bezoeker') {
-    return res.status(400).json({ error: 'role moet "admin", "gebruiker" of "bezoeker" zijn.' });
+  if (role !== 'admin' && role !== 'editor' && role !== 'bezoeker') {
+    return res.status(400).json({ error: 'role moet "admin", "editor" of "bezoeker" zijn.' });
   }
 
-  if (role === 'admin') {
-    const alreadyAdmin = await pool.query(
-      `select 1 from tenant_users where tenant_id = $1 and user_id = $2 and role = 'admin'`,
+  if (role === 'admin' || role === 'editor') {
+    const alreadyCounted = await pool.query(
+      `select 1 from tenant_users where tenant_id = $1 and user_id = $2 and role in ('admin', 'editor')`,
       [req.params.tenantId, req.params.userId]
     );
-    if (alreadyAdmin.rows.length === 0) {
+    if (alreadyCounted.rows.length === 0) {
       try {
-        await assertCanAddAdmin(req.params.tenantId);
+        await assertCanAddEditor(req.params.tenantId);
       } catch (err) {
         if (err instanceof LicenseLimitError) return res.status(403).json({ error: err.message });
         throw err;

@@ -11,7 +11,7 @@ const PREFIX = unique('announce');
 // api/src/routes/announcement.ts en db/init.sql system_announcements.
 describe('systeemmelding (onderhoud)', () => {
   let sysadminToken: string;
-  let gebruikerToken: string;
+  let editorToken: string;
 
   before(async () => {
     await startTestServer();
@@ -19,10 +19,10 @@ describe('systeemmelding (onderhoud)', () => {
     await createSysadminUser(sysadminEmail, 'wachtwoord123');
     sysadminToken = await login(sysadminEmail, 'wachtwoord123');
 
-    const gebruikerEmail = `${PREFIX}-gebruiker@test.local`;
+    const gebruikerEmail = `${PREFIX}-editor@test.local`;
     await createSysadminUser(gebruikerEmail, 'wachtwoord123');
     await pool.query('update users set is_sysadmin = false where email = $1', [gebruikerEmail]);
-    gebruikerToken = await login(gebruikerEmail, 'wachtwoord123');
+    editorToken = await login(gebruikerEmail, 'wachtwoord123');
 
     // Deze singleton-rij wordt door tests in ANDERE bestanden mogelijk ook
     // geraakt (het is systeembreed, niet per-prefix) — begin dus expliciet
@@ -47,7 +47,7 @@ describe('systeemmelding (onderhoud)', () => {
 
   it('PUT /api/announcement is sysadmin-only', async () => {
     const asGebruiker = await req('PUT', '/api/announcement', {
-      token: gebruikerToken, body: { message: 'Onderhoud gepland', active: true },
+      token: editorToken, body: { message: 'Onderhoud gepland', active: true },
     });
     assert.equal(asGebruiker.status, 403);
 

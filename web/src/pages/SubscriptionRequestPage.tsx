@@ -1,6 +1,8 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { api, ApiError } from '../api';
-import type { PriceQuote, PublicModule, PublicTier } from '../types';
+import type { BillingPeriod, PriceQuote, PublicModule, PublicTier } from '../types';
+
+const PERIOD_LABEL: Record<BillingPeriod, string> = { maand: 'maand', jaar: 'jaar' };
 
 // Publieke aanvraagpagina ("nieuw abonnement aanvragen") — zie
 // doelenboom_licentiemodel.md §9. Ongeauthenticeerd, bereikbaar via een link
@@ -19,6 +21,10 @@ export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBac
   }, []);
 
   const [tierId, setTierId] = useState<number | null>(null);
+  // Facturatieperiode (sinds 7 september 2026) — default jaarlijks, net als
+  // vóór de invoering van maandelijkse facturatie. Bepaalt zowel welke
+  // tierprijs getoond wordt als de contractcadans na betaling.
+  const [billingPeriod, setBillingPeriod] = useState<BillingPeriod>('jaar');
   const [selectedModules, setSelectedModules] = useState<Set<string>>(new Set());
   const [quote, setQuote] = useState<PriceQuote | null>(null);
   const selectedTier = tiers?.find((t) => t.id === tierId) ?? null;
@@ -39,7 +45,7 @@ export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBac
     // aangevinkt staat).
     let cancelled = false;
     api
-      .subscriptionPriceForTier(tierId, [...selectedModules])
+      .subscriptionPriceForTier(tierId, billingPeriod, [...selectedModules])
       .then((q) => {
         if (!cancelled) setQuote(q);
       })
@@ -50,7 +56,7 @@ export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBac
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tierId, [...selectedModules].sort().join(',')]);
+  }, [tierId, billingPeriod, [...selectedModules].sort().join(',')]);
 
   const [organizationName, setOrganizationName] = useState('');
   const [applicantName, setApplicantName] = useState('');
@@ -104,6 +110,7 @@ export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBac
         password,
         tierId,
         moduleKeys: [...selectedModules],
+        billingPeriod,
       });
       onSubmitted(applicantEmail.trim());
     } catch (err) {
@@ -129,7 +136,7 @@ export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBac
       >
         <div style={{ ...styles.tierName, ...(accent ? { color: accent.text } : {}) }}>{t.name}</div>
         <div style={styles.tierMeta}>
-          max {t.maxAdmins} admin{t.maxAdmins === 1 ? '' : 's'}, max {t.maxBomen} doelenbomen
+          max {t.maxEditors} admin/editor{t.maxEditors === 1 ? '' : 's'}, max {t.maxBomen} doelenbomen
         </div>
         {(t.trialDays != null || t.allModulesIncluded) && (
           <div style={styles.tierBadgeRow}>
@@ -145,18 +152,21 @@ export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBac
             )}
           </div>
         )}
-        {t.currentPriceEur != null && (
-          Number(t.currentPriceEur) === 0 ? (
+        {(() => {
+          const priceStr = t.currentPriceEur[billingPeriod];
+          if (priceStr == null) return null;
+          const price = Number(priceStr);
+          return price === 0 ? (
             <div style={{ ...styles.tierPriceFree, ...(accent ? { color: accent.text } : {}) }}>Gratis</div>
           ) : (
             <>
-              <div style={styles.tierPrice}>€ {Number(t.currentPriceEur).toLocaleString('nl-NL')} / jaar</div>
+              <div style={styles.tierPrice}>€ {price.toLocaleString('nl-NL')} / {PERIOD_LABEL[billingPeriod]}</div>
               <div style={styles.tierPriceBtw}>
-                € {(Number(t.currentPriceEur) * 1.21).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} incl. BTW (21%)
+                € {(price * 1.21).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} incl. BTW (21%)
               </div>
             </>
-          )
-        )}
+          );
+        })()}
       </button>
     );
   }
@@ -177,6 +187,18 @@ export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBac
         {!tiers && <p style={styles.muted}>Laden…</p>}
 
         <form onSubmit={handleSubmit} style={styles.form}>
+          <div style={styles.periodToggle}>
+            {(['jaar', 'maand'] as const).map((p) => (
+              <button
+                type="button"
+                key={p}
+                onClick={() => setBillingPeriod(p)}
+                style={{ ...styles.periodToggleBtn, ...(billingPeriod === p ? styles.periodToggleBtnActive : {}) }}
+              >
+                {p === 'jaar' ? 'Jaarlijks' : 'Maandelijks'}
+              </button>
+            ))}
+          </div>
           {tiers && (() => {
             // Verdeeld over twee rijen i.p.v. één rij die organisch wrapt op
             // schermbreedte (dat liet voorheen willekeurig 1 tegel eenzaam op
@@ -213,30 +235,30 @@ export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBac
                     overgeslagen zodat er niet twee keer hetzelfde staat. */}
                 {!(quote.finalPriceEur === 0 && !quote.offer) && (
                   <>
-                    <div style={styles.priceLineItem}>Abonnement: € {quote.tierPriceEur.toLocaleString('nl-NL')} / jaar</div>
+                    <div style={styles.priceLineItem}>Abonnement: € {quote.tierPriceEur.toLocaleString('nl-NL')} / {PERIOD_LABEL[billingPeriod]}</div>
                     {quote.moduleSurcharges.map((s) => (
                       <div key={s.moduleKey} style={styles.priceLineItem}>
-                        + {s.moduleName} ({s.surchargePct}% opslag): € {s.amountEur.toLocaleString('nl-NL')} / jaar
+                        + {s.moduleName} ({s.surchargeType === 'fixed' ? 'vast bedrag' : `${s.surchargePct}% opslag`}): € {s.amountEur.toLocaleString('nl-NL')} / {PERIOD_LABEL[billingPeriod]}
                       </div>
                     ))}
                     {quote.moduleSurcharges.length > 0 && quote.subtotalEur != null && (
-                      <div style={styles.priceLineItem}>Subtotaal: € {quote.subtotalEur.toLocaleString('nl-NL')} / jaar</div>
+                      <div style={styles.priceLineItem}>Subtotaal: € {quote.subtotalEur.toLocaleString('nl-NL')} / {PERIOD_LABEL[billingPeriod]}</div>
                     )}
                   </>
                 )}
                 {quote.offer ? (
                   <>
-                    <div style={styles.priceStrike}>€ {quote.subtotalEur?.toLocaleString('nl-NL')} / jaar</div>
+                    <div style={styles.priceStrike}>€ {quote.subtotalEur?.toLocaleString('nl-NL')} / {PERIOD_LABEL[billingPeriod]}</div>
                     <div style={styles.priceFinal}>
                       {quote.btwVrij
-                        ? `€ ${quote.subtotalEur?.toLocaleString('nl-NL')} / jaar, zonder BTW`
-                        : `€ ${quote.finalPriceEur?.toLocaleString('nl-NL')} / jaar`}{' '}
+                        ? `€ ${quote.subtotalEur?.toLocaleString('nl-NL')} / ${PERIOD_LABEL[billingPeriod]}, zonder BTW`
+                        : `€ ${quote.finalPriceEur?.toLocaleString('nl-NL')} / ${PERIOD_LABEL[billingPeriod]}`}{' '}
                       <span style={styles.offerBadge}>{quote.offer.name}</span>
                     </div>
                   </>
                 ) : (
                   <div style={{ ...styles.priceFinal, ...(quote.finalPriceEur === 0 ? { color: '#2F9E44' } : {}) }}>
-                    {quote.finalPriceEur === 0 ? 'Gratis' : `€ ${quote.finalPriceEur?.toLocaleString('nl-NL')} / jaar`}
+                    {quote.finalPriceEur === 0 ? 'Gratis' : `€ ${quote.finalPriceEur?.toLocaleString('nl-NL')} / ${PERIOD_LABEL[billingPeriod]}`}
                   </div>
                 )}
                 {!quote.btwVrij && quote.finalPriceEur != null && quote.finalPriceEur > 0 && (
@@ -386,6 +408,15 @@ const styles: Record<string, React.CSSProperties> = {
   muted: { color: '#9aa0a8', fontSize: 14 },
   error: { color: '#DC3545', fontSize: 13.5, background: '#FBE9EA', border: '1px solid #f3c2c6', borderRadius: 6, padding: '0.5rem 0.75rem' },
   form: { display: 'flex', flexDirection: 'column', gap: 14 },
+  periodToggle: {
+    display: 'inline-flex', alignSelf: 'center', border: '1px solid #d0d4da', borderRadius: 999,
+    padding: 3, background: '#f4f5f7', gap: 2,
+  },
+  periodToggleBtn: {
+    border: 'none', background: 'transparent', borderRadius: 999, padding: '6px 18px',
+    fontSize: 13, fontWeight: 600, color: '#6c6f76', cursor: 'pointer',
+  },
+  periodToggleBtnActive: { background: '#2F5597', color: 'white' },
   // Houdt de rest van het formulier (prijsopgave, modules, persoonsgegevens)
   // op leesbare regelbreedte, los van de bredere kaart hierboven (zie card.maxWidth).
   narrowSection: { display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 480, margin: '0 auto', width: '100%', boxSizing: 'border-box' },
