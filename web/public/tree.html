@@ -551,6 +551,15 @@
     font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;
     color: #999; margin-bottom: 8px;
   }
+  /* Toggle "Geplande datum bij opgeleverde items" in de Tijdlijn-titel (zie
+     showPlannedForDelivered/buildTimelineMarkers) -- zit in .dp-project-title
+     (uppercase/bold/letter-spacing), dus hier weer resetten naar normale
+     leesbare tekst, net als .activity-field-checkbox-label elders. */
+  .timeline-toggle-planned {
+    display: flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 400;
+    text-transform: none; letter-spacing: normal; color: #666; cursor: pointer;
+  }
+  .timeline-toggle-planned input { display: inline-block; width: auto; margin: 0; cursor: pointer; }
   .dp-badges { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
   .status-badge, .rag-badge {
     display: inline-flex; align-items: center; gap: 4px; color: #fff; font-size: 11.5px;
@@ -2153,6 +2162,21 @@ function runApp(data) {
   // project geëxporteerd/geïmporteerd moet worden; de "Excel"-knop in de
   // projectkaart zelf heeft dat al via data-code en heeft dit niet nodig.
   let currentProjectCode = null;
+  // Kleur waarmee de op dit moment getoonde projectkaart is geopend (zie
+  // enterFocus/renderProjectPanel) — puur bewaard zodat de tijdlijn-toggle
+  // hieronder de kaart opnieuw kan tekenen (renderProjectPanel) zonder de
+  // aanroepende node opnieuw te hoeven opzoeken.
+  let currentProjectColor = '#002855';
+  // Toont, standaard aan (huidig gedrag), de verwachte/geplande datum ook
+  // voor producten die al een werkelijke (opgeleverde) datum hebben — zowel
+  // op de projecttijdlijn zelf als in de as-berekening die de Activiteiten-
+  // Gantt overneemt (computeProjectTimelineBounds) en in het "Alle
+  // project-tijdlijnen"-overzicht (renderTimelinesView), zie
+  // buildTimelineMarkers. Uitzetten laat bij een al opgeleverd item alleen
+  // de gevulde "opgeleverd"-marker staan, voor een rustiger beeld zodra een
+  // project grotendeels is afgerond. Puur een sessie-instelling (net als
+  // collapsedSummaries), geen server-side voorkeur.
+  let showPlannedForDelivered = true;
   const timelinesViewEl = document.getElementById('timelines-view');
   const tooltipEl = document.getElementById('hover-tooltip');
   const searchInput = document.getElementById('search-input');
@@ -3365,7 +3389,12 @@ function runApp(data) {
     products.forEach((p) => {
       const type = p.type === 'mijlpaal' ? 'mijlpaal' : 'deliverable';
       const label = p.name || p.code || '';
-      if (p.verwacht) {
+      // De geplande (verwachte) datum blijft standaard altijd zichtbaar, ook
+      // als het item al opgeleverd is — zie showPlannedForDelivered. Alleen
+      // als de gebruiker die uitzet én er ook al een werkelijke datum is,
+      // vervalt de open "verwacht"-marker; zonder werkelijke datum blijft
+      // de geplande datum sowieso de enige/leidende marker.
+      if (p.verwacht && (showPlannedForDelivered || !p.werkelijk)) {
         const t = parseDateFlexible(p.verwacht);
         if (!isNaN(t)) markers.push({ t, type, filled: false, label, dateLabel: formatDateNL(p.verwacht), kind: 'Verwacht' });
       }
@@ -4556,7 +4585,11 @@ function runApp(data) {
     let html = '';
     const timelineHtml = productTimelineHtml(products);
     if (timelineHtml) {
-      html += '<div class="dp-project-title"><span>Tijdlijn</span></div>' + timelineHtml;
+      html += '<div class="dp-project-title"><span>Tijdlijn</span>' +
+        '<label class="timeline-toggle-planned" title="Toon de geplande (verwachte) datum ook voor producten die al een werkelijke datum hebben">' +
+          '<input type="checkbox" id="timeline-toggle-planned-cb"' + (showPlannedForDelivered ? ' checked' : '') + '> Geplande datum bij opgeleverde items' +
+        '</label>' +
+      '</div>' + timelineHtml;
     }
 
     // Activiteiten-planning (start-/einddatum, kunnen er meerdere zijn) staat
@@ -4699,6 +4732,7 @@ function runApp(data) {
     projectPanelEl.innerHTML = projectHeaderHtml(id, color) + projectSectionHtml(id);
     projectPanelEl.classList.add('visible');
     currentProjectCode = id;
+    currentProjectColor = color;
     document.body.classList.toggle('project-selected', projectenActive);
   }
 
@@ -7766,6 +7800,17 @@ function runApp(data) {
   }
   detailPanel.addEventListener('click', onDetailAreaClick);
   projectPanelEl.addEventListener('click', onDetailAreaClick);
+
+  // Toggle "Geplande datum bij opgeleverde items" op de Tijdlijn (zie
+  // showPlannedForDelivered/buildTimelineMarkers hierboven) -- alleen op het
+  // projectdetailpaneel aanwezig, dus een gerichte 'change'-listener i.p.v.
+  // uitbreiding van onDetailAreaClick (dat is click-gebaseerd).
+  projectPanelEl.addEventListener('change', (ev) => {
+    if (ev.target && ev.target.id === 'timeline-toggle-planned-cb') {
+      showPlannedForDelivered = ev.target.checked;
+      if (currentProjectCode) renderProjectPanel(currentProjectCode, currentProjectColor);
+    }
+  });
 
   // Dubbelklik op een deliverable-/mijlpaal-tile opent meteen het
   // bewerk-formulier (zelfde modal als de "Bewerken"-knop hierboven,
