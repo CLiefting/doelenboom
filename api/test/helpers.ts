@@ -193,6 +193,23 @@ export async function cleanupByPrefix(prefix: string): Promise<void> {
 // kolommen/instellingen/import — 'bezoeker' mag alleen lezen.
 export async function setupWritableDoelenboom(sysadminToken: string, prefix: string) {
   const tenant = await req('POST', '/api/tenants', { token: sysadminToken, body: { slug: prefix, name: prefix } });
+  if (tenant.status !== 201) {
+    // Zonder deze check liep dit door met tenantId=undefined (tenant.body.id
+    // bestaat niet bij een foutrespons) — elke vervolgaanroep hieronder ging dan
+    // naar /api/tenants/undefined/..., wat de server niet met een nette
+    // foutmelding afhandelt (geen validatie op een niet-numerieke :tenantId,
+    // zie routes/tenants.ts) maar met een onafgehandelde promise-rejection die
+    // de aanvraag voor altijd laat hangen — in de praktijk gezien als een
+    // test die na ~300s (fetch's timeout) faalde met een cryptische
+    // 'fetch failed', in plaats van meteen hier met een duidelijke oorzaak.
+    // Concrete aanleiding: twee testbestand-brede prefixes (`${PREFIX}-t8`
+    // t/m `-t12`) werden per ongeluk dubbel gebruikt in licenses.test.ts,
+    // wat hier een 409 (slug bestaat al) opleverde.
+    throw new Error(
+      `setupWritableDoelenboom: POST /api/tenants voor prefix "${prefix}" gaf ${tenant.status} ` +
+        `i.p.v. 201 (${JSON.stringify(tenant.body)}) — mogelijk een hergebruikte/dubbele prefix.`
+    );
+  }
   const tenantId = tenant.body.id as number;
 
   const adminEmail = `${prefix}-admin@test.local`;
@@ -216,6 +233,13 @@ export async function setupWritableDoelenboom(sysadminToken: string, prefix: str
   const boom = await req('POST', `/api/tenants/${tenantId}/doelenbomen`, {
     token: adminToken, body: { slug: 'boom', name: 'Testboom' },
   });
+  if (boom.status !== 201) {
+    // Zelfde reden als de check hierboven bij de tenant-aanmaak.
+    throw new Error(
+      `setupWritableDoelenboom: POST .../doelenbomen voor prefix "${prefix}" gaf ${boom.status} ` +
+        `i.p.v. 201 (${JSON.stringify(boom.body)}).`
+    );
+  }
   const doelenboomId = boom.body.id as number;
 
   return { tenantId, doelenboomId, adminToken, gebruikerToken, bezoekerToken };

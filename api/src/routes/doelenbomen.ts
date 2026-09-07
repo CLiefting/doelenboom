@@ -114,6 +114,15 @@ doelenbomenRouter.post(
   '/tenants/:tenantId/doelenbomen',
   requireTenantRoleForTenantParam('admin', 'tenantId'),
   async (req, res) => {
+    // requireTenantRoleForTenantParam laat een sysadmin altijd meteen door
+    // zonder dat :tenantId al gevalideerd is (zie rbac.ts requireTenantRole en
+    // dezelfde toelichting bij routes/tenants.ts POST /:tenantId/members) — een
+    // niet-numerieke :tenantId zou verderop een rauwe Postgres-castfout
+    // ("invalid input syntax for type bigint") geven die hier niet is
+    // opgevangen en de aanvraag onbeantwoord laat hangen.
+    if (!/^\d+$/.test(req.params.tenantId)) {
+      return res.status(400).json({ error: 'Ongeldig tenantId.' });
+    }
     const { slug, name, templateId } = req.body ?? {};
     if (!slug || !name) {
       return res.status(400).json({ error: 'slug en name zijn verplicht' });

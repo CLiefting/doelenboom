@@ -349,15 +349,15 @@ describe('licenties', () => {
 
   describe('handhaving: admins', () => {
     it('een admin toevoegen boven de tier-limiet geeft 403; een bestaande admin opnieuw admin maken mag altijd', async () => {
-      const { tenantId, adminToken } = await setupWritableDoelenboom(sysadminToken, `${PREFIX}-t8`);
+      const { tenantId, adminToken } = await setupWritableDoelenboom(sysadminToken, `${PREFIX}-t13`);
       // setupWritableDoelenboom heeft al 1 admin — een tier met maxAdmins=1 zit
       // dus al meteen "vol".
       const tier = await req('POST', '/api/tiers', {
-        token: sysadminToken, body: { name: `${PREFIX}-t8-tier`, maxAdmins: 1, maxBomen: 10, sortOrder: 0 },
+        token: sysadminToken, body: { name: `${PREFIX}-t13-tier`, maxAdmins: 1, maxBomen: 10, sortOrder: 0 },
       });
       await req('PUT', `/api/tenants/${tenantId}/license/tier`, { token: sysadminToken, body: { tierId: tier.body.id } });
 
-      const tweedeAdminEmail = `${PREFIX}-t8-admin2@test.local`;
+      const tweedeAdminEmail = `${PREFIX}-t13-admin2@test.local`;
       const geblokkeerd = await req('POST', `/api/tenants/${tenantId}/members`, {
         token: sysadminToken, body: { email: tweedeAdminEmail, password: 'wachtwoord123', role: 'admin' },
       });
@@ -375,7 +375,7 @@ describe('licenties', () => {
 
       // Na upgraden van de tier lukt het wél.
       const groteTier = await req('POST', '/api/tiers', {
-        token: sysadminToken, body: { name: `${PREFIX}-t8-tier-groot`, maxAdmins: 2, maxBomen: 10, sortOrder: 0 },
+        token: sysadminToken, body: { name: `${PREFIX}-t13-tier-groot`, maxAdmins: 2, maxBomen: 10, sortOrder: 0 },
       });
       await req('PUT', `/api/tenants/${tenantId}/license/tier`, {
         token: sysadminToken, body: { tierId: groteTier.body.id },
@@ -389,13 +389,13 @@ describe('licenties', () => {
     });
 
     it('downgraden naar een tier die niet meer past geeft 409 (eerst afbouwen)', async () => {
-      const { tenantId } = await setupWritableDoelenboom(sysadminToken, `${PREFIX}-t9`);
+      const { tenantId } = await setupWritableDoelenboom(sysadminToken, `${PREFIX}-t14`);
       // 1 admin + 1 doelenboom al aanwezig (setupWritableDoelenboom) — een tier
       // met maxAdmins=0 is niet toegestaan via de API (moet > 0 zijn), dus
       // gebruik een tier die precies te klein is voor de bomen-limiet i.p.v.
       // de admin-limiet, dat is even goed een "downgrade past niet"-geval.
       const tePas = await req('POST', '/api/tiers', {
-        token: sysadminToken, body: { name: `${PREFIX}-t9-te-klein`, maxAdmins: 5, maxBomen: 5, sortOrder: 0 },
+        token: sysadminToken, body: { name: `${PREFIX}-t14-te-klein`, maxAdmins: 5, maxBomen: 5, sortOrder: 0 },
       });
       await req('PUT', `/api/tenants/${tenantId}/license/tier`, { token: sysadminToken, body: { tierId: tePas.body.id } });
 
@@ -403,11 +403,11 @@ describe('licenties', () => {
       // door een tweede admin toe te voegen (mag, huidige tier staat 5 toe).
       await req('POST', `/api/tenants/${tenantId}/members`, {
         token: sysadminToken,
-        body: { email: `${PREFIX}-t9-admin2@test.local`, password: 'wachtwoord123', role: 'admin' },
+        body: { email: `${PREFIX}-t14-admin2@test.local`, password: 'wachtwoord123', role: 'admin' },
       });
 
       const teKleineTier = await req('POST', '/api/tiers', {
-        token: sysadminToken, body: { name: `${PREFIX}-t9-single`, maxAdmins: 1, maxBomen: 5, sortOrder: 0 },
+        token: sysadminToken, body: { name: `${PREFIX}-t14-single`, maxAdmins: 1, maxBomen: 5, sortOrder: 0 },
       });
       const downgrade = await req('PUT', `/api/tenants/${tenantId}/license/tier`, {
         token: sysadminToken, body: { tierId: teKleineTier.body.id },
@@ -423,10 +423,10 @@ describe('licenties', () => {
 
   describe('handhaving: doelenbomen (archiveren telt niet mee)', () => {
     it('een doelenboom aanmaken boven de tier-limiet geeft 403; archiveren maakt weer ruimte', async () => {
-      const { tenantId, adminToken } = await setupWritableDoelenboom(sysadminToken, `${PREFIX}-t10`);
+      const { tenantId, adminToken } = await setupWritableDoelenboom(sysadminToken, `${PREFIX}-t15`);
       // setupWritableDoelenboom heeft al 1 doelenboom aangemaakt.
       const tier = await req('POST', '/api/tiers', {
-        token: sysadminToken, body: { name: `${PREFIX}-t10-tier`, maxAdmins: 5, maxBomen: 1, sortOrder: 0 },
+        token: sysadminToken, body: { name: `${PREFIX}-t15-tier`, maxAdmins: 5, maxBomen: 1, sortOrder: 0 },
       });
       await req('PUT', `/api/tenants/${tenantId}/license/tier`, { token: sysadminToken, body: { tierId: tier.body.id } });
 
@@ -467,7 +467,7 @@ describe('licenties', () => {
 
   describe('module-gating: "Projecten"', () => {
     it('zonder de module: schrijven naar producten is geblokkeerd en de boom levert lege project-data', async () => {
-      const { tenantId, doelenboomId, adminToken } = await setupWritableDoelenboom(sysadminToken, `${PREFIX}-t11`);
+      const { tenantId, doelenboomId, adminToken } = await setupWritableDoelenboom(sysadminToken, `${PREFIX}-t16`);
       await req('POST', `/api/doelenbomen/${doelenboomId}/elements`, {
         token: adminToken, body: { code: 'P1', type: 'Project', name: 'Project 1' },
       });
@@ -506,7 +506,7 @@ describe('licenties', () => {
     });
 
     it('met de module actief: schrijven naar producten werkt en de boom levert de data', async () => {
-      const { tenantId, doelenboomId, adminToken } = await setupWritableDoelenboom(sysadminToken, `${PREFIX}-t12`);
+      const { tenantId, doelenboomId, adminToken } = await setupWritableDoelenboom(sysadminToken, `${PREFIX}-t17`);
       await req('POST', `/api/doelenbomen/${doelenboomId}/elements`, {
         token: adminToken, body: { code: 'P1', type: 'Project', name: 'Project 1' },
       });

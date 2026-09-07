@@ -301,6 +301,19 @@ tenantsRouter.get('/:tenantId/members', requireTenantRoleForTenantParam('admin',
 // kan alleen via /api/users, sysadmin-only). Bestaat het account al, dan wordt
 // alleen de rol in déze tenant gezet/overschreven (upsert).
 tenantsRouter.post('/:tenantId/members', requireTenantRoleForTenantParam('admin', 'tenantId'), async (req, res) => {
+  // requireTenantRoleForTenantParam laat een sysadmin altijd meteen door
+  // (zie rbac.ts requireTenantRole) — zónder dat :tenantId dan al ergens is
+  // gevalideerd. Een niet-numerieke :tenantId (verkeerde aanroep, of een
+  // client die op een foutrespons van een vorige stap toch doorgaat, zie de
+  // gelijknamige check in test/helpers.ts setupWritableDoelenboom) belandde
+  // daardoor tot nu toe rauw in de query hieronder — Postgres wijst dat af
+  // ("invalid input syntax for type bigint"), en die fout wordt hier niet
+  // opgevangen: een onafgehandelde promise-rejection die de aanvraag
+  // voorgoed laat hangen i.p.v. een nette foutmelding te geven. Vroeg en
+  // expliciet valideren i.p.v. de database het laten ontdekken.
+  if (!/^\d+$/.test(req.params.tenantId)) {
+    return res.status(400).json({ error: 'Ongeldig tenantId.' });
+  }
   const b = (req.body ?? {}) as Record<string, unknown>;
   const email = typeof b.email === 'string' ? b.email.trim().toLowerCase() : '';
   const password = typeof b.password === 'string' ? b.password : '';
@@ -354,6 +367,10 @@ tenantsRouter.post('/:tenantId/members', requireTenantRoleForTenantParam('admin'
 });
 
 tenantsRouter.put('/:tenantId/members/:userId', requireTenantRoleForTenantParam('admin', 'tenantId'), async (req, res) => {
+  // Zie de toelichting bij POST /:tenantId/members hierboven.
+  if (!/^\d+$/.test(req.params.tenantId) || !/^\d+$/.test(req.params.userId)) {
+    return res.status(400).json({ error: 'Ongeldig tenantId of userId.' });
+  }
   const role = (req.body ?? {}).role;
   if (role !== 'admin' && role !== 'gebruiker' && role !== 'bezoeker') {
     return res.status(400).json({ error: 'role moet "admin", "gebruiker" of "bezoeker" zijn.' });
