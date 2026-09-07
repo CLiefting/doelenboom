@@ -291,8 +291,12 @@ export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBac
                         />
                         <span>
                           <strong>{m.name}</strong>
-                          {m.currentSurchargePct != null && (
-                            <span style={{ opacity: 0.7 }}> (+{Number(m.currentSurchargePct).toLocaleString('nl-NL')}%)</span>
+                          {m.pricingVariesByTier ? (
+                            <span style={{ opacity: 0.7 }}> (prijs varieert per abonnement)</span>
+                          ) : (
+                            m.currentSurchargePct != null && (
+                              <span style={{ opacity: 0.7 }}> (+{Number(m.currentSurchargePct).toLocaleString('nl-NL')}%)</span>
+                            )
                           )}
                           {m.description && <span style={{ opacity: 0.7 }}> — {m.description}</span>}
                         </span>

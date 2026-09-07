@@ -5,6 +5,7 @@ import { listModules, listTiers } from '../license.js';
 import { listOffers } from '../offers.js';
 import { getCurrentTierPrice } from '../tierPrices.js';
 import { getCurrentModuleSurcharge } from '../moduleSurcharges.js';
+import { listModuleTierSurcharges } from '../moduleTierSurcharges.js';
 import {
   countPendingSubscriptionActions,
   createSubscriptionRequest,
@@ -59,14 +60,30 @@ subscriptionsRouter.get('/subscription-tiers', async (_req, res) => {
 // login nodig (die route zit achter licensesRouter.use(requireAuth)), voor de
 // modulekeuze op de aanvraagpagina. currentSurchargePct erbij zodat de UI kan
 // tonen wat een module momenteel aan opslag kost (null = nog niet bepaald).
+//
+// Sinds 7 september 2026 (module_tier_surcharges, zie moduleTierSurcharges.ts)
+// kan een module i.p.v. één percentage voor alle tiers, per tier (en periode)
+// een eigen vast bedrag hebben — quotePrice valt alleen terug op het
+// percentage hierboven voor een tier ZONDER zo'n vaste rij (bv. Single-Use/
+// Evaluatie bij Projecten, zie module_tier_surcharges-toelichting in
+// db/init.sql). Eén vast "(+X%)"-label vóór de tierkeuze zou dan voor de
+// meeste tiers gewoon fout zijn. pricingVariesByTier geeft aan of dat voor
+// deze module het geval is, zodat de aanvraagpagina in dat geval geen (mis-
+// leidend) percentage toont — het exacte, per-tier-correcte bedrag staat
+// sowieso al in de prijsopgave zodra een tier gekozen is (zie .../price).
 subscriptionsRouter.get('/subscription-modules', async (_req, res) => {
   const modules = await listModules();
   const today = new Date().toISOString().slice(0, 10);
   const withSurcharge = await Promise.all(
-    modules.map(async (m) => ({
-      ...m,
-      currentSurchargePct: (await getCurrentModuleSurcharge(m.id, today))?.surchargePct ?? null,
-    }))
+    modules.map(async (m) => {
+      const tierSurcharges = await listModuleTierSurcharges(m.id);
+      const pricingVariesByTier = tierSurcharges.some((ts) => ts.validFrom <= today && ts.validUntil >= today);
+      return {
+        ...m,
+        currentSurchargePct: (await getCurrentModuleSurcharge(m.id, today))?.surchargePct ?? null,
+        pricingVariesByTier,
+      };
+    })
   );
   res.json(withSurcharge);
 });
