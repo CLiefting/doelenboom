@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { api, ApiError } from '../api';
-import type { BillingPeriod, PriceQuote, PublicModule, PublicTier } from '../types';
+import type { BillingPeriod, Offer, PriceQuote, PublicModule, PublicTier } from '../types';
 
 const PERIOD_LABEL: Record<BillingPeriod, string> = { maand: 'maand', jaar: 'jaar' };
 
@@ -13,11 +13,21 @@ const PERIOD_LABEL: Record<BillingPeriod, string> = { maand: 'maand', jaar: 'jaa
 export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBack: () => void; onSubmitted: (email: string) => void }) {
   const [tiers, setTiers] = useState<PublicTier[] | null>(null);
   const [modules, setModules] = useState<PublicModule[] | null>(null);
+  // Lopende aanbiedingen, rechtstreeks opgehaald i.p.v. pas zichtbaar zodra
+  // een tier gekozen is (Charles, 11 september 2026: "ik wil dat de
+  // aanbiedingen wel direct zichtbaar zijn en niet pas als ik het abonnement
+  // selecteer"). GET /subscription-offers filtert al op "nu geldig" (zie
+  // routes/subscriptions.ts) — offerForTier hieronder kiest per tier
+  // dezelfde "meest recent gestarte wint"-aanbieding als de backend
+  // (computeOfferedPrice in offers.ts: offers[0] uit een op valid_from desc
+  // gesorteerde lijst).
+  const [offers, setOffers] = useState<Offer[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     api.subscriptionTiers().then(setTiers).catch((err) => setError(errMsg(err)));
     api.subscriptionModules().then(setModules).catch((err) => setError(errMsg(err)));
+    api.subscriptionOffers().then(setOffers).catch((err) => setError(errMsg(err)));
   }, []);
 
   const [tierId, setTierId] = useState<number | null>(null);
@@ -134,10 +144,22 @@ export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBac
     }
   }
 
+  // Kiest, voor één tier, dezelfde aanbieding als de backend automatisch zou
+  // toepassen (computeOfferedPrice in api/src/offers.ts: bij meerdere lopende
+  // aanbiedingen voor dezelfde tier wint de meest recent gestarte). `offers`
+  // komt al "nu geldig" gefilterd binnen via GET /subscription-offers.
+  function offerForTier(tierId: number): Offer | null {
+    if (!offers) return null;
+    const matching = offers.filter((o) => o.tierIds.includes(tierId));
+    if (matching.length === 0) return null;
+    return [...matching].sort((a, b) => b.validFrom.localeCompare(a.validFrom))[0];
+  }
+
   function renderTierCard(t: PublicTier) {
     const accent = tierAccent(t.name);
     const selected = tierId === t.id;
     const priceStr = t.currentPriceEur[billingPeriod];
+    const offer = offerForTier(t.id);
     // Een tier zonder prijs voor de op dit moment gekozen periode (bv.
     // Single-Use/Evaluatie: bewust jaar-only, zie
     // doelenboom_licentiemodel.md §9.2 v3) is hier niet aanvraagbaar — zonder
@@ -179,15 +201,40 @@ export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBac
             )}
           </div>
         )}
+        {available && offer && (
+          <div style={styles.offerCardBadge}>
+            🏷 {offer.name} ({offerLabel(offer)}) — tijdelijk t/m {formatDateNL(offer.validUntil)}
+          </div>
+        )}
         {available ? (() => {
           const price = Number(priceStr);
-          return price === 0 ? (
-            <div style={{ ...styles.tierPriceFree, ...(accent ? { color: accent.text } : {}) }}>Gratis</div>
-          ) : (
+          if (price === 0) {
+            return <div style={{ ...styles.tierPriceFree, ...(accent ? { color: accent.text } : {}) }}>Gratis</div>;
+          }
+          // Alleen de tier-basisprijs verdisconteerd (nog geen modules
+          // gekozen op dit punt) — daarom "vanaf": met modules erbij kan de
+          // uiteindelijke prijs in de prijsopgave verderop hoger uitvallen.
+          // btw_vrij raakt dit ex-btw-bedrag niet (scheelt alleen de btw
+          // erbovenop), dus daarvoor geen doorgestreepte/nieuwe prijs — wel
+          // een aangepaste "incl. btw"-regel (die anders zou suggereren dat
+          // er alsnog btw bijkomt).
+          const isPercentOrFixed = offer && (offer.kind === 'percentage' || offer.kind === 'fixed_amount');
+          const offeredPrice = isPercentOrFixed ? applyOfferToAmount(offer!, price) : null;
+          const btwVrij = offer?.kind === 'btw_vrij';
+          return (
             <>
-              <div style={styles.tierPrice}>€ {price.toLocaleString('nl-NL')} / {PERIOD_LABEL[billingPeriod]}</div>
+              {offeredPrice != null ? (
+                <div style={styles.tierPrice}>
+                  <span style={styles.tierPriceStrike}>€ {price.toLocaleString('nl-NL')}</span>{' '}
+                  € {offeredPrice.toLocaleString('nl-NL')} / {PERIOD_LABEL[billingPeriod]} (vanaf)
+                </div>
+              ) : (
+                <div style={styles.tierPrice}>€ {price.toLocaleString('nl-NL')} / {PERIOD_LABEL[billingPeriod]}</div>
+              )}
               <div style={styles.tierPriceBtw}>
-                € {(price * 1.21).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} incl. BTW (21%)
+                {btwVrij
+                  ? 'geen btw (tijdelijke aanbieding)'
+                  : `€ ${((offeredPrice ?? price) * 1.21).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} incl. BTW (21%)`}
               </div>
             </>
           );
@@ -392,6 +439,39 @@ function errMsg(err: unknown): string {
   return err instanceof ApiError ? err.message : 'Er ging iets mis.';
 }
 
+function formatDateNL(dateStr: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
+  if (!m) return dateStr;
+  const [, y, mo, d] = m;
+  return `${d}-${mo}-${y}`;
+}
+
+// Kortingslabel voor op de tierkaart — zelfde bedrag-/percentageformattering
+// als de latere prijsopgave (quote.offer), maar dan zonder een tier
+// geselecteerd te hoeven hebben.
+function offerLabel(offer: Offer): string {
+  if (offer.kind === 'percentage' && offer.value != null) return `-${Number(offer.value).toLocaleString('nl-NL')}%`;
+  if (offer.kind === 'fixed_amount' && offer.value != null) return `-€ ${Number(offer.value).toLocaleString('nl-NL')}`;
+  if (offer.kind === 'btw_vrij') return 'zonder btw';
+  return offer.name;
+}
+
+// Zelfde percentage/vast-bedrag-berekening als computeOfferedPrice in
+// api/src/offers.ts, hier toegepast op alleen de tier-basisprijs (nog geen
+// modules gekozen op dit punt in de flow) — geeft dus het "vanaf"-bedrag;
+// met modules erbij kan het uiteindelijke bedrag in de prijsopgave verderop
+// hoger uitvallen. btw_vrij verandert het bedrag zelf niet (scheelt alleen
+// de btw erbovenop, zie de "incl. btw"-regel).
+function applyOfferToAmount(offer: Offer, amount: number): number {
+  if (offer.kind === 'percentage' && offer.value != null) {
+    return Math.round(amount * (1 - Number(offer.value) / 100) * 100) / 100;
+  }
+  if (offer.kind === 'fixed_amount' && offer.value != null) {
+    return Math.max(0, Math.round((amount - Number(offer.value)) * 100) / 100);
+  }
+  return amount;
+}
+
 // Metaal-accenten per tiernaam — Single-Use en eventuele eigen/maatwerktiers
 // krijgen bewust geen accent (vallen terug op de neutrale kaartstijl). Evaluatie
 // krijgt bewust geen metaalkleur maar hetzelfde groen als elders in de app voor
@@ -480,6 +560,15 @@ const styles: Record<string, React.CSSProperties> = {
   // verkoopargument, dat mag zichtbaar zwaarder wegen dan een gewoon bedrag.
   tierPriceFree: { fontSize: 16, fontWeight: 700, color: '#2F9E44', marginTop: 4 },
   tierPriceBtw: { fontSize: 10.5, color: '#9aa0a8' },
+  tierPriceStrike: { textDecoration: 'line-through', color: '#9aa0a8', fontWeight: 400, fontSize: 12 },
+  // Rechtstreeks op de tierkaart (i.p.v. alleen in de prijsopgave na het
+  // kiezen van een tier, zie offerBadge hieronder) — vandaar het expliciete
+  // "tijdelijk t/m <datum>" erin, zodat direct duidelijk is dat dit geen
+  // permanente prijs is.
+  offerCardBadge: {
+    fontSize: 10.5, fontWeight: 600, color: '#946200', background: '#FFF3CD', border: '1px solid #FFE69C',
+    borderRadius: 6, padding: '3px 6px', marginTop: 2, lineHeight: 1.3,
+  },
   // Voor een tier zonder prijs in de op dit moment gekozen periode (bv.
   // Single-Use/Evaluatie: bewust alleen jaarlijks, zie
   // doelenboom_licentiemodel.md §9.2 v3) — de kaart blijft zichtbaar (welke
