@@ -710,7 +710,7 @@ export const api = {
   // Bouwversie (git-hash + datum, via Docker build-arg — zie api/Dockerfile en
   // docker-compose.yml) voor de versie-footer (App.tsx). Geen token nodig:
   // dit staat ook zichtbaar voordat iemand is ingelogd.
-  version: () => request<{ version: string }>('/api/version', {}),
+  version: () => request<{ version: string; gitRef: string | null }>('/api/version', {}),
 
   // --- Juridische documenten (gebruiksvoorwaarden/privacyverklaring) — zie
   // api/src/routes/legal.ts. GET is bewust ongeauthenticeerd (ook zichtbaar

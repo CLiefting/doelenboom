@@ -23,9 +23,22 @@ export default function VersionFooter({
   onLegalRequest?: (type: 'terms' | 'privacy') => void;
 }) {
   const [version, setVersion] = useState<string | null>(null);
+  // Los van 'version': lokaal (doelenboom-cli.sh) staat BUILD_VERSION altijd
+  // hard op "dev" (zie dat script), dus zonder dit was de footer lokaal
+  // nutteloos als versheidscheck — je zag altijd letterlijk "vdev", ongeacht
+  // welke branch/commit je net had uitgecheckt en herbouwd (Charles, 11
+  // september 2026). gitRef ('unknown' zonder git-repo/commits) vult dat aan
+  // met de daadwerkelijke git-stand van de build.
+  const [gitRef, setGitRef] = useState<string | null>(null);
 
   useEffect(() => {
-    api.version().then((r) => setVersion(r.version)).catch(() => {});
+    api
+      .version()
+      .then((r) => {
+        setVersion(r.version);
+        setGitRef(r.gitRef);
+      })
+      .catch(() => {});
   }, []);
 
   return (
@@ -73,6 +86,7 @@ export default function VersionFooter({
           }}
         >
           v{version}
+          {gitRef && gitRef !== 'unknown' && ` (${gitRef})`}
         </div>
       )}
     </div>

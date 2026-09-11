@@ -125,8 +125,19 @@ export function createApp() {
   // versienummer in de footer van de app te tonen (web/src/App.tsx en
   // tree.html halen dit allebei bij deze ene bron op, in plaats van elk hun
   // eigen build-time injectie nodig te hebben).
+  //
+  // gitRef: apart van BUILD_VERSION, want doelenboom-cli.sh zet BUILD_VERSION
+  // lokaal altijd bewust hard op "dev" (zie dat script — voorkomt dat een in
+  // dezelfde shell nog geëxporteerde productie-BUILD_VERSION per ongeluk in de
+  // lokale footer blijft hangen). Daardoor toont de footer lokaal nooit welke
+  // commit je daadwerkelijk draait — precies het probleem waar Charles op
+  // 11 september 2026 tegenaan liep tijdens het debuggen van de aanbiedingen-
+  // badge (de footer leek nutteloos als versheidscheck). gitRef wordt WEL
+  // altijd meegegeven (zie docker-compose.yml/Dockerfile), onafhankelijk van
+  // BUILD_VERSION, dus de footer kan "vdev" en de actuele git-stand
+  // tegelijk tonen.
   app.get('/api/version', (_req, res) => {
-    res.json({ version: process.env.BUILD_VERSION || 'dev' });
+    res.json({ version: process.env.BUILD_VERSION || 'dev', gitRef: process.env.GIT_REF || null });
   });
 
   // announcementRouter vóór alle hieronder op de kale prefix '/api' gemounte
