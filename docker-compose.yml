@@ -49,6 +49,10 @@ services:
       # geen onderscheidende versie.
       args:
         BUILD_VERSION: ${BUILD_VERSION:-dev}
+        # Los van BUILD_VERSION — doelenboom-cli.sh zet die lokaal altijd hard
+        # op "dev" en vult GIT_REF apart met de actuele git-commit/branch, zodat
+        # de footer ("vdev") toch te herleiden is naar een concrete git-stand.
+        GIT_REF: ${GIT_REF:-unknown}
     image: doelenboom-api:latest
     restart: unless-stopped
     environment:

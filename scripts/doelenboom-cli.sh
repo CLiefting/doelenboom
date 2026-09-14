@@ -13,7 +13,22 @@
 #   doelenboom -local -rebuild -restart   # idem, én eerst alle (nieuwe) db/migrations/*.sql toepassen
 set -euo pipefail
 
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Vaste, veilige locatie i.p.v. dynamische BASH_SOURCE-resolutie (Charles, 14
+# september 2026: "maak scripts veilig. zet daar cd ~/OneDrive/src/doelenboom
+# altijd voor" — na een sessie vol OneDrive-verwarring waarbij dit project op
+# meerdere plekken tegelijk kon staan, waarvan sommige leeg of verouderd. Een
+# script dat zijn eigen locatie afleidt via BASH_SOURCE kan zo, afhankelijk
+# van welke symlink/kopie toevallig actief was, stilzwijgend tegen de
+# verkeerde/lege map aanpraten — met verwarrende fouten diep in docker compose
+# tot gevolg i.p.v. meteen een duidelijke melding. Deze vaste cd + expliciete
+# check hieronder falen liever meteen en luid.
+REPO_DIR="$HOME/OneDrive/src/doelenboom"
+if [ ! -f "$REPO_DIR/docker-compose.yml" ]; then
+  echo "Kan doelenboom niet vinden op $REPO_DIR (geen docker-compose.yml daar)." >&2
+  echo "Is de map leeg, verplaatst, of nog niet gesynchroniseerd (bv. door een OneDrive-issue)? Controleer dit eerst." >&2
+  exit 1
+fi
+cd "$REPO_DIR"
 
 # Zelfde credential-fallback als docker-compose.yml (${POSTGRES_USER:-doelenboom}
 # e.d.) — hardcoded default "doelenboom", maar overschrijfbaar door dezelfde
@@ -57,8 +72,6 @@ if [ "$ENVIRONMENT" = "prod" ]; then
   exit 1
 fi
 
-cd "$REPO_DIR"
-
 # Alle db/migrations/*.sql tegen de lopende (of net gestarte) db-container
 # toepassen, op volgorde van bestandsnaam (0001_..., 0002_..., ...). Elk
 # bestand is bewust idempotent (if not exists / on conflict do nothing, zie
@@ -87,6 +100,24 @@ case "$ACTION" in
     fi
 
     echo "==> Lokale stack herbouwen (gewijzigde services) en herstarten"
+    # GIT_REF: actuele branch@hash(-dirty) van deze checkout — los van
+    # BUILD_VERSION hieronder, zodat de footer ("vdev") alsnog te herleiden is
+    # naar een concrete git-stand. Zonder dit toonde de footer lokaal altijd
+    # letterlijk "vdev", ongeacht welke branch/commit je net had uitgecheckt —
+    # nutteloos als versheidscheck bij het debuggen (Charles, 11 september
+    # 2026). Geen git-repo/geen commits? Dan valt dit terug op "unknown" (zie
+    # ook de ARG-default in api/Dockerfile).
+    GIT_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+    GIT_HASH="$(git rev-parse --short HEAD 2>/dev/null || true)"
+    GIT_DIRTY=""
+    if [ -n "$GIT_HASH" ] && [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+      GIT_DIRTY="-dirty"
+    fi
+    if [ -n "$GIT_HASH" ]; then
+      GIT_REF="${GIT_BRANCH}@${GIT_HASH}${GIT_DIRTY}"
+    else
+      GIT_REF="unknown"
+    fi
     # BUILD_VERSION expliciet op 'dev' voor de lokale stack (footer toont dan
     # "vdev"), ONGEACHT een eventueel in deze shell geëxporteerde
     # BUILD_VERSION — bv. van scripts/build-version.sh, meestal geëxporteerd
@@ -96,7 +127,7 @@ case "$ACTION" in
     # ook al is dit gewoon een lokale dev-build. Een echte productie-build
     # blijft altijd BUILD_VERSION expliciet zetten (deploy/README.md, "Images
     # bouwen"), dus die is hier niet van afhankelijk.
-    BUILD_VERSION=dev docker compose up -d --build
+    BUILD_VERSION=dev GIT_REF="$GIT_REF" docker compose up -d --build
     echo
     docker compose ps
     ;;

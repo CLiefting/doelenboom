@@ -8,6 +8,12 @@ WORKDIR /app
 # gewoon werkt.
 ARG BUILD_VERSION=dev
 ENV BUILD_VERSION=${BUILD_VERSION}
+# Los van BUILD_VERSION (die doelenboom-cli.sh lokaal altijd hard op "dev"
+# zet, zie dat script) — de daadwerkelijke git-commit/branch die lokaal
+# gebouwd is, zodat de footer ("vdev") toch te herleiden is naar een
+# concrete git-stand. Zie doelenboom-cli.sh voor hoe dit gevuld wordt.
+ARG GIT_REF=unknown
+ENV GIT_REF=${GIT_REF}
 COPY package*.json ./
 RUN npm install
 COPY . .

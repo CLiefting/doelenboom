@@ -31,6 +31,15 @@ describe('overige endpoints (hello/health/version)', () => {
     assert.equal(res.body.version, process.env.BUILD_VERSION || 'dev');
   });
 
+  // gitRef: los van BUILD_VERSION, want doelenboom-cli.sh zet die lokaal
+  // altijd hard op "dev" — gitRef laat de footer alsnog de daadwerkelijke
+  // git-stand tonen (zie app.ts en VersionFooter.tsx).
+  it('GET /api/version geeft gitRef terug (null zonder GIT_REF-env-var)', async () => {
+    const res = await req('GET', '/api/version');
+    assert.equal(res.status, 200);
+    assert.equal(res.body.gitRef, process.env.GIT_REF || null);
+  });
+
   // Beveiligingsheaders (helmet, zie app.ts) — CISO-aandachtspunt. req() (via
   // helpers.ts) parset alleen de JSON-body, dus hier rechtstreeks fetch()
   // tegen getBaseUrl() om de response-headers zelf te kunnen inspecteren.

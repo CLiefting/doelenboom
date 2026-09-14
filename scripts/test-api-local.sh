@@ -12,7 +12,16 @@
 # Gebruik:
 #   ./scripts/test-api-local.sh
 set -euo pipefail
-cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Vaste, veilige locatie i.p.v. dynamische BASH_SOURCE-resolutie — zie
+# doelenboom-cli.sh voor de achtergrond (Charles, 14 september 2026).
+REPO_DIR="$HOME/OneDrive/src/doelenboom"
+if [ ! -f "$REPO_DIR/docker-compose.yml" ]; then
+  echo "Kan doelenboom niet vinden op $REPO_DIR (geen docker-compose.yml daar)." >&2
+  echo "Is de map leeg, verplaatst, of nog niet gesynchroniseerd (bv. door een OneDrive-issue)? Controleer dit eerst." >&2
+  exit 1
+fi
+cd "$REPO_DIR"
 
 echo "==> Poort 5432 controleren op vreemde luisteraars..."
 # lsof geeft exit-code 1 als er niets op de poort luistert — dat is hier prima

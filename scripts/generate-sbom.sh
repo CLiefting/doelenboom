@@ -5,13 +5,14 @@
 # (dat deze map runtime inleest, zie SBOM_DIR verderop/deploy/README.md).
 #
 # Hoort bij elke build te draaien, vóór `docker compose build`/`up --build`,
-# zelfde plek in de flow als scripts/build-version.sh:
+# zelfde plek in de flow als scripts/build-version.sh. Het script cd't zelf al
+# naar ~/OneDrive/src/doelenboom (zie hieronder), dus vanaf welke map je het
+# aanroept maakt niet uit:
 #
 #   set -euo pipefail
-#   cd ~/OneDrive/src/doelenboom
-#   ./scripts/pre-build.sh          # draait dit script ook zelf, zie onderaan
-#   export BUILD_VERSION="$(./scripts/build-version.sh)"
-#   docker compose up --build
+#   ~/OneDrive/src/doelenboom/scripts/pre-build.sh   # draait dit script ook zelf, zie onderaan
+#   export BUILD_VERSION="$(~/OneDrive/src/doelenboom/scripts/build-version.sh)"
+#   (cd ~/OneDrive/src/doelenboom && docker compose up --build)
 #
 # Vereisten: node/npx (voor cyclonedx-npm, via npx — geen extra
 # package.json-dependency nodig, zie §28 "minimaliseer nieuwe dependencies"),
@@ -24,7 +25,16 @@
 # hoeft dus niet bij élke lokale `npm run dev` te draaien, alleen vóór een
 # echte build/deploy of als je de pagina lokaal wil uitproberen.
 set -euo pipefail
-cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Vaste, veilige locatie i.p.v. dynamische BASH_SOURCE-resolutie — zie
+# doelenboom-cli.sh voor de achtergrond (Charles, 14 september 2026).
+REPO_DIR="$HOME/OneDrive/src/doelenboom"
+if [ ! -f "$REPO_DIR/docker-compose.yml" ]; then
+  echo "Kan doelenboom niet vinden op $REPO_DIR (geen docker-compose.yml daar)." >&2
+  echo "Is de map leeg, verplaatst, of nog niet gesynchroniseerd (bv. door een OneDrive-issue)? Controleer dit eerst." >&2
+  exit 1
+fi
+cd "$REPO_DIR"
 
 CYCLONEDX_NPM_VERSION="6.0.1"
 OUT="sbom"
