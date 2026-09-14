@@ -249,9 +249,11 @@ export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBac
         {available && offer && (
           <div style={styles.offerBelowTile}>
             <div style={styles.offerBelowTileTitle}>🏷 Tijdelijke aanbieding</div>
-            <div>
-              {offerDescription(offer)} — geldig t/m {formatDateNL(offer.validUntil)}
-            </div>
+            <div>{offerDescription(offer)}</div>
+            {/* Charles, 14 september 2026: geldigheidsdatum op een eigen
+                regel, met een lege regel ertussen (marginTop op
+                offerBelowTileValidUntil) i.p.v. inline achter de omschrijving. */}
+            <div style={styles.offerBelowTileValidUntil}>aanbieding geldig t/m {formatDateNL(offer.validUntil)}</div>
           </div>
         )}
       </div>
@@ -607,6 +609,10 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: '0 0 10px 10px', padding: '5px 9px 6px', lineHeight: 1.35, marginTop: -1,
   },
   offerBelowTileTitle: { fontWeight: 700, marginBottom: 1 },
+  // marginTop 10 (i.p.v. de gebruikelijke 2-4px elders) geeft bewust een
+  // duidelijk zichtbare "lege regel" tussen de omschrijving en de
+  // geldigheidsdatum (Charles, 14 september 2026).
+  offerBelowTileValidUntil: { marginTop: 10 },
   // Voor een tier zonder prijs in de op dit moment gekozen periode (bv.
   // Single-Use/Evaluatie: bewust alleen jaarlijks, zie
   // doelenboom_licentiemodel.md §9.2 v3) — de kaart blijft zichtbaar (welke
