@@ -13,7 +13,22 @@
 #   doelenboom -local -rebuild -restart   # idem, én eerst alle (nieuwe) db/migrations/*.sql toepassen
 set -euo pipefail
 
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Vaste, veilige locatie i.p.v. dynamische BASH_SOURCE-resolutie (Charles, 14
+# september 2026: "maak scripts veilig. zet daar cd ~/OneDrive/src/doelenboom
+# altijd voor" — na een sessie vol OneDrive-verwarring waarbij dit project op
+# meerdere plekken tegelijk kon staan, waarvan sommige leeg of verouderd. Een
+# script dat zijn eigen locatie afleidt via BASH_SOURCE kan zo, afhankelijk
+# van welke symlink/kopie toevallig actief was, stilzwijgend tegen de
+# verkeerde/lege map aanpraten — met verwarrende fouten diep in docker compose
+# tot gevolg i.p.v. meteen een duidelijke melding. Deze vaste cd + expliciete
+# check hieronder falen liever meteen en luid.
+REPO_DIR="$HOME/OneDrive/src/doelenboom"
+if [ ! -f "$REPO_DIR/docker-compose.yml" ]; then
+  echo "Kan doelenboom niet vinden op $REPO_DIR (geen docker-compose.yml daar)." >&2
+  echo "Is de map leeg, verplaatst, of nog niet gesynchroniseerd (bv. door een OneDrive-issue)? Controleer dit eerst." >&2
+  exit 1
+fi
+cd "$REPO_DIR"
 
 # Zelfde credential-fallback als docker-compose.yml (${POSTGRES_USER:-doelenboom}
 # e.d.) — hardcoded default "doelenboom", maar overschrijfbaar door dezelfde
@@ -56,8 +71,6 @@ if [ "$ENVIRONMENT" = "prod" ]; then
   echo "Productie-acties zijn nog niet geautomatiseerd in dit script — volg deploy/README.md." >&2
   exit 1
 fi
-
-cd "$REPO_DIR"
 
 # Alle db/migrations/*.sql tegen de lopende (of net gestarte) db-container
 # toepassen, op volgorde van bestandsnaam (0001_..., 0002_..., ...). Elk

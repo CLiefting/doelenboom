@@ -3,20 +3,29 @@
 # excel-service/tests/, incl. de Excel-import/export-rondgang — geen skips)
 # en stopt meteen (set -e) zodra er iets faalt, zodat een kapotte build het
 # nooit tot de daadwerkelijke `docker compose build` haalt. Bedoeld als eerste
-# stap vóór een productie-release:
+# stap vóór een productie-release (het script cd't zelf al naar
+# ~/OneDrive/src/doelenboom, zie hieronder — vanaf welke map je het aanroept
+# maakt dus niet uit):
 #
-#   set -euo pipefail
-#   cd ~/OneDrive/src/doelenboom
-#   ./scripts/pre-build.sh
-#   export BUILD_VERSION="$(./scripts/build-version.sh)"
-#   docker compose up --build
+#   ~/OneDrive/src/doelenboom/scripts/pre-build.sh
+#   export BUILD_VERSION="$(~/OneDrive/src/doelenboom/scripts/build-version.sh)"
+#   (cd ~/OneDrive/src/doelenboom && docker compose up --build)
 #
 # Dekt NIET de handmatige checklist (docs/regressie-checklist.md) — tree.html
 # heeft bewust geen testinfra (zie TESTING.md), dus die moet je zelf blijven
 # doorlopen vóór een productie-deploy. Dit script vervangt dat niet, het is
 # een aanvullende vangnet-stap voor wat wél geautomatiseerd kan.
 set -euo pipefail
-cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Vaste, veilige locatie i.p.v. dynamische BASH_SOURCE-resolutie — zie
+# doelenboom-cli.sh voor de achtergrond (Charles, 14 september 2026).
+REPO_DIR="$HOME/OneDrive/src/doelenboom"
+if [ ! -f "$REPO_DIR/docker-compose.yml" ]; then
+  echo "Kan doelenboom niet vinden op $REPO_DIR (geen docker-compose.yml daar)." >&2
+  echo "Is de map leeg, verplaatst, of nog niet gesynchroniseerd (bv. door een OneDrive-issue)? Controleer dit eerst." >&2
+  exit 1
+fi
+cd "$REPO_DIR"
 
 UVICORN_PID=""
 cleanup() {

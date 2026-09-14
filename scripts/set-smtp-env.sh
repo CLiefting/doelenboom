@@ -5,10 +5,10 @@
 # zelf — dit script vráágt het interactief (verborgen invoer, niet op het
 # scherm zichtbaar, niet in je shell-geschiedenis).
 #
-# Gebruik (vanuit de root van de repo-checkout, waar ook .env/.env.example
-# staan):
-#   chmod +x scripts/set-smtp-env.sh
-#   ./scripts/set-smtp-env.sh
+# Gebruik (het script cd't zelf al naar ~/OneDrive/src/doelenboom, zie
+# hieronder — vanaf welke map je het aanroept maakt dus niet uit):
+#   chmod +x ~/OneDrive/src/doelenboom/scripts/set-smtp-env.sh
+#   ~/OneDrive/src/doelenboom/scripts/set-smtp-env.sh
 #
 # Poort/beveiliging zijn de door Hostnet bevestigde waarden (587, STARTTLS —
 # zie §9 in het ontwerpdocument) en staan hieronder vast. Host is instelbaar
@@ -18,8 +18,15 @@
 # adres) gewoon doorkomt — functioneel gelijkwaardig voor dit lage volume.
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$SCRIPT_DIR"
+# Vaste, veilige locatie i.p.v. dynamische BASH_SOURCE-resolutie — zie
+# doelenboom-cli.sh voor de achtergrond (Charles, 14 september 2026).
+REPO_DIR="$HOME/OneDrive/src/doelenboom"
+if [ ! -f "$REPO_DIR/docker-compose.yml" ]; then
+  echo "Kan doelenboom niet vinden op $REPO_DIR (geen docker-compose.yml daar)." >&2
+  echo "Is de map leeg, verplaatst, of nog niet gesynchroniseerd (bv. door een OneDrive-issue)? Controleer dit eerst." >&2
+  exit 1
+fi
+cd "$REPO_DIR"
 
 ENV_FILE=".env"
 if [ ! -f "$ENV_FILE" ]; then
