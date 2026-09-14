@@ -169,20 +169,29 @@ export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBac
     // backend-validatie in createSubscriptionRequest).
     const available = priceStr != null;
     const otherPeriod: BillingPeriod = billingPeriod === 'jaar' ? 'maand' : 'jaar';
+    // Wrapper i.p.v. de button rechtstreeks in tierGrid: het "Tijdelijke
+    // aanbieding"-paneel hoort ONDER de tile (Charles, 14 september 2026:
+    // "ik zou graag de aanbieding onder de tile willen zien als duidelijk
+    // 'tijdelijke aanbieding' met de aanbieding duidelijk wat het is" — eerst
+    // stond de badge boven de prijs, IN de kaart). Als renderTierCard twee
+    // aparte elementen naast elkaar teruggeeft, ziet tierGrid (CSS grid) die
+    // als twee losse grid-items i.p.v. gestapeld in één kolom — vandaar deze
+    // ene wrapper-div als het daadwerkelijke grid-item.
     return (
-      <button
-        type="button"
-        key={t.id}
-        disabled={!available}
-        onClick={() => available && setTierId(t.id)}
-        title={available ? undefined : `Dit abonnement is alleen ${PERIOD_LABEL[otherPeriod]}lijks beschikbaar.`}
-        style={{
-          ...styles.tierCard,
-          ...(accent ? { borderTopColor: accent.border, background: selected ? styles.tierCardSelected.background : accent.bg } : {}),
-          ...(selected ? styles.tierCardSelected : {}),
-          ...(available ? {} : styles.tierCardDisabled),
-        }}
-      >
+      <div key={t.id} style={styles.tierCardWrapper}>
+        <button
+          type="button"
+          disabled={!available}
+          onClick={() => available && setTierId(t.id)}
+          title={available ? undefined : `Dit abonnement is alleen ${PERIOD_LABEL[otherPeriod]}lijks beschikbaar.`}
+          style={{
+            ...styles.tierCard,
+            ...(offer && available ? styles.tierCardWithOfferBelow : {}),
+            ...(accent ? { borderTopColor: accent.border, background: selected ? styles.tierCardSelected.background : accent.bg } : {}),
+            ...(selected ? styles.tierCardSelected : {}),
+            ...(available ? {} : styles.tierCardDisabled),
+          }}
+        >
         <div style={{ ...styles.tierName, ...(accent ? { color: accent.text } : {}) }}>{t.name}</div>
         <div style={styles.tierMeta}>
           max {t.maxEditors} admin/editor{t.maxEditors === 1 ? '' : 's'}, max {t.maxBomen} doelenbomen
@@ -199,11 +208,6 @@ export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBac
                 ✓ alle modules
               </span>
             )}
-          </div>
-        )}
-        {available && offer && (
-          <div style={styles.offerCardBadge}>
-            🏷 {offer.name} ({offerLabel(offer)}) — tijdelijk t/m {formatDateNL(offer.validUntil)}
           </div>
         )}
         {available ? (() => {
@@ -241,7 +245,16 @@ export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBac
         })() : (
           <div style={styles.tierUnavailableNote}>Alleen {PERIOD_LABEL[otherPeriod]}lijks beschikbaar</div>
         )}
-      </button>
+        </button>
+        {available && offer && (
+          <div style={styles.offerBelowTile}>
+            <div style={styles.offerBelowTileTitle}>🏷 Tijdelijke aanbieding</div>
+            <div>
+              {offerDescription(offer)} — geldig t/m {formatDateNL(offer.validUntil)}
+            </div>
+          </div>
+        )}
+      </div>
     );
   }
 
@@ -449,10 +462,17 @@ function formatDateNL(dateStr: string): string {
 // Kortingslabel voor op de tierkaart — zelfde bedrag-/percentageformattering
 // als de latere prijsopgave (quote.offer), maar dan zonder een tier
 // geselecteerd te hoeven hebben.
-function offerLabel(offer: Offer): string {
-  if (offer.kind === 'percentage' && offer.value != null) return `-${Number(offer.value).toLocaleString('nl-NL')}%`;
-  if (offer.kind === 'fixed_amount' && offer.value != null) return `-€ ${Number(offer.value).toLocaleString('nl-NL')}`;
-  if (offer.kind === 'btw_vrij') return 'zonder btw';
+// Volledige, ondubbelzinnige omschrijving voor het "Tijdelijke aanbieding"-
+// paneel onder de tile (Charles, 14 september 2026: "...met de aanbieding
+// duidelijk wat het is" — een kaal "-20%"-label zonder context volstond niet).
+function offerDescription(offer: Offer): string {
+  if (offer.kind === 'percentage' && offer.value != null) {
+    return `${offer.name}: ${Number(offer.value).toLocaleString('nl-NL')}% korting op de abonnementsprijs`;
+  }
+  if (offer.kind === 'fixed_amount' && offer.value != null) {
+    return `${offer.name}: € ${Number(offer.value).toLocaleString('nl-NL')} korting op de abonnementsprijs`;
+  }
+  if (offer.kind === 'btw_vrij') return `${offer.name}: geen btw over de abonnementsprijs`;
   return offer.name;
 }
 
@@ -534,12 +554,27 @@ const styles: Record<string, React.CSSProperties> = {
   // gridTemplateColumns wordt per rij overschreven (zie de rowStyle-berekening
   // hierboven, die beide rijen op hetzelfde aantal kolommen zet) — dit is
   // alleen de fallback-basisstijl.
-  tierGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 },
+  // alignItems: 'start' — zonder dit rekt CSS grid elke tierCardWrapper naar
+  // de hoogte van de langste kaart in de rij (grid-standaardgedrag is
+  // stretch), wat een lege, ongebruikte strook onder de kortere kaarten
+  // oplevert zodra één kaart in dezelfde rij het "Tijdelijke aanbieding"-
+  // paneel erbij krijgt. Met 'start' krijgt elke kaart gewoon zijn eigen,
+  // natuurlijke hoogte.
+  tierGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, alignItems: 'start' },
+  // Eén wrapper per tier = één grid-item (zie renderTierCard) — houdt de
+  // knop en het eventuele aanbiedingspaneel eronder in dezelfde kolom i.p.v.
+  // los naast elkaar in de grid.
+  tierCardWrapper: { display: 'flex', flexDirection: 'column' },
   tierCard: {
     textAlign: 'left', border: '1px solid #e4e6ea', borderTop: '4px solid #e4e6ea', borderRadius: 10,
     padding: '0.75rem 0.9rem', background: 'white', cursor: 'pointer', display: 'flex', flexDirection: 'column',
     gap: 3,
   },
+  // Wanneer er een aanbiedingspaneel onder de kaart komt (zie offerBelowTile)
+  // sluiten de twee visueel op elkaar aan: de kaart verliest zijn onderrand-
+  // radius, zodat het geheel als één doorlopend blok oogt i.p.v. twee losse
+  // afgeronde vlakken onder elkaar.
+  tierCardWithOfferBelow: { borderBottomLeftRadius: 0, borderBottomRightRadius: 0, borderBottom: 'none' },
   // Zet bewust alléén de zij-/onderrand blauw (longhand-properties, geen
   // "border"-shorthand) — de bovenrand houdt zo zijn metaal-accentkleur
   // (zie tierAccent hierboven) ook wanneer de tile geselecteerd is.
@@ -561,14 +596,17 @@ const styles: Record<string, React.CSSProperties> = {
   tierPriceFree: { fontSize: 16, fontWeight: 700, color: '#2F9E44', marginTop: 4 },
   tierPriceBtw: { fontSize: 10.5, color: '#9aa0a8' },
   tierPriceStrike: { textDecoration: 'line-through', color: '#9aa0a8', fontWeight: 400, fontSize: 12 },
-  // Rechtstreeks op de tierkaart (i.p.v. alleen in de prijsopgave na het
-  // kiezen van een tier, zie offerBadge hieronder) — vandaar het expliciete
-  // "tijdelijk t/m <datum>" erin, zodat direct duidelijk is dat dit geen
-  // permanente prijs is.
-  offerCardBadge: {
-    fontSize: 10.5, fontWeight: 600, color: '#946200', background: '#FFF3CD', border: '1px solid #FFE69C',
-    borderRadius: 6, padding: '3px 6px', marginTop: 2, lineHeight: 1.3,
+  // Los paneel ONDER de tile (i.p.v. een badge binnenin, zie tierCardWrapper
+  // hierboven) — Charles, 14 september 2026: "ik zou graag de aanbieding
+  // onder de tile willen zien als duidelijk 'tijdelijke aanbieding' met de
+  // aanbieding duidelijk wat het is". Vast aan de kaart "gelast" via
+  // tierCardWithOfferBelow (geen rand-radius/rand aan de onderkant van de
+  // kaart zelf) + marginTop: -1 hier om de randen exact te laten overlappen.
+  offerBelowTile: {
+    fontSize: 10.5, color: '#946200', background: '#FFF3CD', border: '1px solid #FFE69C', borderTop: 'none',
+    borderRadius: '0 0 10px 10px', padding: '5px 9px 6px', lineHeight: 1.35, marginTop: -1,
   },
+  offerBelowTileTitle: { fontWeight: 700, marginBottom: 1 },
   // Voor een tier zonder prijs in de op dit moment gekozen periode (bv.
   // Single-Use/Evaluatie: bewust alleen jaarlijks, zie
   // doelenboom_licentiemodel.md §9.2 v3) — de kaart blijft zichtbaar (welke
