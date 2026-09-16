@@ -563,6 +563,21 @@ rechtstreeks in de database het account tijdelijk degraderen
 herstel weer terugzetten) — een bewuste, loggegevens-buiten-de-app-om-actie,
 zelfde soort ingreep als de migratie-commando's hierboven.
 
+## Notificatiemail bij een nieuwe abonnementsaanvraag
+
+Elke geslaagde zelfbedieningsaanvraag (publieke aanvraagpagina,
+`POST /api/subscription-requests`) stuurt een interne notificatiemail —
+"er wacht een aanvraag op (re)actie" — zie `api/src/email.ts`
+`sendNewSubscriptionRequestEmail` en de aanroep vanuit `createSubscriptionRequest`
+in `api/src/subscriptions.ts` (Charles, 16 september 2026). Gebruikt dezelfde
+SMTP-relay als de MFA-mail hierboven; alleen de ontvanger is apart instelbaar
+via `SUBSCRIPTION_REQUEST_NOTIFY_EMAIL` in `.env` (standaard
+`info.doelenboom@code072.nl`, zie `.env.example`). Staat `SMTP_HOST`
+leeg/ontbrekend, dan wordt ook deze mail niet verstuurd — alleen een
+waarschuwing in de `api`-container-log, zelfde fallback als bij MFA. Een
+mislukte verzending (bv. relay tijdelijk onbereikbaar) blokkeert de aanvraag
+zelf niet: die wordt sowieso al aangemaakt vóórdat de mail geprobeerd wordt.
+
 ## Openstaand aandachtspunt: offsite-kopie
 
 De databaseback-up hierboven én de nachtelijke Excel-back-up staan beide

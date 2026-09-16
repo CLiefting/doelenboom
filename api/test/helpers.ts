@@ -11,7 +11,7 @@
 // wegwerpbare database (doelenboom_test), dezelfde aanpak als productie.
 import { createApp } from '../src/app.js';
 import { pool } from '../src/db.js';
-import { setSendMfaEmailImpl } from '../src/email.js';
+import { setSendMfaEmailImpl, setSendNewSubscriptionRequestEmailImpl, NewSubscriptionRequestNotification } from '../src/email.js';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 
@@ -48,6 +48,19 @@ export function setMfaEmailFailure(shouldFail: boolean): void {
   } else {
     setSendMfaEmailImpl(captureMfaEmail);
   }
+}
+
+// Zelfde soort testhaak als captureMfaEmail hierboven, nu voor de
+// nieuwe-aanvraag-notificatiemail (zie subscriptions.ts createSubscriptionRequest
+// / email.ts sendNewSubscriptionRequestEmail) — vangt de laatst verstuurde
+// notificatie per aanvraag-ID op i.p.v. écht te mailen.
+const lastSubscriptionRequestNotificationById = new Map<number, NewSubscriptionRequestNotification>();
+setSendNewSubscriptionRequestEmailImpl(async (notification) => {
+  lastSubscriptionRequestNotificationById.set(notification.requestId, notification);
+});
+
+export function getLastSubscriptionRequestNotification(requestId: number): NewSubscriptionRequestNotification | undefined {
+  return lastSubscriptionRequestNotificationById.get(requestId);
 }
 
 let server: Server | null = null;

@@ -13,6 +13,16 @@ const SMTP_PASSWORD = process.env.SMTP_PASSWORD;
 // ontvanger ziet mag dus afwijken van het account waarmee verstuurd wordt.
 const SMTP_FROM = process.env.SMTP_FROM ?? 'no-reply.doelenboom@code072.nl';
 
+// Interne notificatie ("er wacht een aanvraag op (re)actie") bij elke nieuwe
+// zelfbedieningsaanvraag (zie createSubscriptionRequest in subscriptions.ts).
+// Dit is de ONTVANGER, niet de afzender — apart van SMTP_FROM/SMTP_USER
+// hierboven. Instelbaar via env (Charles, 16 september 2026: "wil ik dat er
+// een mail wordt gestuurd ... zodat ik geinformeerd wordt dat iemand op
+// (re)actie wacht"), met een vaste standaardwaarde zodat dit ook zonder extra
+// configuratie meteen werkt.
+const SUBSCRIPTION_REQUEST_NOTIFY_EMAIL =
+  process.env.SUBSCRIPTION_REQUEST_NOTIFY_EMAIL ?? 'info.doelenboom@code072.nl';
+
 let transporter: Transporter | null = null;
 
 function getTransporter(): Transporter | null {
@@ -76,4 +86,75 @@ export let sendMfaEmail = async (to: string, code: string, ttlMinutes = 10): Pro
 
 export function setSendMfaEmailImpl(fn: typeof sendMfaEmail): void {
   sendMfaEmail = fn;
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
+}
+
+export interface NewSubscriptionRequestNotification {
+  requestId: number;
+  organizationName: string;
+  applicantName: string;
+  applicantEmail: string;
+  applicantPhone: string | null;
+  tierName: string;
+  billingPeriod: 'maand' | 'jaar';
+  priceEur: number | null;
+  trialEndDate: string;
+}
+
+function renderNewSubscriptionRequestEmail(
+  n: NewSubscriptionRequestNotification
+): { subject: string; text: string; html: string } {
+  const periodLabel = n.billingPeriod === 'maand' ? 'per maand' : 'per jaar';
+  const priceLabel = n.priceEur != null ? `€ ${n.priceEur.toLocaleString('nl-NL')} ${periodLabel}` : 'onbekend';
+  const contactLine = `${n.applicantName} <${n.applicantEmail}>${n.applicantPhone ? ` — ${n.applicantPhone}` : ''}`;
+  const subject = `Nieuwe abonnementsaanvraag: ${n.organizationName}`;
+  const text =
+    `Er is een nieuwe abonnementsaanvraag binnengekomen die op (re)actie wacht.\n\n` +
+    `Organisatie: ${n.organizationName}\n` +
+    `Aanvrager: ${contactLine}\n` +
+    `Tier: ${n.tierName}\n` +
+    `Prijs: ${priceLabel}\n` +
+    `Proefperiode tot: ${n.trialEndDate}\n` +
+    `Aanvraag-ID: ${n.requestId}`;
+  const row = (label: string, value: string) =>
+    `<tr><td style="padding:2px 12px 2px 0;color:#6c6f76">${label}</td><td>${value}</td></tr>`;
+  const html =
+    `<p>Er is een nieuwe abonnementsaanvraag binnengekomen die op (re)actie wacht.</p>` +
+    `<table style="border-collapse:collapse">` +
+    row('Organisatie', escapeHtml(n.organizationName)) +
+    row(
+      'Aanvrager',
+      `${escapeHtml(n.applicantName)} &lt;${escapeHtml(n.applicantEmail)}&gt;` +
+        (n.applicantPhone ? ` — ${escapeHtml(n.applicantPhone)}` : '')
+    ) +
+    row('Tier', escapeHtml(n.tierName)) +
+    row('Prijs', escapeHtml(priceLabel)) +
+    row('Proefperiode tot', escapeHtml(n.trialEndDate)) +
+    row('Aanvraag-ID', String(n.requestId)) +
+    `</table>`;
+  return { subject, text, html };
+}
+
+// Zelfde `let`-exportbinding-patroon als sendMfaEmail hierboven, om dezelfde
+// reden mockbaar vanuit api/test/helpers.ts (setSendNewSubscriptionRequestEmailImpl).
+export let sendNewSubscriptionRequestEmail = async (
+  notification: NewSubscriptionRequestNotification
+): Promise<void> => {
+  const transport = getTransporter();
+  const { subject, text, html } = renderNewSubscriptionRequestEmail(notification);
+  if (!transport) {
+    console.warn(
+      `WAARSCHUWING: geen SMTP_HOST geconfigureerd — notificatie voor nieuwe aanvraag #${notification.requestId} ` +
+        `(${notification.organizationName}) is niet gemaild (zou naar ${SUBSCRIPTION_REQUEST_NOTIFY_EMAIL} gaan).`
+    );
+    return;
+  }
+  await transport.sendMail({ from: SMTP_FROM, to: SUBSCRIPTION_REQUEST_NOTIFY_EMAIL, subject, text, html });
+};
+
+export function setSendNewSubscriptionRequestEmailImpl(fn: typeof sendNewSubscriptionRequestEmail): void {
+  sendNewSubscriptionRequestEmail = fn;
 }
