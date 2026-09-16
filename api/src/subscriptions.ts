@@ -5,6 +5,7 @@ import { computeOfferedPrice, listActiveOffersForTier, ModuleSurchargeLine, Pric
 import { getCurrentTierPrice } from './tierPrices.js';
 import { getCurrentModuleSurcharge } from './moduleSurcharges.js';
 import { getCurrentModuleTierSurcharge } from './moduleTierSurcharges.js';
+import { sendNewSubscriptionRequestEmail } from './email.js';
 
 export type BillingPeriod = 'maand' | 'jaar';
 export function isBillingPeriod(v: unknown): v is BillingPeriod {
@@ -319,6 +320,30 @@ export async function createSubscriptionRequest(input: {
     });
 
     await client.query('commit');
+
+    // Notificatie naar de beheerder dat er een aanvraag op (re)actie wacht
+    // (Charles, 16 september 2026) — BEWUST NA de commit en in een eigen
+    // try/catch: de aanvraag zelf is op dit punt al geslaagd, een mislukte
+    // notificatiemail (bv. SMTP-relay tijdelijk onbereikbaar) mag dat succes
+    // niet ongedaan maken of de aanvrager een 500 laten zien. Ontvanger is
+    // instelbaar via SUBSCRIPTION_REQUEST_NOTIFY_EMAIL (zie email.ts),
+    // standaard info.doelenboom@code072.nl.
+    try {
+      await sendNewSubscriptionRequestEmail({
+        requestId,
+        organizationName: input.organizationName,
+        applicantName: input.applicantName,
+        applicantEmail: input.applicantEmail,
+        applicantPhone: input.applicantPhone,
+        tierName: tier.name,
+        billingPeriod: input.billingPeriod,
+        priceEur: quote.finalPriceEur,
+        trialEndDate,
+      });
+    } catch (err) {
+      console.error(`Notificatiemail voor nieuwe aanvraag #${requestId} mislukt:`, err);
+    }
+
     return { tenantId, tenantSlug: tenantResult.rows[0].slug, requestId };
   } catch (err) {
     await client.query('rollback');

@@ -69,6 +69,11 @@ services:
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM: ${SMTP_FROM:-no-reply.doelenboom@code072.nl}
+      # Ontvanger van de interne notificatiemail bij een nieuwe zelf-
+      # bedieningsaanvraag (zie api/src/email.ts sendNewSubscriptionRequestEmail
+      # en deploy/README.md) — apart instelbaar, gebruikt verder dezelfde
+      # SMTP_*-instellingen hierboven.
+      SUBSCRIPTION_REQUEST_NOTIFY_EMAIL: ${SUBSCRIPTION_REQUEST_NOTIFY_EMAIL:-info.doelenboom@code072.nl}
       # Expliciet i.p.v. te vertrouwen op dependencyHealth.ts's eigen
       # cwd-gebaseerde fallback (`path.resolve(process.cwd(), '..', 'sbom')`,
       # bedoeld voor lokaal `npm run dev` zonder Docker vanuit api/): met

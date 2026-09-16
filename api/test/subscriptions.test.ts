@@ -2,7 +2,7 @@ import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   startTestServer, stopTestServer, closePool, req, unique, createSysadminUser, login, cleanupByPrefix,
-  setupWritableDoelenboom,
+  setupWritableDoelenboom, getLastSubscriptionRequestNotification,
 } from './helpers.js';
 
 const PREFIX = unique('sub');
@@ -167,6 +167,33 @@ describe('zelfbedieningsaanvraag', () => {
       const list = await req('GET', '/api/subscription-requests', { token: sysadminToken });
       const row = list.body.find((r: any) => r.requestId === created.body.requestId || r.id === created.body.requestId);
       assert.equal(Number(row.priceAtRequest), 1200);
+    });
+
+    // Charles, 16 september 2026: "als iemand een nieuw abonnement afsluit
+    // wil ik dat er een mail wordt gestuurd ... zodat ik geinformeerd word
+    // dat iemand op (re)actie wacht" — zie email.ts sendNewSubscriptionRequestEmail,
+    // aangeroepen vanuit createSubscriptionRequest ná de commit.
+    it('een geslaagde aanvraag stuurt een notificatiemail met de aanvraaggegevens', async () => {
+      const tier = await makeTier('notificatie', 500);
+      const applicantEmail = `${PREFIX}-notify@test.local`;
+      const created = await req('POST', '/api/subscription-requests', {
+        body: {
+          organizationName: `${PREFIX} Notificatie BV`, applicantName: 'Jan Janssen',
+          applicantEmail, applicantPhone: '06-12345678',
+          password: 'wachtwoord123', tierId: tier.id, moduleKeys: [], billingPeriod: 'jaar',
+        },
+      });
+      assert.equal(created.status, 201, JSON.stringify(created.body));
+
+      const notification = getLastSubscriptionRequestNotification(created.body.requestId);
+      assert.ok(notification, 'geen notificatiemail opgevangen voor deze aanvraag');
+      assert.equal(notification!.organizationName, `${PREFIX} Notificatie BV`);
+      assert.equal(notification!.applicantName, 'Jan Janssen');
+      assert.equal(notification!.applicantEmail, applicantEmail);
+      assert.equal(notification!.applicantPhone, '06-12345678');
+      assert.equal(notification!.tierName, tier.name);
+      assert.equal(notification!.billingPeriod, 'jaar');
+      assert.equal(notification!.priceEur, 500);
     });
 
     it('een BTW-vrij-aanbieding laat de prijs ongewijzigd maar zet btwVrij op true', async () => {
