@@ -160,6 +160,17 @@
   .filter-status.visible { display: flex; }
   .filter-status .filter-status-text { font-weight: 600; color: #2f6fed; }
 
+  .connect-status {
+    display: none; align-items: center; gap: 8px; font-size: 12.5px; color: #666;
+    background: #f5f0ff; border: 1px solid #ddd0fb; border-radius: 999px;
+    padding: 6px 8px 6px 14px; flex-wrap: wrap;
+  }
+  .connect-status.visible { display: flex; }
+  .connect-status .connect-status-text { font-weight: 600; color: #7c3aed; }
+  .connect-status select, .connect-status input[type=text] {
+    font-family: inherit; font-size: 12px; padding: 3px 6px; border-radius: 6px; border: 1px solid #ccc;
+  }
+
   .controls {
     display: flex; justify-content: center; align-items: center; gap: 10px;
     flex-wrap: wrap; margin-bottom: 22px;
@@ -173,6 +184,7 @@
   .btn:hover:not(:disabled) { background: var(--navy); color: #fff; transform: translateY(-1px); }
   .btn:disabled { opacity: 0.35; cursor: default; }
   .btn.ghost { border-color: #bbb; color: #777; }
+  .btn.ghost.active-mode { background: var(--navy); color: #fff; border-color: var(--navy); }
   .btn.ghost:hover:not(:disabled) { background: #777; color: #fff; }
   .btn.back-btn { border-color: var(--focus); color: var(--focus); }
   .btn.back-btn:hover:not(:disabled) { background: var(--focus); color: #fff; }
@@ -1126,6 +1138,20 @@
     box-shadow: 0 0 0 3px #2f6fed, 0 0 0 7px rgba(47,111,237,0.35), 0 3px 8px rgba(0,0,0,0.3);
   }
   .node.filter-hidden { display: none; }
+  /* Verbindmodus (klik-op-klik relaties maken, zie "---- Verbindmodus ----"
+     verderop in het script): bewust een derde, eigen kleuraccent (paars)
+     naast blauw (Boomfilter) en oranje (pad-highlight), plus een
+     volgnummer-badge zodat de klikvolgorde (bepalend voor de
+     relatierichting) zichtbaar blijft. */
+  .node.connect-picked {
+    box-shadow: 0 0 0 3px #7c3aed, 0 0 0 7px rgba(124,58,237,0.35), 0 3px 8px rgba(0,0,0,0.3);
+  }
+  .node-connect-badge {
+    position: absolute; top: -9px; left: -9px; width: 20px; height: 20px; border-radius: 50%;
+    background: #7c3aed; color: #fff; font-size: 11px; font-weight: 700; font-family: inherit;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.35); pointer-events: none; z-index: 2;
+  }
   .node.dimmed { opacity: 0.25; }
   .node-tag-dot {
     position: absolute; top: 3px; right: 3px; width: 6px; height: 6px; border-radius: 50%;
@@ -1407,7 +1433,7 @@
   </div>
 
   <div class="page-header">
-    <p class="hint">Klik op een vak om het volledige verbonden pad te markeren. Houd de muis boven een vak voor de omschrijving. Dubbelklik om in te zoomen op dat element, &eacute;&eacute;n niveau erboven en alle onderliggende elementen. Ctrl/Cmd-klik (op mobiel: lang indrukken) om een vak toe te voegen aan de boomfilter en druk daarna op "Toon deze bomen" om alleen de bomen te zien die de geselecteerde elementen raken.</p>
+    <p class="hint">Klik op een vak om het volledige verbonden pad te markeren. Houd de muis boven een vak voor de omschrijving. Dubbelklik om in te zoomen op dat element, &eacute;&eacute;n niveau erboven en alle onderliggende elementen. Ctrl/Cmd-klik (op mobiel: lang indrukken) om een vak toe te voegen aan de boomfilter en druk daarna op "Toon deze bomen" om alleen de bomen te zien die de geselecteerde elementen raken. Klik op &quot;Verbinden&quot; en klik daarna elementen in de gewenste volgorde aan om relaties tussen ze te maken.</p>
   </div>
 
   <div class="legend"></div>
@@ -1417,6 +1443,10 @@
     <button class="btn ghost" id="show-all-btn" type="button">Toon alle kolommen</button>
     <button class="btn ghost" id="reset-btn" type="button">&#8635; Alleen Missie</button>
     <button class="btn ghost crud-only" id="new-element-btn" type="button">+ Nieuw element</button>
+    <!-- Verbindmodus: klik elementen in volgorde aan om relaties (edges)
+         te maken, zie script hieronder ("---- Verbindmodus ----"). Alleen
+         voor editors+ (crud-only), net als "+ Nieuw element" hierboven. -->
+    <button class="btn ghost crud-only" id="connect-mode-btn" type="button" title="Klik elementen na elkaar aan om relaties te maken">Verbinden</button>
     <button class="btn back-btn" id="back-btn" style="display:none;">&#8592; Terug naar vorig scherm</button>
     <!-- Boomfilter: Ctrl/Cmd-klik (of op touch: lang indrukken) op een vak
          voegt het toe aan filter-selection (zie tree.html-script hieronder,
@@ -1426,6 +1456,21 @@
       <span class="filter-status-text" id="filter-status-text"></span>
       <button class="btn ghost btn-xs" id="filter-apply-btn" type="button">Toon deze bomen</button>
       <button class="btn ghost btn-xs" id="filter-clear-btn" type="button">Wis</button>
+    </span>
+    <!-- Verbindmodus-statusbalk: toont de huidige keten (in klikvolgorde)
+         plus een gedeeld relatietype/toelichting voor alle nieuwe relaties
+         in deze keten ineen — zie setConnectMode/updateConnectStatusUI
+         verderop in het script. -->
+    <span class="connect-status" id="connect-status">
+      <span class="connect-status-text" id="connect-status-text"></span>
+      <select id="connect-field-weight" title="Relatietype voor de nieuwe relaties in deze keten">
+        <option value="">(geen relatietype)</option>
+        <option value="primair">Primair</option>
+        <option value="ondersteunend">Ondersteunend</option>
+      </select>
+      <input type="text" id="connect-field-toelichting" placeholder="Toelichting (optioneel)" style="width:140px;">
+      <button class="btn ghost btn-xs" id="connect-make-btn" type="button" disabled>Maak relaties</button>
+      <button class="btn ghost btn-xs" id="connect-clear-btn" type="button" disabled>Wissen</button>
     </span>
   </div>
 
@@ -2188,6 +2233,15 @@ function runApp(data) {
   const filterStatusTextEl = document.getElementById('filter-status-text');
   const filterApplyBtn = document.getElementById('filter-apply-btn');
   const filterClearBtn = document.getElementById('filter-clear-btn');
+  const connectModeBtn = document.getElementById('connect-mode-btn');
+  const connectStatusEl = document.getElementById('connect-status');
+  const connectStatusTextEl = document.getElementById('connect-status-text');
+  const connectFieldWeight = document.getElementById('connect-field-weight');
+  const connectFieldToelichting = document.getElementById('connect-field-toelichting');
+  const connectMakeBtn = document.getElementById('connect-make-btn');
+  const connectClearBtn = document.getElementById('connect-clear-btn');
+  let connectMode = false;
+  let connectChain = []; // geordende lijst met element-codes (volgorde = relatierichting)
   // Zie de toelichting bij #filter-chips-apply-btn hierboven — gevuld door
   // applyTagFilter() met de elementen die de actieve tag/org/verouderd-chips
   // matchen, zodat je die in één klik naar de echte boomfilter kunt overzetten.
@@ -2493,7 +2547,22 @@ function runApp(data) {
     //    benefit -> Programmabaat FPBB met Sub-benefit FPBB verborgen) en is
     //    dat in de zichtbare boom gewoon een verbinding tussen naast elkaar
     //    liggende kolommen — die moet hier NIET alsnog als "te ver" sneuvelen.
-    const visibleColOrder = CANONICAL_COL_ORDER.filter(t => !hiddenCols.has(t));
+    //    Zelfde redenering geldt voor een kolom die niet handmatig
+    //    dichtgeklapt is (niet in hiddenCols) maar door de Boomfilter zelf
+    //    toevallig helemaal leeg is gefilterd (elk element van dat type
+    //    filter-hidden) — bv. Strategisch doel leeg terwijl Doel → Visie
+    //    rechtstreeks verbonden is: zonder deze correctie gold zo'n
+    //    verbinding ten onrechte als "te ver", ook al staat de kolom
+    //    ertussen in de zichtbare boom feitelijk leeg (Charles, 18
+    //    september 2026 — ontdekt na het toevoegen van een rechtstreekse
+    //    relatie via Verbindmodus die een kolom overslaat).
+    const typesWithVisibleNode = new Set();
+    Object.keys(nodeVisible).forEach(id => {
+      if (!nodeVisible[id]) return;
+      const t = DETAILS[id] && DETAILS[id].type;
+      if (t) typesWithVisibleNode.add(t);
+    });
+    const visibleColOrder = CANONICAL_COL_ORDER.filter(t => !hiddenCols.has(t) && typesWithVisibleNode.has(t));
     const adjacentOnly = effective.filter(e => {
       const sType = DETAILS[e.source] && DETAILS[e.source].type;
       const tType = DETAILS[e.target] && DETAILS[e.target].type;
@@ -2887,20 +2956,124 @@ function runApp(data) {
   });
   updateFilterStatusUI();
 
+  // ---- Verbindmodus: relaties maken door elementen in volgorde aan te
+  // klikken (A, dan B, dan C → A→B, B→C). Losstaand van, en tijdelijk
+  // exclusief t.o.v., de Boomfilter-pick hierboven (zie mousedown/click
+  // verderop): allebei gebruiken een klik op een .node, en zouden anders om
+  // dezelfde klik strijden. De backend/API bestond al (edgesRouter, "fase
+  // 3" — zie api/src/routes/edges.ts) en blijft ongewijzigd; dit is puur
+  // een andere, snellere manier om 'm vanuit de boom aan te roepen dan het
+  // bestaande "+ Relatie"-formulier in het detailpaneel (dat blijft ook
+  // gewoon bestaan, voor een losse relatie of het bijstellen van een
+  // afwijkend relatietype achteraf).
+  function updateConnectStatusUI() {
+    connectStatusEl.classList.toggle('visible', connectMode);
+    if (!connectMode) return;
+    connectStatusTextEl.textContent = connectChain.length === 0
+      ? 'Verbindmodus actief — klik elementen in de gewenste volgorde aan.'
+      : 'Keten: ' + connectChain.join(' → ');
+    connectMakeBtn.disabled = connectChain.length < 2;
+    connectClearBtn.disabled = connectChain.length === 0;
+  }
+
+  function renderConnectBadges() {
+    document.querySelectorAll('.node.connect-picked').forEach((n) => n.classList.remove('connect-picked'));
+    document.querySelectorAll('.node-connect-badge').forEach((b) => b.remove());
+    connectChain.forEach((id, i) => {
+      const node = document.querySelector('.node[data-id="' + id + '"]');
+      if (!node) return;
+      node.classList.add('connect-picked');
+      const badge = document.createElement('span');
+      badge.className = 'node-connect-badge';
+      badge.textContent = String(i + 1);
+      node.appendChild(badge);
+    });
+  }
+
+  function toggleConnectPick(id) {
+    if (focusId !== null) return; // zelfde beperking als Boomfilter-pick hierboven
+    const idx = connectChain.indexOf(id);
+    if (idx !== -1) connectChain.splice(idx, 1); else connectChain.push(id);
+    renderConnectBadges();
+    updateConnectStatusUI();
+  }
+
+  function setConnectMode(on) {
+    connectMode = on;
+    connectModeBtn.classList.toggle('active-mode', on);
+    connectModeBtn.textContent = on ? 'Stop verbinden' : 'Verbinden';
+    connectChain = [];
+    renderConnectBadges();
+    if (on) deselect();
+    updateConnectStatusUI();
+  }
+
+  async function submitConnectChain() {
+    if (connectChain.length < 2) return;
+    const weight = connectFieldWeight.value || null;
+    const toelichting = connectFieldToelichting.value.trim();
+    connectMakeBtn.disabled = true;
+    connectClearBtn.disabled = true;
+    connectStatusTextEl.textContent = 'Bezig met opslaan…';
+    let created = 0, skipped = 0;
+    const errors = [];
+    for (let i = 0; i < connectChain.length - 1; i++) {
+      const source = connectChain[i];
+      const target = connectChain[i + 1];
+      // Bestaat deze relatie (in déze richting) al? Dan overslaan i.p.v.
+      // opnieuw aanmaken of overschrijven — zie ook de 409-afvanging
+      // hieronder voor het geval EDGES lokaal (nog) niet helemaal actueel is.
+      if (EDGES.some((e) => e.source === source && e.target === target)) { skipped++; continue; }
+      try {
+        const res = await fetch(apiUrl + '/api/doelenbomen/' + doelenboomId + '/edges', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + authToken },
+          body: JSON.stringify({ source, target, weight, toelichting }),
+        });
+        if (res.status === 409) { skipped++; continue; }
+        if (!res.ok) {
+          const b = await res.json().catch(() => ({}));
+          errors.push(source + ' → ' + target + ': ' + (b.error || ('HTTP ' + res.status)));
+          continue;
+        }
+        created++;
+      } catch (err) {
+        errors.push(source + ' → ' + target + ': ' + (err && err.message ? err.message : 'onbekende fout'));
+      }
+    }
+    let summary = created + ' relatie' + (created === 1 ? '' : 's') + ' aangemaakt';
+    if (skipped) summary += ', ' + skipped + ' bestond' + (skipped === 1 ? '' : 'en') + ' al (overgeslagen)';
+    if (errors.length) summary += ', ' + errors.length + ' mislukt: ' + errors.join('; ');
+    showToast(summary, errors.length ? 'error' : 'ok');
+    setConnectMode(false);
+    if (created > 0) reloadTreeKeepingFocus(400);
+  }
+
+  connectModeBtn.addEventListener('click', () => setConnectMode(!connectMode));
+  connectClearBtn.addEventListener('click', () => { connectChain = []; renderConnectBadges(); updateConnectStatusUI(); });
+  connectMakeBtn.addEventListener('click', submitConnectChain);
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape' && connectMode) setConnectMode(false);
+  });
+  updateConnectStatusUI();
+
   // Ctrl/Cmd-klik (Boomfilter-pick) op 'mousedown' i.p.v. pas op 'click'
   // (mouseup): geeft meteen visuele feedback (de .filter-picked-rand, zie
   // .node.filter-picked hierboven) zodra de muisknop ingedrukt wordt, i.p.v.
   // pas na loslaten. De click-listener hieronder handelt zo'n klik dus NIET
   // nogmaals af (anders zou hij het net gezette pick weer terugdraaien).
+  // Verbindmodus (connectMode) sluit dit tijdelijk uit — anders zou één
+  // Ctrl/Cmd-klik tijdens verbindmodus twee dingen tegelijk doen.
   columnsEl.addEventListener('mousedown', (ev) => {
     const node = ev.target.closest('.node');
-    if (!node) return;
+    if (!node || connectMode) return;
     if (ev.metaKey || ev.ctrlKey) toggleFilterPick(node.dataset.id);
   });
   columnsEl.addEventListener('click', (ev) => {
     const node = ev.target.closest('.node');
-    if (!node) { deselect(); return; }
+    if (!node) { if (!connectMode) deselect(); return; }
     const id = node.dataset.id;
+    if (connectMode) { toggleConnectPick(id); return; }
     if (ev.metaKey || ev.ctrlKey) return; // al afgehandeld op mousedown hierboven
     if (selectedId === id) { deselect(); } else { selectNode(id); }
   });
@@ -4953,7 +5126,7 @@ function runApp(data) {
 
   columnsEl.addEventListener('dblclick', (ev) => {
     const node = ev.target.closest('.node');
-    if (!node) return;
+    if (!node || connectMode) return; // niet in-/uitzoomen terwijl een keten wordt opgebouwd
     enterFocus(node);
   });
 
