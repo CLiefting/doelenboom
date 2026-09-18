@@ -2531,61 +2531,31 @@ function runApp(data) {
     // elementen (computeElementFilterKeepSet loopt bidirectioneel over de
     // rúwe EDGES) — dat neemt ook zijtakken mee die niet op hetzelfde pad
     // liggen, en bij een breed vertakte boom geeft dat al snel een dichte mesh
-    // van lijnen. Twee opeenvolgende verfijningen voor de GETEKENDE lijnen
-    // (de zichtbare/gehouden ELEMENTEN zelf blijven ongemoeid — dat blijft
+    // van lijnen. Eén verfijning voor de GETEKENDE lijnen (de zichtbare/
+    // gehouden ELEMENTEN zelf blijven ongemoeid — dat blijft
     // computeElementFilterKeepSet's bredere "hele samenhangende component"):
     if (!elementFilterActive) return effective;
 
-    // 1) alleen verbindingen tussen elementen die in ÉÉN kolom afstand van
-    //    elkaar staan — een verbinding die een kolom overslaat (bv.
-    //    Capability rechtstreeks naar Programmabaat) is op zich geldige data,
-    //    maar oogt in de gefilterde weergave als een storende, ver
-    //    doorlopende lijn. "Afstand" wordt bepaald op de ZICHTBARE
-    //    kolomvolgorde (hiddenCols eruit gefilterd) i.p.v. de volledige
-    //    CANONICAL_COL_ORDER: als een kolom verborgen is, heeft walk()
-    //    hierboven de verbinding er al doorheen gebrugd (bv. Operationele
-    //    benefit -> Programmabaat FPBB met Sub-benefit FPBB verborgen) en is
-    //    dat in de zichtbare boom gewoon een verbinding tussen naast elkaar
-    //    liggende kolommen — die moet hier NIET alsnog als "te ver" sneuvelen.
-    //    Zelfde redenering geldt voor een kolom die niet handmatig
-    //    dichtgeklapt is (niet in hiddenCols) maar door de Boomfilter zelf
-    //    toevallig helemaal leeg is gefilterd (elk element van dat type
-    //    filter-hidden) — bv. Strategisch doel leeg terwijl Doel → Visie
-    //    rechtstreeks verbonden is: zonder deze correctie gold zo'n
-    //    verbinding ten onrechte als "te ver", ook al staat de kolom
-    //    ertussen in de zichtbare boom feitelijk leeg (Charles, 18
-    //    september 2026 — ontdekt na het toevoegen van een rechtstreekse
-    //    relatie via Verbindmodus die een kolom overslaat).
-    const typesWithVisibleNode = new Set();
-    Object.keys(nodeVisible).forEach(id => {
-      if (!nodeVisible[id]) return;
-      const t = DETAILS[id] && DETAILS[id].type;
-      if (t) typesWithVisibleNode.add(t);
-    });
-    const visibleColOrder = CANONICAL_COL_ORDER.filter(t => !hiddenCols.has(t) && typesWithVisibleNode.has(t));
-    const adjacentOnly = effective.filter(e => {
-      const sType = DETAILS[e.source] && DETAILS[e.source].type;
-      const tType = DETAILS[e.target] && DETAILS[e.target].type;
-      const sIdx = visibleColOrder.indexOf(sType);
-      const tIdx = visibleColOrder.indexOf(tType);
-      // Onbekend/niet-gevonden type: niet aannemen dat het "te ver" is —
-      // gewoon tonen (kan gebeuren bij een niet-standaard kolomconfiguratie).
-      if (sIdx === -1 || tIdx === -1) return true;
-      return Math.abs(sIdx - tIdx) === 1;
-    });
-
-    // 2) alleen verbindingen die daadwerkelijk op het verbonden pad van (een
-    //    van) de gepickte elementen liggen. Zonder deze stap kon een lijn
-    //    tussen twee toevallig-allebei-zichtbare elementen blijven staan
-    //    terwijl die lijn zelf nergens' pad is — elk van de twee eindpunten
-    //    kan om een HELEMAAL ANDERE reden gehouden zijn (bv. elk op het pad
-    //    van een ANDERE pick), zonder dat de verbinding daartussen ergens toe
-    //    doet. reachableSets() hergebruikt dezelfde traversal als de
-    //    pad-markering (computeActiveSets), nu toegepast op adjacentOnly
-    //    i.p.v. de nog niet bijgewerkte currentEffectiveEdges.
-    if (filterSelection.size === 0) return adjacentOnly;
-    const reach = reachableSets(Array.from(filterSelection), adjacentOnly);
-    return adjacentOnly.filter(e => reach.edgeKeys.has(e.source + '|' + e.target));
+    // Zolang de Boomfilter actief is, blijven alleen de lijnen staan die
+    // daadwerkelijk op het verbonden pad van (een van) de gepickte
+    // elementen liggen — ongeacht hoeveel kolommen ze onderweg overslaan.
+    // reachableSets() hergebruikt dezelfde traversal als de pad-markering
+    // (computeActiveSets), hier toegepast op `effective` i.p.v. de nog niet
+    // bijgewerkte currentEffectiveEdges.
+    //
+    // Hier stond eerder ook een "maximaal 1 kolom afstand"-eis (om een
+    // relatie die een kolom oversloeg niet als storende, ver doorlopende
+    // lijn te tonen, met een aparte verfijning voor een kolom die door de
+    // Boomfilter zelf leeg was gefilterd). Sinds Verbindmodus bewust
+    // kolom-overslaande relaties toelaat (Charles, 18 september 2026: "D1
+    // mag rechtstreeks naar Visie") zat die eis alleen nog in de weg: zo'n
+    // relatie bleef ook verdwijnen zodra de kolom ertussen gewoon andere,
+    // niet-gerelateerde elementen bevatte — terwijl de lijn zelf, dankzij
+    // de reachableSets-check hieronder, al gegarandeerd op het gepickte pad
+    // ligt. Die eis is daarom komen te vervallen.
+    if (filterSelection.size === 0) return effective;
+    const reach = reachableSets(Array.from(filterSelection), effective);
+    return effective.filter(e => reach.edgeKeys.has(e.source + '|' + e.target));
   }
 
   function drawEdges() {
