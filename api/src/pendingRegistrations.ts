@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { pool } from './db.js';
+import { hashSql } from './passwordHash.js';
 import { sendRegistrationExistingAccountEmail, sendRegistrationVerificationEmail } from './email.js';
 import { createSubscriptionRequest, prepareSubscriptionRequest, SubscriptionRequestInput } from './subscriptions.js';
 
@@ -39,7 +40,7 @@ export async function submitRegistration(input: RegistrationInput): Promise<void
   // Het wachtwoord hashen we ook als het adres al bekend is (en het resultaat
   // dan weggooien): zo verschilt de rekentijd niet merkbaar tussen "bekend" en
   // "onbekend" adres.
-  const hash = await pool.query(`select crypt($1, gen_salt('bf')) as h`, [input.password]);
+  const hash = await pool.query(`select ${hashSql('$1')} as h`, [input.password]);
 
   const existing = await pool.query('select 1 from users where email = $1', [input.applicantEmail]);
   if (existing.rows.length > 0) {

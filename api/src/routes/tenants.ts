@@ -5,6 +5,7 @@ import { requireSysadmin, requireTenantRoleForTenantParam } from '../rbac.js';
 import { createTenantDefaultConfig } from '../columnConfig.js';
 import { assertCanAddEditor, computeDefaultLicenseEndDate, LicenseLimitError } from '../license.js';
 import { logAuditEvent } from '../auditLog.js';
+import { hashSql } from '../passwordHash.js';
 import { terminateTenant } from '../tenantRetention.js';
 
 export const tenantsRouter = Router();
@@ -332,7 +333,7 @@ tenantsRouter.post('/:tenantId/members', requireTenantRoleForTenantParam('admin'
     }
     const created = await pool.query(
       `insert into users (email, password_hash, is_sysadmin, must_change_password)
-       values ($1, crypt($2, gen_salt('bf')), false, true) returning id`,
+       values ($1, ${hashSql('$2')}, false, true) returning id`,
       [email, password]
     );
     userId = created.rows[0].id;

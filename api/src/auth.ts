@@ -5,6 +5,7 @@ import { previewOrCommitWipe } from './tenantWipe.js';
 import { needsTermsAcceptance } from './legal.js';
 import { getAppSettings } from './appSettings.js';
 import { createMfaChallenge, verifyMfaChallenge, resendMfaChallenge } from './mfa.js';
+import { bcryptCost, hashSql } from './passwordHash.js';
 import { ipBlockedForSeconds, recordIpFailure, recordUnknownEmailFailure, unknownEmailLockState } from './loginThrottle.js';
 
 const JWT_SECRET = process.env.JWT_SECRET ?? 'dev-secret-change-me';
@@ -179,7 +180,7 @@ authRouter.post('/login', async (req, res) => {
     // Onbekend adres: dezelfde rekentijd (dummy bcrypt) en hetzelfde
     // teller/blokkade-gedrag als een bestaand account, zodat noch de
     // responstijd noch een 429 verraadt of het adres bestaat.
-    await pool.query(`select crypt($1, gen_salt('bf'))`, [password]);
+    await pool.query(`select ${hashSql('$1')}`, [password]);
     recordIpFailure(clientIp);
     const state = unknownEmailLockState(email);
     if (state.locked) return res.status(429).json(lockedBody(state.minutesLeft));
@@ -232,9 +233,15 @@ authRouter.post('/login', async (req, res) => {
   await pool.query(
     `update users
      set last_login_at = now(), scheduled_deletion_at = null, inactivity_warning_sent_at = null,
-         failed_login_count = 0, locked_until = null
+         failed_login_count = 0, locked_until = null,
+         -- DOEL-25: hash met lagere bcrypt-kosten dan nu gewenst? Het (zojuist
+         -- geverifieerde) wachtwoord is hier beschikbaar: opnieuw hashen.
+         password_hash = case
+           when password_hash ~ '^\\$2[abxy]\\$[0-9]{2}\\$' and substr(password_hash, 5, 2)::int < $2::int
+           then ${hashSql('$3')}
+           else password_hash end
      where id = $1`,
-    [user.id]
+    [user.id, bcryptCost(), password]
   );
   if (user.scheduled_deletion_at) {
     await pool.query(
@@ -477,7 +484,7 @@ authRouter.post('/change-password', requireAuth, async (req: AuthedRequest, res)
     return res.status(401).json({ error: 'Huidig wachtwoord is onjuist.' });
   }
   await pool.query(
-    `update users set password_hash = crypt($1, gen_salt('bf')), must_change_password = false where id = $2`,
+    `update users set password_hash = ${hashSql('$1')}, must_change_password = false where id = $2`,
     [newPassword, req.user!.id]
   );
   const tenantRoles = req.user!.isSysadmin ? [] : await fetchTenantRoles(req.user!.id);

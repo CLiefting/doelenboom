@@ -6,6 +6,7 @@ import { getCurrentTierPrice } from './tierPrices.js';
 import { getCurrentModuleSurcharge } from './moduleSurcharges.js';
 import { getCurrentModuleTierSurcharge } from './moduleTierSurcharges.js';
 import { sendNewSubscriptionRequestEmail } from './email.js';
+import { hashSql } from './passwordHash.js';
 
 export type BillingPeriod = 'maand' | 'jaar';
 export function isBillingPeriod(v: unknown): v is BillingPeriod {
@@ -283,7 +284,7 @@ export async function createSubscriptionRequest(
 
     const userResult = await client.query(
       `insert into users (email, password_hash, is_sysadmin, must_change_password)
-       values ($1, ${input.passwordHash ? '$2' : "crypt($2, gen_salt('bf'))"}, false, false) returning id`,
+       values ($1, ${input.passwordHash ? '$2' : hashSql('$2')}, false, false) returning id`,
       [input.applicantEmail, input.passwordHash ?? input.password]
     );
     const userId = userResult.rows[0].id as number;

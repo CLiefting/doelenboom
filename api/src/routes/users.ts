@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { pool } from '../db.js';
 import { requireAuth, AuthedRequest } from '../auth.js';
 import { requireSysadmin } from '../rbac.js';
+import { hashSql } from '../passwordHash.js';
 
 // Beheer van gebruikersaccounts zelf (aanmaken/wijzigen/verwijderen, sysadmin-vlag)
 // — uitsluitend voor sysadmins. Het koppelen van een account aan een tenant (met
@@ -67,7 +68,7 @@ usersRouter.post('/', async (req, res) => {
   try {
     const result = await pool.query(
       `insert into users (email, password_hash, is_sysadmin, must_change_password)
-       values ($1, crypt($2, gen_salt('bf')), $3, $4)
+       values ($1, ${hashSql('$2')}, $3, $4)
        returning ${USER_SELECT_FIELDS}`,
       [email, password, isSysadmin, mustChangePassword]
     );
@@ -117,7 +118,7 @@ usersRouter.put('/:id', async (req: AuthedRequest, res) => {
     const result = await pool.query(
       `update users set
          email = coalesce($1, email),
-         password_hash = case when $2::text is null then password_hash else crypt($2, gen_salt('bf')) end,
+         password_hash = case when $2::text is null then password_hash else ${hashSql('$2')} end,
          is_sysadmin = coalesce($3, is_sysadmin),
          must_change_password = coalesce($4, must_change_password),
          mfa_enabled = coalesce($5, mfa_enabled)

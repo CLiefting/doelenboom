@@ -15,6 +15,10 @@
 process.env.REGISTRATION_RATE_LIMIT_MAX ??= '100000';
 process.env.REGISTRATION_GLOBAL_LIMIT_MAX ??= '100000';
 process.env.LOGIN_IP_MAX_FAILURES ??= '100000';
+// DOEL-25: nieuwe wachtwoordhashes gebruiken standaard bcrypt-kosten 12 (~0,25 s);
+// de suite maakt honderden accounts, dus hier de minimale kosten. test/passwordHash.test.ts
+// zet eigen waarden en test de standaard.
+process.env.BCRYPT_COST ??= '4';
 
 import { createApp } from '../src/app.js';
 import { pool } from '../src/db.js';

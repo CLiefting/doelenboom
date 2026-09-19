@@ -60,7 +60,7 @@ Er is één seed-gebruiker die sysadmin is (toegang tot alle tenants — zie
 **Verander dit wachtwoord voordat deze omgeving buiten je eigen laptop draait** — via
 "Wachtwoord wijzigen" naast "Uitloggen" op het overzichtsscherm (zie "Gebruikersbeheer
 & rollen" verderop), of direct in de database via `update users set password_hash =
-crypt('nieuw-wachtwoord', gen_salt('bf')) where email = 'admin@code072.nl';`.
+crypt('nieuw-wachtwoord', gen_salt('bf', 12)) where email = 'admin@code072.nl';`.
 
 ## Structuur
 
