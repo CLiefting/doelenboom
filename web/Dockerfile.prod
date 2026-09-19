@@ -20,7 +20,10 @@ RUN npm run build
 # 8080 (poorten < 1024 zijn dan niet toegestaan); Traefik verwijst daarom naar
 # 8080 (docker-compose.prod.yml) en nginx.conf luistert daarop.
 FROM nginxinc/nginx-unprivileged:alpine
-COPY --from=build /app/dist /usr/share/nginx/html
+# DOEL-41: de gebouwde dist behoudt de modus van de bronbestanden (web/public/tree.html wordt
+# letterlijk gekopieerd). Bij modus 600 kan nginx (uid 101) het niet lezen: 403. Symbolisch
+# (X = x alleen bij mappen): mappen 755, bestanden 644, ongeacht de werkmap.
+COPY --from=build --chmod=u=rwX,go=rX /app/dist /usr/share/nginx/html
 # DOEL-31d: --chmod=0644 zet die modus OOK op nieuw aangemaakte mappen (geen x-bit):
 # /etc/nginx/snippets werd ontoegankelijk voor nginx (uid 101) en nginx startte niet.
 # Symbolisch (X = x alleen bij mappen) geeft mappen 755 en bestanden 644, ongeacht

@@ -135,5 +135,7 @@ describe('image-leesrechten: niet afhankelijk van de rechten in de werkmap (DOEL
     assert.match(stage, /^COPY --chmod=u=rwX,go=rX nginx\.conf /m);
     assert.match(stage, /^COPY --chmod=u=rwX,go=rX security-headers\.conf /m);
     assert.ok(!/^COPY --chmod=0?[0-7]{3} /m.test(stage), 'geen octale --chmod op COPY: maakt mappen ontoegankelijk');
+    // DOEL-41: ook de gebouwde dist (o.a. tree.html) krijgt vaste leesrechten; anders geeft nginx een 403 bij modus 600.
+    assert.match(stage, /^COPY --from=build --chmod=u=rwX,go=rX \/app\/dist /m);
   });
 });

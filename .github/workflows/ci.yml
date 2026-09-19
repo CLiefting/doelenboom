@@ -111,6 +111,19 @@ jobs:
       - working-directory: excel-service
         run: python -m pytest -q
 
+  images:
+    name: images — starten als runtime-gebruiker (DOEL-41)
+    # Bouwt de productie-images van web en excel-service met bronbestanden op
+    # modus 600 en start ze als niet-root gebruiker (nginx + headers, uvicorn +
+    # /health). Vangt Dockerfile-rechtenfouten (DOEL-39, DOEL-40) vóór het
+    # uitrollen. Zelfde script als lokaal: bash scripts/image-smoke-test.sh
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Image-smoketest
+        run: bash scripts/image-smoke-test.sh
+
   owasp-semgrep:
     name: OWASP Top 10 — Semgrep
     runs-on: ubuntu-latest
