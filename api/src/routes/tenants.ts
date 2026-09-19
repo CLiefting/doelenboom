@@ -7,6 +7,7 @@ import { assertCanAddEditor, computeDefaultLicenseEndDate, LicenseLimitError } f
 import { logAuditEvent } from '../auditLog.js';
 import { hashSql } from '../passwordHash.js';
 import { terminateTenant } from '../tenantRetention.js';
+import { sendServerError } from '../errors.js';
 
 export const tenantsRouter = Router();
 tenantsRouter.use(requireAuth);
@@ -89,7 +90,8 @@ tenantsRouter.post('/', requireSysadmin, async (req, res) => {
     res.status(201).json(result.rows[0]);
   } catch (err) {
     await client.query('rollback');
-    res.status(409).json({ error: 'Tenant met deze slug bestaat al', detail: (err as Error).message });
+    if (!isUniqueViolation(err)) return sendServerError(res, err, 'Aanmaken van tenant mislukt');
+    res.status(409).json({ error: 'Tenant met deze slug bestaat al' });
   } finally {
     client.release();
   }

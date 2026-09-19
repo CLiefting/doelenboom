@@ -4,6 +4,7 @@ import { requireTenantRoleForDoelenboomParam, tenantIdForDoelenboom } from '../r
 import { logAuditEvent } from '../auditLog.js';
 import { fetchTree } from './tree.js';
 import { isStandardColumns } from '../columnConfig.js';
+import { sendServerError } from '../errors.js';
 
 const EXCEL_SERVICE_URL = process.env.EXCEL_SERVICE_URL ?? 'http://excel-service:8000';
 const XLSX_MEDIA_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -75,12 +76,12 @@ exportsRouter.get('/doelenbomen/:id/export', requireTenantRoleForDoelenboomParam
       body,
     });
   } catch (err) {
-    return res.status(502).json({ error: 'Excel-service niet bereikbaar', detail: (err as Error).message });
+    return sendServerError(res, err, 'Excel-service niet bereikbaar', 502);
   }
 
   if (!upstream.ok) {
     const text = await upstream.text();
-    return res.status(502).json({ error: 'Excel-service gaf een fout terug', detail: text });
+    return sendServerError(res, text, 'Excel-service gaf een fout terug', 502);
   }
 
   const arrayBuffer = await upstream.arrayBuffer();

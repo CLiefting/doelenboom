@@ -4,6 +4,7 @@ import { requireAuth, AuthedRequest } from '../auth.js';
 import { requireTenantRoleForDoelenboomParam, requireWritableDoelenboom, requireModule, tenantIdForDoelenboom } from '../rbac.js';
 import { logAuditEvent } from '../auditLog.js';
 import { fetchTree } from './tree.js';
+import { sendServerError } from '../errors.js';
 
 // Export/import van de VOLLEDIGE gegevens van één project (Producten,
 // Activiteiten, projectstatus, tags en organisatieonderdelen) als Excel-
@@ -123,11 +124,11 @@ async function downloadProjectDocument(
       body: JSON.stringify({ data, meta }),
     });
   } catch (err) {
-    return void res.status(502).json({ error: 'Excel-service niet bereikbaar', detail: (err as Error).message });
+    return void sendServerError(res, err, 'Excel-service niet bereikbaar', 502);
   }
   if (!upstream.ok) {
     const text = await upstream.text();
-    return void res.status(502).json({ error: 'Excel-service gaf een fout terug', detail: text });
+    return void sendServerError(res, text, 'Excel-service gaf een fout terug', 502);
   }
 
   const arrayBuffer = await upstream.arrayBuffer();
@@ -200,11 +201,11 @@ projectExcelRouter.post(
     try {
       upstream = await fetch(`${EXCEL_SERVICE_URL}/project-parse`, { method: 'POST', body: form });
     } catch (err) {
-      return res.status(502).json({ error: 'Excel-service niet bereikbaar', detail: (err as Error).message });
+      return sendServerError(res, err, 'Excel-service niet bereikbaar', 502);
     }
     if (!upstream.ok) {
       const text = await upstream.text();
-      return res.status(502).json({ error: 'Excel-service gaf een fout terug', detail: text });
+      return sendServerError(res, text, 'Excel-service gaf een fout terug', 502);
     }
 
     const result = await upstream.json();

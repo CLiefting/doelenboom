@@ -11,6 +11,7 @@ import {
 import { getColumnsForDoelenboom } from '../columnConfig.js';
 import { hasModule } from '../license.js';
 import { logAuditEvent } from '../auditLog.js';
+import { sendServerError } from '../errors.js';
 
 // Voor routes met :id = import-id (niet doelenboom-id): eerst de doelenboom van
 // deze import opzoeken, dan pas de tenant daarvan.
@@ -60,11 +61,11 @@ importsRouter.post(
       const upstream = await fetch(`${EXCEL_SERVICE_URL}/parse?${parseQuery}`, { method: 'POST', body: form });
       if (!upstream.ok) {
         const text = await upstream.text();
-        return res.status(502).json({ error: 'Excel-service gaf een fout terug', detail: text });
+        return sendServerError(res, text, 'Excel-service gaf een fout terug', 502);
       }
       parseResult = (await upstream.json()) as typeof parseResult;
     } catch (err) {
-      return res.status(502).json({ error: 'Excel-service niet bereikbaar', detail: (err as Error).message });
+      return sendServerError(res, err, 'Excel-service niet bereikbaar', 502);
     }
 
     // In een try/catch: excel-service is een los, door ons niet volledig
@@ -91,7 +92,7 @@ importsRouter.post(
       );
       res.status(201).json(insertResult.rows[0]);
     } catch (err) {
-      res.status(500).json({ error: 'Opslaan van de import is mislukt', detail: (err as Error).message });
+      sendServerError(res, err, 'Opslaan van de import is mislukt');
     }
   }
 );
@@ -355,7 +356,7 @@ importsRouter.post(
     res.json({ status: 'published', elementCount: parsed.elements.length, edgeCount: parsed.edges.length });
   } catch (err) {
     await client.query('rollback');
-    res.status(500).json({ error: 'Publiceren mislukt', detail: (err as Error).message });
+    sendServerError(res, err, 'Publiceren mislukt');
   } finally {
     client.release();
   }

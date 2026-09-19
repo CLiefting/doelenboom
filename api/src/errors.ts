@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import type { ErrorRequestHandler, NextFunction, Request, Response } from 'express';
 
@@ -82,6 +83,34 @@ export const errorHandler: ErrorRequestHandler = (err: HttpishError, req, res, n
 
   // Alles wat overblijft is onverwacht: volledig server-side loggen, de
   // client krijgt niets over de oorzaak te zien (OWASP A05/A09).
-  console.error(`Onverwachte fout in ${req.method} ${req.path}:`, err);
-  res.status(500).json({ error: 'Interne serverfout.' });
+  const errorId = newErrorId();
+  console.error(`[${errorId}] Onverwachte fout in ${req.method} ${req.path}:`, err);
+  res.status(500).json({ error: 'Interne serverfout.', errorId });
 };
+
+// Korte correlatie-id die zowel in het serverlog als in het antwoord aan de
+// client staat: bij een melding ("foutcode 3f9a1c2e") is de echte oorzaak in
+// het log terug te vinden zonder dat de client er iets over te zien krijgt.
+export function newErrorId(): string {
+  return randomUUID().slice(0, 8);
+}
+
+// Postgres-fout 23505 (unique_violation): een verwachte, door de gebruiker
+// veroorzaakte situatie (bv. slug bestaat al) — geen serverfout.
+export function isUniqueViolation(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { code?: string }).code === '23505';
+}
+
+// DOEL-32 (analyse M, OWASP A05/A09): vervangt het patroon
+// `res.status(500).json({ error, detail: err.message })`, dat databasefouten
+// (tabel-/kolom-/constraintnamen, SQL-fragmenten) en interne foutteksten van
+// de excel-service naar de client lekte. De oorzaak (`cause`: een Error of, bij
+// een foutrespons van een andere service, de responstekst) gaat alleen naar het
+// serverlog; de client krijgt de vaste, door de route gekozen melding plus
+// de correlatie-id.
+export function sendServerError(res: Response, cause: unknown, error: string, status = 500): void {
+  const errorId = newErrorId();
+  const where = res.req ? `${res.req.method} ${res.req.path}` : '(onbekend)';
+  console.error(`[${errorId}] ${error} in ${where}:`, cause);
+  res.status(status).json({ error, errorId });
+}

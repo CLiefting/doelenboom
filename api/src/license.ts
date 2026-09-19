@@ -486,9 +486,13 @@ export async function setSubscriptionCancelled(
   });
 }
 
+// DOEL-32: eigen fouttype, zodat de route alleen déze (verwachte) fout als 400
+// met de melding doorgeeft en alle andere fouten als generieke 500 afhandelt.
+export class UnknownModuleError extends Error {}
+
 async function tenantModuleId(moduleKey: string): Promise<number> {
   const moduleRow = await pool.query('select id from modules where key = $1', [moduleKey]);
-  if (!moduleRow.rows[0]) throw new Error(`Module "${moduleKey}" bestaat niet.`);
+  if (!moduleRow.rows[0]) throw new UnknownModuleError(`Module "${moduleKey}" bestaat niet.`);
   return moduleRow.rows[0].id;
 }
 

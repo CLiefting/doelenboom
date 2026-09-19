@@ -13,6 +13,7 @@ import { seedExampleTree } from '../exampleTree.js';
 import { logAuditEvent } from '../auditLog.js';
 import { applyTemplateToNewDoelenboom } from '../doelenboomTemplates.js';
 import { assertCanCreateBoom, incrementLifetimeTreesCreated, isLicenseExpired, LicenseLimitError } from '../license.js';
+import { sendServerError } from '../errors.js';
 
 function isUniqueViolation(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { code?: string }).code === '23505';
@@ -196,7 +197,8 @@ doelenbomenRouter.post(
       res.status(201).json(result.rows[0]);
     } catch (err) {
       await client.query('rollback');
-      res.status(409).json({ error: 'Doelenboom met deze slug bestaat al binnen deze tenant', detail: (err as Error).message });
+      if (!isUniqueViolation(err)) return sendServerError(res, err, 'Opslaan van de doelenboom mislukt');
+      res.status(409).json({ error: 'Doelenboom met deze slug bestaat al binnen deze tenant' });
     } finally {
       client.release();
     }
@@ -294,7 +296,8 @@ doelenbomenRouter.put(
       );
       res.json(result.rows[0]);
     } catch (err) {
-      res.status(409).json({ error: 'Doelenboom met deze slug bestaat al binnen deze tenant', detail: (err as Error).message });
+      if (!isUniqueViolation(err)) return sendServerError(res, err, 'Opslaan van de doelenboom mislukt');
+      res.status(409).json({ error: 'Doelenboom met deze slug bestaat al binnen deze tenant' });
     }
   }
 );
@@ -609,9 +612,9 @@ doelenbomenRouter.post('/doelenbomen/:id/duplicate', requireSysadmin, async (req
     if (isUniqueViolation(err)) {
       return res
         .status(409)
-        .json({ error: 'Doelenboom- of tenant-slug bestaat al.', detail: (err as Error).message });
+        .json({ error: 'Doelenboom- of tenant-slug bestaat al.' });
     }
-    res.status(500).json({ error: 'Dupliceren mislukt', detail: (err as Error).message });
+    sendServerError(res, err, 'Dupliceren mislukt');
   } finally {
     client.release();
   }

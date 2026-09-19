@@ -23,6 +23,7 @@ import {
   SubscriptionRequestError,
   updateSubscriptionRequestApplicant,
 } from '../subscriptions.js';
+import { sendServerError } from '../errors.js';
 
 // Zelfbedieningsaanvraag voor een nieuw abonnement — zie
 // doelenboom_licentiemodel.md §2/§9 en subscriptions.ts. De eerste drie
@@ -276,7 +277,7 @@ subscriptionsRouter.post('/subscription-requests/:id/register-payment', async (r
     res.json(updated);
   } catch (err) {
     if (err instanceof SubscriptionRequestError) return res.status(409).json({ error: err.message });
-    res.status(500).json({ error: 'Betaling registreren mislukt', detail: (err as Error).message });
+    sendServerError(res, err, 'Betaling registreren mislukt');
   }
 });
 
@@ -287,7 +288,7 @@ subscriptionsRouter.post('/subscription-requests/:id/register-renewal', async (r
     res.json(updated);
   } catch (err) {
     if (err instanceof SubscriptionRequestError) return res.status(409).json({ error: err.message });
-    res.status(500).json({ error: 'Verlenging registreren mislukt', detail: (err as Error).message });
+    sendServerError(res, err, 'Verlenging registreren mislukt');
   }
 });
 
@@ -300,6 +301,6 @@ subscriptionsRouter.post('/subscription-requests/:id/reject', async (req: Authed
     res.json(updated);
   } catch (err) {
     if (err instanceof SubscriptionRequestError) return res.status(409).json({ error: err.message });
-    res.status(500).json({ error: 'Afwijzen mislukt', detail: (err as Error).message });
+    sendServerError(res, err, 'Afwijzen mislukt');
   }
 });

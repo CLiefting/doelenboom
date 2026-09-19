@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { pool } from '../db.js';
 import { requireAuth } from '../auth.js';
 import { requireWritableDoelenboom } from '../rbac.js';
+import { sendServerError } from '../errors.js';
 
 // CRUD voor relaties (edges) tussen elementen — fase 3 van de CRUD-uitbreiding.
 // Edges worden geïdentificeerd door hun (source-code, target-code)-paar i.p.v. een
@@ -68,7 +69,7 @@ edgesRouter.post('/doelenbomen/:id/edges', requireEditor, async (req, res) => {
     if (isUniqueViolation(err)) {
       return res.status(409).json({ error: `Relatie ${source} → ${target} bestaat al.` });
     }
-    res.status(500).json({ error: 'Aanmaken van relatie mislukt', detail: (err as Error).message });
+    sendServerError(res, err, 'Aanmaken van relatie mislukt');
   }
 });
 

@@ -4,6 +4,7 @@ import { requireAuth, AuthedRequest, endUserSessions } from '../auth.js';
 import { requireSysadmin } from '../rbac.js';
 import { hashSql } from '../passwordHash.js';
 import { logAuditEvent } from '../auditLog.js';
+import { sendServerError } from '../errors.js';
 
 // Beheer van gebruikersaccounts zelf (aanmaken/wijzigen/verwijderen, sysadmin-vlag)
 // — uitsluitend voor sysadmins. Het koppelen van een account aan een tenant (met
@@ -85,7 +86,7 @@ usersRouter.post('/', async (req: AuthedRequest, res) => {
     if (isUniqueViolation(err)) {
       return res.status(409).json({ error: `Er bestaat al een account met e-mailadres "${email}".` });
     }
-    res.status(500).json({ error: 'Aanmaken van gebruiker mislukt', detail: (err as Error).message });
+    sendServerError(res, err, 'Aanmaken van gebruiker mislukt');
   }
 });
 
@@ -170,7 +171,7 @@ usersRouter.put('/:id', async (req: AuthedRequest, res) => {
     if (isUniqueViolation(err)) {
       return res.status(409).json({ error: `Er bestaat al een account met e-mailadres "${email}".` });
     }
-    res.status(500).json({ error: 'Bijwerken van gebruiker mislukt', detail: (err as Error).message });
+    sendServerError(res, err, 'Bijwerken van gebruiker mislukt');
   }
 });
 

@@ -29,7 +29,7 @@ import { legalRouter } from './routes/legal.js';
 import { systemSbomRouter } from './routes/systemSbom.js';
 import { customerManagementRouter } from './routes/customerManagement.js';
 import { pool } from './db.js';
-import { errorHandler, installAsyncErrorSupport } from './errors.js';
+import { errorHandler, installAsyncErrorSupport, newErrorId } from './errors.js';
 
 // Bouwt de Express-app zonder 'm te starten (geen app.listen, geen idle-sweep-
 // interval) — losgetrokken uit index.ts zodat de regressietest-suite (api/test/)
@@ -127,7 +127,11 @@ export function createApp() {
       await pool.query('select 1');
       res.json({ status: 'ok', db: 'connected' });
     } catch (err) {
-      res.status(500).json({ status: 'error', db: 'unreachable', error: (err as Error).message });
+      // DOEL-32: geen databasefoutmelding (host/poort/gebruiker) naar de
+      // client — dit endpoint is publiek bereikbaar. Oorzaak gaat naar het log.
+      const errorId = newErrorId();
+      console.error(`[${errorId}] Health-check: database niet bereikbaar:`, err);
+      res.status(500).json({ status: 'error', db: 'unreachable', errorId });
     }
   });
 

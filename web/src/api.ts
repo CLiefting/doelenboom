@@ -35,6 +35,8 @@ async function request<T>(path: string, options: RequestInit = {}, token?: strin
     try {
       const body = await res.json();
       message = body.error ?? body.detail ?? message;
+      // DOEL-32: bij een serverfout een korte foutcode meegeven, zodat een melding van een gebruiker in het serverlog terug te vinden is.
+      if (typeof body.errorId === 'string') message += ` (foutcode ${body.errorId})`;
       reason = body.reason;
     } catch {
       // response had geen JSON-body

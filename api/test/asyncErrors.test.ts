@@ -85,7 +85,9 @@ describe('errors.ts — async-wrapper + globale foutafhandelaar (los van de app)
     const text = await res.text();
     assert.ok(!text.includes('hunter2'), 'interne foutmelding mag niet naar de client');
     assert.ok(!text.includes('at '), 'geen stacktrace naar de client');
-    assert.deepEqual(JSON.parse(text), { error: 'Interne serverfout.' });
+    const body500 = JSON.parse(text);
+    assert.equal(body500.error, 'Interne serverfout.');
+    assert.match(body500.errorId, /^[0-9a-f]{8}$/);
   });
 
   it('de echte fout wordt wél server-side gelogd', () => {
@@ -97,7 +99,9 @@ describe('errors.ts — async-wrapper + globale foutafhandelaar (los van de app)
   it('een gooiende sync handler geeft ook 500 (Express-standaardgedrag blijft werken)', async () => {
     const res = await fetch(`${base}/sync-throw`, { signal: AbortSignal.timeout(HANG_MS) });
     assert.equal(res.status, 500);
-    assert.deepEqual(await res.json(), { error: 'Interne serverfout.' });
+    const body500 = await res.json();
+    assert.equal(body500.error, 'Interne serverfout.');
+    assert.match(body500.errorId, /^[0-9a-f]{8}$/);
   });
 
   it('een falende async middleware (vóór next()) hangt niet maar geeft 500', async () => {
