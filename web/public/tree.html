@@ -3421,7 +3421,7 @@ function runApp(data) {
   function formatDateNL(iso) {
     if (!iso) return '';
     const t = parseDateFlexible(iso);
-    if (isNaN(t)) return iso;
+    if (isNaN(t)) return stripHtmlChars(iso);
     return new Date(t).toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit', year: 'numeric' });
   }
 
@@ -3431,7 +3431,7 @@ function runApp(data) {
   function formatDateTimeNL(iso) {
     if (!iso) return '';
     const t = parseDateFlexible(iso);
-    if (isNaN(t)) return iso;
+    if (isNaN(t)) return stripHtmlChars(iso);
     return new Date(t).toLocaleString('nl-NL', {
       day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
     });
@@ -3716,10 +3716,12 @@ function runApp(data) {
       verwachtT: isNaN(verwachtT) ? null : verwachtT,
       werkelijkT: isNaN(werkelijkT) ? null : werkelijkT,
       deadlineT: isNaN(deadlineT) ? null : deadlineT,
-      verwachtLabel: p.verwacht ? formatDateNL(p.verwacht) : null,
-      werkelijkLabel: p.werkelijk ? formatDateNL(p.werkelijk) : null,
-      deadlineLabel: p.deadline ? formatDateNL(p.deadline) : null,
-      durationLabel: p.duur + ' ' + (DUUR_EENHEID_LABELS[p.duurEenheid] || p.duurEenheid),
+      // Deze labels komen uitsluitend in HTML-strings terecht (title-attributen
+      // in activityGanttHtml) en worden daarom hier al geëscaped (DOEL-21).
+      verwachtLabel: p.verwacht ? escapeHtml(formatDateNL(p.verwacht)) : null,
+      werkelijkLabel: p.werkelijk ? escapeHtml(formatDateNL(p.werkelijk)) : null,
+      deadlineLabel: p.deadline ? escapeHtml(formatDateNL(p.deadline)) : null,
+      durationLabel: escapeHtml(p.duur + ' ' + (DUUR_EENHEID_LABELS[p.duurEenheid] || p.duurEenheid)),
     };
   }
 
@@ -4797,7 +4799,7 @@ function runApp(data) {
         if (p.duur !== null && p.duur !== undefined) {
           extraParts.push('Duur: ' + p.duur + ' ' + (DUUR_EENHEID_LABELS[p.duurEenheid] || p.duurEenheid));
         }
-        const extraMetaHtml = extraParts.length ? '<div class="product-extra-meta">' + extraParts.join(' &middot; ') + '</div>' : '';
+        const extraMetaHtml = extraParts.length ? '<div class="product-extra-meta">' + extraParts.map(escapeHtml).join(' &middot; ') + '</div>' : '';
         // Kleur de hele tile oranje (net als .product-item-nodate) zodra dit
         // product een planningsconflict heeft — niet alleen het badge-
         // icoontje in de hoek, zodat zo'n item tussen alle andere tiles
@@ -6057,7 +6059,7 @@ function runApp(data) {
     productDepsList.innerHTML = deps.map((d) => {
       const predName = nameByDbId.get(String(d.predecessorId)) || '?';
       const lagSuffix = d.lagAmount ? ' <span class="activity-dep-chip-type">(' +
-        (d.lagAmount > 0 ? '+' : '') + d.lagAmount + (d.lagEenheid || 'd') + ')</span>' : '';
+        escapeHtml((d.lagAmount > 0 ? '+' : '') + d.lagAmount + (d.lagEenheid || 'd')) + ')</span>' : '';
       return '<span class="dp-chip">Hangt af van: <b>' + escapeHtml(predName) + '</b>' + lagSuffix +
         '<button type="button" class="dp-chip-remove crud-only product-dep-remove-btn" data-code="' + escapeHtml(productModalProjectCode) +
           '" data-dep-id="' + escapeHtml(String(d.dbId)) + '" title="Afhankelijkheid verwijderen">&times;</button></span>';
@@ -6321,7 +6323,7 @@ function runApp(data) {
     const nameByDbId = new Map((ACTIVITIES[activityModalProjectCode] || []).map((a) => [String(a.dbId), a.name]));
     activityDepsList.innerHTML = deps.map((d) => {
       const predName = nameByDbId.get(String(d.predecessorId)) || '?';
-      const lagSuffix = d.lagDays ? (d.lagDays > 0 ? ' +' + d.lagDays + 'd' : ' ' + d.lagDays + 'd') : '';
+      const lagSuffix = d.lagDays ? escapeHtml(d.lagDays > 0 ? ' +' + d.lagDays + 'd' : ' ' + d.lagDays + 'd') : '';
       return '<span class="dp-chip">Volgt op: <b>' + escapeHtml(predName) + '</b>' +
         ' <span class="activity-dep-chip-type">(' + escapeHtml(d.type) + lagSuffix + ')</span>' +
         '<button type="button" class="dp-chip-remove crud-only activity-dep-remove-btn" data-code="' + escapeHtml(activityModalProjectCode) +
@@ -8549,7 +8551,11 @@ function runApp(data) {
 // in het bestand stond. Zie doelenboom_update_instructie.md voor de brondata-conventies.
 // ============================================================================
 
-let PARENT_ORIGIN = '*';
+// Standaard de eigen origin (de React-app serveert tree.html same-origin);
+// pas na een geslaagde handshake overschreven met event.origin (zelfde
+// waarde). Nooit '*' — behalve bij file:// (statische export), waar de
+// origin 'null' is en er geen parent is om naar te posten.
+let PARENT_ORIGIN = window.location.origin === 'null' ? '*' : window.location.origin;
 let apiUrl = null, authToken = null, doelenboomId = null, userEmail = null;
 // 'admin' (mag alles), 'gebruiker' (mag losse boom-inhoud wijzigen) of
 // 'bezoeker' (alleen lezen) — de eerste, voorlopige waarde komt van React op
@@ -8613,6 +8619,23 @@ function escapeHtml(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[c]));
+}
+
+// DOEL-21: helpers voor velden die de server als getal/enum levert maar die
+// (bij een vijandige of foute API-respons) tekst met HTML kunnen bevatten.
+// stripHtmlChars: voor 'terugvalwaarden' die als tekst getoond worden (bv. een
+// onparseerbare datum) — haalt de tekens weg waarmee HTML/attributen te
+// doorbreken zijn. safeNumber/safeDuurEenheid: afdwingen van het verwachte
+// type bij het inlezen van de boomdata (zie boot()).
+function stripHtmlChars(s) {
+  return String(s == null ? '' : s).replace(/[<>&"'`]/g, '');
+}
+function safeNumber(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+function safeDuurEenheid(v) {
+  return v === 'd' || v === 'w' || v === 'm' || v === 'y' ? v : 'd';
 }
 
 // Eigen confirm/melding-UI i.p.v. de lelijke browser-systeemdialogen (window.confirm/
@@ -8808,7 +8831,7 @@ function adaptTreeResponse(tree) {
   Object.keys(tree.productDependencies || {}).forEach((id) => {
     PRODUCT_DEPENDENCIES[id] = (tree.productDependencies[id] || []).map((d) => ({
       dbId: d.id, predecessorId: d.predecessorId, successorId: d.successorId,
-      type: d.type || 'FS', lagAmount: d.lagAmount || 0, lagEenheid: d.lagEenheid || 'd',
+      type: d.type || 'FS', lagAmount: safeNumber(d.lagAmount), lagEenheid: safeDuurEenheid(d.lagEenheid),
     }));
   });
 
@@ -8839,7 +8862,7 @@ function adaptTreeResponse(tree) {
   Object.keys(tree.dependencies || {}).forEach((id) => {
     DEPENDENCIES[id] = (tree.dependencies[id] || []).map((d) => ({
       dbId: d.id, predecessorId: d.predecessorId, successorId: d.successorId,
-      type: d.type || 'FS', lagDays: d.lagDays || 0,
+      type: d.type || 'FS', lagDays: safeNumber(d.lagDays),
     }));
   });
 
@@ -9022,6 +9045,11 @@ if (window.__STATIC_TREE__) {
 } else {
   window.addEventListener('message', (event) => {
     if (!event.data || event.data.type !== 'doelenboom-init') return;
+    // DOEL-21: alleen het init-bericht van de eigen parent-frame op dezelfde
+    // origin accepteren. Zonder deze controle kon elke pagina die deze
+    // tree.html in een iframe/popup opent (of ernaar post) apiUrl+token laten
+    // overschrijven en zo de sessie naar een eigen server laten lopen.
+    if (event.source !== window.parent || event.origin !== window.location.origin) return;
     PARENT_ORIGIN = event.origin;
     apiUrl = event.data.apiUrl;
     authToken = event.data.token;
@@ -9037,11 +9065,18 @@ if (window.__STATIC_TREE__) {
   // wachten op een postMessage-handshake. De echte app gebruikt altijd postMessage
   // (geen token in de URL/adresbalk/geschiedenis).
   (function initFromQuery() {
+    // DOEL-21: dit pad laadt de boom uit een API-adres dat in de URL staat en
+    // stuurt daar het token naartoe — met een aangemaakte link kon zo een
+    // aanvaller-server binnen de origin van de app draaien. Alleen nog actief
+    // op een lokale ontwikkelhost (localhost/127.0.0.1/[::1]); in productie
+    // wordt de querystring hier genegeerd en werkt alleen de handshake.
+    const isLocalDevHost = ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname);
+    if (!isLocalDevHost) return;
     const params = new URLSearchParams(window.location.search);
     const qApi = params.get('api');
     const qToken = params.get('token');
     const qId = params.get('doelenboom');
-    if (qApi && qToken && qId) {
+    if (qApi && qToken && qId && /^https?:\/\//i.test(qApi)) {
       apiUrl = qApi; authToken = qToken; doelenboomId = qId;
       userEmail = params.get('user') || null;
       // Standalone/debug-modus buiten de React-app: standaard 'admin' (tenzij
@@ -9056,7 +9091,7 @@ if (window.__STATIC_TREE__) {
 
   // Meldt aan de parent dat dit iframe klaar is om het init-bericht te ontvangen
   // (voorkomt een race condition als de parent eerder post dan onze listener actief is).
-  window.parent.postMessage({ type: 'doelenboom-ready' }, '*');
+  window.parent.postMessage({ type: 'doelenboom-ready' }, PARENT_ORIGIN);
 }
 </script>
 </body>
