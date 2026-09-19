@@ -1,0 +1,14 @@
+# gitleaks-configuratie (DOEL-41). Standaardregels blijven aan; alleen de testbestanden
+# zijn uitgezonderd: die bevatten bewust verzonnen wachtwoorden als 'juist-wachtwoord-1'
+# (regel generic-api-key). Er staan geen echte geheimen in api/test; een echt geheim
+# elders in de repo wordt nog steeds gevonden.
+title = "doelenboom"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "verzonnen testwachtwoorden in de API-tests"
+paths = [
+  '''^api/test/.*\.ts$''',
+]
