@@ -48,7 +48,9 @@ describe('nginx.conf: beveiligingsheaders (DOEL-30)', () => {
   it('de Dockerfile kopieert het snippet naar het pad waar nginx.conf naar verwijst', () => {
     // Optionele --chmod-vlag (DOEL-31b): COPY neemt anders de rechten van de werkmap over.
     assert.match(dockerfile, /COPY (--chmod=\S+ )?security-headers\.conf \/etc\/nginx\/snippets\/security-headers\.conf/);
-    assert.match(dockerfile, /COPY --chmod=0?644 security-headers\.conf /);
+    // Symbolisch, niet 0644: een octale modus zonder x-bit zet ook de nieuw aangemaakte
+    // map /etc/nginx/snippets op 644, waardoor nginx (uid 101) er niet meer in kan (DOEL-31d).
+    assert.match(dockerfile, /COPY --chmod=u=rwX,go=rX security-headers\.conf /);
   });
 });
 
