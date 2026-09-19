@@ -9,6 +9,12 @@
 // api/scripts/reset-test-db.ts en de "pretest"/"test"-npm-scripts in
 // package.json) — geen mocks: dit zijn integratietests tegen een echte,
 // wegwerpbare database (doelenboom_test), dezelfde aanpak als productie.
+// DOEL-20: de publieke aanvraagroute heeft een rate limit (standaard 5/uur per
+// IP). De suite doet tientallen aanvragen vanaf 127.0.0.1, dus hier ruim
+// omhoog; test/registrationRateLimit.test.ts zet eigen, lage waarden.
+process.env.REGISTRATION_RATE_LIMIT_MAX ??= '100000';
+process.env.REGISTRATION_GLOBAL_LIMIT_MAX ??= '100000';
+
 import { createApp } from '../src/app.js';
 import { pool } from '../src/db.js';
 import { setSendMfaEmailImpl, setSendNewSubscriptionRequestEmailImpl, NewSubscriptionRequestNotification } from '../src/email.js';

@@ -71,6 +71,12 @@ export function createApp() {
   installAsyncErrorSupport();
 
   const app = express();
+  // Hoeveel reverse proxies (Traefik, nginx in de web-container, ...) vóór de
+  // API staan en hun X-Forwarded-For mogen worden vertrouwd voor req.ip
+  // (rate limiting, zie rateLimit.ts). 0 = geen proxy vertrouwen (lokale dev:
+  // req.ip is het socketadres). Productie: zie docker-compose.prod.yml.
+  const trustProxyHops = Number(process.env.TRUST_PROXY_HOPS);
+  if (Number.isInteger(trustProxyHops) && trustProxyHops > 0) app.set('trust proxy', trustProxyHops);
   // Beveiligingsheaders (CISO-aandachtspunt) — X-Content-Type-Options,
   // X-DNS-Prefetch-Control, Referrer-Policy, X-Frame-Options (SAMEORIGIN,
   // niet DENY: tree.html laadt zichzelf same-origin in een iframe, zie

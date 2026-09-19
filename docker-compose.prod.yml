@@ -73,6 +73,13 @@ services:
     environment:
       ALLOWED_ORIGINS: https://doelenboom.code072.nl
       NODE_ENV: production
+      # Aantal reverse proxies vóór de API waarvan X-Forwarded-For vertrouwd
+      # wordt (DOEL-20, rate limiting per client-IP, zie api/src/rateLimit.ts):
+      # Traefik -> nginx (web-container, web/nginx.conf) -> api = 2 hops. Klopt
+      # dit niet (bv. er komt een CDN voor Traefik), dan delen alle bezoekers één
+      # teller (te laag) of kan een client zijn IP spoofen (te hoog) — zie
+      # deploy/README.md voor de controle na het uitrollen.
+      TRUST_PROXY_HOPS: "2"
     ports: !override
       - "127.0.0.1:4000:4000"   # alleen via een SSH-tunnel, niet vanaf internet
     networks:

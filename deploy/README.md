@@ -170,6 +170,29 @@ Standaard sysadmin-account uit `db/seed.sql`: `admin@code072.nl` /
 — dit gebeurt niet automatisch, `must_change_password` staat voor dit
 seed-account op `false` (zie `db/seed.sql`).
 
+## Rate limiting controleren (DOEL-20)
+
+`POST /api/subscription-requests` is publiek en begrensd op 5 aanvragen per uur
+per IP (en 30 per uur in totaal; instelbaar met `REGISTRATION_RATE_LIMIT_MAX` /
+`REGISTRATION_GLOBAL_LIMIT_MAX`). Het client-IP komt uit `X-Forwarded-For`;
+`TRUST_PROXY_HOPS: "2"` in `docker-compose.prod.yml` gaat uit van
+Traefik → nginx (web) → api. Controleer na het uitrollen dat dat klopt — een
+lege aanvraag geeft 400 en telt wel mee:
+
+```bash
+for i in 1 2 3 4 5 6 7; do
+  curl -s -o /dev/null -w "%{http_code} " -X POST https://doelenboom.code072.nl/api/subscription-requests \
+    -H 'Content-Type: application/json' -H "X-Forwarded-For: 198.51.100.$i" -d '{}'
+done; echo
+```
+
+Verwacht: `400 400 400 400 400 429 429` (ook al wijzigt het meegestuurde
+`X-Forwarded-For` steeds, zo werkt het spoofen niet). Zie je zeven keer `400`,
+dan staat `TRUST_PROXY_HOPS` te hoog; zie je al bij de eerste aanvraag `429`,
+dan te laag (of er zit een extra proxy/CDN voor Traefik) en delen alle
+bezoekers één teller. Wacht een uur of herstart de API (`dbprod restart api`)
+om de tellers te wissen.
+
 ## Controles achteraf
 
 - `curl -I http://doelenboom.code072.nl` → redirect naar https (Traefik doet
