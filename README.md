@@ -57,6 +57,10 @@ Er is één seed-gebruiker die sysadmin is (toegang tot alle tenants — zie
 - E-mail: `admin@code072.nl`
 - Wachtwoord: `changeme`
 
+Bij een nieuwe database dwingt de eerste login een nieuw wachtwoord af
+(`must_change_password`), en met `NODE_ENV=production` weigert de API te starten
+zolang dit wachtwoord nog werkt (`api/src/startupChecks.ts`).
+
 **Verander dit wachtwoord voordat deze omgeving buiten je eigen laptop draait** — via
 "Wachtwoord wijzigen" naast "Uitloggen" op het overzichtsscherm (zie "Gebruikersbeheer
 & rollen" verderop), of direct in de database via `update users set password_hash =

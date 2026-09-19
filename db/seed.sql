@@ -14,8 +14,13 @@ begin
   -- een oudere seed is gestart (zie deploy/README.md). De sysadmin-account
   -- bestaat dan al; alleen de tenant/doelenboom hieronder is dan nieuw.
   if not exists (select 1 from users where email = 'admin@code072.nl') then
-    insert into users (email, password_hash, is_sysadmin)
-    values ('admin@code072.nl', crypt('changeme', gen_salt('bf')), true);
+    -- must_change_password = true (DOEL-23): het standaardwachtwoord staat in
+    -- de README, dus bij de eerste login wordt een nieuw wachtwoord afgedwongen
+    -- (zie mustChangePassword-gate in web/src/App.tsx). Daarnaast weigert de
+    -- API in productie te starten zolang dit wachtwoord nog werkt (zie
+    -- api/src/startupChecks.ts).
+    insert into users (email, password_hash, is_sysadmin, must_change_password)
+    values ('admin@code072.nl', crypt('changeme', gen_salt('bf')), true, true);
   end if;
 
   if not exists (select 1 from tenants where slug = 'demo') then

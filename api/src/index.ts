@@ -4,6 +4,7 @@ import { sweepAccountRetention } from './accountRetention.js';
 import { sweepTenantRetention } from './tenantRetention.js';
 import { sweepDependencyHealthCheck } from './dependencyHealth.js';
 import { sweepLicenseRenewalReminders } from './licenseRenewalReminder.js';
+import { runStartupChecks } from './startupChecks.js';
 
 // Laatste vangnet (DOEL-22). Een fout in een route-handler komt sinds errors.ts
 // (async-wrapper + globale foutafhandelaar) als 500 bij de client terecht en
@@ -30,6 +31,9 @@ process.on('uncaughtException', (err) => {
 const app = createApp();
 
 const PORT = Number(process.env.PORT ?? 4000);
+
+// DOEL-23: in productie niet starten zolang het standaard sysadmin-wachtwoord werkt.
+await runStartupChecks();
 
 const server = app.listen(PORT, () => {
   console.log(`doelenboom-api listening on port ${PORT}`);

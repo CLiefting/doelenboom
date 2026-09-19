@@ -165,10 +165,23 @@ alias dbprod='docker compose -f docker-compose.yml -f docker-compose.prod.yml'
 ## 6. Eerste inlog
 
 Standaard sysadmin-account uit `db/seed.sql`: `admin@code072.nl` /
-`changeme`. **Meteen wachtwoord wijzigen** na de eerste login (Gebruikersbeheer
-→ eigen account, of gewoon de "Wachtwoord wijzigen"-link in de picker-header)
-— dit gebeurt niet automatisch, `must_change_password` staat voor dit
-seed-account op `false` (zie `db/seed.sql`).
+`changeme`. Bij een **nieuwe** database staat `must_change_password` voor dit
+account op `true`, dus de eerste login dwingt een nieuw wachtwoord af.
+
+**Belangrijk (bestaande database):** de seed draait alleen bij de allereerste
+initialisatie. In productie (`NODE_ENV=production`) weigert de API sinds
+DOEL-23 te starten zolang een sysadmin-account nog het wachtwoord `changeme`
+heeft (`api/src/startupChecks.ts`). Controleer/wijzig dat dus **vóór** je een
+nieuwe versie uitrolt:
+
+```bash
+dbprod exec db psql -U doelenboom -d doelenboom -c \
+  "select email from users where (is_sysadmin or email = 'admin@code072.nl') and password_hash = crypt('changeme', password_hash);"
+```
+
+Geeft dit een rij terug, wijzig dan het wachtwoord (Gebruikersbeheer of via
+`update users set password_hash = crypt('<nieuw-wachtwoord>', gen_salt('bf')),
+must_change_password = false where email = 'admin@code072.nl';`).
 
 ## Controles achteraf
 
