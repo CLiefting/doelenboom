@@ -139,3 +139,33 @@ describe('image-leesrechten: niet afhankelijk van de rechten in de werkmap (DOEL
     assert.match(stage, /^COPY --from=build --chmod=u=rwX,go=rX \/app\/dist /m);
   });
 });
+
+describe('Node-versie: geen end-of-life runtime (DOEL-42, OWASP A06)', () => {
+  // Node 20 is end-of-life. Verhoog MIN_NODE_MAJOR bij de volgende LTS-wissel.
+  const MIN_NODE_MAJOR = 24;
+  const dockerfiles = ['api/Dockerfile', 'api/Dockerfile.prod', 'web/Dockerfile', 'web/Dockerfile.prod'];
+  const nodeMajors = (text: string) => [...stripComments(text).matchAll(/^FROM node:(\d+)/gm)].map((m) => Number(m[1]));
+
+  for (const f of dockerfiles) {
+    it(`${f}: alle node-images zijn Node ${MIN_NODE_MAJOR} of nieuwer`, () => {
+      const majors = nodeMajors(read(f));
+      assert.ok(majors.length > 0, 'geen FROM node: gevonden');
+      for (const m of majors) assert.ok(m >= MIN_NODE_MAJOR, `node:${m} is verouderd (minimaal ${MIN_NODE_MAJOR})`);
+    });
+  }
+
+  it('Docker-images en CI gebruiken dezelfde Node-major', () => {
+    const ci = stripComments(read('.github/workflows/ci.yml'));
+    const ciMajors = [...ci.matchAll(/node-version:\s*'?(\d+)/g)].map((m) => Number(m[1]));
+    assert.ok(ciMajors.length >= 3, 'verwacht node-version in de api-, web- en dependency-audit-job');
+    const dockerMajors = new Set(dockerfiles.flatMap((f) => nodeMajors(read(f))));
+    assert.equal(dockerMajors.size, 1, `Dockerfiles gebruiken verschillende Node-majors: ${[...dockerMajors].join(', ')}`);
+    for (const c of ciMajors) assert.ok(dockerMajors.has(c), `CI gebruikt Node ${c}, de Dockerfiles ${[...dockerMajors].join(', ')}`);
+  });
+
+  it('api (prod): runtime-laag kopieert package.json en dist met vaste leesrechten', () => {
+    const stage = finalStage(read('api/Dockerfile.prod'));
+    assert.match(stage, /^COPY --chmod=u=rwX,go=rX package\*\.json \.\/$/m);
+    assert.match(stage, /^COPY --from=build --chmod=u=rwX,go=rX \/app\/dist \.\/dist$/m);
+  });
+});

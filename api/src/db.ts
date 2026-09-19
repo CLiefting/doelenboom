@@ -9,7 +9,7 @@ const { Pool, types } = pg;
 // terugsturen als JSON (JSON.stringify -> Date.toISOString()) wordt dat altijd
 // naar UTC omgezet — in elke tijdzone vóór UTC (bv. Europe/Amsterdam) schuift
 // een datum dan een dag terug (2026-12-01 wordt "2026-11-30T23:00:00.000Z").
-// In de Docker-images (node:20-alpine/postgres:18-alpine, beide standaard UTC)
+// In de Docker-images (node:24-alpine/postgres:18-alpine, beide standaard UTC)
 // is dit tot nu toe niet zichtbaar geworden, maar het is exact de kern van de
 // datum-problemen die tree.html eerder dit project moest omzeilen
 // (parseDateFlexible/toDateInputValue) — en zou gegarandeerd terugkomen zodra

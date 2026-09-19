@@ -2,7 +2,7 @@
 // testbestand draait (Node's ingebouwde testrunner start standaard één
 // subproces per --test-bestand) zijn eigen createApp()-instantie op een
 // ephemeral poort (0 = "geef er zelf een"), en praat er via gewone fetch()
-// mee — geen aparte testtool (supertest e.d.) nodig, Node 20 heeft fetch al
+// mee — geen aparte testtool (supertest e.d.) nodig, Node heeft fetch al ingebouwd
 // ingebouwd.
 //
 // Vereist een draaiende Postgres die bereikbaar is via DATABASE_URL (zie

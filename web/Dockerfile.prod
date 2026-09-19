@@ -6,7 +6,7 @@
 # app doet gewoon fetch('/api/...') en nginx (stage 2) stuurt dat intern door
 # naar de api-container — zelfde aanpak als bij WWspeur, geen CORS nodig en
 # geen domeinnaam hardcoded in de build.
-FROM node:20-alpine AS build
+FROM node:24-alpine AS build
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci
