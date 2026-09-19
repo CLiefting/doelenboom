@@ -56,4 +56,7 @@ COPY . .
 ENV SBOM_DIR=/app/sbom
 COPY --from=sbom /out/ /app/sbom/
 EXPOSE 4000
+# Alleen lokale ontwikkeling (bind-mounts, dev-server). Productie gebruikt Dockerfile.prod,
+# dat niet als root draait (DOEL-31).
+# nosemgrep: dockerfile.security.missing-user.missing-user
 CMD ["npm", "run", "dev"]

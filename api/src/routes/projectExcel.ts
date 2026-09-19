@@ -152,6 +152,9 @@ async function downloadProjectDocument(
   });
   res.setHeader('Content-Type', opts.mediaType);
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  // Binaire xlsx/pptx-download: vaste Content-Type, Content-Disposition: attachment en een
+  // gesaneerde bestandsnaam; geen HTML, dus geen XSS-pad (Semgrep-vals-positief, DOEL-41).
+  // nosemgrep: javascript.express.security.audit.xss.direct-response-write.direct-response-write
   res.send(Buffer.from(arrayBuffer));
 }
 

@@ -1,0 +1,13 @@
+# DOEL-41: GitHub Actions staan vastgezet op een commit-SHA (Semgrep: veranderlijke tags zijn
+# een supply-chain-risico). Dependabot stelt wekelijks een PR voor met de nieuwste versie,
+# inclusief de nieuwe SHA en het versiecommentaar. De cooldown wacht 7 dagen met nieuw
+# gepubliceerde versies: die kunnen kwaadaardig of instabiel zijn (Semgrep-regel
+# dependabot-missing-cooldown).
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
