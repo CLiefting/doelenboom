@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { AuthedRequest, requireAuth } from '../auth.js';
 import { requireSysadmin } from '../rbac.js';
 import { createRateLimiter, envInt } from '../rateLimit.js';
+import { confirmRegistration, InvalidRegistrationTokenError, submitRegistration } from '../pendingRegistrations.js';
 import { listModules, listTiers } from '../license.js';
 import { listOffers } from '../offers.js';
 import { getCurrentTierPrice } from '../tierPrices.js';
@@ -9,7 +10,6 @@ import { getCurrentModuleSurcharge } from '../moduleSurcharges.js';
 import { listModuleTierSurcharges } from '../moduleTierSurcharges.js';
 import {
   countPendingSubscriptionActions,
-  createSubscriptionRequest,
   getSubscriptionRequestById,
   isBillingPeriod,
   listLicenseEventsForTenant,
@@ -164,7 +164,10 @@ subscriptionsRouter.post('/subscription-requests', registrationRateLimitPerIp, r
   if (errors.length) return res.status(400).json({ error: errors.join(' ') });
 
   try {
-    const result = await createSubscriptionRequest({
+    // DOEL-20: er wordt hier nog GEEN tenant/account aangemaakt — de aanvraag
+    // wacht op bevestiging via de link in de e-mail (zie pendingRegistrations.ts).
+    // Dezelfde respons of het adres nieuw is of al een account heeft.
+    await submitRegistration({
       organizationName,
       applicantName,
       applicantEmail,
@@ -174,10 +177,33 @@ subscriptionsRouter.post('/subscription-requests', registrationRateLimitPerIp, r
       moduleKeys,
       billingPeriod: billingPeriod as 'maand' | 'jaar',
     });
-    res.status(201).json(result);
+    res.status(202).json({ status: 'bevestiging-verzonden' });
   } catch (err) {
     if (err instanceof SubscriptionRequestError) return res.status(400).json({ error: err.message });
-    res.status(500).json({ error: 'Aanvraag indienen mislukt', detail: (err as Error).message });
+    // Onverwachte fouten: globale foutafhandelaar (500, generieke tekst, zie errors.ts).
+    throw err;
+  }
+});
+
+// Bevestigt een aanvraag met het token uit de verificatiemail: pas nu ontstaan
+// tenant + admin-account + proefperiode + de notificatiemail aan de beheerder.
+// Ongeauthenticeerd (de aanvrager heeft nog geen account) en dus ook begrensd.
+const confirmRateLimit = createRateLimiter({
+  windowMs: () => REGISTRATION_WINDOW_MS,
+  max: () => envInt('REGISTRATION_CONFIRM_RATE_LIMIT_MAX', 20),
+  message: 'Er zijn te veel pogingen vanaf dit adres. Probeer het over een uur opnieuw.',
+});
+subscriptionsRouter.post('/subscription-requests/confirm', confirmRateLimit, async (req, res) => {
+  const token = typeof (req.body as { token?: unknown } | undefined)?.token === 'string' ? (req.body as { token: string }).token : '';
+  try {
+    const result = await confirmRegistration(token);
+    res.status(201).json(result);
+  } catch (err) {
+    if (err instanceof InvalidRegistrationTokenError) {
+      return res.status(400).json({ error: 'Deze bevestigingslink is ongeldig of verlopen. Vraag het abonnement opnieuw aan.' });
+    }
+    if (err instanceof SubscriptionRequestError) return res.status(400).json({ error: err.message });
+    throw err;
   }
 });
 

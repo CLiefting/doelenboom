@@ -17,7 +17,10 @@ process.env.REGISTRATION_GLOBAL_LIMIT_MAX ??= '100000';
 
 import { createApp } from '../src/app.js';
 import { pool } from '../src/db.js';
-import { setSendMfaEmailImpl, setSendNewSubscriptionRequestEmailImpl, NewSubscriptionRequestNotification } from '../src/email.js';
+import {
+  setSendMfaEmailImpl, setSendNewSubscriptionRequestEmailImpl, NewSubscriptionRequestNotification,
+  setSendRegistrationVerificationEmailImpl, setSendRegistrationExistingAccountEmailImpl,
+} from '../src/email.js';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 
@@ -67,6 +70,31 @@ setSendNewSubscriptionRequestEmailImpl(async (notification) => {
 
 export function getLastSubscriptionRequestNotification(requestId: number): NewSubscriptionRequestNotification | undefined {
   return lastSubscriptionRequestNotificationById.get(requestId);
+}
+
+// Testhaken voor de e-mailverificatie van de publieke aanvraag (DOEL-20, zie
+// pendingRegistrations.ts): vangen de "verstuurde" verificatielink en de
+// 'account bestaat al'-mail op i.p.v. te mailen. De link is
+// `<APP_BASE_URL>/aanvraag/bevestigen#<token>` — getRegistrationToken() geeft
+// alleen het token terug.
+const lastRegistrationLinkByEmail = new Map<string, string>();
+const registrationExistingMailCountByEmail = new Map<string, number>();
+const registrationVerificationMailCountByEmail = new Map<string, number>();
+setSendRegistrationVerificationEmailImpl(async (to, link) => {
+  lastRegistrationLinkByEmail.set(to, link);
+  registrationVerificationMailCountByEmail.set(to, (registrationVerificationMailCountByEmail.get(to) ?? 0) + 1);
+});
+setSendRegistrationExistingAccountEmailImpl(async (to) => {
+  registrationExistingMailCountByEmail.set(to, (registrationExistingMailCountByEmail.get(to) ?? 0) + 1);
+});
+export function getRegistrationToken(email: string): string | undefined {
+  return lastRegistrationLinkByEmail.get(email)?.split('#')[1];
+}
+export function registrationMailCounts(email: string) {
+  return {
+    verification: registrationVerificationMailCountByEmail.get(email) ?? 0,
+    existingAccount: registrationExistingMailCountByEmail.get(email) ?? 0,
+  };
 }
 
 let server: Server | null = null;
@@ -128,6 +156,22 @@ export async function rawReq(method: string, path: string, opts: ReqOpts = {}): 
     headers,
     body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
   });
+}
+
+// Volledige (tweestaps) zelfbedieningsaanvraag zoals de gebruiker die doorloopt:
+// indienen + het token uit de opgevangen verificatiemail bevestigen. Geeft
+// het resultaat van de BEVESTIGING terug (201 {tenantId, tenantSlug, requestId}
+// zoals het indienen vóór DOEL-20 deed), of — bij een fout tijdens het
+// indienen (bv. 400-validatie) — meteen díe respons. Bij een 202 zonder
+// opgevangen token (bv. bestaand adres) is dat de 202-respons zelf.
+export async function registerSubscription(body: Record<string, unknown>): Promise<ReqResult> {
+  const submitted = await req('POST', '/api/subscription-requests', { body });
+  if (submitted.status !== 202) return submitted;
+  const email = String(body.applicantEmail ?? '').trim().toLowerCase();
+  const token = getRegistrationToken(email);
+  if (!token) return submitted;
+  lastRegistrationLinkByEmail.delete(email);
+  return req('POST', '/api/subscription-requests/confirm', { body: { token } });
 }
 
 let counter = 0;

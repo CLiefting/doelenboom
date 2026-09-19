@@ -507,9 +507,19 @@ export const api = {
     moduleKeys: string[];
     billingPeriod: import('./types').BillingPeriod;
   }) =>
-    request<{ tenantId: number; tenantSlug: string; requestId: number }>('/api/subscription-requests', {
+    // Sinds DOEL-20 maakt dit nog géén account aan: de API mailt een
+    // bevestigingslink (altijd dezelfde 202-respons, ook bij een bekend adres).
+    request<{ status: string }>('/api/subscription-requests', {
       method: 'POST',
       body: JSON.stringify(body),
+    }),
+
+  // Bevestigt de aanvraag met het token uit de verificatiemail (uit het
+  // URL-fragment, zie SubscriptionConfirmPage) — pas dan ontstaat het account.
+  confirmSubscriptionRequest: (token: string) =>
+    request<{ tenantId: number; tenantSlug: string; requestId: number }>('/api/subscription-requests/confirm', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
     }),
 
   // --- Sysadmin-beheer van aanvragen/verlengingen ---

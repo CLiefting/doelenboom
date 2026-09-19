@@ -80,6 +80,9 @@ services:
       # teller (te laag) of kan een client zijn IP spoofen (te hoog) — zie
       # deploy/README.md voor de controle na het uitrollen.
       TRUST_PROXY_HOPS: "2"
+      # Basis-URL voor links in e-mails (bevestigingslink van de publieke
+      # aanvraag, DOEL-20): <APP_BASE_URL>/aanvraag/bevestigen#<token>.
+      APP_BASE_URL: https://doelenboom.code072.nl
     ports: !override
       - "127.0.0.1:4000:4000"   # alleen via een SSH-tunnel, niet vanaf internet
     networks:

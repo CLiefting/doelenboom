@@ -4,6 +4,7 @@ import { sweepAccountRetention } from './accountRetention.js';
 import { sweepTenantRetention } from './tenantRetention.js';
 import { sweepDependencyHealthCheck } from './dependencyHealth.js';
 import { sweepLicenseRenewalReminders } from './licenseRenewalReminder.js';
+import { sweepPendingRegistrations } from './pendingRegistrations.js';
 
 // Laatste vangnet (DOEL-22). Een fout in een route-handler komt sinds errors.ts
 // (async-wrapper + globale foutafhandelaar) als 500 bij de client terecht en
@@ -110,3 +111,12 @@ setInterval(() => {
     console.error('Verlengingsherinnering-sweep mislukt:', err);
   });
 }, LICENSE_RENEWAL_REMINDER_SWEEP_INTERVAL_MS);
+
+// Opruimen van verlopen/verbruikte e-mailverificatie-aanvragen (DOEL-20, zie
+// pendingRegistrations.ts) — zelfde in-process setInterval-patroon als hierboven.
+const PENDING_REGISTRATION_SWEEP_INTERVAL_MS = 60 * 60_000;
+setInterval(() => {
+  sweepPendingRegistrations().catch((err) => {
+    console.error('Opruimen onbevestigde aanvragen mislukt:', err);
+  });
+}, PENDING_REGISTRATION_SWEEP_INTERVAL_MS);

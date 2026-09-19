@@ -394,17 +394,23 @@ export default function App() {
   );
 }
 
-// Bevestiging na een geslaagde abonnementsaanvraag (zie SubscriptionRequestPage) —
-// simpel bericht, geen eigen route: de proefaccount is er al, alleen inloggen
-// hoeft nog.
+// Bevestiging na het indienen van een abonnementsaanvraag (zie
+// SubscriptionRequestPage) — simpel bericht, geen eigen route. Het account
+// ontstaat pas nadat de aanvrager de link in de verificatiemail bevestigd heeft
+// (DOEL-20, zie SubscriptionConfirmPage).
 function SignupDoneNotice({ email, onBack }: { email: string; onBack: () => void }) {
   return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#eef1f8', fontFamily: 'system-ui, sans-serif', padding: '1rem' }}>
       <div style={{ background: 'white', borderRadius: 12, boxShadow: '0 1px 3px rgba(0,0,0,0.1)', padding: '2rem', maxWidth: 420, textAlign: 'center' }}>
-        <h1 style={{ color: '#203864', margin: '0 0 10px' }}>Aanvraag ontvangen</h1>
+        <h1 style={{ color: '#203864', margin: '0 0 10px' }}>Controleer je e-mail</h1>
         <p style={{ color: '#444', fontSize: 14.5, lineHeight: 1.5 }}>
-          Je proefaccount staat klaar. Log in met <strong>{email}</strong> en het wachtwoord dat je net gekozen hebt
-          om meteen te beginnen — je hebt 14 dagen om de betaling te regelen.
+          We hebben een bevestigingslink gestuurd naar <strong>{email}</strong>. Klik op die link om je aanvraag te
+          bevestigen en je proefaccount te activeren — de link is 24 uur geldig. Daarna log je in met het
+          wachtwoord dat je net gekozen hebt en heb je 14 dagen om de betaling te regelen.
+        </p>
+        <p style={{ color: '#666', fontSize: 13, lineHeight: 1.5 }}>
+          Geen mail gezien? Kijk ook in je spammap. Is dit adres al bij ons bekend, dan ontvang je een mail met
+          uitleg hoe je kunt inloggen.
         </p>
         <button
           onClick={onBack}

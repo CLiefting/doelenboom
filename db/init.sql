@@ -1031,6 +1031,19 @@ create table if not exists subscription_requests (
 );
 create index if not exists idx_subscription_requests_status on subscription_requests(status);
 
+-- E-mailverificatie voor de publieke aanvraag (DOEL-20) — zie
+-- db/migrations/0040_pending_registrations.sql voor de toelichting.
+create table if not exists pending_registrations (
+  id bigserial primary key,
+  email text not null,
+  token_hash text not null unique,
+  payload jsonb not null,
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null,
+  consumed_at timestamptz
+);
+create index if not exists idx_pending_registrations_email_created on pending_registrations(email, created_at);
+
 -- Losstaande logging-module: elke handeling in de aanvraag-/verlengcyclus
 -- wordt hier vastgelegd, los van de "huidige stand" in subscription_requests/
 -- tenants zelf — zodat alles achteraf traceerbaar blijft, ook nadat een status

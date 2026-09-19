@@ -5,6 +5,7 @@ import DbStatPage from './pages/DbStatPage';
 import SessionsPage from './pages/SessionsPage';
 import AuditLogPage from './pages/AuditLogPage';
 import SystemInfoPage from './pages/SystemInfoPage';
+import SubscriptionConfirmPage from './pages/SubscriptionConfirmPage';
 
 // Geen routerbibliotheek — dit zijn de enige losse URL's naast de hoofdapp, dus
 // een simpele pathname-check volstaat. Vite's devserver (en de manier waarop dit
@@ -16,6 +17,7 @@ const ROUTES: Record<string, typeof App> = {
   '/sessions': SessionsPage,
   '/audit-log': AuditLogPage,
   '/system-info': SystemInfoPage,
+  '/aanvraag/bevestigen': SubscriptionConfirmPage,
 };
 const Root = ROUTES[window.location.pathname] ?? App;
 

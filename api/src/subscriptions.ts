@@ -191,20 +191,30 @@ export async function quotePrice(
 // license_end_date van de tenant wordt meteen op aanvraagdatum + 14 dagen
 // gezet — de proefperiode blokkeert zichzelf dus automatisch via de
 // bestaande license.isLicenseExpired-enforcement, geen aparte sweep nodig.
-export async function createSubscriptionRequest(input: {
+export type SubscriptionRequestInput = {
   organizationName: string;
   applicantName: string;
   applicantEmail: string;
   applicantPhone: string | null;
-  password: string;
+  // Precies één van beide: `password` (leesbaar, wordt hier gehasht) of
+  // `passwordHash` (al met bcrypt/crypt() gehasht — het pad via e-mail-
+  // verificatie, zie pendingRegistrations.ts: het wachtwoord staat dan
+  // nooit leesbaar in de database).
+  password?: string;
+  passwordHash?: string;
   tierId: number;
   moduleKeys: string[];
   billingPeriod: BillingPeriod;
-}): Promise<{ tenantId: number; tenantSlug: string; requestId: number }> {
-  const emailExists = await pool.query('select 1 from users where email = $1', [input.applicantEmail]);
-  if (emailExists.rows.length > 0) {
-    throw new SubscriptionRequestError('Er bestaat al een account met dit e-mailadres.');
-  }
+};
+
+// Alle controles op tier/modules/prijs die NIET afhangen van het e-mailadres —
+// losgetrokken uit createSubscriptionRequest zodat de publieke route ze al bij
+// het indienen kan doen (directe, duidelijke foutmelding, zonder te verklappen
+// of een account bestaat) én createSubscriptionRequest ze bij het bevestigen
+// nogmaals doet (tiers/prijzen kunnen tussentijds gewijzigd zijn).
+export async function prepareSubscriptionRequest(
+  input: Pick<SubscriptionRequestInput, 'tierId' | 'moduleKeys' | 'billingPeriod'>
+) {
   const tiers = await listTiers();
   const tier = tiers.find((t) => String(t.id) === String(input.tierId));
   if (!tier) throw new SubscriptionRequestError('Onbekende tier.');
@@ -228,7 +238,6 @@ export async function createSubscriptionRequest(input: {
   // Tier-specifieke proefduur (bv. Evaluatie: 30 dagen) valt terug op de
   // standaard TRIAL_DAYS als de tier zelf geen eigen trialDays heeft.
   const trialEndDate = addDays(now, tier.trialDays ?? TRIAL_DAYS);
-  const slug = await uniqueSlug(input.organizationName);
 
   const today = requestedAt.slice(0, 10);
   const quote = await quotePrice(tier.id, moduleKeys, input.billingPeriod, today);
@@ -246,6 +255,19 @@ export async function createSubscriptionRequest(input: {
       `Deze tier heeft geen ${input.billingPeriod === 'maand' ? 'maand' : 'jaar'}prijs — kies een andere facturatieperiode.`
     );
   }
+  return { tier, moduleKeys, requestedAt, trialEndDate, quote };
+}
+
+export async function createSubscriptionRequest(
+  input: SubscriptionRequestInput
+): Promise<{ tenantId: number; tenantSlug: string; requestId: number }> {
+  const emailExists = await pool.query('select 1 from users where email = $1', [input.applicantEmail]);
+  if (emailExists.rows.length > 0) {
+    throw new SubscriptionRequestError('Er bestaat al een account met dit e-mailadres.');
+  }
+  const { tier, moduleKeys, requestedAt, trialEndDate, quote } = await prepareSubscriptionRequest(input);
+  const slug = await uniqueSlug(input.organizationName);
+  if (!input.password && !input.passwordHash) throw new Error('createSubscriptionRequest: wachtwoord of wachtwoordhash vereist');
 
   const client = await pool.connect();
   try {
@@ -261,8 +283,8 @@ export async function createSubscriptionRequest(input: {
 
     const userResult = await client.query(
       `insert into users (email, password_hash, is_sysadmin, must_change_password)
-       values ($1, crypt($2, gen_salt('bf')), false, false) returning id`,
-      [input.applicantEmail, input.password]
+       values ($1, ${input.passwordHash ? '$2' : "crypt($2, gen_salt('bf'))"}, false, false) returning id`,
+      [input.applicantEmail, input.passwordHash ?? input.password]
     );
     const userId = userResult.rows[0].id as number;
     await client.query(`insert into tenant_users (tenant_id, user_id, role) values ($1,$2,'admin')`, [

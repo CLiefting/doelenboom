@@ -193,6 +193,39 @@ dan te laag (of er zit een extra proxy/CDN voor Traefik) en delen alle
 bezoekers één teller. Wacht een uur of herstart de API (`dbprod restart api`)
 om de tellers te wissen.
 
+## E-mailverificatie publieke aanvraag (DOEL-20)
+
+Sinds DOEL-20 maakt `POST /api/subscription-requests` niet meer direct een
+tenant + account aan: de aanvraag wordt eerst bewaard in de tabel
+`pending_registrations` en er gaat een e-mail met een bevestigingslink uit
+(`<APP_BASE_URL>/aanvraag/bevestigen#<token>`, 24 uur geldig, eenmalig). Pas
+na het bevestigen ontstaan tenant + account. Zo kan niemand nog met andermans
+e-mailadres accounts aanmaken.
+
+**Vóór het uitrollen van de nieuwe `api`-image** eenmalig de migratie draaien
+(zie ook "Een los migratiebestand draaien" verderop):
+
+```bash
+cd ~/doelenboom
+git pull
+docker compose -f docker-compose.yml -f docker-compose.prod.yml exec -T db \
+  psql -U doelenboom -d doelenboom -v ON_ERROR_STOP=1 < db/migrations/0040_pending_registrations.sql
+```
+
+Vereisten in productie:
+
+- `SMTP_HOST` (en de overige `SMTP_*`) moeten ingesteld zijn (zelfde relay als
+  de MFA-mail). Zonder SMTP kan niemand een aanvraag bevestigen; de API logt
+  dan een `FOUT: geen SMTP_HOST geconfigureerd`-regel. (De link zelf komt in
+  productie nooit in de logs.)
+- `APP_BASE_URL` staat in `docker-compose.prod.yml` op
+  `https://doelenboom.code072.nl`; pas dit aan als het domein wijzigt.
+
+Controle na het uitrollen: dien op de publieke pagina een aanvraag in met een
+eigen e-mailadres, klik op de link in de mail en controleer dat inloggen
+lukt. Een tweede aanvraag met een bestaand adres levert dezelfde melding op
+maar een andere mail ("Je hebt al een Doelenboom-account").
+
 ## Controles achteraf
 
 - `curl -I http://doelenboom.code072.nl` → redirect naar https (Traefik doet
