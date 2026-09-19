@@ -17,12 +17,13 @@ __pycache__
 # docker-compose.prod.yml).
 /backups/
 
-# Gegenereerde CycloneDX-SBOM's (scripts/generate-sbom.sh, zie
+# Lokaal gegenereerde CycloneDX-SBOM's (scripts/generate-sbom.sh, zie
 # doelenboom_sbom_ontwerp.md in het project) — build-artefacten, niet
 # reproduceerbaar-identiek qua timestamp/serialNumber tussen twee runs van
-# dezelfde commit, dus horen net als /dist hierboven niet in git. Wordt in de
-# api-container gemount (docker-compose.yml, api.volumes) zodat
-# dependencyHealth.ts 'm runtime kan inlezen.
+# dezelfde commit, dus horen net als /dist hierboven niet in git. De SBOM die
+# in de Docker-images meegaat wordt tijdens `docker compose build` gegenereerd
+# (SBOM-stages in de Dockerfiles) en komt hier niet voor; deze map is alleen
+# nog voor de API draaien buiten Docker.
 /sbom/
 
 # Door de Claude-desktop-app zelf aangemaakte map wanneer een bestand (bv. een

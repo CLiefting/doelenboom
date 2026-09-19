@@ -99,19 +99,12 @@ echo
 echo "==> excel-service/tests/ (pytest)"
 (cd excel-service && .venv/bin/pytest -q)
 
-echo
-echo "==> Software Bill of Materials genereren (scripts/generate-sbom.sh)"
-# Ná de tests/venv-opzet hierboven (excel-service/.venv staat er dan al, incl.
-# requirements-dev.txt/cyclonedx-bom) en vóór de daadwerkelijke
-# `docker compose build` — zie doelenboom_sbom_ontwerp.md in het project. Een
-# falende SBOM-generatie mag het hele pre-build-script niet laten stranden
-# (de belangrijkste stap hierboven, de tests, is dan al geslaagd) — vandaar
-# de eigen foutafhandeling i.p.v. gewoon set -e te laten stoppen.
-if ! ./scripts/generate-sbom.sh; then
-  echo "WAARSCHUWING: SBOM-generatie mislukt — de Softwarecomponenten-pagina" >&2
-  echo "toont dan straks 'geen SBOM beschikbaar' totdat dit handmatig wordt" >&2
-  echo "opgelost (draai './scripts/generate-sbom.sh' los om de fout te zien)." >&2
-fi
+# Geen SBOM-stap meer hier: de Software Bill of Materials wordt sinds
+# 19 september 2026 tijdens `docker compose build` zelf in de images gegenereerd
+# (SBOM-stages in api/Dockerfile*, excel-service/Dockerfile — zie
+# doelenboom_sbom_ontwerp.md in het project) en hoort daardoor altijd bij de
+# gebouwde/gedeployde versie. scripts/generate-sbom.sh blijft bestaan voor de
+# API draaien buiten Docker, maar hoort niet meer bij de release-flow.
 
 echo
 echo "Alle geautomatiseerde tests geslaagd."

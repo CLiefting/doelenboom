@@ -26,7 +26,12 @@ services:
       retries: 10
 
   excel-service:
-    build: ./excel-service
+    build:
+      context: ./excel-service
+      additional_contexts:
+        # scripts/ valt buiten de build-context van deze service; nodig voor
+        # sbom_python_scope.py in de SBOM-stage van excel-service/Dockerfile.
+        sbom_tools: ./scripts
     # Vaste tag (i.p.v. de door compose afgeleide project-naam-tag) zodat een
     # lokaal gebouwde image via `docker save`/`docker load` 1-op-1 op de VPS
     # herbruikt kan worden — zie deploy/README.md ("Lokaal bouwen, VPS laadt
@@ -53,6 +58,22 @@ services:
         # op "dev" en vult GIT_REF apart met de actuele git-commit/branch, zodat
         # de footer ("vdev") toch te herleiden is naar een concrete git-stand.
         GIT_REF: ${GIT_REF:-unknown}
+      # De SBOM (Software Bill of Materials) wordt tijdens deze build in de
+      # image gegenereerd (SBOM-stage in api/Dockerfile en api/Dockerfile.prod)
+      # en staat dus altijd bij precies deze gebouwde versie in /app/sbom —
+      # geen ./sbom-volume en geen handmatig meesturen naar de VPS meer. Voor
+      # die stage zijn drie named build-contexts nodig:
+      additional_contexts:
+        # sbom-postprocess.mjs (scripts/ valt buiten ./api).
+        sbom_tools: ./scripts
+        # package.json + package-lock.json van de web-app (SBOM van web).
+        web_src: ./web
+        # De excel-service-image: bevat /sbom, gegenereerd uit de echt
+        # geïnstalleerde Python-omgeving. Compose bouwt excel-service daarom
+        # eerst; altijd api + web + excel-service samen bouwen (zie
+        # deploy/README.md), anders kan een oudere excel-service-image
+        # meegenomen worden.
+        excel_sbom: service:excel-service
     image: doelenboom-api:latest
     restart: unless-stopped
     environment:
@@ -74,24 +95,8 @@ services:
       # en deploy/README.md) — apart instelbaar, gebruikt verder dezelfde
       # SMTP_*-instellingen hierboven.
       SUBSCRIPTION_REQUEST_NOTIFY_EMAIL: ${SUBSCRIPTION_REQUEST_NOTIFY_EMAIL:-info.doelenboom@code072.nl}
-      # Expliciet i.p.v. te vertrouwen op dependencyHealth.ts's eigen
-      # cwd-gebaseerde fallback (`path.resolve(process.cwd(), '..', 'sbom')`,
-      # bedoeld voor lokaal `npm run dev` zonder Docker vanuit api/): met
-      # WORKDIR /app (zie api/Dockerfile) en `npm run dev` z'n cwd ook op
-      # /app, zou die fallback hier op "/sbom" uitkomen — één map te hoog,
-      # niet waar het volume hieronder daadwerkelijk gemount is.
-      SBOM_DIR: /app/sbom
     ports:
       - "4000:4000"
-    volumes:
-      # Door scripts/generate-sbom.sh op de host gegenereerde CycloneDX-SBOM's
-      # (zie .gitignore/doelenboom_sbom_ontwerp.md) — read-only, want de api
-      # leest dit alleen (api/src/dependencyHealth.ts, SBOM_DIR hierboven).
-      # Ontbreekt de map/staat hij leeg (nog niet gegenereerd), dan valt de
-      # Softwarecomponenten-pagina terug op "geen SBOM beschikbaar" i.p.v. te
-      # crashen. docker-compose.prod.yml merget dit additief mee, geen aparte
-      # override nodig.
-      - ./sbom:/app/sbom:ro
     depends_on:
       db:
         condition: service_healthy

@@ -4,15 +4,15 @@
 # doelenboom_sbom_ontwerp.md in het project en api/src/dependencyHealth.ts
 # (dat deze map runtime inleest, zie SBOM_DIR verderop/deploy/README.md).
 #
-# Hoort bij elke build te draaien, vóór `docker compose build`/`up --build`,
-# zelfde plek in de flow als scripts/build-version.sh. Het script cd't zelf al
-# naar ~/OneDrive/src/doelenboom (zie hieronder), dus vanaf welke map je het
-# aanroept maakt niet uit:
-#
-#   set -euo pipefail
-#   ~/OneDrive/src/doelenboom/scripts/pre-build.sh   # draait dit script ook zelf, zie onderaan
-#   export BUILD_VERSION="$(~/OneDrive/src/doelenboom/scripts/build-version.sh)"
-#   (cd ~/OneDrive/src/doelenboom && docker compose up --build)
+# LET OP — dit script is NIET meer onderdeel van de release-flow: de SBOM wordt
+# sinds 19 september 2026 tijdens `docker compose build` in de images zelf
+# gegenereerd (SBOM-stages in api/Dockerfile, api/Dockerfile.prod en
+# excel-service/Dockerfile) en staat daarna in de api-image (/app/sbom, zie
+# SBOM_DIR). Dit script is alleen nog handig om de Softwarecomponenten-pagina
+# uit te proberen met de API BUITEN Docker (`npm run dev` vanuit api/, waar
+# dependencyHealth.ts terugvalt op ../sbom). Het script cd't zelf naar
+# ~/OneDrive/src/doelenboom (zie hieronder), dus vanaf welke map je het
+# aanroept maakt niet uit.
 #
 # Vereisten: node/npx (voor cyclonedx-npm, via npx — geen extra
 # package.json-dependency nodig, zie §28 "minimaliseer nieuwe dependencies"),

@@ -349,66 +349,51 @@ de wijziging alléén in `api`/`web`/`excel-service`-code, dan volstaat
 veranderd is). Alleen als `docker-compose.yml`/`docker-compose.prod.yml`
 zelf wijzigde, is de `git pull` op de VPS ook nodig vóór `up -d`.
 
-### Softwarecomponenten (SBOM): `sbom/`-map los overzetten
+### Softwarecomponenten (SBOM): zit in de image, niets los overzetten
 
-`scripts/generate-sbom.sh` schrijft naar `./sbom/` (bewust **niet** in git, zie
-`.gitignore` — build-artefact, niet reproduceerbaar-identiek qua timestamp
-tussen twee runs) en `docker-compose.yml` mount die map read-only in de
-`api`-container (`SBOM_DIR=/app/sbom`, zie hierboven). Die map zit dus niet in
-een `docker save`/`docker load`-image en ook niet in een `git pull` — zonder
-extra actie toont de Softwarecomponenten-pagina op de VPS na een deploy
-gewoon "geen SBOM beschikbaar" (netjes, geen crash, maar wel nutteloos).
+Sinds 19 september 2026 wordt de SBOM (Software Bill of Materials, CycloneDX)
+tijdens `docker compose build` zelf gegenereerd en zit hij in de `api`-image
+(`/app/sbom`, `SBOM_DIR` is als `ENV` in `api/Dockerfile*` gezet). De SBOM
+gaat dus mee in dezelfde `docker save`/`docker load` als de images en hoort
+daardoor altijd bij precies de versie die draait — er is geen `sbom/`-map meer
+om los te `scp`'en en geen `./sbom:/app/sbom:ro`-volume meer. (De vroegere
+valkuilen — geneste `sbom/sbom/`-map door `scp -r`, en een `api`-container
+die aan een verwijderde bind-mount-map bleef hangen — bestaan daarmee niet
+meer.)
 
-Bewust **niet** op de VPS zelf genereren (zelfde reden als "images bouwen":
-geen extra npm/pip-toolchain-belasting op de qua resources krappe, gedeelde
-server) — in plaats daarvan lokaal genereren en meesturen met de images:
+Hoe het werkt, kort:
 
-**Op de VPS eerst de INHOUD van de map leegmaken (niet de map zelf
-verwijderen!)** — zie de twee waarschuwingen hieronder waarom het precies zo
-moet — **daarna op je Mac**, ná `./scripts/generate-sbom.sh` (zie
-hoofd-README):
-```bash
-ssh charles@185.107.90.64 'rm -rf ~/doelenboom/sbom/*'
-scp -r sbom/. charles@185.107.90.64:~/doelenboom/sbom/
-```
+- `api`/`web` (npm): de SBOM-stage in `api/Dockerfile(.prod)` draait
+  `cyclonedx-npm --package-lock-only` op het `package-lock.json` van beide.
+- `excel-service` (Python): de SBOM-stage in `excel-service/Dockerfile`
+  inventariseert de daadwerkelijk geïnstalleerde omgeving van die image
+  (transitieve pip-versies zijn niet gepind, dus dit kan alleen daar). Die
+  image bevat de eigen SBOM in `/sbom`.
+- De `api`-build haalt die van de excel-service-image (`additional_contexts:
+  excel_sbom: service:excel-service` in `docker-compose.yml`) en voegt alles
+  samen met `scripts/sbom-postprocess.mjs --from ... --out ...`.
 
-**Waarschuwing 1 — `scp -r` overschrijft NIET 1-op-1 als de doelmap al
-bestaat:** `scp -r sbom host:~/doelenboom/sbom` (zónder de `/.`  hierboven)
-plaatst de nieuwe bestanden, zodra `~/doelenboom/sbom` al bestaat (dus elke
-keer ná de allereerste deploy), in een geneste submap
-`~/doelenboom/sbom/sbom/...` in plaats van de bestaande `.json`-bestanden te
-vervangen — `dependencyHealth.ts` leest dan stilzwijgend de oude,
-nooit-bijgewerkte top-level bestanden, ook na een klik op "Nu controleren"
-(die leest wél telkens vers van schijf, maar dan gewoon de verkeerde,
-ongewijzigde bestanden). Geen foutmelding, geen crash — alleen een
-Softwarecomponenten-pagina die na een deploy stilletjes de oude cijfers
-blijft tonen. Vandaar `sbom/.` (de INHOUD van de lokale map, niet de map
-zelf) als bron.
+Gevolgen voor de deploy:
 
-**Waarschuwing 2 — verwijder nooit de map `~/doelenboom/sbom` zelf, alleen
-haar inhoud:** `docker-compose.yml`'s `./sbom:/app/sbom:ro` is een
-bind-mount die bij het starten van de `api`-container aan die ene specifieke
-map gekoppeld wordt. Verwijder je die map zelf (`rm -rf ~/doelenboom/sbom`)
-en laat je scp 'm opnieuw aanmaken, dan blijft de al-draaiende container aan
-de oude, inmiddels verwijderde map gekoppeld en ziet hij de nieuwe bestanden
-niet — de Softwarecomponenten-pagina meldt dan zelfs "geen SBOM gevonden",
-erger dan de oude cijfers uit waarschuwing 1. Dit is al één keer misgegaan in
-productie. Is dit toch per ongeluk gebeurd, dan is de enige weg terug de
-`api`-container herstarten zodat de bind-mount opnieuw gekoppeld wordt (zie
-"Verplichte check: geen actieve gebruikers" hieronder — ook een `restart`
-onderbreekt ingelogde gebruikers, dus eerst
-`./deploy/check-no-active-users.sh` draaien):
-```bash
-./deploy/check-no-active-users.sh && \
-  docker compose -f docker-compose.yml -f docker-compose.prod.yml restart api
-```
-
-**Op de VPS** is verder niets nodig — de map staat dan op de juiste plek
-(`~/doelenboom/sbom`, wat `docker-compose.yml`'s `./sbom:/app/sbom:ro`
-verwacht) vóórdat je `up -d` draait. Bij een latere dependency-wijziging dit
-`rm -rf .../sbom/*` + `scp -r sbom/. ...`-tweetal herhalen (nooit de map zelf
-verwijderen); een verse `sbom/`-set wordt pas zichtbaar in de app na een klik
-op "Nu controleren".
+- **Altijd `api`, `web` én `excel-service` samen bouwen** (zoals in de
+  commando's hierboven al staat) — de `api`-image bevat de SBOM van de
+  `excel-service`-image zoals die op dat moment gebouwd is.
+- Er is een recente Docker Compose/BuildKit nodig (`additional_contexts` met
+  `service:` bestaat sinds Compose 2.33; de fouten met `up --build` en de
+  bouwvolgorde zijn daarna verholpen — gebruik dus een actuele Docker Desktop).
+  Met `DOCKER_BUILDKIT=0` (classic builder) werkt dit niet.
+- `docker compose ... up -d` op de VPS blijft zonder `--build`. Omdat
+  `docker-compose.yml` gewijzigd is (volume weg), is na de eerste keer wel een
+  `git pull` op de VPS nodig vóór `up -d`.
+- De oude map `~/doelenboom/sbom` op de VPS wordt niet meer gemount en mag
+  weg (`rm -rf ~/doelenboom/sbom`) — pas ná de eerste deploy met deze
+  wijziging.
+- Een verse SBOM wordt in de app pas zichtbaar na een klik op "Nu
+  controleren" (of de dagelijkse automatische controle).
+- Controleren wat er in een gebouwde image zit, zonder de container te starten:
+  ```bash
+  docker run --rm --entrypoint cat doelenboom-api:latest /app/sbom/meta.json
+  ```
 
 ### Verplichte check: geen actieve gebruikers vóór `up -d`
 
