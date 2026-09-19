@@ -29,6 +29,7 @@ import { legalRouter } from './routes/legal.js';
 import { systemSbomRouter } from './routes/systemSbom.js';
 import { customerManagementRouter } from './routes/customerManagement.js';
 import { pool } from './db.js';
+import { errorHandler, installAsyncErrorSupport } from './errors.js';
 
 // Bouwt de Express-app zonder 'm te starten (geen app.listen, geen idle-sweep-
 // interval) — losgetrokken uit index.ts zodat de regressietest-suite (api/test/)
@@ -64,6 +65,11 @@ export function createApp() {
   // bekend JWT-geheim mag nooit ook maar één request kunnen beantwoorden.
   assertCurrentJwtSecretIsSafe();
 
+  // Express 4 vangt de rejection van een async handler/middleware niet af
+  // (request bleef hangen, zie errors.ts / DOEL-22) — vóór het mounten van
+  // enige router activeren.
+  installAsyncErrorSupport();
+
   const app = express();
   // Beveiligingsheaders (CISO-aandachtspunt) — X-Content-Type-Options,
   // X-DNS-Prefetch-Control, Referrer-Policy, X-Frame-Options (SAMEORIGIN,
@@ -97,9 +103,8 @@ export function createApp() {
     // die wél een Origin meesturen. Een origin die niet op de lijst staat
     // krijgt gewoon geen CORS-headers terug (callback(null, false)) i.p.v.
     // een foutstatus — de browser blokkeert het resultaat dan zelf aan de
-    // cliëntkant; er is hier bewust geen centrale Express-foutafhandelaar
-    // (zie index.ts/app.ts) die een callback(new Error(...)) netjes zou
-    // afvangen.
+    // cliëntkant (er is sinds DOEL-22 wel een centrale foutafhandelaar,
+    // maar een 500 op elke geblokkeerde preflight zou onnodig lawaai zijn).
     origin: (origin, callback) => {
       if (!origin || ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
       callback(null, false);
@@ -192,6 +197,9 @@ export function createApp() {
   app.use('/api/audit-log', auditLogRouter);
   app.use('/api/app-settings', appSettingsRouter);
   app.use('/api/system/sbom', systemSbomRouter);
+
+  // Globale foutafhandelaar — moet als LAATSTE (zie errors.ts).
+  app.use(errorHandler);
 
   return app;
 }
