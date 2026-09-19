@@ -707,7 +707,8 @@ create table if not exists audit_log (
   id bigserial primary key,
   event_type text not null check (event_type in (
     'doelenboom_view', 'tenant_settings_changed', 'mfa_verified', 'mfa_failed',
-    'tenant_contact_changed', 'tenant_customer_info_changed', 'tenant_subscription_changed'
+    'tenant_contact_changed', 'tenant_customer_info_changed', 'tenant_subscription_changed',
+    'doelenboom_wiped'
   )),
   user_id bigint references users(id) on delete set null,
   tenant_id bigint references tenants(id) on delete set null,

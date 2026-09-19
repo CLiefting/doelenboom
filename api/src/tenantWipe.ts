@@ -1,4 +1,5 @@
 import { pool } from './db.js';
+import { logAuditEvent } from './auditLog.js';
 
 // "Tenant leegmaken bij vertrek laatste gebruiker" — zie db/init.sql (sessions,
 // tenants.wipe_on_empty/session_timeout_minutes) en de toelichting in README.md
@@ -8,6 +9,11 @@ import { pool } from './db.js';
 // tot tenant X" betekent nu echt "is sysadmin, óf heeft een rij in tenant_users
 // voor tenant X" (rol admin of gebruiker maakt hier niet uit — beide tellen als
 // actieve toegang; alleen schrijfrechten verschillen, zie rbac.ts).
+//
+// DOEL-28: heeft de tenant open toegang (tenants.open_access_role, zie
+// rbac.ts getTenantRole), dan heeft ELK ingelogd account toegang — dus telt
+// dan ook elke actieve sessie mee. Voorheen wiste de minutensweep de inhoud
+// terwijl iemand die alleen via open toegang binnen was er nog mee werkte.
 
 export type WipeCandidate = {
   tenant: { id: number; slug: string; name: string };
@@ -36,6 +42,7 @@ async function tenantHasActiveAccess(
        and (
          u.is_sysadmin = true
          or exists (select 1 from tenant_users tu where tu.user_id = u.id and tu.tenant_id = $3)
+         or exists (select 1 from tenants ot where ot.id = $3 and ot.open_access_role is not null)
        )
        and s.last_seen_at > now() - make_interval(mins => $1::int)
        and ($2::uuid is null or s.id != $2)
@@ -45,14 +52,36 @@ async function tenantHasActiveAccess(
   return (result.rowCount ?? 0) > 0;
 }
 
-async function wipeDoelenboomData(doelenboomId: number): Promise<void> {
+export type WipeResult = { elements: number; tags: number; orgUnits: number; imports: number };
+
+// Alles-of-niets: vier deletes in één transactie (voorheen losse deletes — een
+// fout halverwege liet een half geleegde doelenboom achter). Geeft terug
+// hoeveel rijen er (direct) weg zijn, zodat de aanroeper alleen een echte
+// wipe logt en niet elke minuut een al lege doelenboom.
+async function wipeDoelenboomData(doelenboomId: number): Promise<WipeResult> {
   // Zelfde volgorde/aanpak als de "volledige vervanging" bij het publiceren van
   // een import (routes/imports.ts): elements cascadet naar edges/project_status/
   // products/element_tags/ob_org_relations. Doelenboom-rij zelf blijft bestaan.
-  await pool.query('delete from elements where doelenboom_id = $1', [doelenboomId]);
-  await pool.query('delete from tags where doelenboom_id = $1', [doelenboomId]);
-  await pool.query('delete from org_units where doelenboom_id = $1', [doelenboomId]);
-  await pool.query('delete from excel_imports where doelenboom_id = $1', [doelenboomId]);
+  const client = await pool.connect();
+  try {
+    await client.query('begin');
+    const elements = await client.query('delete from elements where doelenboom_id = $1', [doelenboomId]);
+    const tags = await client.query('delete from tags where doelenboom_id = $1', [doelenboomId]);
+    const orgUnits = await client.query('delete from org_units where doelenboom_id = $1', [doelenboomId]);
+    const imports = await client.query('delete from excel_imports where doelenboom_id = $1', [doelenboomId]);
+    await client.query('commit');
+    return {
+      elements: elements.rowCount ?? 0,
+      tags: tags.rowCount ?? 0,
+      orgUnits: orgUnits.rowCount ?? 0,
+      imports: imports.rowCount ?? 0,
+    };
+  } catch (err) {
+    await client.query('rollback').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 // Bepaalt welke doelenbomen (gegroepeerd per tenant) op dit moment "verlaten"
@@ -134,15 +163,37 @@ export async function previewOrCommitWipe(
     });
   }
 
-  if (commit) {
-    for (const c of candidates) {
-      for (const d of c.doelenbomen) {
-        await wipeDoelenboomData(d.id);
+  if (!commit) return candidates;
+
+  // DOEL-28: elke doelenboom in een eigen transactie; een fout bij één boom
+  // (gelogd) houdt de rest niet tegen. Er komt alleen een auditlog-regel voor
+  // een wipe waarbij ook echt data weg is (de sweep draait elke minuut en mag
+  // het log niet volschrijven met "wipes" van al lege bomen). Alleen wat echt
+  // gewist is komt in het resultaat.
+  const trigger = requestingUser ? 'logout' : 'idle_sweep';
+  const wiped: WipeCandidate[] = [];
+  for (const c of candidates) {
+    const done: WipeCandidate['doelenbomen'] = [];
+    for (const d of c.doelenbomen) {
+      try {
+        const result = await wipeDoelenboomData(d.id);
+        done.push(d);
+        if (result.elements + result.tags + result.orgUnits + result.imports > 0) {
+          await logAuditEvent({
+            eventType: 'doelenboom_wiped',
+            userId: requestingUser?.id ?? null,
+            tenantId: c.tenant.id,
+            doelenboomId: d.id,
+            detail: { trigger, deleted: result },
+          });
+        }
+      } catch (err) {
+        console.error(`Wipe van doelenboom ${d.id} mislukt (niets gewijzigd):`, err);
       }
     }
+    if (done.length > 0) wiped.push({ tenant: c.tenant, doelenbomen: done });
   }
-
-  return candidates;
+  return wiped;
 }
 
 // Periodieke sweep (elke minuut vanuit index.ts) — vangt browsers die zonder

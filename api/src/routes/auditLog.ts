@@ -42,6 +42,7 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   tenant_contact_changed: 'Contactpersoon gewijzigd',
   tenant_customer_info_changed: 'Klantgegevens gewijzigd',
   tenant_subscription_changed: 'Abonnement gewijzigd',
+  doelenboom_wiped: 'Doelenboom leeggemaakt',
 };
 
 // Optioneel filteren op tenantId en/of eventType via query-string — voor de

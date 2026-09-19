@@ -47,6 +47,7 @@ const EVENT_LABELS: Record<AuditLogEntry['eventType'], string> = {
   tenant_contact_changed: 'Contactpersoon gewijzigd',
   tenant_customer_info_changed: 'Klantgegevens gewijzigd',
   tenant_subscription_changed: 'Abonnement gewijzigd',
+  doelenboom_wiped: 'Doelenboom leeggemaakt',
 };
 
 function eventLabel(eventType: AuditLogEntry['eventType']): string {
@@ -91,6 +92,11 @@ function formatDetail(entry: AuditLogEntry): string {
       );
     }
     return parts.join(', ');
+  }
+  if (entry.eventType === 'doelenboom_wiped') {
+    const d = entry.detail as { trigger?: string; deleted?: { elements?: number; tags?: number; orgUnits?: number; imports?: number } };
+    const via = d.trigger === 'logout' ? 'bij uitloggen' : 'automatisch (niemand meer actief)';
+    return `${via} — ${d.deleted?.elements ?? 0} elementen, ${d.deleted?.tags ?? 0} tags, ${d.deleted?.orgUnits ?? 0} organisatieonderdelen`;
   }
   if (entry.eventType === 'mfa_failed') {
     const reason = (entry.detail as { reason?: string }).reason;
