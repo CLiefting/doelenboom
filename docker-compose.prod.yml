@@ -56,6 +56,9 @@ services:
       # herhalen voorkomt verrassingen als dat basisbestand ooit verandert.
       args:
         BUILD_VERSION: ${BUILD_VERSION:-dev}
+      # 'additional_contexts' (sbom_tools/web_src/excel_sbom voor de SBOM-stage
+      # in Dockerfile.prod) staat in docker-compose.yml en wordt hier
+      # meegemerged — niet herhalen. Zie de toelichting daar.
     # CORS-allowlist (zie ALLOWED_ORIGINS in api/src/app.ts) — het echte
     # productiedomein. Compose merget deze map additief met de environment-
     # map uit docker-compose.yml (DATABASE_URL/PORT/JWT_SECRET/
