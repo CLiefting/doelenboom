@@ -13,7 +13,7 @@
 # api en web: uit het package-lock.json (--package-lock-only), niet uit
 # node_modules — geen installatie nodig en identiek aan wat `npm ci` installeert.
 # ---------------------------------------------------------------------------
-FROM node:20-alpine AS sbom
+FROM node:24-alpine AS sbom
 ARG BUILD_VERSION=dev
 ARG GIT_REF=unknown
 WORKDIR /in/api
@@ -31,7 +31,7 @@ COPY --from=sbom_tools sbom-postprocess.mjs /tools/sbom-postprocess.mjs
 RUN node /tools/sbom-postprocess.mjs --from /in --out /out \
       --build-version "$BUILD_VERSION" --git-commit "$GIT_REF"
 
-FROM node:20-alpine
+FROM node:24-alpine
 WORKDIR /app
 # Build-versie (git-hash + datum, meegegeven door het deploy-script via
 # `docker compose build --build-arg` / de BUILD_VERSION env var in

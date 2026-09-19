@@ -5,7 +5,7 @@
 # Multi-stage: eerst compileren (incl. devDependencies/typescript nodig voor
 # tsc), dan een schone runtime-laag met alleen de gecompileerde JS + productie-
 # dependencies — geen typescript/tsx/@types/* in het uiteindelijke image.
-FROM node:20-alpine AS build
+FROM node:24-alpine AS build
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci
@@ -27,7 +27,7 @@ RUN npm run build
 # api en web: uit het package-lock.json (--package-lock-only), niet uit
 # node_modules — geen installatie nodig en identiek aan wat `npm ci` installeert.
 # ---------------------------------------------------------------------------
-FROM node:20-alpine AS sbom
+FROM node:24-alpine AS sbom
 ARG BUILD_VERSION=dev
 ARG GIT_REF=unknown
 WORKDIR /in/api
@@ -45,7 +45,7 @@ COPY --from=sbom_tools sbom-postprocess.mjs /tools/sbom-postprocess.mjs
 RUN node /tools/sbom-postprocess.mjs --from /in --out /out \
       --build-version "$BUILD_VERSION" --git-commit "$GIT_REF"
 
-FROM node:20-alpine
+FROM node:24-alpine
 WORKDIR /app
 ENV NODE_ENV=production
 # Build-versie (git-hash + datum) voor GET /api/version — zie ook het gewone
@@ -54,9 +54,12 @@ ENV NODE_ENV=production
 # footer altijd "dev" tonen, ook als BUILD_VERSION wél is meegegeven.
 ARG BUILD_VERSION=dev
 ENV BUILD_VERSION=${BUILD_VERSION}
-COPY package*.json ./
+# DOEL-42: de app draait als USER node en mag niet afhangen van de rechten in de werkmap
+# (bronbestanden op modus 600 zouden package.json onleesbaar maken). Symbolisch: mappen 755,
+# bestanden 644 (zie DOEL-39/40/41).
+COPY --chmod=u=rwX,go=rX package*.json ./
 RUN npm ci --omit=dev
-COPY --from=build /app/dist ./dist
+COPY --from=build --chmod=u=rwX,go=rX /app/dist ./dist
 # SBOM van deze build (zie SBOM-stage hierboven) — als laatste laag, want de
 # inhoud verandert bij elke build (tijdstip/serienummer/BUILD_VERSION).
 # dependencyHealth.ts leest de SBOM uit SBOM_DIR; geen volume-mount meer.
@@ -69,7 +72,7 @@ COPY --from=sbom /out/ /app/sbom/
 RUN mkdir -p /backups && chown node:node /backups
 USER node
 EXPOSE 4000
-# Node 20 heeft fetch; /api/health geeft 503 als de database niet bereikbaar is.
+# Node heeft fetch ingebouwd; /api/health geeft 503 als de database niet bereikbaar is.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:4000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 # Direct node i.p.v. `npm start`: geen npm als PID 1 (dat geeft SIGTERM niet
