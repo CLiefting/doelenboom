@@ -158,7 +158,8 @@ projectExcelRouter.get(
 
 // PowerPoint-rapportage van één project (status/RAG, voortgang/deliverables,
 // activiteiten, aandachtspunten) — zie excel-service/app/project_pptx.py
-// voor de opmaak van de 4 slides. Puur export, geen import (in tegenstelling
+// voor de opmaak (dynamisch aantal slides: overzicht, openstaande
+// deliverables, gepland komende 2 maanden, deliverables als tiles, Gantt). Puur export, geen import (in tegenstelling
 // tot project-export hierboven): dit is een kant-en-klaar eindresultaat voor
 // buiten de applicatie (bv. een klant/stakeholder), geen brondocument.
 projectExcelRouter.get(
