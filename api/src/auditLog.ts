@@ -16,7 +16,22 @@ export type AuditEventType =
   | 'tenant_subscription_changed'
   // Automatisch/bij uitloggen leegmaken van een doelenboom (DOEL-28); userId is
   // null bij de periodieke sweep.
-  | 'doelenboom_wiped';
+  | 'doelenboom_wiped'
+  // DOEL-29 (analyse M6): inloggen, wachtwoorden, gebruikers/leden, export/import.
+  // userId = de ACTOR (bij login_failed/account_locked op een bekend account: het
+  // account zelf; bij een onbekend adres null); het doelwit staat in detail.
+  | 'login_success'
+  | 'login_failed'
+  | 'account_locked'
+  | 'password_changed'
+  | 'password_reset'
+  | 'user_created'
+  | 'user_updated'
+  | 'user_deleted'
+  | 'tenant_member_changed'
+  | 'doelenboom_deleted'
+  | 'doelenboom_exported'
+  | 'doelenboom_import_published';
 
 export interface LogAuditEventInput {
   eventType: AuditEventType;

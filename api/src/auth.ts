@@ -6,6 +6,7 @@ import { needsTermsAcceptance } from './legal.js';
 import { getAppSettings } from './appSettings.js';
 import { createMfaChallenge, verifyMfaChallenge, resendMfaChallenge } from './mfa.js';
 import { bcryptCost, hashSql } from './passwordHash.js';
+import { logAuditEvent } from './auditLog.js';
 import { ipBlockedForSeconds, recordIpFailure, recordUnknownEmailFailure, unknownEmailLockState } from './loginThrottle.js';
 
 const JWT_SECRET = process.env.JWT_SECRET ?? 'dev-secret-change-me';
@@ -229,7 +230,17 @@ authRouter.post('/login', async (req, res) => {
     const state = unknownEmailLockState(email);
     if (state.locked) return res.status(429).json(lockedBody(state.minutesLeft));
     const rec = recordUnknownEmailFailure(email, settings.maxFailedLoginAttempts, settings.loginLockoutMinutes);
-    if (rec.locked) return res.status(429).json(rec.justLocked ? justLockedBody() : lockedBody(rec.minutesLeft));
+    // DOEL-29: mislukte poging op een onbekend adres (het adres zelf staat in
+    // het log, begrensd in lengte; geen wachtwoord). Beperkt in volume door de
+    // per-adres- en per-IP-tellers hierboven (loginThrottle.ts).
+    const attempted = email.slice(0, 320);
+    await logAuditEvent({ eventType: 'login_failed', userId: null, detail: { email: attempted, ip: clientIp, reason: 'unknown_user' } });
+    if (rec.locked) {
+      if (rec.justLocked) {
+        await logAuditEvent({ eventType: 'account_locked', userId: null, detail: { email: attempted, ip: clientIp, lockoutMinutes: settings.loginLockoutMinutes } });
+      }
+      return res.status(429).json(rec.justLocked ? justLockedBody() : lockedBody(rec.minutesLeft));
+    }
     return res.status(401).json({ error: 'Onjuiste inloggegevens' });
   }
 
@@ -261,7 +272,11 @@ authRouter.post('/login', async (req, res) => {
   }
   if (!attempt.rows[0].password_ok) {
     recordIpFailure(clientIp);
-    if (attempt.rows[0].now_locked) return res.status(429).json(justLockedBody());
+    await logAuditEvent({ eventType: 'login_failed', userId: user.id, detail: { ip: clientIp, reason: 'wrong_password' } });
+    if (attempt.rows[0].now_locked) {
+      await logAuditEvent({ eventType: 'account_locked', userId: user.id, detail: { ip: clientIp, lockoutMinutes: settings.loginLockoutMinutes } });
+      return res.status(429).json(justLockedBody());
+    }
     return res.status(401).json({ error: 'Onjuiste inloggegevens' });
   }
 
@@ -336,7 +351,7 @@ authRouter.post('/login', async (req, res) => {
     });
   }
 
-  res.json(await completeLogin(user.id));
+  res.json(await completeLogin(user.id, clientIp, false));
 });
 
 // Rondt een inlogpoging daadwerkelijk af: maakt de sessies-rij en het JWT aan
@@ -344,7 +359,7 @@ authRouter.post('/login', async (req, res) => {
 // MFA-vrije tak hierboven als POST /mfa/verify hieronder (die roept dit pas
 // aan ná een geslaagde codecontrole) — zo bestaat er precies één plek die
 // ooit daadwerkelijk een sessie/token uitgeeft.
-async function completeLogin(userId: number) {
+async function completeLogin(userId: number, ip: string, viaMfa: boolean) {
   const userResult = await pool.query(
     'select id, email, is_sysadmin, must_change_password, mfa_enabled from users where id = $1',
     [userId]
@@ -356,6 +371,7 @@ async function completeLogin(userId: number) {
     [user.id]
   );
   const sessionId = sessionResult.rows[0].id as string;
+  await logAuditEvent({ eventType: 'login_success', userId: user.id, detail: { ip, mfa: viaMfa } });
 
   const token = jwt.sign(
     { id: user.id, email: user.email, isSysadmin: user.is_sysadmin, sid: sessionId },
@@ -403,7 +419,7 @@ authRouter.post('/mfa/verify', async (req, res) => {
     return res.status(status).json({ error: messages[result.reason], reason: result.reason });
   }
 
-  res.json(await completeLogin(result.userId));
+  res.json(await completeLogin(result.userId, req.ip ?? 'onbekend', true));
 });
 
 // POST /api/auth/mfa/resend — vervangt de code IN dezelfde challenge (zie
@@ -534,6 +550,7 @@ authRouter.post('/change-password', requireAuth, async (req: AuthedRequest, res)
   // DOEL-26: alle ANDERE sessies (en openstaande MFA-challenges) vervallen; de
   // huidige sessie blijft, zodat de gebruiker niet meteen uitgelogd wordt.
   await endUserSessions(req.user!.id, req.user!.sessionId);
+  await logAuditEvent({ eventType: 'password_changed', userId: req.user!.id, detail: { ip: req.ip ?? 'onbekend' } });
   const tenantRoles = req.user!.isSysadmin ? [] : await fetchTenantRoles(req.user!.id);
   const termsAcceptanceRequired = await needsTermsAcceptance(req.user!.id);
   // mfaEnabled/mfaRequiredTenants horen hier ook bij (dit retourneert een

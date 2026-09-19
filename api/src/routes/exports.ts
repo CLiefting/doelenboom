@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { requireAuth, AuthedRequest } from '../auth.js';
-import { requireTenantRoleForDoelenboomParam } from '../rbac.js';
+import { requireTenantRoleForDoelenboomParam, tenantIdForDoelenboom } from '../rbac.js';
+import { logAuditEvent } from '../auditLog.js';
 import { fetchTree } from './tree.js';
 import { isStandardColumns } from '../columnConfig.js';
 
@@ -83,6 +84,18 @@ exportsRouter.get('/doelenbomen/:id/export', requireTenantRoleForDoelenboomParam
   }
 
   const arrayBuffer = await upstream.arrayBuffer();
+  // DOEL-29: een export is de manier om data uit de applicatie te halen
+  // (data-exfiltratie) — wie/welke boom/welk formaat komt in het auditlog.
+  // Een lege sjabloon-export (mode=template) bevat geen data en wordt niet gelogd.
+  if (mode === 'data') {
+    await logAuditEvent({
+      eventType: 'doelenboom_exported',
+      userId: req.user!.id,
+      tenantId: await tenantIdForDoelenboom(req.params.id),
+      doelenboomId: req.params.id,
+      detail: { kind: 'doelenboom-xlsx', format },
+    });
+  }
   res.setHeader('Content-Type', XLSX_MEDIA_TYPE);
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
   res.send(Buffer.from(arrayBuffer));

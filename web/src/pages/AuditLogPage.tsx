@@ -48,7 +48,39 @@ const EVENT_LABELS: Record<AuditLogEntry['eventType'], string> = {
   tenant_customer_info_changed: 'Klantgegevens gewijzigd',
   tenant_subscription_changed: 'Abonnement gewijzigd',
   doelenboom_wiped: 'Doelenboom leeggemaakt',
+  login_success: 'Ingelogd',
+  login_failed: 'Inlogpoging mislukt',
+  account_locked: 'Account geblokkeerd (te veel pogingen)',
+  password_changed: 'Wachtwoord gewijzigd (zelf)',
+  password_reset: 'Wachtwoord gereset (door sysadmin)',
+  user_created: 'Account aangemaakt',
+  user_updated: 'Account gewijzigd',
+  user_deleted: 'Account verwijderd',
+  tenant_member_changed: 'Lidmaatschap/rol gewijzigd',
+  doelenboom_deleted: 'Doelenboom verwijderd',
+  doelenboom_exported: 'Doelenboom geëxporteerd',
+  doelenboom_import_published: 'Import gepubliceerd',
 };
+
+// Generieke weergave voor de DOEL-29-gebeurtenissen: "sleutel: waarde" per
+// (platte) detailregel; geneste {from,to}-wijzigingen als "veld: a → b".
+function formatGenericDetail(detail: Record<string, unknown>): string {
+  const parts: string[] = [];
+  for (const [key, value] of Object.entries(detail)) {
+    if (value === null || value === undefined) continue;
+    if (key === 'changes' && typeof value === 'object') {
+      for (const [field, change] of Object.entries(value as Record<string, unknown>)) {
+        const { from, to } = (change ?? {}) as { from?: unknown; to?: unknown };
+        parts.push(`${field}: ${JSON.stringify(from)} → ${JSON.stringify(to)}`);
+      }
+    } else if (typeof value === 'object') {
+      parts.push(`${key}: ${JSON.stringify(value)}`);
+    } else {
+      parts.push(`${key}: ${String(value)}`);
+    }
+  }
+  return parts.join(', ');
+}
 
 function eventLabel(eventType: AuditLogEntry['eventType']): string {
   return EVENT_LABELS[eventType];
@@ -102,6 +134,7 @@ function formatDetail(entry: AuditLogEntry): string {
     const reason = (entry.detail as { reason?: string }).reason;
     return reason ? `reden: ${reason}` : '';
   }
+  if (entry.eventType !== 'doelenboom_view') return formatGenericDetail(entry.detail);
   return '';
 }
 

@@ -225,7 +225,7 @@ describe('mfa', () => {
     await req('POST', '/api/auth/mfa/verify', { body: { challengeId: loginResult.body.challengeId, code } });
 
     const rows = await pool.query(
-      `select event_type from audit_log where user_id = $1 order by created_at`,
+      `select event_type from audit_log where user_id = $1 and event_type like 'mfa_%' order by created_at`,
       [userId]
     );
     assert.deepEqual(rows.rows.map((r) => r.event_type), ['mfa_failed', 'mfa_verified']);

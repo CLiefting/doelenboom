@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { requireAuth, AuthedRequest } from '../auth.js';
-import { requireTenantRoleForDoelenboomParam, requireWritableDoelenboom, requireModule } from '../rbac.js';
+import { requireTenantRoleForDoelenboomParam, requireWritableDoelenboom, requireModule, tenantIdForDoelenboom } from '../rbac.js';
+import { logAuditEvent } from '../auditLog.js';
 import { fetchTree } from './tree.js';
 
 // Export/import van de VOLLEDIGE gegevens van één project (Producten,
@@ -140,6 +141,14 @@ async function downloadProjectDocument(
   const titlePart = sanitizeForFilename(String(data.project.name || ''));
   const filename = `Project_${sanitizeForFilename(req.params.code)}` +
     (titlePart ? `_${titlePart}` : '') + `_${isoDate}.${opts.extension}`;
+  // DOEL-29: ook een project-export/-rapportage haalt data uit de applicatie.
+  await logAuditEvent({
+    eventType: 'doelenboom_exported',
+    userId: req.user!.id,
+    tenantId: await tenantIdForDoelenboom(req.params.id),
+    doelenboomId: req.params.id,
+    detail: { kind: `project-${opts.extension}`, elementCode: req.params.code },
+  });
   res.setHeader('Content-Type', opts.mediaType);
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
   res.send(Buffer.from(arrayBuffer));

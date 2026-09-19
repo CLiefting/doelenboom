@@ -10,6 +10,7 @@ import {
 } from '../rbac.js';
 import { getColumnsForDoelenboom } from '../columnConfig.js';
 import { hasModule } from '../license.js';
+import { logAuditEvent } from '../auditLog.js';
 
 // Voor routes met :id = import-id (niet doelenboom-id): eerst de doelenboom van
 // deze import opzoeken, dan pas de tenant daarvan.
@@ -342,6 +343,15 @@ importsRouter.post(
     );
 
     await client.query('commit');
+    // DOEL-29: een publicatie vervangt de HELE inhoud van de doelenboom — hoort
+    // in het auditlog (wie, welke boom, hoeveel).
+    await logAuditEvent({
+      eventType: 'doelenboom_import_published',
+      userId: (req as AuthedRequest).user!.id,
+      tenantId: tenantIdForModuleCheck,
+      doelenboomId,
+      detail: { importId: Number(req.params.id), elementCount: parsed.elements.length, edgeCount: parsed.edges.length },
+    });
     res.json({ status: 'published', elementCount: parsed.elements.length, edgeCount: parsed.edges.length });
   } catch (err) {
     await client.query('rollback');

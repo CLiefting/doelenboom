@@ -10,6 +10,7 @@ import {
 } from '../rbac.js';
 import { createDoelenboomConfigFromTenantDefault, copyDoelenboomConfig } from '../columnConfig.js';
 import { seedExampleTree } from '../exampleTree.js';
+import { logAuditEvent } from '../auditLog.js';
 import { applyTemplateToNewDoelenboom } from '../doelenboomTemplates.js';
 import { assertCanCreateBoom, incrementLifetimeTreesCreated, isLicenseExpired, LicenseLimitError } from '../license.js';
 
@@ -307,9 +308,18 @@ doelenbomenRouter.delete(
   // geen boom-inhoud (zie rbac.ts rolmodel-comment en de gematigde
   // sysadmin-scope hierboven bij deze route).
   requireTenantRoleForDoelenboomParam('admin', 'id', { allowSysadmin: true }),
-  async (req, res) => {
+  async (req: AuthedRequest, res) => {
+    // DOEL-29: naam/tenant vóór het verwijderen vastleggen (na de delete is de
+    // rij weg; doelenboom_id in het log wordt dan door de FK op null gezet).
+    const doomed = await pool.query('select tenant_id, slug, name from doelenbomen where id = $1', [req.params.id]);
     const result = await pool.query('delete from doelenbomen where id = $1 returning id', [req.params.id]);
     if (result.rowCount === 0) return res.status(404).json({ error: 'Doelenboom niet gevonden.' });
+    await logAuditEvent({
+      eventType: 'doelenboom_deleted',
+      userId: req.user!.id,
+      tenantId: doomed.rows[0]?.tenant_id ?? null,
+      detail: { doelenboomId: Number(req.params.id), slug: doomed.rows[0]?.slug, name: doomed.rows[0]?.name },
+    });
     res.status(204).send();
   }
 );
@@ -358,7 +368,7 @@ doelenbomenRouter.put(
   // geen boom-inhoud (zie rbac.ts rolmodel-comment en de gematigde
   // sysadmin-scope hierboven bij deze route).
   requireTenantRoleForDoelenboomParam('admin', 'id', { allowSysadmin: true }),
-  async (req, res) => {
+  async (req: AuthedRequest, res) => {
     const b = (req.body ?? {}) as Record<string, unknown>;
     const role =
       b.role === 'admin' || b.role === 'editor' || b.role === 'bezoeker' ? b.role : b.role === null ? null : undefined;
@@ -387,6 +397,13 @@ doelenbomenRouter.put(
         [req.params.id, req.params.userId, role]
       );
     }
+    await logAuditEvent({
+      eventType: 'tenant_member_changed',
+      userId: req.user!.id,
+      tenantId: await tenantIdForDoelenboom(req.params.id),
+      doelenboomId: req.params.id,
+      detail: { action: role === null ? 'doelenboom_role_removed' : 'doelenboom_role_set', targetUserId: Number(req.params.userId), to: role },
+    });
     res.status(204).send();
   }
 );

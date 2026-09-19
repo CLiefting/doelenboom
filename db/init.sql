@@ -708,7 +708,10 @@ create table if not exists audit_log (
   event_type text not null check (event_type in (
     'doelenboom_view', 'tenant_settings_changed', 'mfa_verified', 'mfa_failed',
     'tenant_contact_changed', 'tenant_customer_info_changed', 'tenant_subscription_changed',
-    'doelenboom_wiped'
+    'doelenboom_wiped',
+    'login_success', 'login_failed', 'account_locked', 'password_changed', 'password_reset',
+    'user_created', 'user_updated', 'user_deleted', 'tenant_member_changed',
+    'doelenboom_deleted', 'doelenboom_exported', 'doelenboom_import_published'
   )),
   user_id bigint references users(id) on delete set null,
   tenant_id bigint references tenants(id) on delete set null,
