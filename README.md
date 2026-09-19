@@ -501,3 +501,29 @@ productie-build (`npm run build` → `tsc`, schoon) en `web`'s productie-build
 JS-bundel geen `localhost:4000` meer bevat). De daadwerkelijke deploy op de
 VPS via bovenstaande stappen, en de Traefik/DNS/certificaat-verificatie uit
 `deploy/README.md`, moet nog bij jou gebeuren.
+
+## Geheimen en OneDrive (DOEL-33)
+
+Deze map staat in OneDrive. Daardoor worden ook `.env` (met o.a. het SMTP-wachtwoord), de volledige `.git`-map en de image-tarballs (`*.tar.gz`, ruim 250 MB) naar de cloud gesynchroniseerd. `.env` staat in `.gitignore` en is nooit gecommit, dus in git zelf zit geen geheim. Een `.git`-map in een sync-map geeft daarnaast bekende problemen (achtergebleven `HEAD.lock`/`maintenance.lock`-bestanden zijn in dit project al voorgekomen).
+
+**Controleer de stand** (toont nooit een waarde, alleen of iets gezet is):
+
+```bash
+scripts/check-secrets.sh
+```
+
+**Aanbevolen: de werkmap buiten OneDrive zetten.** Stop eerst de stack (`doelenboom -local -stop`) en sluit editors die de map open hebben; verplaats dan de hele map en zet één variabele, waarna alle scripts (`doelenboom-cli.sh`, `pre-build.sh`, `build-version.sh`, `generate-sbom.sh`, `set-smtp-env.sh`) de nieuwe plek gebruiken:
+
+```bash
+mkdir -p ~/src
+mv ~/OneDrive/src/doelenboom ~/src/doelenboom
+echo 'export DOELENBOOM_DIR="$HOME/src/doelenboom"' >> ~/.zshrc
+source ~/.zshrc
+# pas ook het alias-pad in ~/.zshrc aan (zie zshrc_snippet.txt), bv.:
+#   alias doelenboom="$DOELENBOOM_DIR/scripts/doelenboom-cli.sh"
+cd ~/src/doelenboom && git status && scripts/check-secrets.sh
+```
+
+Zonder `DOELENBOOM_DIR` gebruiken de scripts nog steeds `~/OneDrive/src/doelenboom`. Als de map in OneDrive blijft staan is er geen manier om alleen `.env` van de synchronisatie uit te sluiten (OneDrive kan alleen hele mappen uitsluiten); dan blijft alleen roteren over.
+
+**SMTP-wachtwoord roteren** (aan te raden als je OneDrive-account op meer apparaten of met meer mensen wordt gedeeld, of als je twijfelt): wijzig het wachtwoord van de mailbox `no-reply@code072.nl` bij Hostnet, voer het nieuwe in met `scripts/set-smtp-env.sh` (lokaal) en pas het ook aan in de `.env` op de VPS (`nano .env`, daarna `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d api`).
