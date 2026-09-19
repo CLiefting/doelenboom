@@ -46,7 +46,9 @@ describe('nginx.conf: beveiligingsheaders (DOEL-30)', () => {
   });
 
   it('de Dockerfile kopieert het snippet naar het pad waar nginx.conf naar verwijst', () => {
-    assert.match(dockerfile, /COPY security-headers\.conf \/etc\/nginx\/snippets\/security-headers\.conf/);
+    // Optionele --chmod-vlag (DOEL-31b): COPY neemt anders de rechten van de werkmap over.
+    assert.match(dockerfile, /COPY (--chmod=\S+ )?security-headers\.conf \/etc\/nginx\/snippets\/security-headers\.conf/);
+    assert.match(dockerfile, /COPY --chmod=0?644 security-headers\.conf /);
   });
 });
 
