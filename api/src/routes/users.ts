@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { pool } from '../db.js';
-import { requireAuth, AuthedRequest } from '../auth.js';
+import { requireAuth, AuthedRequest, endUserSessions } from '../auth.js';
 import { requireSysadmin } from '../rbac.js';
 import { hashSql } from '../passwordHash.js';
 
@@ -127,6 +127,12 @@ usersRouter.put('/:id', async (req: AuthedRequest, res) => {
       [email ?? null, password ?? null, isSysadmin ?? null, mustChangePassword ?? null, mfaEnabled ?? null, userId]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Gebruiker niet gevonden.' });
+    // DOEL-26: na een wachtwoord-reset vervallen alle sessies van dit account
+    // (behalve de eigen sessie als een sysadmin zijn eigen wachtwoord zet).
+    if (password !== undefined) {
+      const own = String(result.rows[0].id) === String(req.user!.id);
+      await endUserSessions(result.rows[0].id, own ? req.user!.sessionId : undefined);
+    }
     res.json((await attachTenantRoles(result.rows))[0]);
   } catch (err) {
     if (isUniqueViolation(err)) {

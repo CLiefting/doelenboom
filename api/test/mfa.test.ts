@@ -285,6 +285,10 @@ describe('mfa', () => {
     await req('POST', `/api/tenants/${tenantId}/members`, {
       token: sysadminToken, body: { email: memberEmail, password: 'geheim1234', role: 'editor' },
     });
+    // DOEL-26: een via de ledenroute aangemaakt account heeft een tijdelijk
+    // wachtwoord (must_change_password) en mag daarmee server-side alleen nog
+    // het wachtwoord wijzigen; deze test gaat over MFA, dus de vlag gaat uit.
+    await pool.query('update users set must_change_password = false where email = $1', [memberEmail]);
 
     // Geen sysadmin, mfa_enabled staat niet aan — toch moet /login een code
     // vereisen, puur omdat dit account lid is van een tenant met mfa_required.
@@ -323,6 +327,10 @@ describe('mfa', () => {
     await req('POST', `/api/tenants/${tenantId}/members`, {
       token: sysadminToken, body: { email: memberEmail, password: 'geheim1234', role: 'editor' },
     });
+    // DOEL-26: een via de ledenroute aangemaakt account heeft een tijdelijk
+    // wachtwoord (must_change_password) en mag daarmee server-side alleen nog
+    // het wachtwoord wijzigen; deze test gaat over MFA, dus de vlag gaat uit.
+    await pool.query('update users set must_change_password = false where email = $1', [memberEmail]);
 
     const loginResult = await req('POST', '/api/auth/login', { body: { email: memberEmail, password: 'geheim1234' } });
     assert.equal(loginResult.status, 200);

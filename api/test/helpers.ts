@@ -217,7 +217,24 @@ export async function createUser(email: string, password = 'test-wachtwoord-1'):
   return r.rows[0].id;
 }
 
-export async function login(email: string, password = 'test-wachtwoord-1'): Promise<string> {
+// DOEL-26: de server dwingt must_change_password nu af (403 op alle routes
+// behalve wachtwoord wijzigen/uitloggen). Accounts die een test via de API
+// aanmaakt (POST /api/users, ledenroute met wachtwoord) hebben die vlag aan,
+// terwijl de tests er meteen mee aan het werk willen. Daarom zet deze helper de
+// vlag standaard uit voor het account waarmee ingelogd wordt; tests die juist
+// de tijdelijk-wachtwoord-situatie willen, geven { keepMustChange: true } mee.
+export async function login(
+  email: string,
+  password = 'test-wachtwoord-1',
+  opts: { keepMustChange?: boolean } = {}
+): Promise<string> {
+  if (!opts.keepMustChange) {
+    await pool.query('update users set must_change_password = false where email = $1 and must_change_password', [email]);
+  }
+  return loginRaw(email, password);
+}
+
+async function loginRaw(email: string, password: string): Promise<string> {
   const { status, body } = await req('POST', '/api/auth/login', { body: { email, password } });
   if (status !== 200) {
     throw new Error(`Login mislukt voor ${email}: ${status} ${JSON.stringify(body)}`);

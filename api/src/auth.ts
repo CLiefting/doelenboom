@@ -57,8 +57,36 @@ export function assertCurrentJwtSecretIsSafe(): void {
 const IDLE_TIMEOUT_MINUTES = 15;
 
 export type AuthedRequest = Request & {
-  user?: { id: number; email: string; isSysadmin: boolean; sessionId: string };
+  user?: { id: number; email: string; isSysadmin: boolean; sessionId: string; mustChangePassword?: boolean };
 };
+
+// DOEL-26 (analyse M3): zolang must_change_password aan staat (tijdelijk
+// wachtwoord van een sysadmin) mag de gebruiker ALLEEN de routes gebruiken die
+// nodig zijn om het wachtwoord te vervangen, de eigen sessie te beheren en uit
+// te loggen. Voorheen deed alleen de frontend dat (zie App.tsx), waardoor het
+// tijdelijke wachtwoord met een gewone API-client onbeperkt bruikbaar bleef.
+// Bewust een allowlist (alles daarbuiten geweigerd), geen blocklist.
+const MUST_CHANGE_PASSWORD_ALLOWED_PATHS = new Set([
+  '/api/auth/change-password',
+  '/api/auth/me',
+  '/api/auth/logout',
+  '/api/auth/logout-preview',
+  '/api/auth/heartbeat',
+  '/api/auth/activity',
+]);
+
+// Beëindigt alle (of alle behalve één) actieve sessies van een gebruiker en
+// maakt nog openstaande MFA-challenges ongeldig — na een wachtwoordwijziging
+// of -reset horen sessies/inlogpogingen met het OUDE wachtwoord niet meer te
+// werken (voorheen bleef zo'n JWT tot 12 uur geldig, DOEL-26).
+export async function endUserSessions(userId: number | string, exceptSessionId?: string): Promise<void> {
+  await pool.query(
+    `update sessions set ended_at = now()
+     where user_id = $1 and ended_at is null and ($2::uuid is null or id <> $2::uuid)`,
+    [userId, exceptSessionId ?? null]
+  );
+  await pool.query('update mfa_challenges set consumed_at = now() where user_id = $1 and consumed_at is null', [userId]);
+}
 
 // Async, want naast de JWT-handtekening wordt ook de sessions-rij zelf
 // gecontroleerd: een geldige JWT alleen is niet genoeg zodra er is uitgelogd
@@ -93,7 +121,7 @@ export async function requireAuth(req: AuthedRequest, res: Response, next: NextF
   // waarde — geen losse fixes per call site nodig.
   const sessionResult = await pool.query(
     `select s.ended_at, (s.last_activity_at < now() - interval '${IDLE_TIMEOUT_MINUTES} minutes') as idle,
-            u.is_sysadmin
+            u.is_sysadmin, u.must_change_password
      from sessions s
      join users u on u.id = s.user_id
      where s.id = $1`,
@@ -107,7 +135,23 @@ export async function requireAuth(req: AuthedRequest, res: Response, next: NextF
     return res.status(401).json({ error: 'Sessie is verlopen door inactiviteit', reason: 'idle_timeout' });
   }
 
-  req.user = { id: payload.id, email: payload.email, isSysadmin: session.is_sysadmin, sessionId: payload.sid };
+  if (session.must_change_password) {
+    const path = req.originalUrl.split('?')[0].replace(/\/+$/, '').toLowerCase();
+    if (!MUST_CHANGE_PASSWORD_ALLOWED_PATHS.has(path)) {
+      return res.status(403).json({
+        error: 'Je moet eerst je wachtwoord wijzigen voordat je verder kunt.',
+        reason: 'must_change_password',
+      });
+    }
+  }
+
+  req.user = {
+    id: payload.id,
+    email: payload.email,
+    isSysadmin: session.is_sysadmin,
+    sessionId: payload.sid,
+    mustChangePassword: session.must_change_password,
+  };
   next();
 }
 
@@ -487,6 +531,9 @@ authRouter.post('/change-password', requireAuth, async (req: AuthedRequest, res)
     `update users set password_hash = ${hashSql('$1')}, must_change_password = false where id = $2`,
     [newPassword, req.user!.id]
   );
+  // DOEL-26: alle ANDERE sessies (en openstaande MFA-challenges) vervallen; de
+  // huidige sessie blijft, zodat de gebruiker niet meteen uitgelogd wordt.
+  await endUserSessions(req.user!.id, req.user!.sessionId);
   const tenantRoles = req.user!.isSysadmin ? [] : await fetchTenantRoles(req.user!.id);
   const termsAcceptanceRequired = await needsTermsAcceptance(req.user!.id);
   // mfaEnabled/mfaRequiredTenants horen hier ook bij (dit retourneert een
