@@ -130,7 +130,10 @@ describe('image-leesrechten: niet afhankelijk van de rechten in de werkmap (DOEL
 
   it('web (prod): nginx-configuratie wordt met expliciete leesrechten gekopieerd', () => {
     const stage = finalStage(read('web/Dockerfile.prod'));
-    assert.match(stage, /^COPY --chmod=0?644 nginx\.conf /m);
-    assert.match(stage, /^COPY --chmod=0?644 security-headers\.conf /m);
+    // DOEL-31d: symbolisch. Een octale modus als 0644 zet ook de nieuw aangemaakte MAP op 644 (geen x-bit),
+    // waardoor nginx (uid 101) /etc/nginx/snippets niet meer kan openen en niet start.
+    assert.match(stage, /^COPY --chmod=u=rwX,go=rX nginx\.conf /m);
+    assert.match(stage, /^COPY --chmod=u=rwX,go=rX security-headers\.conf /m);
+    assert.ok(!/^COPY --chmod=0?[0-7]{3} /m.test(stage), 'geen octale --chmod op COPY: maakt mappen ontoegankelijk');
   });
 });
