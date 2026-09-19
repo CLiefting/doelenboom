@@ -14,6 +14,7 @@
 // omhoog; test/registrationRateLimit.test.ts zet eigen, lage waarden.
 process.env.REGISTRATION_RATE_LIMIT_MAX ??= '100000';
 process.env.REGISTRATION_GLOBAL_LIMIT_MAX ??= '100000';
+process.env.LOGIN_IP_MAX_FAILURES ??= '100000';
 
 import { createApp } from '../src/app.js';
 import { pool } from '../src/db.js';

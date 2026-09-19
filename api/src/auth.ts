@@ -5,6 +5,7 @@ import { previewOrCommitWipe } from './tenantWipe.js';
 import { needsTermsAcceptance } from './legal.js';
 import { getAppSettings } from './appSettings.js';
 import { createMfaChallenge, verifyMfaChallenge, resendMfaChallenge } from './mfa.js';
+import { ipBlockedForSeconds, recordIpFailure, recordUnknownEmailFailure, unknownEmailLockState } from './loginThrottle.js';
 
 const JWT_SECRET = process.env.JWT_SECRET ?? 'dev-secret-change-me';
 
@@ -129,66 +130,93 @@ authRouter.post('/login', async (req, res) => {
   if (!email || !password) {
     return res.status(400).json({ error: 'E-mail en wachtwoord verplicht' });
   }
+  // Alleen strings: een object/array als "wachtwoord" of "e-mail" hoort hier
+  // nooit, en zou als queryparameter op onverwachte manieren geserialiseerd worden.
+  if (typeof email !== 'string' || typeof password !== 'string' || email.length > 320 || password.length > 1024) {
+    return res.status(400).json({ error: 'Ongeldige invoer.' });
+  }
+
+  // DOEL-24 (analyse M1): per-IP beperking op MISLUKTE pogingen, vóórdat er
+  // ook maar één wachtwoord gecontroleerd wordt (zie loginThrottle.ts).
+  const clientIp = req.ip ?? 'onbekend';
+  const ipWait = ipBlockedForSeconds(clientIp);
+  if (ipWait > 0) {
+    res.setHeader('Retry-After', String(ipWait));
+    return res.status(429).json({
+      error: 'Te veel mislukte inlogpogingen vanaf dit adres. Probeer het later opnieuw.',
+      reason: 'too_many_attempts_ip',
+    });
+  }
 
   // Rate limiting / tijdelijke accountblokkade bij herhaalde mislukte
   // inlogpogingen (CISO-aandachtspunt) — drempel/duur zijn sysadmin-
   // instelbaar, app-breed (zie appSettings.ts/routes/appSettings.ts,
   // "Accountbeheer" in de frontend), geen hardgecodeerde constanten.
-  // password_ok wordt als losse, berekende kolom meegenomen i.p.v. in de
-  // where-clause (zoals voorheen), zodat we ook bij een FOUT wachtwoord de
-  // rest van de rij (met name failed_login_count/locked_until) beschikbaar
-  // hebben om de teller op te hogen — een niet-bestaand e-mailadres geeft
-  // nog altijd domweg geen rij, exact zoals voorheen (geen aparte fout,
-  // voorkomt dat we verklappen of een e-mailadres bestaat).
   const result = await pool.query(
     `select id, email, is_sysadmin, must_change_password, scheduled_deletion_at,
-            failed_login_count, locked_until, mfa_enabled,
-            (password_hash = crypt($2, password_hash)) as password_ok,
+            mfa_enabled,
             exists(
               select 1 from tenant_users tu join tenants t on t.id = tu.tenant_id
               where tu.user_id = users.id and t.mfa_required
             ) as tenant_mfa_required
      from users
      where email = $1`,
-    [email, password]
+    [email]
   );
   const user = result.rows[0];
+  const settings = await getAppSettings();
+
+  const lockedBody = (minutes: number) => ({
+    error: `Account tijdelijk geblokkeerd wegens te veel mislukte inlogpogingen. Probeer het over ongeveer ${minutes} minuut/minuten opnieuw.`,
+    reason: 'account_locked',
+  });
+  const justLockedBody = () => ({
+    error: `Te veel mislukte inlogpogingen. Account is ${settings.loginLockoutMinutes} minuten geblokkeerd.`,
+    reason: 'account_locked',
+  });
+
   if (!user) {
+    // Onbekend adres: dezelfde rekentijd (dummy bcrypt) en hetzelfde
+    // teller/blokkade-gedrag als een bestaand account, zodat noch de
+    // responstijd noch een 429 verraadt of het adres bestaat.
+    await pool.query(`select crypt($1, gen_salt('bf'))`, [password]);
+    recordIpFailure(clientIp);
+    const state = unknownEmailLockState(email);
+    if (state.locked) return res.status(429).json(lockedBody(state.minutesLeft));
+    const rec = recordUnknownEmailFailure(email, settings.maxFailedLoginAttempts, settings.loginLockoutMinutes);
+    if (rec.locked) return res.status(429).json(rec.justLocked ? justLockedBody() : lockedBody(rec.minutesLeft));
     return res.status(401).json({ error: 'Onjuiste inloggegevens' });
   }
 
-  const settings = await getAppSettings();
-
-  // Al geblokkeerd: geen wachtwoordcontrole meer nodig — ook een ondertussen
-  // toevallig juist wachtwoord wordt pas ná het verstrijken van de blokkade
-  // weer geaccepteerd. Eenvoudiger en voorspelbaarder dan een vroegtijdige
-  // uitzondering, en voorkomt dat een aanvaller die tijdens de blokkade
-  // alsnog raadt meteen binnenkomt.
-  if (user.locked_until && new Date(user.locked_until).getTime() > Date.now()) {
-    const minutesLeft = Math.max(1, Math.ceil((new Date(user.locked_until).getTime() - Date.now()) / 60000));
-    return res.status(429).json({
-      error: `Account tijdelijk geblokkeerd wegens te veel mislukte inlogpogingen. Probeer het over ongeveer ${minutesLeft} minuut/minuten opnieuw.`,
-      reason: 'account_locked',
-    });
+  // De poging wordt ATOMAIR geboekt vóórdat het wachtwoord geldt (één UPDATE):
+  // voorheen las elke parallelle request dezelfde teller en schreef "teller + 1"
+  // terug, waardoor een burst van N gelijktijdige pogingen de drempel omzeilde
+  // (N gokken i.p.v. maximaal `maxFailedLoginAttempts`). Nu krijgt elke
+  // poging een eigen, oplopend volgnummer; de poging die de drempel bereikt
+  // zet de blokkade in dezelfde statement, en alle pogingen daarna (ook
+  // gelijktijdige) vinden een geblokkeerd account en worden geweigerd ZONDER
+  // dat hun wachtwoord nog gecontroleerd wordt. Een geslaagde login zet de
+  // teller hieronder weer op 0.
+  const attempt = await pool.query(
+    `update users set
+        failed_login_count = case when failed_login_count + 1 >= $2 then 0 else failed_login_count + 1 end,
+        locked_until = case when failed_login_count + 1 >= $2 then now() + make_interval(mins => $3) else locked_until end
+     where id = $1 and (locked_until is null or locked_until <= now())
+     returning (password_hash = crypt($4, password_hash)) as password_ok,
+               (locked_until is not null and locked_until > now()) as now_locked`,
+    [user.id, settings.maxFailedLoginAttempts, settings.loginLockoutMinutes, password]
+  );
+  if (attempt.rows.length === 0) {
+    // Al geblokkeerd: geen wachtwoordcontrole — ook een toevallig juist
+    // wachtwoord wordt pas ná het verstrijken van de blokkade geaccepteerd.
+    recordIpFailure(clientIp);
+    const lock = await pool.query('select locked_until from users where id = $1', [user.id]);
+    const until = lock.rows[0]?.locked_until ? new Date(lock.rows[0].locked_until).getTime() : Date.now();
+    return res.status(429).json(lockedBody(Math.max(1, Math.ceil((until - Date.now()) / 60000))));
   }
-
-  if (!user.password_ok) {
-    const newCount = user.failed_login_count + 1;
-    if (newCount >= settings.maxFailedLoginAttempts) {
-      // Teller resetten (niet laten doorlopen): de blokkade zelf is nu de
-      // maatregel, en na afloop start een nieuwe telling vanaf 0.
-      await pool.query(
-        `update users
-         set failed_login_count = 0, locked_until = now() + make_interval(mins => $2)
-         where id = $1`,
-        [user.id, settings.loginLockoutMinutes]
-      );
-      return res.status(429).json({
-        error: `Te veel mislukte inlogpogingen. Account is ${settings.loginLockoutMinutes} minuten geblokkeerd.`,
-        reason: 'account_locked',
-      });
-    }
-    await pool.query('update users set failed_login_count = $2 where id = $1', [user.id, newCount]);
+  if (!attempt.rows[0].password_ok) {
+    recordIpFailure(clientIp);
+    if (attempt.rows[0].now_locked) return res.status(429).json(justLockedBody());
     return res.status(401).json({ error: 'Onjuiste inloggegevens' });
   }
 
