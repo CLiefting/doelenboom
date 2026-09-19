@@ -129,6 +129,10 @@ services:
       - traefik.http.middlewares.doelenboom-headers.headers.stsSeconds=31536000
       - traefik.http.middlewares.doelenboom-headers.headers.contentTypeNosniff=true
       - traefik.http.middlewares.doelenboom-headers.headers.customFrameOptionsValue=SAMEORIGIN
+      # DOEL-30: Referrer-Policy en Permissions-Policy. (De Content-Security-
+      # Policy zet de web-container zelf, zie web/security-headers.conf.)
+      - traefik.http.middlewares.doelenboom-headers.headers.referrerPolicy=same-origin
+      - traefik.http.middlewares.doelenboom-headers.headers.customresponseheaders.Permissions-Policy=camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()
       - traefik.http.services.doelenboom.loadbalancer.server.port=80
 
 networks:
