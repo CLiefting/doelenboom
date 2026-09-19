@@ -118,3 +118,19 @@ describe('deploy/backup-database.sh: bestandsrechten (DOEL-31)', () => {
     }
   });
 });
+
+describe('image-leesrechten: niet afhankelijk van de rechten in de werkmap (DOEL-31b)', () => {
+  it('excel-service: /app wordt leesbaar gemaakt na COPY en vóór USER excel', () => {
+    const stage = finalStage(read('excel-service/Dockerfile'));
+    const chmod = stage.search(/^RUN chmod -R a\+rX \/app\b/m);
+    assert.ok(chmod >= 0, 'RUN chmod -R a+rX /app ontbreekt: bronbestanden met modus 600 zijn dan niet leesbaar voor uid 10001');
+    assert.ok(chmod > stage.indexOf('COPY app'), 'chmod moet ná COPY app draaien');
+    assert.ok(chmod < stage.indexOf('USER excel'), 'chmod moet vóór USER excel draaien (daarna mag het niet meer)');
+  });
+
+  it('web (prod): nginx-configuratie wordt met expliciete leesrechten gekopieerd', () => {
+    const stage = finalStage(read('web/Dockerfile.prod'));
+    assert.match(stage, /^COPY --chmod=0?644 nginx\.conf /m);
+    assert.match(stage, /^COPY --chmod=0?644 security-headers\.conf /m);
+  });
+});

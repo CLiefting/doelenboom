@@ -41,6 +41,10 @@ FROM base
 # voor de api-image-build (zie hierboven).
 COPY --from=sbom /out/ /sbom/
 COPY app ./app
+# DOEL-31b: COPY neemt de rechten van je werkmap over. Was een bronbestand 600,
+# dan kon de niet-root gebruiker het niet lezen en crashte uvicorn bij het starten.
+# Daarom expliciet leesbaar maken, los van wat er lokaal staat.
+RUN chmod -R a+rX /app /sbom
 # DOEL-31: niet als root draaien. Deze service verwerkt door gebruikers
 # geüploade bestanden (xlsx/mpp, via de JVM/mpxj); een kwetsbaarheid in een
 # parser geeft zo geen root in de container. Alles onder /app, /sbom en
