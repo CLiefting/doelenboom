@@ -624,11 +624,15 @@ def _add_product_tile(slide, left, top, w, h, p: dict[str, Any], today_iso: str)
         date_line = f"Opgeleverd: {_fmt_date(p.get('werkelijkeDatum'))}"
     else:
         date_line = f"Verwacht: {_fmt_date(p.get('verwachteDatum'))}"
+    # Deadline staat rechts UITGELIJND OP DEZELFDE REGEL als de datum: een
+    # eigen regel eronder viel buiten de tegel (tile_h is ~1.55") zodra de
+    # naam-/badgeregels hun volle hoogte gebruiken.
     _add_text(slide, inner_left, cy, inner_w, Inches(0.2), date_line, size=9, color=MUTED)
-    cy += Inches(0.22)
-
     if not delivered and p.get('deadline'):
-        _add_text(slide, inner_left, cy, inner_w, Inches(0.2), f"Deadline: {_fmt_date(p.get('deadline'))}", size=9, color=TIMELINE_DEADLINE_COLOR)
+        _add_text(
+            slide, inner_left + inner_w // 2, cy, inner_w - inner_w // 2, Inches(0.2),
+            f"Deadline: {_fmt_date(p.get('deadline'))}", size=9, color=TIMELINE_DEADLINE_COLOR, align=PP_ALIGN.RIGHT,
+        )
 
 
 def _slide_tiles(

@@ -6,6 +6,7 @@ from __future__ import annotations
 import io
 
 from pptx import Presentation
+from pptx.util import Inches
 
 from app.project_pptx import (
     _build_timeline_markers,
@@ -234,6 +235,34 @@ class TestBuildProjectPptx:
         assert 'PID' in combined
         assert 'gereed' in combined  # voortgangspercentage op de tile
         assert 'Opgeleverd / gehaald' in combined
+
+    def test_tile_inhoud_valt_binnen_de_tegel_ook_met_deadline_en_te_laat_badge(self):
+        # Regressie: de "Deadline"-regel stond onder de tegel (buiten het
+        # witte vlak) zodra een open deliverable een deadline had. Alle
+        # tekstvakken die met hun linkerbovenhoek in een tegel beginnen
+        # moeten er ook helemaal binnen eindigen.
+        data = make_data()
+        data['products'][0]['name'] = 'Een heel lange deliverablenaam die over twee regels loopt in de tegel'
+        content = build_project_pptx(data, make_meta())
+        prs = Presentation(io.BytesIO(content))
+        checked = 0
+        for slide in prs.slides:
+            if 'Deliverables' not in all_text(slide) or 'gereed' not in all_text(slide):
+                continue
+            tiles = [
+                sh for sh in slide.shapes
+                if sh.shape_type == 1 and sh.width > Inches(3) and sh.height > Inches(1)
+            ]
+            assert tiles
+            for tile in tiles:
+                for sh in slide.shapes:
+                    if not sh.has_text_frame or sh is tile:
+                        continue
+                    if tile.left <= sh.left < tile.left + tile.width and tile.top <= sh.top < tile.top + tile.height:
+                        assert sh.top + sh.height <= tile.top + tile.height, sh.text_frame.text
+                        checked += 1
+        assert checked > 0
+        assert 'Deadline' in full_text(prs)
 
     def test_activiteiten_gantt_toont_ook_deliverables_met_duur_en_afhankelijkheid(self):
         # make_data(): 'Adviesrapport' heeft een ingevulde duur (10 maanden)

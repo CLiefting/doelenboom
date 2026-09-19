@@ -134,6 +134,16 @@ rol-afhankelijk gedrag te kunnen zien.
 - [ ] "Bewerken" op de status opent een modal voor projectstatus/RAG/
       toelichting/rapportagedatum/cluster PPT; opslaan werkt, wissen zet de
       status terug naar "nog niet gerapporteerd".
+- [ ] De "⇩ PPT"-knop in de projectkaart-header downloadt een .pptx
+      (`Project_<code>_<naam>_<datum>.pptx`); zichtbaar voor iedereen met
+      leesrechten, alleen bij een licentie met de module Projecten.
+- [ ] De PowerPoint opent zonder herstelmelding in PowerPoint/Keynote en
+      bevat: overzicht (status/RAG, tijdlijn, aandachtspunten), openstaande
+      deliverables, gepland komende 2 maanden, deliverable-tegels en de
+      activiteiten-Gantt; lange lijsten lopen over meerdere slides en niets
+      valt buiten een tegel of de slide.
+- [ ] De tijdlijn in de PowerPoint volgt de toggle "Geplande datum bij
+      opgeleverde items" zoals die op het scherm stond bij het klikken.
 - [ ] Tijdlijn boven de producten-sectie toont maand- of kwartaalvlakken
       (kwartaal bij een lange periode), een "vandaag"-streepje binnen bereik,
       en per product/mijlpaal het juiste symbool op de juiste datum.
