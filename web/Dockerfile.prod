@@ -16,8 +16,13 @@ ENV VITE_API_URL=$VITE_API_URL
 RUN npm run build
 
 # Stage 2: statische bestanden serveren + /api/ doorsturen naar de api-container.
-FROM nginx:alpine
+# DOEL-31: nginx-unprivileged draait als niet-root (uid 101) en luistert op
+# 8080 (poorten < 1024 zijn dan niet toegestaan); Traefik verwijst daarom naar
+# 8080 (docker-compose.prod.yml) en nginx.conf luistert daarop.
+FROM nginxinc/nginx-unprivileged:alpine
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY security-headers.conf /etc/nginx/snippets/security-headers.conf
-EXPOSE 80
+EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -q --spider http://127.0.0.1:8080/ || exit 1

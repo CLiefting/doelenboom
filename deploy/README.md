@@ -628,3 +628,13 @@ aanbevolen vóór veel productiegebruik: periodiek (bv. met `rclone`/`rsync`,
 in hetzelfde cron-patroon) een kopie van `~/doelenboom/backups/` naar een
 andere locatie/opslagdienst wegschrijven. Zelfde aandachtspunt als bij
 WWspeur, zie `SERVER-BEHEER.md`.
+
+## Container-hardening en beveiligingsheaders (DOEL-30/31)
+
+Wat er per component is veranderd en wat je bij het uitrollen moet controleren:
+
+- **Niet als root**: `api` draait als `node` (uid 1000), `excel-service` als `excel` (uid 10001), `web` (nginx-unprivileged) als uid 101 en luistert nu op poort **8080** (Traefik-label en `web/nginx.conf` zijn aangepast). De back-upmap moet schrijfbaar zijn voor uid 1000 (de API-container schrijft de nachtelijke Excel-back-ups): `mkdir -p ~/doelenboom/backups && sudo chown -R 1000:1000 ~/doelenboom/backups` (geldt ook voor bestaande back-ups uit de root-tijd). Draait je VPS-gebruiker als uid 1000 (`id -u`), dan klopt dit al.
+- **Resourcegrenzen** (`docker-compose.prod.yml`): db 512 MB / 1 cpu, api 512 MB / 1 cpu, excel-service 1 GB / 1 cpu, web 128 MB / 0,5 cpu. Startwaarden; controleer na uitrollen met `docker stats --no-stream` en pas aan als een container tegen zijn grens aanloopt (bv. een grote .mpp-import in de excel-service).
+- **Databasewachtwoord**: in productie weigert de API te starten als `DATABASE_URL` een bekend standaardwachtwoord bevat (o.a. `doelenboom`). Stappen: zet in `.env` een sterk `POSTGRES_PASSWORD`, wijzig het wachtwoord in de draaiende database (`docker compose exec db psql -U doelenboom -c "alter user doelenboom password '<nieuw>'"`) en herstart `api`. Wil je eerst uitrollen en daarna wijzigen: tijdelijk `ALLOW_DEFAULT_DB_PASSWORD=true` in de api-environment (geeft een waarschuwing i.p.v. een stop) — daarna weer weghalen.
+- **Back-ups zijn alleen-eigenaar** (0600/0700): `backup-database.sh` en de Excel-/demo-back-ups. Het database-back-upscript zet ook bestaande dumps en de map recht.
+- **Headers**: Traefik zet Referrer-Policy en Permissions-Policy, de web-container een Content-Security-Policy (`web/security-headers.conf`). Controle na uitrollen: `curl -sI https://doelenboom.code072.nl/ | grep -iE 'content-security|referrer|permissions'`. Zie ook de toelichting in dat bestand: `script-src` heeft nog `'unsafe-inline'` tot het inline script uit `tree.html` is gehaald.

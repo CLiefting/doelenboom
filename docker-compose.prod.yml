@@ -42,10 +42,24 @@ services:
       - "127.0.0.1:5432:5432"   # alleen via een SSH-tunnel, niet vanaf internet
     networks:
       - default
+    # DOEL-31: resourcegrenzen — de VPS is gedeeld met WWspeur (zware Chromium-
+    # scans, geen swap); zonder grens kan één container (upload-verwerking,
+    # runaway query) de hele server vastzetten. Startwaarden: controleer na
+    # uitrollen met `docker stats` en pas zo nodig aan.
+    mem_limit: 512m
+    cpus: 1.0
 
   excel-service:
     networks:
       - default
+    # Verwerkt geüploade xlsx/mpp (JVM voor mpxj): de zwaarste geheugengebruiker.
+    mem_limit: 1g
+    cpus: 1.0
+    # DOEL-31: no-new-privileges + geen Linux-capabilities (draait al niet-root).
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
 
   api:
     build:
@@ -88,6 +102,13 @@ services:
     networks:
       - default
       - code072-net
+    mem_limit: 512m
+    cpus: 1.0
+    # DOEL-31: no-new-privileges + geen Linux-capabilities (draait al niet-root).
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     # Bind mount (relatief aan de compose-project-map, dus ~/doelenboom/backups
     # op de VPS) i.p.v. een named volume: zo staan de nachtelijke Excel-
     # backups (deploy/export-all-doelenbomen.sh, gepland via cron — zie
@@ -108,6 +129,13 @@ services:
     networks:
       - default
       - code072-net
+    mem_limit: 128m
+    cpus: 0.5
+    # DOEL-31: no-new-privileges + geen Linux-capabilities (draait al niet-root).
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     labels:
       - traefik.enable=true
       - traefik.http.routers.doelenboom.rule=Host(`doelenboom.code072.nl`)
@@ -133,7 +161,7 @@ services:
       # Policy zet de web-container zelf, zie web/security-headers.conf.)
       - traefik.http.middlewares.doelenboom-headers.headers.referrerPolicy=same-origin
       - traefik.http.middlewares.doelenboom-headers.headers.customresponseheaders.Permissions-Policy=camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()
-      - traefik.http.services.doelenboom.loadbalancer.server.port=80
+      - traefik.http.services.doelenboom.loadbalancer.server.port=8080
 
 networks:
   default: {}

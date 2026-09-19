@@ -1,4 +1,5 @@
 import pg from 'pg';
+import { assertDatabasePasswordIsSafe } from './dbPasswordGuard.js';
 
 const { Pool, types } = pg;
 
@@ -18,6 +19,10 @@ const { Pool, types } = pg;
 // string teruggeven i.p.v. als Date-object — precies wat elke aanroeper
 // (tree.ts, products.ts, projectStatus.ts, de frontend) toch al verwacht.
 types.setTypeParser(types.builtins.DATE, (value) => value);
+
+// DOEL-31: in productie geen bekend standaard-databasewachtwoord (gooit bij het
+// laden van deze module, dus vóór de API gaat luisteren — net als JWT_SECRET).
+assertDatabasePasswordIsSafe(process.env.DATABASE_URL, process.env.NODE_ENV);
 
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
