@@ -116,6 +116,11 @@ tenantsRouter.post('/', requireSysadmin, async (req, res) => {
 // meegestuurd" (allebei worden null in JS/SQL). In plaats daarvan: alleen
 // wijzigen als de key 'openAccessRole' ÜBERHAUPT in de request-body zit
 // ('in b'), ongeacht of de waarde zelf null of een rol is.
+type OpenAccessRole = 'admin' | 'editor' | 'bezoeker' | null;
+function openAccessRank(role: OpenAccessRole): number {
+  return role === 'admin' ? 3 : role === 'editor' ? 2 : role === 'bezoeker' ? 1 : 0;
+}
+
 tenantsRouter.put('/:id', requireTenantRoleForTenantParam('admin', 'id'), async (req: AuthedRequest, res) => {
   const b = (req.body ?? {}) as Record<string, unknown>;
   const { wipeOnEmpty, sessionTimeoutMinutes, nightlyExportEnabled } = b;
@@ -191,6 +196,37 @@ tenantsRouter.put('/:id', requireTenantRoleForTenantParam('admin', 'id'), async 
   const before = await pool.query(`select ${TENANT_SELECT_FIELDS} from tenants where id = $1`, [req.params.id]);
   if (before.rows.length === 0) return res.status(404).json({ error: 'Tenant niet gevonden' });
   const beforeRow = before.rows[0] as Record<string, unknown>;
+
+  // DOEL-27 (analyse M4): open toegang geeft ELK account met een login een rol
+  // in deze tenant — met een open registratie feitelijk publiek. Een
+  // tenant-admin mag dat dus niet zelf naar believen verruimen:
+  //  - verlagen of uitzetten mag altijd;
+  //  - een ongewijzigde waarde terugsturen mag (het instellingenformulier
+  //    stuurt bij elke opslag alle velden mee);
+  //  - verruimen naar 'editor'/'admin' is sysadmin-only;
+  //  - verruimen naar 'bezoeker' (alleen lezen) mag met expliciete bevestiging
+  //    (confirmOpenAccess: true) — bewust een aparte, strikte boolean.
+  // Sysadmins zijn niet beperkt. Elke wijziging komt in de auditlog
+  // (tenant_settings_changed, hieronder).
+  if (hasOpenAccessRole && !req.user!.isSysadmin) {
+    const current = (beforeRow.open_access_role ?? null) as OpenAccessRole;
+    const requested = (openAccessRole ?? null) as OpenAccessRole;
+    if (requested !== current && openAccessRank(requested) > openAccessRank(current)) {
+      if (requested !== 'bezoeker') {
+        return res.status(403).json({
+          error: 'Alleen een sysadmin mag open toegang met de rol "editor" of "admin" instellen.',
+          reason: 'open_access_sysadmin_only',
+        });
+      }
+      if (b.confirmOpenAccess !== true) {
+        return res.status(400).json({
+          error:
+            'Open toegang geeft elk account met een login leestoegang tot deze tenant. Bevestig dit expliciet (confirmOpenAccess: true).',
+          reason: 'confirmation_required',
+        });
+      }
+    }
+  }
 
   try {
     const result = await pool.query(
