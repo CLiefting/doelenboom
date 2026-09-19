@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { pool } from '../db.js';
 import { requireAuth } from '../auth.js';
 import { requireWritableDoelenboom } from '../rbac.js';
+import { sendServerError } from '../errors.js';
 
 // CRUD voor tags (fase 2 van de CRUD-uitbreiding, samen met org-units.ts), plus
 // (fase 4) het koppelen/ontkoppelen van een bestaande tag aan een specifiek
@@ -69,7 +70,7 @@ tagsRouter.post('/doelenbomen/:id/tags', requireAdmin, async (req, res) => {
     if (isUniqueViolation(err)) {
       return res.status(409).json({ error: `Tag met code "${code}" bestaat al in deze doelenboom.` });
     }
-    res.status(500).json({ error: 'Aanmaken van tag mislukt', detail: (err as Error).message });
+    sendServerError(res, err, 'Aanmaken van tag mislukt');
   }
 });
 
@@ -90,7 +91,7 @@ tagsRouter.put('/doelenbomen/:id/tags/:code', requireAdmin, async (req, res) => 
     if (isUniqueViolation(err)) {
       return res.status(409).json({ error: `Tag met code "${newCode}" bestaat al in deze doelenboom.` });
     }
-    res.status(500).json({ error: 'Bijwerken van tag mislukt', detail: (err as Error).message });
+    sendServerError(res, err, 'Bijwerken van tag mislukt');
   }
 });
 
@@ -139,7 +140,7 @@ tagsRouter.post('/doelenbomen/:id/elements/:code/tags', requireEditor, async (re
     if (isUniqueViolation(err)) {
       return res.status(409).json({ error: `Tag "${tagCode}" is al gekoppeld aan dit element.` });
     }
-    res.status(500).json({ error: 'Koppelen van tag mislukt', detail: (err as Error).message });
+    sendServerError(res, err, 'Koppelen van tag mislukt');
   }
 });
 

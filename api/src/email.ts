@@ -158,3 +158,81 @@ export let sendNewSubscriptionRequestEmail = async (
 export function setSendNewSubscriptionRequestEmailImpl(fn: typeof sendNewSubscriptionRequestEmail): void {
   sendNewSubscriptionRequestEmail = fn;
 }
+
+// --- Verificatiemail voor de publieke zelfbedieningsaanvraag (DOEL-20) ---
+// Zelfde `let`-exportbinding-patroon als hierboven (mockbaar via
+// setSendRegistrationVerificationEmailImpl in api/test/helpers.ts).
+
+function renderRegistrationVerificationEmail(
+  link: string,
+  organizationName: string,
+  ttlHours: number
+): { subject: string; text: string; html: string } {
+  const subject = 'Bevestig je Doelenboom-aanvraag';
+  const text =
+    `Je hebt een Doelenboom-proefaccount aangevraagd voor ${organizationName}.\n\n` +
+    `Bevestig je e-mailadres om het account aan te maken:\n${link}\n\n` +
+    `Deze link is ${ttlHours} uur geldig en kan één keer gebruikt worden.\n\n` +
+    `Heb je dit niet zelf aangevraagd? Dan kun je deze e-mail negeren; er wordt dan niets aangemaakt.`;
+  const html =
+    `<p>Je hebt een Doelenboom-proefaccount aangevraagd voor <strong>${escapeHtml(organizationName)}</strong>.</p>` +
+    `<p>Bevestig je e-mailadres om het account aan te maken:</p>` +
+    `<p><a href="${escapeHtml(link)}" style="display:inline-block;padding:10px 18px;background:#2F5597;color:#fff;border-radius:6px;text-decoration:none">Aanvraag bevestigen</a></p>` +
+    `<p style="color:#6c6f76;font-size:13px">Werkt de knop niet? Kopieer dan deze link in je browser:<br>${escapeHtml(link)}</p>` +
+    `<p style="color:#6c6f76;font-size:13px">Deze link is ${ttlHours} uur geldig en kan één keer gebruikt worden. ` +
+    `Heb je dit niet zelf aangevraagd? Dan kun je deze e-mail negeren; er wordt dan niets aangemaakt.</p>`;
+  return { subject, text, html };
+}
+
+export let sendRegistrationVerificationEmail = async (
+  to: string,
+  link: string,
+  organizationName: string,
+  ttlHours: number
+): Promise<void> => {
+  const transport = getTransporter();
+  const { subject, text, html } = renderRegistrationVerificationEmail(link, organizationName, ttlHours);
+  if (!transport) {
+    // De link is een bearer-geheim: buiten productie tonen we hem voor lokale
+    // dev (geen SMTP), in productie nooit in de logs.
+    if (process.env.NODE_ENV === 'production') {
+      console.error(`FOUT: geen SMTP_HOST geconfigureerd — verificatiemail voor ${to} kon niet verstuurd worden; aanvragen kunnen niet bevestigd worden.`);
+    } else {
+      console.warn(`WAARSCHUWING: geen SMTP_HOST geconfigureerd — verificatielink voor ${to} is: ${link} (alleen in deze console, niet gemaild).`);
+    }
+    return;
+  }
+  await transport.sendMail({ from: SMTP_FROM, to, subject, text, html });
+};
+
+export function setSendRegistrationVerificationEmailImpl(fn: typeof sendRegistrationVerificationEmail): void {
+  sendRegistrationVerificationEmail = fn;
+}
+
+// Voor een aanvraag met een e-mailadres dat al een account heeft: dezelfde
+// (generieke) respons aan de aanvrager als bij een nieuw adres, maar de
+// eigenaar van het adres krijgt deze mail i.p.v. een verificatielink. Zo is
+// het bestaan van een account niet te achterhalen door een aanvraag in te
+// dienen (account-enumeratie), terwijl de echte eigenaar wel weet wat er speelt.
+export let sendRegistrationExistingAccountEmail = async (to: string, loginUrl: string): Promise<void> => {
+  const transport = getTransporter();
+  const subject = 'Je hebt al een Doelenboom-account';
+  const text =
+    `Iemand heeft met dit e-mailadres een Doelenboom-proefaccount aangevraagd, maar er bestaat al een account.\n\n` +
+    `Log gewoon in: ${loginUrl}\n` +
+    `Wachtwoord vergeten? Vraag de beheerder van je organisatie om een nieuw wachtwoord.\n\n` +
+    `Was jij dit niet? Dan kun je deze e-mail negeren; er is niets gewijzigd.`;
+  const html =
+    `<p>Iemand heeft met dit e-mailadres een Doelenboom-proefaccount aangevraagd, maar er bestaat al een account.</p>` +
+    `<p><a href="${escapeHtml(loginUrl)}">Log gewoon in</a>. Wachtwoord vergeten? Vraag de beheerder van je organisatie om een nieuw wachtwoord.</p>` +
+    `<p style="color:#6c6f76;font-size:13px">Was jij dit niet? Dan kun je deze e-mail negeren; er is niets gewijzigd.</p>`;
+  if (!transport) {
+    console.warn(`WAARSCHUWING: geen SMTP_HOST geconfigureerd — 'account bestaat al'-mail voor ${to} niet gemaild.`);
+    return;
+  }
+  await transport.sendMail({ from: SMTP_FROM, to, subject, text, html });
+};
+
+export function setSendRegistrationExistingAccountEmailImpl(fn: typeof sendRegistrationExistingAccountEmail): void {
+  sendRegistrationExistingAccountEmail = fn;
+}

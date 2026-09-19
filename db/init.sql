@@ -707,7 +707,11 @@ create table if not exists audit_log (
   id bigserial primary key,
   event_type text not null check (event_type in (
     'doelenboom_view', 'tenant_settings_changed', 'mfa_verified', 'mfa_failed',
-    'tenant_contact_changed', 'tenant_customer_info_changed', 'tenant_subscription_changed'
+    'tenant_contact_changed', 'tenant_customer_info_changed', 'tenant_subscription_changed',
+    'doelenboom_wiped',
+    'login_success', 'login_failed', 'account_locked', 'password_changed', 'password_reset',
+    'user_created', 'user_updated', 'user_deleted', 'tenant_member_changed',
+    'doelenboom_deleted', 'doelenboom_exported', 'doelenboom_import_published'
   )),
   user_id bigint references users(id) on delete set null,
   tenant_id bigint references tenants(id) on delete set null,
@@ -1030,6 +1034,19 @@ create table if not exists subscription_requests (
   rejected_reason text
 );
 create index if not exists idx_subscription_requests_status on subscription_requests(status);
+
+-- E-mailverificatie voor de publieke aanvraag (DOEL-20) — zie
+-- db/migrations/0040_pending_registrations.sql voor de toelichting.
+create table if not exists pending_registrations (
+  id bigserial primary key,
+  email text not null,
+  token_hash text not null unique,
+  payload jsonb not null,
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null,
+  consumed_at timestamptz
+);
+create index if not exists idx_pending_registrations_email_created on pending_registrations(email, created_at);
 
 -- Losstaande logging-module: elke handeling in de aanvraag-/verlengcyclus
 -- wordt hier vastgelegd, los van de "huidige stand" in subscription_requests/

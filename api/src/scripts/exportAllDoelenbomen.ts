@@ -90,9 +90,10 @@ async function exportOneDoelenboom(
   const buffer = Buffer.from(await upstream.arrayBuffer());
 
   const dir = path.join(BACKUP_DIR, sanitizeForFilename(tenantSlug), sanitizeForFilename(doelenboomSlug));
-  fs.mkdirSync(dir, { recursive: true });
+  // DOEL-31: back-ups bevatten klantdata — alleen leesbaar voor de eigenaar.
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   const filePath = path.join(dir, `${sanitizeForFilename(doelenboomSlug)}_${todayIsoStr}.xlsx`);
-  fs.writeFileSync(filePath, buffer);
+  fs.writeFileSync(filePath, buffer, { mode: 0o600 });
   console.log(`[export-all] geschreven: ${filePath} (${buffer.byteLength} bytes)`);
 
   pruneDirectory(dir, doelenboomSlug, todayIsoStr);

@@ -3,6 +3,7 @@ import { pool } from '../db.js';
 import { requireAuth } from '../auth.js';
 import { requireSysadmin, requireTenantRoleForDoelenboomParam, requireWritableDoelenboom } from '../rbac.js';
 import { getColumnsForDoelenboom, getTenantDefaultColumns, replaceColumns, validateColumnsInput } from '../columnConfig.js';
+import { sendServerError } from '../errors.js';
 
 // Kolomconfiguratie: zie docs/kolommen-configuratie-ontwerp.md.
 // - /api/tenants/:tenantId/column-config — de tenant-default (het sjabloon
@@ -45,7 +46,7 @@ columnConfigRouter.put('/tenants/:tenantId/column-config', requireSysadmin, asyn
     res.json({ columns: fresh });
   } catch (err) {
     await client.query('rollback');
-    res.status(500).json({ error: 'Opslaan van kolomconfiguratie mislukt', detail: (err as Error).message });
+    sendServerError(res, err, 'Opslaan van kolomconfiguratie mislukt');
   } finally {
     client.release();
   }
@@ -88,7 +89,7 @@ columnConfigRouter.put(
       res.json({ columns: fresh });
     } catch (err) {
       await client.query('rollback');
-      res.status(500).json({ error: 'Opslaan van kolomconfiguratie mislukt', detail: (err as Error).message });
+      sendServerError(res, err, 'Opslaan van kolomconfiguratie mislukt');
     } finally {
       client.release();
     }

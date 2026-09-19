@@ -26,7 +26,14 @@ BACKUP_RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-14}"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 OUT_FILE="${BACKUP_DIR}/doelenboom-${TIMESTAMP}.sql.gz"
 
+# DOEL-31: een databasedump bevat álles (accountgegevens, wachtwoordhashes,
+# MFA-gegevens, klantdata) — alleen de eigenaar mag 'm kunnen lezen. umask 077
+# maakt nieuwe bestanden 0600 en mappen 0700; de chmod hieronder herstelt ook een
+# map (en oudere dumps) die eerder met ruimere rechten is aangemaakt.
+umask 077
 mkdir -p "$BACKUP_DIR"
+chmod 700 "$BACKUP_DIR"
+find "$BACKUP_DIR" -maxdepth 1 -name 'doelenboom-*.sql.gz' -exec chmod 600 {} +
 
 echo "[$(date -Iseconds)] Databaseback-up gestart -> ${OUT_FILE}"
 

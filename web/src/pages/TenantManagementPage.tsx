@@ -1390,6 +1390,17 @@ function TenantSettingsForm({
       setError('Geef een tekst voor de popup-melding op, of zet de melding uit.');
       return;
     }
+    // Open toegang aanzetten (uit -> aan) geeft elk account met een login
+    // toegang tot deze tenant: eerst expliciet bevestigen (DOEL-27; de API eist
+    // dit van een tenant-admin als confirmOpenAccess: true).
+    const enablingOpenAccess = openAccessRole !== '' && !tenant.open_access_role;
+    if (enablingOpenAccess) {
+      const ok = window.confirm(
+        `Open toegang aanzetten? Elk account met een login krijgt dan de rol "${openAccessRole}" in "${tenant.name}", ` +
+          'ook mensen die je niet kent. Zet dit alleen aan voor niet-vertrouwelijke gegevens (bv. een demo).'
+      );
+      if (!ok) return;
+    }
     setBusy(true);
     setError(null);
     setSaved(false);
@@ -1400,6 +1411,7 @@ function TenantSettingsForm({
         sessionTimeoutMinutes: minutes,
         nightlyExportEnabled,
         openAccessRole: openAccessRole || null,
+        ...(enablingOpenAccess ? { confirmOpenAccess: true } : {}),
         entryPopupEnabled,
         entryPopupMessage: entryPopupMessage.trim(),
         mfaRequired,
@@ -1483,8 +1495,13 @@ function TenantSettingsForm({
         >
           <option value="">Uit — alleen expliciete leden</option>
           <option value="bezoeker">Aan — iedereen: bezoeker</option>
-          <option value="editor">Aan — iedereen: editor</option>
-          <option value="admin">Aan — iedereen: admin</option>
+          {/* Verruimen naar editor/admin is sysadmin-only (DOEL-27); de huidige waarde blijft kiesbaar. */}
+          <option value="editor" disabled={!isSysadmin && tenant.open_access_role !== 'editor' && tenant.open_access_role !== 'admin'}>
+            Aan — iedereen: editor{!isSysadmin && tenant.open_access_role !== 'editor' && tenant.open_access_role !== 'admin' ? ' (alleen sysadmin)' : ''}
+          </option>
+          <option value="admin" disabled={!isSysadmin && tenant.open_access_role !== 'admin'}>
+            Aan — iedereen: admin{!isSysadmin && tenant.open_access_role !== 'admin' ? ' (alleen sysadmin)' : ''}
+          </option>
         </select>
       </label>
       <p style={{ margin: '-4px 0 0 0', fontSize: 12, color: '#9aa0a8' }}>

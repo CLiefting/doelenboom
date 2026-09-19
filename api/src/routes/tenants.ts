@@ -5,7 +5,9 @@ import { requireSysadmin, requireTenantRoleForTenantParam } from '../rbac.js';
 import { createTenantDefaultConfig } from '../columnConfig.js';
 import { assertCanAddEditor, computeDefaultLicenseEndDate, LicenseLimitError } from '../license.js';
 import { logAuditEvent } from '../auditLog.js';
+import { hashSql } from '../passwordHash.js';
 import { terminateTenant } from '../tenantRetention.js';
+import { sendServerError } from '../errors.js';
 
 export const tenantsRouter = Router();
 tenantsRouter.use(requireAuth);
@@ -88,7 +90,8 @@ tenantsRouter.post('/', requireSysadmin, async (req, res) => {
     res.status(201).json(result.rows[0]);
   } catch (err) {
     await client.query('rollback');
-    res.status(409).json({ error: 'Tenant met deze slug bestaat al', detail: (err as Error).message });
+    if (!isUniqueViolation(err)) return sendServerError(res, err, 'Aanmaken van tenant mislukt');
+    res.status(409).json({ error: 'Tenant met deze slug bestaat al' });
   } finally {
     client.release();
   }
@@ -115,6 +118,11 @@ tenantsRouter.post('/', requireSysadmin, async (req, res) => {
 // meegestuurd" (allebei worden null in JS/SQL). In plaats daarvan: alleen
 // wijzigen als de key 'openAccessRole' ÜBERHAUPT in de request-body zit
 // ('in b'), ongeacht of de waarde zelf null of een rol is.
+type OpenAccessRole = 'admin' | 'editor' | 'bezoeker' | null;
+function openAccessRank(role: OpenAccessRole): number {
+  return role === 'admin' ? 3 : role === 'editor' ? 2 : role === 'bezoeker' ? 1 : 0;
+}
+
 tenantsRouter.put('/:id', requireTenantRoleForTenantParam('admin', 'id'), async (req: AuthedRequest, res) => {
   const b = (req.body ?? {}) as Record<string, unknown>;
   const { wipeOnEmpty, sessionTimeoutMinutes, nightlyExportEnabled } = b;
@@ -190,6 +198,37 @@ tenantsRouter.put('/:id', requireTenantRoleForTenantParam('admin', 'id'), async 
   const before = await pool.query(`select ${TENANT_SELECT_FIELDS} from tenants where id = $1`, [req.params.id]);
   if (before.rows.length === 0) return res.status(404).json({ error: 'Tenant niet gevonden' });
   const beforeRow = before.rows[0] as Record<string, unknown>;
+
+  // DOEL-27 (analyse M4): open toegang geeft ELK account met een login een rol
+  // in deze tenant — met een open registratie feitelijk publiek. Een
+  // tenant-admin mag dat dus niet zelf naar believen verruimen:
+  //  - verlagen of uitzetten mag altijd;
+  //  - een ongewijzigde waarde terugsturen mag (het instellingenformulier
+  //    stuurt bij elke opslag alle velden mee);
+  //  - verruimen naar 'editor'/'admin' is sysadmin-only;
+  //  - verruimen naar 'bezoeker' (alleen lezen) mag met expliciete bevestiging
+  //    (confirmOpenAccess: true) — bewust een aparte, strikte boolean.
+  // Sysadmins zijn niet beperkt. Elke wijziging komt in de auditlog
+  // (tenant_settings_changed, hieronder).
+  if (hasOpenAccessRole && !req.user!.isSysadmin) {
+    const current = (beforeRow.open_access_role ?? null) as OpenAccessRole;
+    const requested = (openAccessRole ?? null) as OpenAccessRole;
+    if (requested !== current && openAccessRank(requested) > openAccessRank(current)) {
+      if (requested !== 'bezoeker') {
+        return res.status(403).json({
+          error: 'Alleen een sysadmin mag open toegang met de rol "editor" of "admin" instellen.',
+          reason: 'open_access_sysadmin_only',
+        });
+      }
+      if (b.confirmOpenAccess !== true) {
+        return res.status(400).json({
+          error:
+            'Open toegang geeft elk account met een login leestoegang tot deze tenant. Bevestig dit expliciet (confirmOpenAccess: true).',
+          reason: 'confirmation_required',
+        });
+      }
+    }
+  }
 
   try {
     const result = await pool.query(
@@ -300,7 +339,7 @@ tenantsRouter.get('/:tenantId/members', requireTenantRoleForTenantParam('admin',
 // verplicht, en krijgt het account nooit is_sysadmin=true via deze route — dat
 // kan alleen via /api/users, sysadmin-only). Bestaat het account al, dan wordt
 // alleen de rol in déze tenant gezet/overschreven (upsert).
-tenantsRouter.post('/:tenantId/members', requireTenantRoleForTenantParam('admin', 'tenantId'), async (req, res) => {
+tenantsRouter.post('/:tenantId/members', requireTenantRoleForTenantParam('admin', 'tenantId'), async (req: AuthedRequest, res) => {
   // requireTenantRoleForTenantParam laat een sysadmin altijd meteen door
   // (zie rbac.ts requireTenantRole) — zónder dat :tenantId dan al ergens is
   // gevalideerd. Een niet-numerieke :tenantId (verkeerde aanroep, of een
@@ -324,6 +363,7 @@ tenantsRouter.post('/:tenantId/members', requireTenantRoleForTenantParam('admin'
 
   const existing = await pool.query('select id from users where email = $1', [email]);
   let userId: number;
+  let accountCreated = false;
   if (existing.rows.length > 0) {
     userId = existing.rows[0].id;
   } else {
@@ -332,10 +372,11 @@ tenantsRouter.post('/:tenantId/members', requireTenantRoleForTenantParam('admin'
     }
     const created = await pool.query(
       `insert into users (email, password_hash, is_sysadmin, must_change_password)
-       values ($1, crypt($2, gen_salt('bf')), false, true) returning id`,
+       values ($1, ${hashSql('$2')}, false, true) returning id`,
       [email, password]
     );
     userId = created.rows[0].id;
+    accountCreated = true;
   }
 
   // Licentielimiet (zie license.ts/doelenboom_licentiemodel.md §5 v3): admin
@@ -359,15 +400,36 @@ tenantsRouter.post('/:tenantId/members', requireTenantRoleForTenantParam('admin'
     }
   }
 
+  // DOEL-29: vorige rol (indien lid) voor het auditlog.
+  const previous = await pool.query('select role from tenant_users where tenant_id = $1 and user_id = $2', [
+    req.params.tenantId,
+    userId,
+  ]);
+  const previousRole = (previous.rows[0]?.role as string | undefined) ?? null;
   await pool.query(
     `insert into tenant_users (tenant_id, user_id, role) values ($1, $2, $3)
      on conflict (tenant_id, user_id) do update set role = excluded.role`,
     [req.params.tenantId, userId, role]
   );
+  if (previousRole !== role) {
+    await logAuditEvent({
+      eventType: 'tenant_member_changed',
+      userId: req.user!.id,
+      tenantId: req.params.tenantId,
+      detail: {
+        action: previousRole ? 'role_changed' : 'added',
+        targetUserId: userId,
+        email,
+        from: previousRole,
+        to: role,
+        ...(accountCreated ? { accountCreated: true } : {}),
+      },
+    });
+  }
   res.status(201).json({ userId, email, role });
 });
 
-tenantsRouter.put('/:tenantId/members/:userId', requireTenantRoleForTenantParam('admin', 'tenantId'), async (req, res) => {
+tenantsRouter.put('/:tenantId/members/:userId', requireTenantRoleForTenantParam('admin', 'tenantId'), async (req: AuthedRequest, res) => {
   // Zie de toelichting bij POST /:tenantId/members hierboven.
   if (!/^\d+$/.test(req.params.tenantId) || !/^\d+$/.test(req.params.userId)) {
     return res.status(400).json({ error: 'Ongeldig tenantId of userId.' });
@@ -392,19 +454,37 @@ tenantsRouter.put('/:tenantId/members/:userId', requireTenantRoleForTenantParam(
     }
   }
 
+  const before = await pool.query('select role from tenant_users where tenant_id = $1 and user_id = $2', [
+    req.params.tenantId,
+    req.params.userId,
+  ]);
   const result = await pool.query(
     `update tenant_users set role = $1 where tenant_id = $2 and user_id = $3 returning id`,
     [role, req.params.tenantId, req.params.userId]
   );
   if (result.rowCount === 0) return res.status(404).json({ error: 'Lidmaatschap niet gevonden.' });
+  if (before.rows[0]?.role !== role) {
+    await logAuditEvent({
+      eventType: 'tenant_member_changed',
+      userId: req.user!.id,
+      tenantId: req.params.tenantId,
+      detail: { action: 'role_changed', targetUserId: Number(req.params.userId), from: before.rows[0]?.role ?? null, to: role },
+    });
+  }
   res.json({ userId: Number(req.params.userId), role });
 });
 
-tenantsRouter.delete('/:tenantId/members/:userId', requireTenantRoleForTenantParam('admin', 'tenantId'), async (req, res) => {
+tenantsRouter.delete('/:tenantId/members/:userId', requireTenantRoleForTenantParam('admin', 'tenantId'), async (req: AuthedRequest, res) => {
   const result = await pool.query(
-    'delete from tenant_users where tenant_id = $1 and user_id = $2 returning id',
+    'delete from tenant_users where tenant_id = $1 and user_id = $2 returning id, role',
     [req.params.tenantId, req.params.userId]
   );
   if (result.rowCount === 0) return res.status(404).json({ error: 'Lidmaatschap niet gevonden.' });
+  await logAuditEvent({
+    eventType: 'tenant_member_changed',
+    userId: req.user!.id,
+    tenantId: req.params.tenantId,
+    detail: { action: 'removed', targetUserId: Number(req.params.userId), from: result.rows[0].role, to: null },
+  });
   res.status(204).send();
 });

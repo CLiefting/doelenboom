@@ -42,10 +42,24 @@ services:
       - "127.0.0.1:5432:5432"   # alleen via een SSH-tunnel, niet vanaf internet
     networks:
       - default
+    # DOEL-31: resourcegrenzen — de VPS is gedeeld met WWspeur (zware Chromium-
+    # scans, geen swap); zonder grens kan één container (upload-verwerking,
+    # runaway query) de hele server vastzetten. Startwaarden: controleer na
+    # uitrollen met `docker stats` en pas zo nodig aan.
+    mem_limit: 512m
+    cpus: 1.0
 
   excel-service:
     networks:
       - default
+    # Verwerkt geüploade xlsx/mpp (JVM voor mpxj): de zwaarste geheugengebruiker.
+    mem_limit: 1g
+    cpus: 1.0
+    # DOEL-31: no-new-privileges + geen Linux-capabilities (draait al niet-root).
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
 
   api:
     build:
@@ -73,11 +87,28 @@ services:
     environment:
       ALLOWED_ORIGINS: https://doelenboom.code072.nl
       NODE_ENV: production
+      # Aantal reverse proxies vóór de API waarvan X-Forwarded-For vertrouwd
+      # wordt (DOEL-20, rate limiting per client-IP, zie api/src/rateLimit.ts):
+      # Traefik -> nginx (web-container, web/nginx.conf) -> api = 2 hops. Klopt
+      # dit niet (bv. er komt een CDN voor Traefik), dan delen alle bezoekers één
+      # teller (te laag) of kan een client zijn IP spoofen (te hoog) — zie
+      # deploy/README.md voor de controle na het uitrollen.
+      TRUST_PROXY_HOPS: "2"
+      # Basis-URL voor links in e-mails (bevestigingslink van de publieke
+      # aanvraag, DOEL-20): <APP_BASE_URL>/aanvraag/bevestigen#<token>.
+      APP_BASE_URL: https://doelenboom.code072.nl
     ports: !override
       - "127.0.0.1:4000:4000"   # alleen via een SSH-tunnel, niet vanaf internet
     networks:
       - default
       - code072-net
+    mem_limit: 512m
+    cpus: 1.0
+    # DOEL-31: no-new-privileges + geen Linux-capabilities (draait al niet-root).
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     # Bind mount (relatief aan de compose-project-map, dus ~/doelenboom/backups
     # op de VPS) i.p.v. een named volume: zo staan de nachtelijke Excel-
     # backups (deploy/export-all-doelenbomen.sh, gepland via cron — zie
@@ -98,6 +129,13 @@ services:
     networks:
       - default
       - code072-net
+    mem_limit: 128m
+    cpus: 0.5
+    # DOEL-31: no-new-privileges + geen Linux-capabilities (draait al niet-root).
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     labels:
       - traefik.enable=true
       - traefik.http.routers.doelenboom.rule=Host(`doelenboom.code072.nl`)
@@ -119,7 +157,11 @@ services:
       - traefik.http.middlewares.doelenboom-headers.headers.stsSeconds=31536000
       - traefik.http.middlewares.doelenboom-headers.headers.contentTypeNosniff=true
       - traefik.http.middlewares.doelenboom-headers.headers.customFrameOptionsValue=SAMEORIGIN
-      - traefik.http.services.doelenboom.loadbalancer.server.port=80
+      # DOEL-30: Referrer-Policy en Permissions-Policy. (De Content-Security-
+      # Policy zet de web-container zelf, zie web/security-headers.conf.)
+      - traefik.http.middlewares.doelenboom-headers.headers.referrerPolicy=same-origin
+      - traefik.http.middlewares.doelenboom-headers.headers.customresponseheaders.Permissions-Policy=camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()
+      - traefik.http.services.doelenboom.loadbalancer.server.port=8080
 
 networks:
   default: {}

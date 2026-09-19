@@ -71,7 +71,20 @@ function roleAtLeast(role: TenantRole, minRole: TenantRole): boolean {
 // teruggeeft (met tu.role = null) wanneer er geen lidmaatschap is maar de
 // tenant wél bestaat — nodig om open_access_role als fallback te kunnen
 // gebruiken.
+// Ids uit het URL-pad (req.params) zijn vrije tekst. Zonder controle geeft
+// Number('abc') een NaN (tenants) of komt de kale string in de query
+// terecht (doelenbomen) en faalt Postgres met "invalid input syntax for type
+// bigint" — in een async middleware liet dat het request hangen (DOEL-22).
+// Alleen kale cijfers, maximaal 15 (ruim binnen Number.MAX_SAFE_INTEGER en
+// bigint); alles anders is "bestaat niet" -> null -> 404.
+export function parseId(value: unknown): number | null {
+  const s = typeof value === 'number' ? String(value) : value;
+  if (typeof s !== 'string' || !/^\d{1,15}$/.test(s)) return null;
+  return Number(s);
+}
+
 export async function getTenantRole(userId: number, tenantId: number | string): Promise<TenantRole | null> {
+  if (parseId(tenantId) == null) return null;
   const result = await pool.query(
     `select tu.role, t.open_access_role
      from tenants t
@@ -85,6 +98,7 @@ export async function getTenantRole(userId: number, tenantId: number | string): 
 }
 
 export async function tenantIdForDoelenboom(doelenboomId: number | string): Promise<number | null> {
+  if (parseId(doelenboomId) == null) return null;
   const result = await pool.query('select tenant_id from doelenbomen where id = $1', [doelenboomId]);
   return result.rows[0]?.tenant_id ?? null;
 }
@@ -202,7 +216,7 @@ export function requireTenantRoleForDoelenboomParam(
 
 // Voor routes met :tenantId direct in de URL (tenants/:id, tenants/:tenantId/...).
 export function requireTenantRoleForTenantParam(minRole: TenantRole, paramName = 'tenantId') {
-  return requireTenantRole(minRole, (req) => Number(req.params[paramName]));
+  return requireTenantRole(minRole, (req) => parseId(req.params[paramName]));
 }
 
 // Voor schrijfroutes binnen een doelenboom (boom-inhoud — zie het rolmodel

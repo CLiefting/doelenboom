@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { AuthedRequest, requireAuth } from '../auth.js';
 import { acceptCurrentTerms, DocType, getCurrentDocument, LegalAcceptanceError, needsTermsAcceptance } from '../legal.js';
+import { sendServerError } from '../errors.js';
 
 // Gebruiksvoorwaarden + privacyverklaring — zie legal.ts en
 // docs/juridische-documenten-en-retentie.md. GET is bewust ongeauthenticeerd
@@ -38,6 +39,6 @@ legalRouter.post('/legal/terms/accept', requireAuth, async (req: AuthedRequest, 
     res.json({ accepted: true, version: doc.version });
   } catch (err) {
     if (err instanceof LegalAcceptanceError) return res.status(409).json({ error: err.message });
-    res.status(500).json({ error: 'Accepteren mislukt', detail: (err as Error).message });
+    sendServerError(res, err, 'Accepteren mislukt');
   }
 });

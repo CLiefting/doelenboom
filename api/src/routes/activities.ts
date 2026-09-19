@@ -4,6 +4,7 @@ import { pool } from '../db.js';
 import { requireAuth, AuthedRequest } from '../auth.js';
 import { requireWritableDoelenboom, requireModule } from '../rbac.js';
 import { diffFields, logProjectHistory, touchProjectStatusUpdated } from '../projectHistory.js';
+import { sendServerError } from '../errors.js';
 
 // CRUD voor de activiteiten-planning van een project-element — zelfde opzet
 // als products.ts, maar een activiteit beslaat een PERIODE (start- en
@@ -487,7 +488,7 @@ activitiesRouter.post(
       const xml = await upstream.text();
       res.type('application/xml').send(xml);
     } catch (err) {
-      res.status(502).json({ error: 'MS Project-conversieservice niet bereikbaar.', detail: (err as Error).message });
+      sendServerError(res, err, 'MS Project-conversieservice niet bereikbaar.', 502);
     }
   }
 );

@@ -7,8 +7,9 @@ const PERIOD_LABEL: Record<BillingPeriod, string> = { maand: 'maand', jaar: 'jaa
 // Publieke aanvraagpagina ("nieuw abonnement aanvragen") — zie
 // doelenboom_licentiemodel.md §9. Ongeauthenticeerd, bereikbaar via een link
 // op LoginPage (App.tsx regelt de omschakeling, dit component zelf weet
-// niets van sessies). Bij indienen ontstaat direct een tenant + admin-account
-// (proefperiode van 14 dagen) — de aanvrager kan na het succesbericht meteen
+// niets van sessies). Bij indienen gaat er een verificatiemail uit (DOEL-20);
+// pas na het bevestigen van de link (SubscriptionConfirmPage) ontstaat een
+// tenant + admin-account (proefperiode van 14 dagen) en kan de aanvrager
 // inloggen met het zelfgekozen wachtwoord.
 export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBack: () => void; onSubmitted: (email: string) => void }) {
   const [tiers, setTiers] = useState<PublicTier[] | null>(null);
@@ -268,8 +269,8 @@ export default function SubscriptionRequestPage({ onBack, onSubmitted }: { onBac
         </button>
         <h1 style={styles.title}>Nieuw abonnement aanvragen</h1>
         <p style={styles.subtitle}>
-          Kies een abonnement, vul je gegevens in en je krijgt direct een proefaccount voor{' '}
-          {selectedTier?.trialDays ?? 14} dagen — meteen aan de slag, betaling regelen we daarna.
+          Kies een abonnement, vul je gegevens in en bevestig je e-mailadres: daarna heb je een proefaccount voor{' '}
+          {selectedTier?.trialDays ?? 14} dagen — betaling regelen we later.
         </p>
 
         {error && <p style={styles.error}>{error}</p>}

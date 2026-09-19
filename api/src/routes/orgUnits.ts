@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { pool } from '../db.js';
 import { requireAuth } from '../auth.js';
 import { requireWritableDoelenboom } from '../rbac.js';
+import { sendServerError } from '../errors.js';
 
 // CRUD voor organisatieonderdelen (fase 2, samen met tags.ts), plus (fase 4) het
 // koppelen/bewerken/ontkoppelen van een organisatieonderdeel aan een specifiek
@@ -64,7 +65,7 @@ orgUnitsRouter.post('/doelenbomen/:id/org-units', requireAdmin, async (req, res)
     if (isUniqueViolation(err)) {
       return res.status(409).json({ error: `Organisatieonderdeel met code "${code}" bestaat al in deze doelenboom.` });
     }
-    res.status(500).json({ error: 'Aanmaken van organisatieonderdeel mislukt', detail: (err as Error).message });
+    sendServerError(res, err, 'Aanmaken van organisatieonderdeel mislukt');
   }
 });
 
@@ -85,7 +86,7 @@ orgUnitsRouter.put('/doelenbomen/:id/org-units/:code', requireAdmin, async (req,
     if (isUniqueViolation(err)) {
       return res.status(409).json({ error: `Organisatieonderdeel met code "${newCode}" bestaat al in deze doelenboom.` });
     }
-    res.status(500).json({ error: 'Bijwerken van organisatieonderdeel mislukt', detail: (err as Error).message });
+    sendServerError(res, err, 'Bijwerken van organisatieonderdeel mislukt');
   }
 });
 
@@ -151,7 +152,7 @@ orgUnitsRouter.post('/doelenbomen/:id/elements/:code/org-units', requireEditor, 
     if (isUniqueViolation(err)) {
       return res.status(409).json({ error: `Organisatieonderdeel "${input.orgCode}" is al gekoppeld aan dit element.` });
     }
-    res.status(500).json({ error: 'Koppelen van organisatieonderdeel mislukt', detail: (err as Error).message });
+    sendServerError(res, err, 'Koppelen van organisatieonderdeel mislukt');
   }
 });
 

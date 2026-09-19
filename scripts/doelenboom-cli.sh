@@ -22,7 +22,8 @@ set -euo pipefail
 # verkeerde/lege map aanpraten — met verwarrende fouten diep in docker compose
 # tot gevolg i.p.v. meteen een duidelijke melding. Deze vaste cd + expliciete
 # check hieronder falen liever meteen en luid.
-REPO_DIR="$HOME/OneDrive/src/doelenboom"
+# DOEL-33: overschrijfbaar (DOELENBOOM_DIR) zodat de map buiten OneDrive kan staan.
+REPO_DIR="${DOELENBOOM_DIR:-$HOME/OneDrive/src/doelenboom}"
 if [ ! -f "$REPO_DIR/docker-compose.yml" ]; then
   echo "Kan doelenboom niet vinden op $REPO_DIR (geen docker-compose.yml daar)." >&2
   echo "Is de map leeg, verplaatst, of nog niet gesynchroniseerd (bv. door een OneDrive-issue)? Controleer dit eerst." >&2

@@ -42,6 +42,19 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   tenant_contact_changed: 'Contactpersoon gewijzigd',
   tenant_customer_info_changed: 'Klantgegevens gewijzigd',
   tenant_subscription_changed: 'Abonnement gewijzigd',
+  doelenboom_wiped: 'Doelenboom leeggemaakt',
+  login_success: 'Ingelogd',
+  login_failed: 'Inlogpoging mislukt',
+  account_locked: 'Account geblokkeerd (te veel pogingen)',
+  password_changed: 'Wachtwoord gewijzigd (zelf)',
+  password_reset: 'Wachtwoord gereset (door sysadmin)',
+  user_created: 'Account aangemaakt',
+  user_updated: 'Account gewijzigd',
+  user_deleted: 'Account verwijderd',
+  tenant_member_changed: 'Lidmaatschap/rol gewijzigd',
+  doelenboom_deleted: 'Doelenboom verwijderd',
+  doelenboom_exported: 'Doelenboom geëxporteerd',
+  doelenboom_import_published: 'Import gepubliceerd',
 };
 
 // Optioneel filteren op tenantId en/of eventType via query-string — voor de

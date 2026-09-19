@@ -127,7 +127,20 @@ export type AuditEventType =
   | 'mfa_failed'
   | 'tenant_contact_changed'
   | 'tenant_customer_info_changed'
-  | 'tenant_subscription_changed';
+  | 'tenant_subscription_changed'
+  | 'doelenboom_wiped'
+  | 'login_success'
+  | 'login_failed'
+  | 'account_locked'
+  | 'password_changed'
+  | 'password_reset'
+  | 'user_created'
+  | 'user_updated'
+  | 'user_deleted'
+  | 'tenant_member_changed'
+  | 'doelenboom_deleted'
+  | 'doelenboom_exported'
+  | 'doelenboom_import_published';
 
 export type AuditLogEntry = {
   id: number;

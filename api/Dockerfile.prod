@@ -62,5 +62,16 @@ COPY --from=build /app/dist ./dist
 # dependencyHealth.ts leest de SBOM uit SBOM_DIR; geen volume-mount meer.
 ENV SBOM_DIR=/app/sbom
 COPY --from=sbom /out/ /app/sbom/
+# DOEL-31: niet als root draaien. De code, node_modules en /app/sbom blijven
+# root-eigendom (alleen-lezen voor de app); schrijven gebeurt alleen naar
+# /backups (bind mount, zie docker-compose.prod.yml — op de VPS moet de map
+# ./backups schrijfbaar zijn voor uid 1000, zie deploy/README.md).
+RUN mkdir -p /backups && chown node:node /backups
+USER node
 EXPOSE 4000
-CMD ["npm", "start"]
+# Node 20 heeft fetch; /api/health geeft 503 als de database niet bereikbaar is.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:4000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+# Direct node i.p.v. `npm start`: geen npm als PID 1 (dat geeft SIGTERM niet
+# betrouwbaar door), zelfde commando als "start" in package.json.
+CMD ["node", "dist/index.js"]

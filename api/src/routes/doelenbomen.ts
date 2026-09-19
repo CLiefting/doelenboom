@@ -10,8 +10,10 @@ import {
 } from '../rbac.js';
 import { createDoelenboomConfigFromTenantDefault, copyDoelenboomConfig } from '../columnConfig.js';
 import { seedExampleTree } from '../exampleTree.js';
+import { logAuditEvent } from '../auditLog.js';
 import { applyTemplateToNewDoelenboom } from '../doelenboomTemplates.js';
 import { assertCanCreateBoom, incrementLifetimeTreesCreated, isLicenseExpired, LicenseLimitError } from '../license.js';
+import { sendServerError } from '../errors.js';
 
 function isUniqueViolation(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { code?: string }).code === '23505';
@@ -195,7 +197,8 @@ doelenbomenRouter.post(
       res.status(201).json(result.rows[0]);
     } catch (err) {
       await client.query('rollback');
-      res.status(409).json({ error: 'Doelenboom met deze slug bestaat al binnen deze tenant', detail: (err as Error).message });
+      if (!isUniqueViolation(err)) return sendServerError(res, err, 'Opslaan van de doelenboom mislukt');
+      res.status(409).json({ error: 'Doelenboom met deze slug bestaat al binnen deze tenant' });
     } finally {
       client.release();
     }
@@ -293,7 +296,8 @@ doelenbomenRouter.put(
       );
       res.json(result.rows[0]);
     } catch (err) {
-      res.status(409).json({ error: 'Doelenboom met deze slug bestaat al binnen deze tenant', detail: (err as Error).message });
+      if (!isUniqueViolation(err)) return sendServerError(res, err, 'Opslaan van de doelenboom mislukt');
+      res.status(409).json({ error: 'Doelenboom met deze slug bestaat al binnen deze tenant' });
     }
   }
 );
@@ -307,9 +311,18 @@ doelenbomenRouter.delete(
   // geen boom-inhoud (zie rbac.ts rolmodel-comment en de gematigde
   // sysadmin-scope hierboven bij deze route).
   requireTenantRoleForDoelenboomParam('admin', 'id', { allowSysadmin: true }),
-  async (req, res) => {
+  async (req: AuthedRequest, res) => {
+    // DOEL-29: naam/tenant vóór het verwijderen vastleggen (na de delete is de
+    // rij weg; doelenboom_id in het log wordt dan door de FK op null gezet).
+    const doomed = await pool.query('select tenant_id, slug, name from doelenbomen where id = $1', [req.params.id]);
     const result = await pool.query('delete from doelenbomen where id = $1 returning id', [req.params.id]);
     if (result.rowCount === 0) return res.status(404).json({ error: 'Doelenboom niet gevonden.' });
+    await logAuditEvent({
+      eventType: 'doelenboom_deleted',
+      userId: req.user!.id,
+      tenantId: doomed.rows[0]?.tenant_id ?? null,
+      detail: { doelenboomId: Number(req.params.id), slug: doomed.rows[0]?.slug, name: doomed.rows[0]?.name },
+    });
     res.status(204).send();
   }
 );
@@ -358,7 +371,7 @@ doelenbomenRouter.put(
   // geen boom-inhoud (zie rbac.ts rolmodel-comment en de gematigde
   // sysadmin-scope hierboven bij deze route).
   requireTenantRoleForDoelenboomParam('admin', 'id', { allowSysadmin: true }),
-  async (req, res) => {
+  async (req: AuthedRequest, res) => {
     const b = (req.body ?? {}) as Record<string, unknown>;
     const role =
       b.role === 'admin' || b.role === 'editor' || b.role === 'bezoeker' ? b.role : b.role === null ? null : undefined;
@@ -387,6 +400,13 @@ doelenbomenRouter.put(
         [req.params.id, req.params.userId, role]
       );
     }
+    await logAuditEvent({
+      eventType: 'tenant_member_changed',
+      userId: req.user!.id,
+      tenantId: await tenantIdForDoelenboom(req.params.id),
+      doelenboomId: req.params.id,
+      detail: { action: role === null ? 'doelenboom_role_removed' : 'doelenboom_role_set', targetUserId: Number(req.params.userId), to: role },
+    });
     res.status(204).send();
   }
 );
@@ -592,9 +612,9 @@ doelenbomenRouter.post('/doelenbomen/:id/duplicate', requireSysadmin, async (req
     if (isUniqueViolation(err)) {
       return res
         .status(409)
-        .json({ error: 'Doelenboom- of tenant-slug bestaat al.', detail: (err as Error).message });
+        .json({ error: 'Doelenboom- of tenant-slug bestaat al.' });
     }
-    res.status(500).json({ error: 'Dupliceren mislukt', detail: (err as Error).message });
+    sendServerError(res, err, 'Dupliceren mislukt');
   } finally {
     client.release();
   }

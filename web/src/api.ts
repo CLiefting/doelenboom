@@ -35,6 +35,8 @@ async function request<T>(path: string, options: RequestInit = {}, token?: strin
     try {
       const body = await res.json();
       message = body.error ?? body.detail ?? message;
+      // DOEL-32: bij een serverfout een korte foutcode meegeven, zodat een melding van een gebruiker in het serverlog terug te vinden is.
+      if (typeof body.errorId === 'string') message += ` (foutcode ${body.errorId})`;
       reason = body.reason;
     } catch {
       // response had geen JSON-body
@@ -247,6 +249,8 @@ export const api = {
       // ongemoeid) — null zet open toegang expliciet uit, zie PUT
       // /api/tenants/:id (routes/tenants.ts) voor de tri-state-uitleg.
       openAccessRole?: import('./types').TenantRoleName | null;
+      // Verplicht (true) voor een tenant-admin die open toegang van uit naar aan zet (DOEL-27).
+      confirmOpenAccess?: boolean;
       // Bij entryPopupEnabled: true moet entryPopupMessage in dezelfde
       // aanroep een niet-lege tekst zijn — zie PUT /api/tenants/:id.
       entryPopupEnabled?: boolean;
@@ -507,9 +511,19 @@ export const api = {
     moduleKeys: string[];
     billingPeriod: import('./types').BillingPeriod;
   }) =>
-    request<{ tenantId: number; tenantSlug: string; requestId: number }>('/api/subscription-requests', {
+    // Sinds DOEL-20 maakt dit nog géén account aan: de API mailt een
+    // bevestigingslink (altijd dezelfde 202-respons, ook bij een bekend adres).
+    request<{ status: string }>('/api/subscription-requests', {
       method: 'POST',
       body: JSON.stringify(body),
+    }),
+
+  // Bevestigt de aanvraag met het token uit de verificatiemail (uit het
+  // URL-fragment, zie SubscriptionConfirmPage) — pas dan ontstaat het account.
+  confirmSubscriptionRequest: (token: string) =>
+    request<{ tenantId: number; tenantSlug: string; requestId: number }>('/api/subscription-requests/confirm', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
     }),
 
   // --- Sysadmin-beheer van aanvragen/verlengingen ---

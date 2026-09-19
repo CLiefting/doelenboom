@@ -13,11 +13,29 @@ export type AuditEventType =
   | 'mfa_failed'
   | 'tenant_contact_changed'
   | 'tenant_customer_info_changed'
-  | 'tenant_subscription_changed';
+  | 'tenant_subscription_changed'
+  // Automatisch/bij uitloggen leegmaken van een doelenboom (DOEL-28); userId is
+  // null bij de periodieke sweep.
+  | 'doelenboom_wiped'
+  // DOEL-29 (analyse M6): inloggen, wachtwoorden, gebruikers/leden, export/import.
+  // userId = de ACTOR (bij login_failed/account_locked op een bekend account: het
+  // account zelf; bij een onbekend adres null); het doelwit staat in detail.
+  | 'login_success'
+  | 'login_failed'
+  | 'account_locked'
+  | 'password_changed'
+  | 'password_reset'
+  | 'user_created'
+  | 'user_updated'
+  | 'user_deleted'
+  | 'tenant_member_changed'
+  | 'doelenboom_deleted'
+  | 'doelenboom_exported'
+  | 'doelenboom_import_published';
 
 export interface LogAuditEventInput {
   eventType: AuditEventType;
-  userId: string | number;
+  userId?: string | number | null;
   tenantId?: string | number | null;
   doelenboomId?: string | number | null;
   role?: string | null;
@@ -31,7 +49,7 @@ export async function logAuditEvent(input: LogAuditEventInput): Promise<void> {
        values ($1, $2, $3, $4, $5, $6)`,
       [
         input.eventType,
-        input.userId,
+        input.userId ?? null,
         input.tenantId ?? null,
         input.doelenboomId ?? null,
         input.role ?? null,

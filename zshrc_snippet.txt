@@ -3,4 +3,5 @@
 # vlaggen er zijn — dit is bewust alleen nog maar een dunne alias ernaartoe,
 # geen losse eigen implementatie meer, om te voorkomen dat de twee uit de pas
 # gaan lopen zoals eerder gebeurd is).
-alias doelenboom="$HOME/OneDrive/src/doelenboom/scripts/doelenboom-cli.sh"
+# DOELENBOOM_DIR (optioneel, zie README "Geheimen en OneDrive") wijst naar een werkmap buiten OneDrive.
+alias doelenboom="${DOELENBOOM_DIR:-$HOME/OneDrive/src/doelenboom}/scripts/doelenboom-cli.sh"

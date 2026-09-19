@@ -5,6 +5,9 @@ import { previewOrCommitWipe } from './tenantWipe.js';
 import { needsTermsAcceptance } from './legal.js';
 import { getAppSettings } from './appSettings.js';
 import { createMfaChallenge, verifyMfaChallenge, resendMfaChallenge } from './mfa.js';
+import { bcryptCost, hashSql } from './passwordHash.js';
+import { logAuditEvent } from './auditLog.js';
+import { ipBlockedForSeconds, recordIpFailure, recordUnknownEmailFailure, unknownEmailLockState } from './loginThrottle.js';
 
 const JWT_SECRET = process.env.JWT_SECRET ?? 'dev-secret-change-me';
 
@@ -55,8 +58,36 @@ export function assertCurrentJwtSecretIsSafe(): void {
 const IDLE_TIMEOUT_MINUTES = 15;
 
 export type AuthedRequest = Request & {
-  user?: { id: number; email: string; isSysadmin: boolean; sessionId: string };
+  user?: { id: number; email: string; isSysadmin: boolean; sessionId: string; mustChangePassword?: boolean };
 };
+
+// DOEL-26 (analyse M3): zolang must_change_password aan staat (tijdelijk
+// wachtwoord van een sysadmin) mag de gebruiker ALLEEN de routes gebruiken die
+// nodig zijn om het wachtwoord te vervangen, de eigen sessie te beheren en uit
+// te loggen. Voorheen deed alleen de frontend dat (zie App.tsx), waardoor het
+// tijdelijke wachtwoord met een gewone API-client onbeperkt bruikbaar bleef.
+// Bewust een allowlist (alles daarbuiten geweigerd), geen blocklist.
+const MUST_CHANGE_PASSWORD_ALLOWED_PATHS = new Set([
+  '/api/auth/change-password',
+  '/api/auth/me',
+  '/api/auth/logout',
+  '/api/auth/logout-preview',
+  '/api/auth/heartbeat',
+  '/api/auth/activity',
+]);
+
+// Beëindigt alle (of alle behalve één) actieve sessies van een gebruiker en
+// maakt nog openstaande MFA-challenges ongeldig — na een wachtwoordwijziging
+// of -reset horen sessies/inlogpogingen met het OUDE wachtwoord niet meer te
+// werken (voorheen bleef zo'n JWT tot 12 uur geldig, DOEL-26).
+export async function endUserSessions(userId: number | string, exceptSessionId?: string): Promise<void> {
+  await pool.query(
+    `update sessions set ended_at = now()
+     where user_id = $1 and ended_at is null and ($2::uuid is null or id <> $2::uuid)`,
+    [userId, exceptSessionId ?? null]
+  );
+  await pool.query('update mfa_challenges set consumed_at = now() where user_id = $1 and consumed_at is null', [userId]);
+}
 
 // Async, want naast de JWT-handtekening wordt ook de sessions-rij zelf
 // gecontroleerd: een geldige JWT alleen is niet genoeg zodra er is uitgelogd
@@ -91,7 +122,7 @@ export async function requireAuth(req: AuthedRequest, res: Response, next: NextF
   // waarde — geen losse fixes per call site nodig.
   const sessionResult = await pool.query(
     `select s.ended_at, (s.last_activity_at < now() - interval '${IDLE_TIMEOUT_MINUTES} minutes') as idle,
-            u.is_sysadmin
+            u.is_sysadmin, u.must_change_password
      from sessions s
      join users u on u.id = s.user_id
      where s.id = $1`,
@@ -105,7 +136,23 @@ export async function requireAuth(req: AuthedRequest, res: Response, next: NextF
     return res.status(401).json({ error: 'Sessie is verlopen door inactiviteit', reason: 'idle_timeout' });
   }
 
-  req.user = { id: payload.id, email: payload.email, isSysadmin: session.is_sysadmin, sessionId: payload.sid };
+  if (session.must_change_password) {
+    const path = req.originalUrl.split('?')[0].replace(/\/+$/, '').toLowerCase();
+    if (!MUST_CHANGE_PASSWORD_ALLOWED_PATHS.has(path)) {
+      return res.status(403).json({
+        error: 'Je moet eerst je wachtwoord wijzigen voordat je verder kunt.',
+        reason: 'must_change_password',
+      });
+    }
+  }
+
+  req.user = {
+    id: payload.id,
+    email: payload.email,
+    isSysadmin: session.is_sysadmin,
+    sessionId: payload.sid,
+    mustChangePassword: session.must_change_password,
+  };
   next();
 }
 
@@ -129,66 +176,107 @@ authRouter.post('/login', async (req, res) => {
   if (!email || !password) {
     return res.status(400).json({ error: 'E-mail en wachtwoord verplicht' });
   }
+  // Alleen strings: een object/array als "wachtwoord" of "e-mail" hoort hier
+  // nooit, en zou als queryparameter op onverwachte manieren geserialiseerd worden.
+  if (typeof email !== 'string' || typeof password !== 'string' || email.length > 320 || password.length > 1024) {
+    return res.status(400).json({ error: 'Ongeldige invoer.' });
+  }
+
+  // DOEL-24 (analyse M1): per-IP beperking op MISLUKTE pogingen, vóórdat er
+  // ook maar één wachtwoord gecontroleerd wordt (zie loginThrottle.ts).
+  const clientIp = req.ip ?? 'onbekend';
+  const ipWait = ipBlockedForSeconds(clientIp);
+  if (ipWait > 0) {
+    res.setHeader('Retry-After', String(ipWait));
+    return res.status(429).json({
+      error: 'Te veel mislukte inlogpogingen vanaf dit adres. Probeer het later opnieuw.',
+      reason: 'too_many_attempts_ip',
+    });
+  }
 
   // Rate limiting / tijdelijke accountblokkade bij herhaalde mislukte
   // inlogpogingen (CISO-aandachtspunt) — drempel/duur zijn sysadmin-
   // instelbaar, app-breed (zie appSettings.ts/routes/appSettings.ts,
   // "Accountbeheer" in de frontend), geen hardgecodeerde constanten.
-  // password_ok wordt als losse, berekende kolom meegenomen i.p.v. in de
-  // where-clause (zoals voorheen), zodat we ook bij een FOUT wachtwoord de
-  // rest van de rij (met name failed_login_count/locked_until) beschikbaar
-  // hebben om de teller op te hogen — een niet-bestaand e-mailadres geeft
-  // nog altijd domweg geen rij, exact zoals voorheen (geen aparte fout,
-  // voorkomt dat we verklappen of een e-mailadres bestaat).
   const result = await pool.query(
     `select id, email, is_sysadmin, must_change_password, scheduled_deletion_at,
-            failed_login_count, locked_until, mfa_enabled,
-            (password_hash = crypt($2, password_hash)) as password_ok,
+            mfa_enabled,
             exists(
               select 1 from tenant_users tu join tenants t on t.id = tu.tenant_id
               where tu.user_id = users.id and t.mfa_required
             ) as tenant_mfa_required
      from users
      where email = $1`,
-    [email, password]
+    [email]
   );
   const user = result.rows[0];
+  const settings = await getAppSettings();
+
+  const lockedBody = (minutes: number) => ({
+    error: `Account tijdelijk geblokkeerd wegens te veel mislukte inlogpogingen. Probeer het over ongeveer ${minutes} minuut/minuten opnieuw.`,
+    reason: 'account_locked',
+  });
+  const justLockedBody = () => ({
+    error: `Te veel mislukte inlogpogingen. Account is ${settings.loginLockoutMinutes} minuten geblokkeerd.`,
+    reason: 'account_locked',
+  });
+
   if (!user) {
+    // Onbekend adres: dezelfde rekentijd (dummy bcrypt) en hetzelfde
+    // teller/blokkade-gedrag als een bestaand account, zodat noch de
+    // responstijd noch een 429 verraadt of het adres bestaat.
+    await pool.query(`select ${hashSql('$1')}`, [password]);
+    recordIpFailure(clientIp);
+    const state = unknownEmailLockState(email);
+    if (state.locked) return res.status(429).json(lockedBody(state.minutesLeft));
+    const rec = recordUnknownEmailFailure(email, settings.maxFailedLoginAttempts, settings.loginLockoutMinutes);
+    // DOEL-29: mislukte poging op een onbekend adres (het adres zelf staat in
+    // het log, begrensd in lengte; geen wachtwoord). Beperkt in volume door de
+    // per-adres- en per-IP-tellers hierboven (loginThrottle.ts).
+    const attempted = email.slice(0, 320);
+    await logAuditEvent({ eventType: 'login_failed', userId: null, detail: { email: attempted, ip: clientIp, reason: 'unknown_user' } });
+    if (rec.locked) {
+      if (rec.justLocked) {
+        await logAuditEvent({ eventType: 'account_locked', userId: null, detail: { email: attempted, ip: clientIp, lockoutMinutes: settings.loginLockoutMinutes } });
+      }
+      return res.status(429).json(rec.justLocked ? justLockedBody() : lockedBody(rec.minutesLeft));
+    }
     return res.status(401).json({ error: 'Onjuiste inloggegevens' });
   }
 
-  const settings = await getAppSettings();
-
-  // Al geblokkeerd: geen wachtwoordcontrole meer nodig — ook een ondertussen
-  // toevallig juist wachtwoord wordt pas ná het verstrijken van de blokkade
-  // weer geaccepteerd. Eenvoudiger en voorspelbaarder dan een vroegtijdige
-  // uitzondering, en voorkomt dat een aanvaller die tijdens de blokkade
-  // alsnog raadt meteen binnenkomt.
-  if (user.locked_until && new Date(user.locked_until).getTime() > Date.now()) {
-    const minutesLeft = Math.max(1, Math.ceil((new Date(user.locked_until).getTime() - Date.now()) / 60000));
-    return res.status(429).json({
-      error: `Account tijdelijk geblokkeerd wegens te veel mislukte inlogpogingen. Probeer het over ongeveer ${minutesLeft} minuut/minuten opnieuw.`,
-      reason: 'account_locked',
-    });
+  // De poging wordt ATOMAIR geboekt vóórdat het wachtwoord geldt (één UPDATE):
+  // voorheen las elke parallelle request dezelfde teller en schreef "teller + 1"
+  // terug, waardoor een burst van N gelijktijdige pogingen de drempel omzeilde
+  // (N gokken i.p.v. maximaal `maxFailedLoginAttempts`). Nu krijgt elke
+  // poging een eigen, oplopend volgnummer; de poging die de drempel bereikt
+  // zet de blokkade in dezelfde statement, en alle pogingen daarna (ook
+  // gelijktijdige) vinden een geblokkeerd account en worden geweigerd ZONDER
+  // dat hun wachtwoord nog gecontroleerd wordt. Een geslaagde login zet de
+  // teller hieronder weer op 0.
+  const attempt = await pool.query(
+    `update users set
+        failed_login_count = case when failed_login_count + 1 >= $2 then 0 else failed_login_count + 1 end,
+        locked_until = case when failed_login_count + 1 >= $2 then now() + make_interval(mins => $3) else locked_until end
+     where id = $1 and (locked_until is null or locked_until <= now())
+     returning (password_hash = crypt($4, password_hash)) as password_ok,
+               (locked_until is not null and locked_until > now()) as now_locked`,
+    [user.id, settings.maxFailedLoginAttempts, settings.loginLockoutMinutes, password]
+  );
+  if (attempt.rows.length === 0) {
+    // Al geblokkeerd: geen wachtwoordcontrole — ook een toevallig juist
+    // wachtwoord wordt pas ná het verstrijken van de blokkade geaccepteerd.
+    recordIpFailure(clientIp);
+    const lock = await pool.query('select locked_until from users where id = $1', [user.id]);
+    const until = lock.rows[0]?.locked_until ? new Date(lock.rows[0].locked_until).getTime() : Date.now();
+    return res.status(429).json(lockedBody(Math.max(1, Math.ceil((until - Date.now()) / 60000))));
   }
-
-  if (!user.password_ok) {
-    const newCount = user.failed_login_count + 1;
-    if (newCount >= settings.maxFailedLoginAttempts) {
-      // Teller resetten (niet laten doorlopen): de blokkade zelf is nu de
-      // maatregel, en na afloop start een nieuwe telling vanaf 0.
-      await pool.query(
-        `update users
-         set failed_login_count = 0, locked_until = now() + make_interval(mins => $2)
-         where id = $1`,
-        [user.id, settings.loginLockoutMinutes]
-      );
-      return res.status(429).json({
-        error: `Te veel mislukte inlogpogingen. Account is ${settings.loginLockoutMinutes} minuten geblokkeerd.`,
-        reason: 'account_locked',
-      });
+  if (!attempt.rows[0].password_ok) {
+    recordIpFailure(clientIp);
+    await logAuditEvent({ eventType: 'login_failed', userId: user.id, detail: { ip: clientIp, reason: 'wrong_password' } });
+    if (attempt.rows[0].now_locked) {
+      await logAuditEvent({ eventType: 'account_locked', userId: user.id, detail: { ip: clientIp, lockoutMinutes: settings.loginLockoutMinutes } });
+      return res.status(429).json(justLockedBody());
     }
-    await pool.query('update users set failed_login_count = $2 where id = $1', [user.id, newCount]);
     return res.status(401).json({ error: 'Onjuiste inloggegevens' });
   }
 
@@ -204,9 +292,15 @@ authRouter.post('/login', async (req, res) => {
   await pool.query(
     `update users
      set last_login_at = now(), scheduled_deletion_at = null, inactivity_warning_sent_at = null,
-         failed_login_count = 0, locked_until = null
+         failed_login_count = 0, locked_until = null,
+         -- DOEL-25: hash met lagere bcrypt-kosten dan nu gewenst? Het (zojuist
+         -- geverifieerde) wachtwoord is hier beschikbaar: opnieuw hashen.
+         password_hash = case
+           when password_hash ~ '^\\$2[abxy]\\$[0-9]{2}\\$' and substr(password_hash, 5, 2)::int < $2::int
+           then ${hashSql('$3')}
+           else password_hash end
      where id = $1`,
-    [user.id]
+    [user.id, bcryptCost(), password]
   );
   if (user.scheduled_deletion_at) {
     await pool.query(
@@ -257,7 +351,7 @@ authRouter.post('/login', async (req, res) => {
     });
   }
 
-  res.json(await completeLogin(user.id));
+  res.json(await completeLogin(user.id, clientIp, false));
 });
 
 // Rondt een inlogpoging daadwerkelijk af: maakt de sessies-rij en het JWT aan
@@ -265,7 +359,7 @@ authRouter.post('/login', async (req, res) => {
 // MFA-vrije tak hierboven als POST /mfa/verify hieronder (die roept dit pas
 // aan ná een geslaagde codecontrole) — zo bestaat er precies één plek die
 // ooit daadwerkelijk een sessie/token uitgeeft.
-async function completeLogin(userId: number) {
+async function completeLogin(userId: number, ip: string, viaMfa: boolean) {
   const userResult = await pool.query(
     'select id, email, is_sysadmin, must_change_password, mfa_enabled from users where id = $1',
     [userId]
@@ -277,6 +371,7 @@ async function completeLogin(userId: number) {
     [user.id]
   );
   const sessionId = sessionResult.rows[0].id as string;
+  await logAuditEvent({ eventType: 'login_success', userId: user.id, detail: { ip, mfa: viaMfa } });
 
   const token = jwt.sign(
     { id: user.id, email: user.email, isSysadmin: user.is_sysadmin, sid: sessionId },
@@ -324,7 +419,7 @@ authRouter.post('/mfa/verify', async (req, res) => {
     return res.status(status).json({ error: messages[result.reason], reason: result.reason });
   }
 
-  res.json(await completeLogin(result.userId));
+  res.json(await completeLogin(result.userId, req.ip ?? 'onbekend', true));
 });
 
 // POST /api/auth/mfa/resend — vervangt de code IN dezelfde challenge (zie
@@ -449,9 +544,13 @@ authRouter.post('/change-password', requireAuth, async (req: AuthedRequest, res)
     return res.status(401).json({ error: 'Huidig wachtwoord is onjuist.' });
   }
   await pool.query(
-    `update users set password_hash = crypt($1, gen_salt('bf')), must_change_password = false where id = $2`,
+    `update users set password_hash = ${hashSql('$1')}, must_change_password = false where id = $2`,
     [newPassword, req.user!.id]
   );
+  // DOEL-26: alle ANDERE sessies (en openstaande MFA-challenges) vervallen; de
+  // huidige sessie blijft, zodat de gebruiker niet meteen uitgelogd wordt.
+  await endUserSessions(req.user!.id, req.user!.sessionId);
+  await logAuditEvent({ eventType: 'password_changed', userId: req.user!.id, detail: { ip: req.ip ?? 'onbekend' } });
   const tenantRoles = req.user!.isSysadmin ? [] : await fetchTenantRoles(req.user!.id);
   const termsAcceptanceRequired = await needsTermsAcceptance(req.user!.id);
   // mfaEnabled/mfaRequiredTenants horen hier ook bij (dit retourneert een

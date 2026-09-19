@@ -3,6 +3,7 @@ import { pool } from '../db.js';
 import { requireAuth } from '../auth.js';
 import { requireWritableDoelenboom } from '../rbac.js';
 import { getColumnsForDoelenboom } from '../columnConfig.js';
+import { sendServerError } from '../errors.js';
 
 // CRUD voor losse elementen (fase 1 van de CRUD-uitbreiding — zie ook de latere
 // fases voor tags/organisatieonderdelen en relaties). Dit bestaat naast, en is
@@ -109,7 +110,7 @@ elementsRouter.post('/doelenbomen/:id/elements', requireEditor, async (req, res)
     if (isUniqueViolation(err)) {
       return res.status(409).json({ error: `Element met code "${input.code}" bestaat al in deze doelenboom.` });
     }
-    res.status(500).json({ error: 'Aanmaken van element mislukt', detail: (err as Error).message });
+    sendServerError(res, err, 'Aanmaken van element mislukt');
   }
 });
 
@@ -141,7 +142,7 @@ elementsRouter.put('/doelenbomen/:id/elements/:code', requireEditor, async (req,
     if (isUniqueViolation(err)) {
       return res.status(409).json({ error: `Element met code "${newCode}" bestaat al in deze doelenboom.` });
     }
-    res.status(500).json({ error: 'Bijwerken van element mislukt', detail: (err as Error).message });
+    sendServerError(res, err, 'Bijwerken van element mislukt');
   }
 });
 

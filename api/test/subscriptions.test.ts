@@ -2,7 +2,8 @@ import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   startTestServer, stopTestServer, closePool, req, unique, createSysadminUser, login, cleanupByPrefix,
-  setupWritableDoelenboom, getLastSubscriptionRequestNotification,
+  setupWritableDoelenboom, getLastSubscriptionRequestNotification, registerSubscription,
+  registrationMailCounts,
 } from './helpers.js';
 
 const PREFIX = unique('sub');
@@ -157,12 +158,10 @@ describe('zelfbedieningsaanvraag', () => {
       // En dat subtotaal (tier + opslag) telt ook mee als basis voor de
       // gesnapshotte prijs van een echte aanvraag.
       const email = `${PREFIX}-metmodule@test.local`;
-      const created = await req('POST', '/api/subscription-requests', {
-        body: {
+      const created = await registerSubscription({
           organizationName: `${PREFIX} MetModule`, applicantName: 'X', applicantEmail: email,
           password: 'wachtwoord123', tierId: tier.id, moduleKeys: [mod.key], billingPeriod: 'jaar',
-        },
-      });
+        });
       assert.equal(created.status, 201, JSON.stringify(created.body));
       const list = await req('GET', '/api/subscription-requests', { token: sysadminToken });
       const row = list.body.find((r: any) => r.requestId === created.body.requestId || r.id === created.body.requestId);
@@ -176,13 +175,11 @@ describe('zelfbedieningsaanvraag', () => {
     it('een geslaagde aanvraag stuurt een notificatiemail met de aanvraaggegevens', async () => {
       const tier = await makeTier('notificatie', 500);
       const applicantEmail = `${PREFIX}-notify@test.local`;
-      const created = await req('POST', '/api/subscription-requests', {
-        body: {
+      const created = await registerSubscription({
           organizationName: `${PREFIX} Notificatie BV`, applicantName: 'Jan Janssen',
           applicantEmail, applicantPhone: '06-12345678',
           password: 'wachtwoord123', tierId: tier.id, moduleKeys: [], billingPeriod: 'jaar',
-        },
-      });
+        });
       assert.equal(created.status, 201, JSON.stringify(created.body));
 
       const notification = getLastSubscriptionRequestNotification(created.body.requestId);
@@ -210,49 +207,39 @@ describe('zelfbedieningsaanvraag', () => {
 
     it('POST /api/subscription-requests valideert invoer', async () => {
       const tier = await makeTier('validatie', 250);
-      const empty = await req('POST', '/api/subscription-requests', { body: {} });
+      const empty = await registerSubscription({});
       assert.equal(empty.status, 400);
 
-      const badEmail = await req('POST', '/api/subscription-requests', {
-        body: {
+      const badEmail = await registerSubscription({
           organizationName: 'Test BV', applicantName: 'Jan', applicantEmail: 'niet-geldig',
           password: 'wachtwoord123', tierId: tier.id, moduleKeys: [], billingPeriod: 'jaar',
-        },
-      });
+        });
       assert.equal(badEmail.status, 400);
 
-      const kortWachtwoord = await req('POST', '/api/subscription-requests', {
-        body: {
+      const kortWachtwoord = await registerSubscription({
           organizationName: 'Test BV', applicantName: 'Jan', applicantEmail: `${PREFIX}-kort@test.local`,
           password: 'kort', tierId: tier.id, moduleKeys: [], billingPeriod: 'jaar',
-        },
-      });
+        });
       assert.equal(kortWachtwoord.status, 400);
 
-      const onbekendeTier = await req('POST', '/api/subscription-requests', {
-        body: {
+      const onbekendeTier = await registerSubscription({
           organizationName: 'Test BV', applicantName: 'Jan', applicantEmail: `${PREFIX}-tier@test.local`,
           password: 'wachtwoord123', tierId: 999999999, moduleKeys: [], billingPeriod: 'jaar',
-        },
-      });
+        });
       assert.equal(onbekendeTier.status, 400);
       assert.match(onbekendeTier.body.error, /Onbekende tier/);
 
-      const onbekendeModule = await req('POST', '/api/subscription-requests', {
-        body: {
+      const onbekendeModule = await registerSubscription({
           organizationName: 'Test BV', applicantName: 'Jan', applicantEmail: `${PREFIX}-mod@test.local`,
           password: 'wachtwoord123', tierId: tier.id, moduleKeys: ['bestaat-niet-echt'], billingPeriod: 'jaar',
-        },
-      });
+        });
       assert.equal(onbekendeModule.status, 400);
       assert.match(onbekendeModule.body.error, /modules bestaan niet/);
 
-      const geenBillingPeriod = await req('POST', '/api/subscription-requests', {
-        body: {
+      const geenBillingPeriod = await registerSubscription({
           organizationName: 'Test BV', applicantName: 'Jan', applicantEmail: `${PREFIX}-nobp@test.local`,
           password: 'wachtwoord123', tierId: tier.id, moduleKeys: [],
-        },
-      });
+        });
       assert.equal(geenBillingPeriod.status, 400);
       assert.match(geenBillingPeriod.body.error, /billingPeriod/);
 
@@ -262,12 +249,10 @@ describe('zelfbedieningsaanvraag', () => {
       // reële geval Single-Use/Evaluatie, bewust jaar-only sinds de
       // invoering van maandelijkse facturatie, zie doelenboom_licentiemodel.md
       // §9.2 v3).
-      const periodeZonderPrijs = await req('POST', '/api/subscription-requests', {
-        body: {
+      const periodeZonderPrijs = await registerSubscription({
           organizationName: 'Test BV', applicantName: 'Jan', applicantEmail: `${PREFIX}-geenmaand@test.local`,
           password: 'wachtwoord123', tierId: tier.id, moduleKeys: [], billingPeriod: 'maand',
-        },
-      });
+        });
       assert.equal(periodeZonderPrijs.status, 400, JSON.stringify(periodeZonderPrijs.body));
       assert.match(periodeZonderPrijs.body.error, /maandprijs|facturatieperiode/);
     });
@@ -280,25 +265,24 @@ describe('zelfbedieningsaanvraag', () => {
       });
 
       const email = `${PREFIX}-nieuw@test.local`;
-      const created = await req('POST', '/api/subscription-requests', {
-        body: {
+      const created = await registerSubscription({
           organizationName: `${PREFIX} Organisatie`, applicantName: 'Nieuwe Aanvrager', applicantEmail: email,
           password: 'wachtwoord123', tierId: tier.id, moduleKeys: ['projecten'], billingPeriod: 'jaar',
-        },
-      });
+        });
       assert.equal(created.status, 201, JSON.stringify(created.body));
       assert.ok(created.body.tenantId);
       assert.ok(created.body.requestId);
 
       // Duplicaat e-mailadres is een 400.
-      const dup = await req('POST', '/api/subscription-requests', {
-        body: {
+      const dup = await registerSubscription({
           organizationName: 'Nog een keer', applicantName: 'Iemand', applicantEmail: email,
           password: 'wachtwoord123', tierId: tier.id, moduleKeys: [], billingPeriod: 'jaar',
-        },
-      });
-      assert.equal(dup.status, 400);
-      assert.match(dup.body.error, /bestaat al/);
+        });
+      // Sinds DOEL-20 (e-mailverificatie): dezelfde generieke 202 als bij een nieuw
+      // adres — het bestaan van een account wordt niet meer verklapt; de
+      // eigenaar krijgt een 'je hebt al een account'-mail i.p.v. een link.
+      assert.equal(dup.status, 202);
+      assert.equal(registrationMailCounts(email).existingAccount, 1);
 
       // Proefaccount werkt meteen (zelfgekozen wachtwoord, geen
       // must_change_password) en kan lezen (bv. GET /api/doelenbomen) — de
@@ -345,12 +329,10 @@ describe('zelfbedieningsaanvraag', () => {
       // Maak een gewone (niet-sysadmin) tenant-admin via een eigen aanvraag.
       const tier = await makeTier('nietsysadmin', 300);
       const email = `${PREFIX}-nietsysadmin@test.local`;
-      await req('POST', '/api/subscription-requests', {
-        body: {
+      await registerSubscription({
           organizationName: `${PREFIX} NietSysadmin`, applicantName: 'X', applicantEmail: email,
           password: 'wachtwoord123', tierId: tier.id, moduleKeys: [], billingPeriod: 'jaar',
-        },
-      });
+        });
       const tenantAdminToken = await login(email, 'wachtwoord123');
       const asTenantAdmin = await req('GET', '/api/subscription-requests', { token: tenantAdminToken });
       assert.equal(asTenantAdmin.status, 403);
@@ -361,12 +343,10 @@ describe('zelfbedieningsaanvraag', () => {
     async function makeTrialRequest(prefix: string, tierPrice = 500) {
       const tier = await makeTier(prefix, tierPrice);
       const email = `${PREFIX}-${prefix}@test.local`;
-      const created = await req('POST', '/api/subscription-requests', {
-        body: {
+      const created = await registerSubscription({
           organizationName: `${PREFIX}-${prefix} Org`, applicantName: 'Aanvrager', applicantEmail: email,
           password: 'wachtwoord123', tierId: tier.id, moduleKeys: [], billingPeriod: 'jaar',
-        },
-      });
+        });
       assert.equal(created.status, 201, JSON.stringify(created.body));
       return { requestId: created.body.requestId as number, tenantId: created.body.tenantId as number, email };
     }
@@ -539,12 +519,10 @@ describe('zelfbedieningsaanvraag', () => {
     it('aanmaken/bewerken/verwijderen is sysadmin-only', async () => {
       const tier = await makeTier('offersysadminonly', 300);
       const email = `${PREFIX}-offer-tenantadmin@test.local`;
-      await req('POST', '/api/subscription-requests', {
-        body: {
+      await registerSubscription({
           organizationName: `${PREFIX} OfferTenantAdmin`, applicantName: 'X', applicantEmail: email,
           password: 'wachtwoord123', tierId: tier.id, moduleKeys: [], billingPeriod: 'jaar',
-        },
-      });
+        });
       const tenantAdminToken = await login(email, 'wachtwoord123');
 
       const asTenantAdmin = await req('POST', '/api/offers', {
@@ -647,12 +625,10 @@ describe('zelfbedieningsaanvraag', () => {
     it('een aanvraag op zo\'n tier krijgt de tier-specifieke proefduur i.p.v. de standaard 14 dagen', async () => {
       const tier = await makeEvaluatieAchtigeTier('proefduur', { trialDays: 30, allModulesIncluded: false });
       const email = `${PREFIX}-proefduur@test.local`;
-      const created = await req('POST', '/api/subscription-requests', {
-        body: {
+      const created = await registerSubscription({
           organizationName: `${PREFIX} Proefduur`, applicantName: 'X', applicantEmail: email,
           password: 'wachtwoord123', tierId: tier.id, moduleKeys: [], billingPeriod: 'jaar',
-        },
-      });
+        });
       assert.equal(created.status, 201, JSON.stringify(created.body));
 
       const list = await req('GET', '/api/subscription-requests', { token: sysadminToken });
@@ -676,12 +652,10 @@ describe('zelfbedieningsaanvraag', () => {
       assert.ok(allModules.body.some((m: any) => m.key === extraMod.key));
 
       const email = `${PREFIX}-allemodules@test.local`;
-      const created = await req('POST', '/api/subscription-requests', {
-        body: {
+      const created = await registerSubscription({
           organizationName: `${PREFIX} AlleModules`, applicantName: 'X', applicantEmail: email,
           password: 'wachtwoord123', tierId: tier.id, moduleKeys: [], billingPeriod: 'jaar', // bewust leeg — moet toch alles krijgen
-        },
-      });
+        });
       assert.equal(created.status, 201, JSON.stringify(created.body));
       const tenantId = created.body.tenantId as number;
 
@@ -702,12 +676,10 @@ describe('zelfbedieningsaanvraag', () => {
     it('allModulesIncluded negeert ook een onbekende/ongeldige moduleKeys-waarde van de aanvrager', async () => {
       const tier = await makeEvaluatieAchtigeTier('onbekendemodules', { allModulesIncluded: true });
       const email = `${PREFIX}-onbekendemodules@test.local`;
-      const created = await req('POST', '/api/subscription-requests', {
-        body: {
+      const created = await registerSubscription({
           organizationName: `${PREFIX} OnbekendeModules`, applicantName: 'X', applicantEmail: email,
           password: 'wachtwoord123', tierId: tier.id, moduleKeys: ['bestaat-niet-echt'], billingPeriod: 'jaar',
-        },
-      });
+        });
       assert.equal(created.status, 201, JSON.stringify(created.body), 'allModulesIncluded moet de opgegeven (ongeldige) moduleKeys al overschreven hebben vóór de validatie');
     });
 
@@ -720,12 +692,10 @@ describe('zelfbedieningsaanvraag', () => {
       const mod = modR.body;
 
       const email = `${PREFIX}-regressiestandaard@test.local`;
-      const created = await req('POST', '/api/subscription-requests', {
-        body: {
+      const created = await registerSubscription({
           organizationName: `${PREFIX} RegressieStandaard`, applicantName: 'X', applicantEmail: email,
           password: 'wachtwoord123', tierId: tier.id, moduleKeys: [], billingPeriod: 'jaar', // bewust geen modules gekozen
-        },
-      });
+        });
       assert.equal(created.status, 201, JSON.stringify(created.body));
       const tenantId = created.body.tenantId as number;
 
@@ -747,20 +717,16 @@ describe('zelfbedieningsaanvraag', () => {
     it('POST /api/subscription-requests slaat een optioneel telefoonnummer op, of laat het leeg (null)', async () => {
       const tier = await makeTier('meteltelefoon', 250);
 
-      const metTelefoon = await req('POST', '/api/subscription-requests', {
-        body: {
+      const metTelefoon = await registerSubscription({
           organizationName: `${PREFIX} MetTelefoon`, applicantName: 'Y', applicantEmail: `${PREFIX}-mettel@test.local`,
           applicantPhone: '06-12345678', password: 'wachtwoord123', tierId: tier.id, moduleKeys: [], billingPeriod: 'jaar',
-        },
-      });
+        });
       assert.equal(metTelefoon.status, 201, JSON.stringify(metTelefoon.body));
 
-      const zonderTelefoon = await req('POST', '/api/subscription-requests', {
-        body: {
+      const zonderTelefoon = await registerSubscription({
           organizationName: `${PREFIX} ZonderTelefoon`, applicantName: 'Z', applicantEmail: `${PREFIX}-zondertel@test.local`,
           password: 'wachtwoord123', tierId: tier.id, moduleKeys: [], billingPeriod: 'jaar', // geen applicantPhone meegegeven
-        },
-      });
+        });
       assert.equal(zonderTelefoon.status, 201, JSON.stringify(zonderTelefoon.body));
 
       const list = await req('GET', '/api/subscription-requests', { token: sysadminToken });
@@ -782,12 +748,10 @@ describe('zelfbedieningsaanvraag', () => {
     it('GET /api/subscription-requests/overview toont één rij per tenant, ook een handmatig aangemaakte tenant zonder aanvraag', async () => {
       const tier = await makeTier('overview', 250);
       const email = `${PREFIX}-overview@test.local`;
-      const created = await req('POST', '/api/subscription-requests', {
-        body: {
+      const created = await registerSubscription({
           organizationName: `${PREFIX} Overview`, applicantName: 'Overview Aanvrager', applicantEmail: email,
           applicantPhone: '020-1234567', password: 'wachtwoord123', tierId: tier.id, moduleKeys: [], billingPeriod: 'jaar',
-        },
-      });
+        });
       assert.equal(created.status, 201, JSON.stringify(created.body));
 
       const handmatigSlug = unique(`${PREFIX}-handmatig`);
@@ -822,12 +786,10 @@ describe('zelfbedieningsaanvraag', () => {
     it('PUT /api/subscription-requests/:id werkt aanvrager-/contactgegevens bij, zonder het inlogaccount te raken', async () => {
       const tier = await makeTier('bewerken', 250);
       const email = `${PREFIX}-bewerken@test.local`;
-      const created = await req('POST', '/api/subscription-requests', {
-        body: {
+      const created = await registerSubscription({
           organizationName: `${PREFIX} Bewerken`, applicantName: 'Origineel Naam', applicantEmail: email,
           applicantPhone: '010-0000000', password: 'wachtwoord123', tierId: tier.id, moduleKeys: [], billingPeriod: 'jaar',
-        },
-      });
+        });
       assert.equal(created.status, 201, JSON.stringify(created.body));
       const requestId = created.body.requestId;
 
@@ -856,12 +818,10 @@ describe('zelfbedieningsaanvraag', () => {
 
     it('PUT /api/subscription-requests/:id valideert e-mail, is sysadmin-only en geeft 404 voor onbekend id', async () => {
       const tier = await makeTier('bewerkenvalidatie', 250);
-      const created = await req('POST', '/api/subscription-requests', {
-        body: {
+      const created = await registerSubscription({
           organizationName: `${PREFIX} BewerkenValidatie`, applicantName: 'X', applicantEmail: `${PREFIX}-bewval@test.local`,
           password: 'wachtwoord123', tierId: tier.id, moduleKeys: [], billingPeriod: 'jaar',
-        },
-      });
+        });
       assert.equal(created.status, 201, JSON.stringify(created.body));
 
       const ongeldig = await req('PUT', `/api/subscription-requests/${created.body.requestId}`, {

@@ -1,7 +1,10 @@
 import { Router } from 'express';
 import { pool } from '../db.js';
-import { requireAuth, AuthedRequest } from '../auth.js';
+import { requireAuth, AuthedRequest, endUserSessions } from '../auth.js';
 import { requireSysadmin } from '../rbac.js';
+import { hashSql } from '../passwordHash.js';
+import { logAuditEvent } from '../auditLog.js';
+import { sendServerError } from '../errors.js';
 
 // Beheer van gebruikersaccounts zelf (aanmaken/wijzigen/verwijderen, sysadmin-vlag)
 // — uitsluitend voor sysadmins. Het koppelen van een account aan een tenant (met
@@ -52,7 +55,7 @@ usersRouter.get('/', async (_req, res) => {
 // staat standaard aan: de sysadmin die dit account aanmaakt kiest het
 // (tijdelijke) wachtwoord, dus de nieuwe gebruiker moet het bij de eerste login
 // door zijn/haar eigen wachtwoord vervangen — kan uitgezet met mustChangePassword: false.
-usersRouter.post('/', async (req, res) => {
+usersRouter.post('/', async (req: AuthedRequest, res) => {
   const b = (req.body ?? {}) as Record<string, unknown>;
   const email = typeof b.email === 'string' ? b.email.trim().toLowerCase() : '';
   const password = typeof b.password === 'string' ? b.password : '';
@@ -67,16 +70,23 @@ usersRouter.post('/', async (req, res) => {
   try {
     const result = await pool.query(
       `insert into users (email, password_hash, is_sysadmin, must_change_password)
-       values ($1, crypt($2, gen_salt('bf')), $3, $4)
+       values ($1, ${hashSql('$2')}, $3, $4)
        returning ${USER_SELECT_FIELDS}`,
       [email, password, isSysadmin, mustChangePassword]
     );
+    // DOEL-29: aanmaken van een account (zeker met is_sysadmin) hoort in het
+    // auditlog: userId = de sysadmin die het deed, het nieuwe account in detail.
+    await logAuditEvent({
+      eventType: 'user_created',
+      userId: req.user!.id,
+      detail: { targetUserId: result.rows[0].id, email, isSysadmin },
+    });
     res.status(201).json({ ...result.rows[0], tenantRoles: [] });
   } catch (err) {
     if (isUniqueViolation(err)) {
       return res.status(409).json({ error: `Er bestaat al een account met e-mailadres "${email}".` });
     }
-    res.status(500).json({ error: 'Aanmaken van gebruiker mislukt', detail: (err as Error).message });
+    sendServerError(res, err, 'Aanmaken van gebruiker mislukt');
   }
 });
 
@@ -113,11 +123,14 @@ usersRouter.put('/:id', async (req: AuthedRequest, res) => {
     }
   }
 
+  const beforeUser = await pool.query(`select ${USER_SELECT_FIELDS} from users where id = $1`, [userId]);
+  const beforeRow = beforeUser.rows[0] as Record<string, unknown> | undefined;
+
   try {
     const result = await pool.query(
       `update users set
          email = coalesce($1, email),
-         password_hash = case when $2::text is null then password_hash else crypt($2, gen_salt('bf')) end,
+         password_hash = case when $2::text is null then password_hash else ${hashSql('$2')} end,
          is_sysadmin = coalesce($3, is_sysadmin),
          must_change_password = coalesce($4, must_change_password),
          mfa_enabled = coalesce($5, mfa_enabled)
@@ -126,20 +139,47 @@ usersRouter.put('/:id', async (req: AuthedRequest, res) => {
       [email ?? null, password ?? null, isSysadmin ?? null, mustChangePassword ?? null, mfaEnabled ?? null, userId]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Gebruiker niet gevonden.' });
+    // DOEL-26: na een wachtwoord-reset vervallen alle sessies van dit account
+    // (behalve de eigen sessie als een sysadmin zijn eigen wachtwoord zet).
+    if (password !== undefined) {
+      const own = String(result.rows[0].id) === String(req.user!.id);
+      await endUserSessions(result.rows[0].id, own ? req.user!.sessionId : undefined);
+      await logAuditEvent({
+        eventType: 'password_reset',
+        userId: req.user!.id,
+        detail: { targetUserId: result.rows[0].id, email: result.rows[0].email, mustChangePassword: result.rows[0].must_change_password },
+      });
+    }
+    // DOEL-29: overige wijzigingen als {veld: {from, to}} — vooral de
+    // sysadmin-vlag en MFA-instelling zijn beveiligingsrelevant.
+    if (beforeRow) {
+      const after = result.rows[0] as Record<string, unknown>;
+      const changes: Record<string, { from: unknown; to: unknown }> = {};
+      for (const [field, label] of [['email', 'email'], ['is_sysadmin', 'isSysadmin'], ['mfa_enabled', 'mfaEnabled']] as const) {
+        if (beforeRow[field] !== after[field]) changes[label] = { from: beforeRow[field], to: after[field] };
+      }
+      if (Object.keys(changes).length > 0) {
+        await logAuditEvent({
+          eventType: 'user_updated',
+          userId: req.user!.id,
+          detail: { targetUserId: after.id, email: after.email, changes },
+        });
+      }
+    }
     res.json((await attachTenantRoles(result.rows))[0]);
   } catch (err) {
     if (isUniqueViolation(err)) {
       return res.status(409).json({ error: `Er bestaat al een account met e-mailadres "${email}".` });
     }
-    res.status(500).json({ error: 'Bijwerken van gebruiker mislukt', detail: (err as Error).message });
+    sendServerError(res, err, 'Bijwerken van gebruiker mislukt');
   }
 });
 
 // DELETE /api/users/:id — verwijdert het account volledig (cascade: sessions,
 // tenant_users — zie db/init.sql). Zelfde "laatste sysadmin"-bescherming als bij PUT.
-usersRouter.delete('/:id', async (req, res) => {
+usersRouter.delete('/:id', async (req: AuthedRequest, res) => {
   const userId = req.params.id;
-  const target = await pool.query('select is_sysadmin from users where id = $1', [userId]);
+  const target = await pool.query('select email, is_sysadmin from users where id = $1', [userId]);
   if (target.rows.length === 0) return res.status(404).json({ error: 'Gebruiker niet gevonden.' });
   if (target.rows[0].is_sysadmin) {
     const countResult = await pool.query(
@@ -151,5 +191,10 @@ usersRouter.delete('/:id', async (req, res) => {
     }
   }
   await pool.query('delete from users where id = $1', [userId]);
+  await logAuditEvent({
+    eventType: 'user_deleted',
+    userId: req.user!.id,
+    detail: { targetUserId: Number(userId), email: target.rows[0].email, wasSysadmin: target.rows[0].is_sysadmin },
+  });
   res.status(204).send();
 });

@@ -170,6 +170,62 @@ Standaard sysadmin-account uit `db/seed.sql`: `admin@code072.nl` /
 — dit gebeurt niet automatisch, `must_change_password` staat voor dit
 seed-account op `false` (zie `db/seed.sql`).
 
+## Rate limiting controleren (DOEL-20)
+
+`POST /api/subscription-requests` is publiek en begrensd op 5 aanvragen per uur
+per IP (en 30 per uur in totaal; instelbaar met `REGISTRATION_RATE_LIMIT_MAX` /
+`REGISTRATION_GLOBAL_LIMIT_MAX`). Het client-IP komt uit `X-Forwarded-For`;
+`TRUST_PROXY_HOPS: "2"` in `docker-compose.prod.yml` gaat uit van
+Traefik → nginx (web) → api. Controleer na het uitrollen dat dat klopt — een
+lege aanvraag geeft 400 en telt wel mee:
+
+```bash
+for i in 1 2 3 4 5 6 7; do
+  curl -s -o /dev/null -w "%{http_code} " -X POST https://doelenboom.code072.nl/api/subscription-requests \
+    -H 'Content-Type: application/json' -H "X-Forwarded-For: 198.51.100.$i" -d '{}'
+done; echo
+```
+
+Verwacht: `400 400 400 400 400 429 429` (ook al wijzigt het meegestuurde
+`X-Forwarded-For` steeds, zo werkt het spoofen niet). Zie je zeven keer `400`,
+dan staat `TRUST_PROXY_HOPS` te hoog; zie je al bij de eerste aanvraag `429`,
+dan te laag (of er zit een extra proxy/CDN voor Traefik) en delen alle
+bezoekers één teller. Wacht een uur of herstart de API (`dbprod restart api`)
+om de tellers te wissen.
+
+## E-mailverificatie publieke aanvraag (DOEL-20)
+
+Sinds DOEL-20 maakt `POST /api/subscription-requests` niet meer direct een
+tenant + account aan: de aanvraag wordt eerst bewaard in de tabel
+`pending_registrations` en er gaat een e-mail met een bevestigingslink uit
+(`<APP_BASE_URL>/aanvraag/bevestigen#<token>`, 24 uur geldig, eenmalig). Pas
+na het bevestigen ontstaan tenant + account. Zo kan niemand nog met andermans
+e-mailadres accounts aanmaken.
+
+**Vóór het uitrollen van de nieuwe `api`-image** eenmalig de migratie draaien
+(zie ook "Een los migratiebestand draaien" verderop):
+
+```bash
+cd ~/doelenboom
+git pull
+docker compose -f docker-compose.yml -f docker-compose.prod.yml exec -T db \
+  psql -U doelenboom -d doelenboom -v ON_ERROR_STOP=1 < db/migrations/0040_pending_registrations.sql
+```
+
+Vereisten in productie:
+
+- `SMTP_HOST` (en de overige `SMTP_*`) moeten ingesteld zijn (zelfde relay als
+  de MFA-mail). Zonder SMTP kan niemand een aanvraag bevestigen; de API logt
+  dan een `FOUT: geen SMTP_HOST geconfigureerd`-regel. (De link zelf komt in
+  productie nooit in de logs.)
+- `APP_BASE_URL` staat in `docker-compose.prod.yml` op
+  `https://doelenboom.code072.nl`; pas dit aan als het domein wijzigt.
+
+Controle na het uitrollen: dien op de publieke pagina een aanvraag in met een
+eigen e-mailadres, klik op de link in de mail en controleer dat inloggen
+lukt. Een tweede aanvraag met een bestaand adres levert dezelfde melding op
+maar een andere mail ("Je hebt al een Doelenboom-account").
+
 ## Controles achteraf
 
 - `curl -I http://doelenboom.code072.nl` → redirect naar https (Traefik doet
@@ -572,3 +628,13 @@ aanbevolen vóór veel productiegebruik: periodiek (bv. met `rclone`/`rsync`,
 in hetzelfde cron-patroon) een kopie van `~/doelenboom/backups/` naar een
 andere locatie/opslagdienst wegschrijven. Zelfde aandachtspunt als bij
 WWspeur, zie `SERVER-BEHEER.md`.
+
+## Container-hardening en beveiligingsheaders (DOEL-30/31)
+
+Wat er per component is veranderd en wat je bij het uitrollen moet controleren:
+
+- **Niet als root**: `api` draait als `node` (uid 1000), `excel-service` als `excel` (uid 10001), `web` (nginx-unprivileged) als uid 101 en luistert nu op poort **8080** (Traefik-label en `web/nginx.conf` zijn aangepast). De back-upmap moet schrijfbaar zijn voor uid 1000 (de API-container schrijft de nachtelijke Excel-back-ups): `mkdir -p ~/doelenboom/backups && sudo chown -R 1000:1000 ~/doelenboom/backups` (geldt ook voor bestaande back-ups uit de root-tijd). Draait je VPS-gebruiker als uid 1000 (`id -u`), dan klopt dit al.
+- **Resourcegrenzen** (`docker-compose.prod.yml`): db 512 MB / 1 cpu, api 512 MB / 1 cpu, excel-service 1 GB / 1 cpu, web 128 MB / 0,5 cpu. Startwaarden; controleer na uitrollen met `docker stats --no-stream` en pas aan als een container tegen zijn grens aanloopt (bv. een grote .mpp-import in de excel-service).
+- **Databasewachtwoord**: in productie weigert de API te starten als `DATABASE_URL` een bekend standaardwachtwoord bevat (o.a. `doelenboom`). Stappen: zet in `.env` een sterk `POSTGRES_PASSWORD`, wijzig het wachtwoord in de draaiende database (`docker compose exec db psql -U doelenboom -c "alter user doelenboom password '<nieuw>'"`) en herstart `api`. Wil je eerst uitrollen en daarna wijzigen: tijdelijk `ALLOW_DEFAULT_DB_PASSWORD=true` in de api-environment (geeft een waarschuwing i.p.v. een stop) — daarna weer weghalen.
+- **Back-ups zijn alleen-eigenaar** (0600/0700): `backup-database.sh` en de Excel-/demo-back-ups. Het database-back-upscript zet ook bestaande dumps en de map recht.
+- **Headers**: Traefik zet Referrer-Policy en Permissions-Policy, de web-container een Content-Security-Policy (`web/security-headers.conf`). Controle na uitrollen: `curl -sI https://doelenboom.code072.nl/ | grep -iE 'content-security|referrer|permissions'`. Zie ook de toelichting in dat bestand: `script-src` heeft nog `'unsafe-inline'` tot het inline script uit `tree.html` is gehaald.

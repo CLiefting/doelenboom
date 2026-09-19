@@ -181,9 +181,11 @@ async function main() {
     console.log(`[snapshot-demo] ${table}: ${result.rowCount} rijen`);
   }
 
-  fs.mkdirSync(BACKUP_DIR, { recursive: true });
+  // DOEL-31: alleen leesbaar voor de eigenaar (bevat accountgegevens van de demo-tenant).
+  fs.mkdirSync(BACKUP_DIR, { recursive: true, mode: 0o700 });
   const payload = { createdAt: new Date().toISOString(), tables };
-  fs.writeFileSync(SNAPSHOT_PATH, JSON.stringify(payload, null, 2));
+  fs.writeFileSync(SNAPSHOT_PATH, JSON.stringify(payload, null, 2), { mode: 0o600 });
+  fs.chmodSync(SNAPSHOT_PATH, 0o600); // mode geldt alleen bij een nieuw bestand; dit dekt overschrijven
   console.log(`[snapshot-demo] weggeschreven naar ${SNAPSHOT_PATH} (${totalRows} rijen totaal)`);
   await pool.end();
 }

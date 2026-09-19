@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { AuthedRequest, requireAuth } from '../auth.js';
 import { requireSysadmin } from '../rbac.js';
+import { createRateLimiter, envInt } from '../rateLimit.js';
+import { confirmRegistration, InvalidRegistrationTokenError, submitRegistration } from '../pendingRegistrations.js';
 import { listModules, listTiers } from '../license.js';
 import { listOffers } from '../offers.js';
 import { getCurrentTierPrice } from '../tierPrices.js';
@@ -8,7 +10,6 @@ import { getCurrentModuleSurcharge } from '../moduleSurcharges.js';
 import { listModuleTierSurcharges } from '../moduleTierSurcharges.js';
 import {
   countPendingSubscriptionActions,
-  createSubscriptionRequest,
   getSubscriptionRequestById,
   isBillingPeriod,
   listLicenseEventsForTenant,
@@ -22,6 +23,7 @@ import {
   SubscriptionRequestError,
   updateSubscriptionRequestApplicant,
 } from '../subscriptions.js';
+import { sendServerError } from '../errors.js';
 
 // Zelfbedieningsaanvraag voor een nieuw abonnement — zie
 // doelenboom_licentiemodel.md §2/§9 en subscriptions.ts. De eerste drie
@@ -111,7 +113,28 @@ subscriptionsRouter.get('/subscription-tiers/:tierId/price', async (req, res) =>
   res.json(quote);
 });
 
-subscriptionsRouter.post('/subscription-requests', async (req, res) => {
+// DOEL-20: deze route is publiek en maakt direct een tenant + account + proef-
+// licentie aan (én mailt de beheerder). Zonder rem kon één client duizenden
+// tenants/accounts/mails aanmaken. Twee lagen, beide via env aan te passen:
+//  - per IP: standaard 5 aanvragen per uur (REGISTRATION_RATE_LIMIT_MAX)
+//  - globaal: standaard 30 per uur (REGISTRATION_GLOBAL_LIMIT_MAX) als vangnet
+//    tegen een verspreide (meer-IP) aanval — een echte instroom van 30
+//    nieuwe klanten per uur is er niet; wie de globale grens raakt krijgt een
+//    nette 429 en kan het later opnieuw proberen.
+const REGISTRATION_WINDOW_MS = 60 * 60 * 1000;
+export const registrationRateLimitPerIp = createRateLimiter({
+  windowMs: () => REGISTRATION_WINDOW_MS,
+  max: () => envInt('REGISTRATION_RATE_LIMIT_MAX', 5),
+  message: 'Er zijn te veel aanvragen vanaf dit adres. Probeer het over een uur opnieuw.',
+});
+export const registrationRateLimitGlobal = createRateLimiter({
+  windowMs: () => REGISTRATION_WINDOW_MS,
+  max: () => envInt('REGISTRATION_GLOBAL_LIMIT_MAX', 30),
+  key: () => 'global',
+  message: 'Aanvragen indienen is tijdelijk niet mogelijk. Probeer het later opnieuw.',
+});
+
+subscriptionsRouter.post('/subscription-requests', registrationRateLimitPerIp, registrationRateLimitGlobal, async (req, res) => {
   const b = (req.body ?? {}) as Record<string, unknown>;
   const organizationName = typeof b.organizationName === 'string' ? b.organizationName.trim() : '';
   const applicantName = typeof b.applicantName === 'string' ? b.applicantName.trim() : '';
@@ -129,12 +152,23 @@ subscriptionsRouter.post('/subscription-requests', async (req, res) => {
   if (!applicantName) errors.push('Naam is verplicht.');
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(applicantEmail)) errors.push('Geldig e-mailadres is verplicht.');
   if (!password || password.length < 8) errors.push('Wachtwoord (min. 8 tekens) is verplicht.');
+  // Bovengrenzen (DOEL-20): geen megabytes aan tekst in tenant-/accountvelden.
+  // 72 = bcrypt kapt wachtwoorden daar toch al af.
+  if (organizationName.length > 200) errors.push('Organisatienaam mag maximaal 200 tekens zijn.');
+  if (applicantName.length > 200) errors.push('Naam mag maximaal 200 tekens zijn.');
+  if (applicantEmail.length > 254) errors.push('E-mailadres mag maximaal 254 tekens zijn.');
+  if (applicantPhone && applicantPhone.length > 50) errors.push('Telefoonnummer mag maximaal 50 tekens zijn.');
+  if (password.length > 72) errors.push('Wachtwoord mag maximaal 72 tekens zijn.');
+  if (moduleKeys.length > 50) errors.push('Te veel modules gekozen.');
   if (!Number.isFinite(tierId) || tierId <= 0) errors.push('Kies een geldige tier.');
   if (!isBillingPeriod(billingPeriod)) errors.push('billingPeriod moet "maand" of "jaar" zijn.');
   if (errors.length) return res.status(400).json({ error: errors.join(' ') });
 
   try {
-    const result = await createSubscriptionRequest({
+    // DOEL-20: er wordt hier nog GEEN tenant/account aangemaakt — de aanvraag
+    // wacht op bevestiging via de link in de e-mail (zie pendingRegistrations.ts).
+    // Dezelfde respons of het adres nieuw is of al een account heeft.
+    await submitRegistration({
       organizationName,
       applicantName,
       applicantEmail,
@@ -144,10 +178,33 @@ subscriptionsRouter.post('/subscription-requests', async (req, res) => {
       moduleKeys,
       billingPeriod: billingPeriod as 'maand' | 'jaar',
     });
-    res.status(201).json(result);
+    res.status(202).json({ status: 'bevestiging-verzonden' });
   } catch (err) {
     if (err instanceof SubscriptionRequestError) return res.status(400).json({ error: err.message });
-    res.status(500).json({ error: 'Aanvraag indienen mislukt', detail: (err as Error).message });
+    // Onverwachte fouten: globale foutafhandelaar (500, generieke tekst, zie errors.ts).
+    throw err;
+  }
+});
+
+// Bevestigt een aanvraag met het token uit de verificatiemail: pas nu ontstaan
+// tenant + admin-account + proefperiode + de notificatiemail aan de beheerder.
+// Ongeauthenticeerd (de aanvrager heeft nog geen account) en dus ook begrensd.
+const confirmRateLimit = createRateLimiter({
+  windowMs: () => REGISTRATION_WINDOW_MS,
+  max: () => envInt('REGISTRATION_CONFIRM_RATE_LIMIT_MAX', 20),
+  message: 'Er zijn te veel pogingen vanaf dit adres. Probeer het over een uur opnieuw.',
+});
+subscriptionsRouter.post('/subscription-requests/confirm', confirmRateLimit, async (req, res) => {
+  const token = typeof (req.body as { token?: unknown } | undefined)?.token === 'string' ? (req.body as { token: string }).token : '';
+  try {
+    const result = await confirmRegistration(token);
+    res.status(201).json(result);
+  } catch (err) {
+    if (err instanceof InvalidRegistrationTokenError) {
+      return res.status(400).json({ error: 'Deze bevestigingslink is ongeldig of verlopen. Vraag het abonnement opnieuw aan.' });
+    }
+    if (err instanceof SubscriptionRequestError) return res.status(400).json({ error: err.message });
+    throw err;
   }
 });
 
@@ -220,7 +277,7 @@ subscriptionsRouter.post('/subscription-requests/:id/register-payment', async (r
     res.json(updated);
   } catch (err) {
     if (err instanceof SubscriptionRequestError) return res.status(409).json({ error: err.message });
-    res.status(500).json({ error: 'Betaling registreren mislukt', detail: (err as Error).message });
+    sendServerError(res, err, 'Betaling registreren mislukt');
   }
 });
 
@@ -231,7 +288,7 @@ subscriptionsRouter.post('/subscription-requests/:id/register-renewal', async (r
     res.json(updated);
   } catch (err) {
     if (err instanceof SubscriptionRequestError) return res.status(409).json({ error: err.message });
-    res.status(500).json({ error: 'Verlenging registreren mislukt', detail: (err as Error).message });
+    sendServerError(res, err, 'Verlenging registreren mislukt');
   }
 });
 
@@ -244,6 +301,6 @@ subscriptionsRouter.post('/subscription-requests/:id/reject', async (req: Authed
     res.json(updated);
   } catch (err) {
     if (err instanceof SubscriptionRequestError) return res.status(409).json({ error: err.message });
-    res.status(500).json({ error: 'Afwijzen mislukt', detail: (err as Error).message });
+    sendServerError(res, err, 'Afwijzen mislukt');
   }
 });

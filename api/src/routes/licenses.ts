@@ -7,6 +7,7 @@ import * as tierPrices from '../tierPrices.js';
 import * as moduleSurcharges from '../moduleSurcharges.js';
 import * as moduleTierSurcharges from '../moduleTierSurcharges.js';
 import { isBillingPeriod } from '../subscriptions.js';
+import { sendServerError } from '../errors.js';
 
 // Licentiebeheer — zie doelenboom_licentiemodel.md in het Doelenboom-project.
 // Twee niveaus:
@@ -75,7 +76,7 @@ licensesRouter.post('/tiers', requireSysadmin, async (req, res) => {
     res.status(201).json(tier);
   } catch (err) {
     if (isUniqueViolation(err)) return res.status(409).json({ error: `Er bestaat al een tier met naam "${name}".` });
-    res.status(500).json({ error: 'Aanmaken van tier mislukt', detail: (err as Error).message });
+    sendServerError(res, err, 'Aanmaken van tier mislukt');
   }
 });
 
@@ -113,7 +114,7 @@ licensesRouter.put('/tiers/:id', requireSysadmin, async (req, res) => {
     res.json(tier);
   } catch (err) {
     if (isUniqueViolation(err)) return res.status(409).json({ error: `Er bestaat al een tier met naam "${name}".` });
-    res.status(500).json({ error: 'Bijwerken van tier mislukt', detail: (err as Error).message });
+    sendServerError(res, err, 'Bijwerken van tier mislukt');
   }
 });
 
@@ -204,7 +205,7 @@ licensesRouter.post('/modules', requireSysadmin, async (req, res) => {
     res.status(201).json(mod);
   } catch (err) {
     if (isUniqueViolation(err)) return res.status(409).json({ error: `Er bestaat al een module met key "${key}".` });
-    res.status(500).json({ error: 'Aanmaken van module mislukt', detail: (err as Error).message });
+    sendServerError(res, err, 'Aanmaken van module mislukt');
   }
 });
 
@@ -377,7 +378,7 @@ licensesRouter.put('/tenants/:tenantId/license/tier', requireSysadmin, async (re
     res.json(await license.getTenantLicense(req.params.tenantId));
   } catch (err) {
     if (err instanceof license.LicenseLimitError) return res.status(409).json({ error: err.message });
-    res.status(500).json({ error: 'Instellen van tier mislukt', detail: (err as Error).message });
+    sendServerError(res, err, 'Instellen van tier mislukt');
   }
 });
 
@@ -389,7 +390,8 @@ licensesRouter.put('/tenants/:tenantId/license/modules/:moduleKey', requireSysad
     await license.setTenantModuleActive(req.params.tenantId, req.params.moduleKey, active, req.user!.id);
     res.json(await license.getTenantLicense(req.params.tenantId));
   } catch (err) {
-    res.status(400).json({ error: (err as Error).message });
+    if (err instanceof license.UnknownModuleError) return res.status(400).json({ error: err.message });
+    throw err;
   }
 });
 

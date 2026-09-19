@@ -24,3 +24,10 @@ python-pptx==1.0.2
 # Vereist een JRE in de image, zie Dockerfile.
 mpxj==16.7.0
 JPype1==1.7.1
+# Beveiliging tegen XML-aanvallen (XXE / entity-expansie, "billion laughs") bij
+# het parsen van geüploade .xlsx/.mpp-bestanden (DOEL-31): openpyxl gebruikt
+# defusedxml alléén als het geïnstalleerd is (openpyxl.DEFUSEDXML) — het is
+# geen verplichte dependency van openpyxl en stond hier niet in, dus de
+# productie-image parste uploads zonder die bescherming. Expliciet pinnen
+# zodat het er altijd is; tests/test_hardening.py bewaakt dat het actief is.
+defusedxml==0.7.1

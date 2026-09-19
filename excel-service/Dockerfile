@@ -41,5 +41,16 @@ FROM base
 # voor de api-image-build (zie hierboven).
 COPY --from=sbom /out/ /sbom/
 COPY app ./app
+# DOEL-31: niet als root draaien. Deze service verwerkt door gebruikers
+# geüploade bestanden (xlsx/mpp, via de JVM/mpxj); een kwetsbaarheid in een
+# parser geeft zo geen root in de container. Alles onder /app, /sbom en
+# /usr/local is root-eigendom en alleen-lezen voor deze gebruiker; tijdelijke
+# bestanden gaan naar /tmp. Geen bytecode schrijven (app-map is niet schrijfbaar).
+ENV PYTHONDONTWRITEBYTECODE=1
+RUN useradd --system --uid 10001 --create-home --shell /usr/sbin/nologin excel
+USER excel
 EXPOSE 8000
+# Geen curl in python:slim; de standaardbibliotheek volstaat. /health bestaat in app/main.py.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD python -c "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status == 200 else 1)"
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

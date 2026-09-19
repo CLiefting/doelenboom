@@ -1,8 +1,10 @@
 import { Router } from 'express';
 import { requireAuth, AuthedRequest } from '../auth.js';
-import { requireTenantRoleForDoelenboomParam } from '../rbac.js';
+import { requireTenantRoleForDoelenboomParam, tenantIdForDoelenboom } from '../rbac.js';
+import { logAuditEvent } from '../auditLog.js';
 import { fetchTree } from './tree.js';
 import { isStandardColumns } from '../columnConfig.js';
+import { sendServerError } from '../errors.js';
 
 const EXCEL_SERVICE_URL = process.env.EXCEL_SERVICE_URL ?? 'http://excel-service:8000';
 const XLSX_MEDIA_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -74,15 +76,27 @@ exportsRouter.get('/doelenbomen/:id/export', requireTenantRoleForDoelenboomParam
       body,
     });
   } catch (err) {
-    return res.status(502).json({ error: 'Excel-service niet bereikbaar', detail: (err as Error).message });
+    return sendServerError(res, err, 'Excel-service niet bereikbaar', 502);
   }
 
   if (!upstream.ok) {
     const text = await upstream.text();
-    return res.status(502).json({ error: 'Excel-service gaf een fout terug', detail: text });
+    return sendServerError(res, text, 'Excel-service gaf een fout terug', 502);
   }
 
   const arrayBuffer = await upstream.arrayBuffer();
+  // DOEL-29: een export is de manier om data uit de applicatie te halen
+  // (data-exfiltratie) — wie/welke boom/welk formaat komt in het auditlog.
+  // Een lege sjabloon-export (mode=template) bevat geen data en wordt niet gelogd.
+  if (mode === 'data') {
+    await logAuditEvent({
+      eventType: 'doelenboom_exported',
+      userId: req.user!.id,
+      tenantId: await tenantIdForDoelenboom(req.params.id),
+      doelenboomId: req.params.id,
+      detail: { kind: 'doelenboom-xlsx', format },
+    });
+  }
   res.setHeader('Content-Type', XLSX_MEDIA_TYPE);
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
   res.send(Buffer.from(arrayBuffer));
