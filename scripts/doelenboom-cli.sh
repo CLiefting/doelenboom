@@ -11,6 +11,7 @@
 # Gebruik:
 #   doelenboom -local -restart            # lokale stack herbouwen (gewijzigde images) en herstarten
 #   doelenboom -local -rebuild -restart   # idem, én eerst alle (nieuwe) db/migrations/*.sql toepassen
+#   doelenboom -local -stop               # lokale containers stoppen (database-data blijft bewaard)
 set -euo pipefail
 
 # Vaste, veilige locatie i.p.v. dynamische BASH_SOURCE-resolutie (Charles, 14
@@ -46,10 +47,11 @@ for arg in "$@"; do
     -local) ENVIRONMENT="local" ;;
     -prod) ENVIRONMENT="prod" ;;
     -restart) ACTION="restart" ;;
+    -stop) ACTION="stop" ;;
     -rebuild) REBUILD_SCHEMA="1" ;;
     *)
       echo "Onbekende optie: $arg" >&2
-      echo "Bekende opties: -local | -prod, -restart, -rebuild" >&2
+      echo "Bekende opties: -local | -prod, -restart, -stop, -rebuild" >&2
       exit 1
       ;;
   esac
@@ -60,7 +62,11 @@ if [ -z "$ENVIRONMENT" ]; then
   exit 1
 fi
 if [ -z "$ACTION" ]; then
-  echo "Geef een actie op, bv. -restart" >&2
+  echo "Geef een actie op: -restart of -stop" >&2
+  exit 1
+fi
+if [ "$ACTION" = "stop" ] && [ -n "$REBUILD_SCHEMA" ]; then
+  echo "-rebuild (migraties toepassen) hoort bij -restart, niet bij -stop." >&2
   exit 1
 fi
 
@@ -131,6 +137,15 @@ case "$ACTION" in
     BUILD_VERSION=dev GIT_REF="$GIT_REF" docker compose up -d --build
     echo
     docker compose ps
+    ;;
+  stop)
+    # `stop` (geen `down`): de containers worden gestopt maar blijven bestaan, en het
+    # database-volume blijft in elk geval bewaard. Handig vóór het verplaatsen van de map
+    # (zie README, "Geheimen en OneDrive"); met -restart start je alles weer.
+    echo "==> Lokale stack stoppen (de database-data blijft bewaard)"
+    docker compose stop
+    echo
+    docker compose ps -a
     ;;
 esac
 

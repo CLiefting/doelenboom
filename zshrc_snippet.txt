@@ -1,4 +1,4 @@
-# Doelenboom: lokale stack starten/herstarten met "doelenboom -local -restart"
+# Doelenboom: lokale stack starten/herstarten met "doelenboom -local -restart" en stoppen met "doelenboom -local -stop"
 # (zie scripts/doelenboom-cli.sh voor wat dit precies doet en welke andere
 # vlaggen er zijn — dit is bewust alleen nog maar een dunne alias ernaartoe,
 # geen losse eigen implementatie meer, om te voorkomen dat de twee uit de pas
