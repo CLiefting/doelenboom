@@ -1,7 +1,8 @@
-# Doelenboom: lokale stack starten/herstarten met "doelenboom -local -restart" en stoppen met "doelenboom -local -stop"
+# Doelenboom: lokale stack starten/herstarten met "doelenboom -local -restart" en stoppen met "doelenboom -local -stop";
+# broncode zippen voor delen met "doelenboom -zip" (opruimen: "doelenboom -zip -d")
 # (zie scripts/doelenboom-cli.sh voor wat dit precies doet en welke andere
 # vlaggen er zijn — dit is bewust alleen nog maar een dunne alias ernaartoe,
 # geen losse eigen implementatie meer, om te voorkomen dat de twee uit de pas
 # gaan lopen zoals eerder gebeurd is).
 # DOELENBOOM_DIR (optioneel, zie README "Geheimen en OneDrive") wijst naar een werkmap buiten OneDrive.
-alias doelenboom="${DOELENBOOM_DIR:-$HOME/OneDrive/src/doelenboom}/scripts/doelenboom-cli.sh"
+alias doelenboom="${DOELENBOOM_DIR:-$HOME/src/doelenboom}/scripts/doelenboom-cli.sh"

@@ -5,13 +5,16 @@
 # en een bijbehorende case in het ACTION-blok.
 #
 # Installeren als alias (eenmalig, in ~/.zshrc):
-#   alias doelenboom="$HOME/OneDrive/src/doelenboom/scripts/doelenboom-cli.sh"
+#   alias doelenboom="${DOELENBOOM_DIR:-$HOME/src/doelenboom}/scripts/doelenboom-cli.sh"
 # Daarna: bron je shell opnieuw (nieuwe terminal, of `source ~/.zshrc`).
 #
 # Gebruik:
 #   doelenboom -local -restart            # lokale stack herbouwen (gewijzigde images) en herstarten
 #   doelenboom -local -rebuild -restart   # idem, én eerst alle (nieuwe) db/migrations/*.sql toepassen
 #   doelenboom -local -stop               # lokale containers stoppen (database-data blijft bewaard)
+#   doelenboom -zip                       # ~/Downloads/db_backend.zip (api) en db_frontend.zip (web) maken,
+#                                         # zonder node_modules, .env en .DS_Store
+#   doelenboom -zip -d                    # die twee zips weer verwijderen
 set -euo pipefail
 
 # Vaste, veilige locatie i.p.v. dynamische BASH_SOURCE-resolutie (Charles, 14
@@ -24,7 +27,7 @@ set -euo pipefail
 # tot gevolg i.p.v. meteen een duidelijke melding. Deze vaste cd + expliciete
 # check hieronder falen liever meteen en luid.
 # DOEL-33: overschrijfbaar (DOELENBOOM_DIR) zodat de map buiten OneDrive kan staan.
-REPO_DIR="${DOELENBOOM_DIR:-$HOME/OneDrive/src/doelenboom}"
+REPO_DIR="${DOELENBOOM_DIR:-$HOME/src/doelenboom}"
 if [ ! -f "$REPO_DIR/docker-compose.yml" ]; then
   echo "Kan doelenboom niet vinden op $REPO_DIR (geen docker-compose.yml daar)." >&2
   echo "Is de map leeg, verplaatst, of nog niet gesynchroniseerd (bv. door een OneDrive-issue)? Controleer dit eerst." >&2
@@ -41,6 +44,7 @@ DB_NAME="${POSTGRES_DB:-doelenboom}"
 ENVIRONMENT=""
 ACTION=""
 REBUILD_SCHEMA=""
+DELETE_ZIPS=""
 
 for arg in "$@"; do
   case "$arg" in
@@ -48,25 +52,36 @@ for arg in "$@"; do
     -prod) ENVIRONMENT="prod" ;;
     -restart) ACTION="restart" ;;
     -stop) ACTION="stop" ;;
+    -zip) ACTION="zip" ;;
+    -d) DELETE_ZIPS="1" ;;
     -rebuild) REBUILD_SCHEMA="1" ;;
     *)
       echo "Onbekende optie: $arg" >&2
-      echo "Bekende opties: -local | -prod, -restart, -stop, -rebuild" >&2
+      echo "Bekende opties: -local | -prod, -restart, -stop, -rebuild, -zip [-d]" >&2
       exit 1
       ;;
   esac
 done
 
-if [ -z "$ENVIRONMENT" ]; then
+if [ -n "$DELETE_ZIPS" ] && [ "$ACTION" != "zip" ]; then
+  echo "-d hoort bij -zip (doelenboom -zip -d verwijdert de zips)." >&2
+  exit 1
+fi
+# -zip werkt op de bronmap en heeft geen omgeving nodig.
+if [ "$ACTION" != "zip" ] && [ -z "$ENVIRONMENT" ]; then
   echo "Geef een omgeving op: -local of -prod" >&2
   exit 1
 fi
 if [ -z "$ACTION" ]; then
-  echo "Geef een actie op: -restart of -stop" >&2
+  echo "Geef een actie op: -restart, -stop of -zip" >&2
   exit 1
 fi
-if [ "$ACTION" = "stop" ] && [ -n "$REBUILD_SCHEMA" ]; then
-  echo "-rebuild (migraties toepassen) hoort bij -restart, niet bij -stop." >&2
+if [ "$ACTION" != "restart" ] && [ -n "$REBUILD_SCHEMA" ]; then
+  echo "-rebuild (migraties toepassen) hoort bij -restart, niet bij -$ACTION." >&2
+  exit 1
+fi
+if [ "$ACTION" = "zip" ] && [ -n "$ENVIRONMENT" ]; then
+  echo "-zip werkt zonder -local of -prod." >&2
   exit 1
 fi
 
@@ -146,6 +161,30 @@ case "$ACTION" in
     docker compose stop
     echo
     docker compose ps -a
+    ;;
+  zip)
+    # Vervangt de oude ~/.zshrc-functie `doelenboomzip` (DOEL-51). Zips van de bronmappen api en
+    # web om te delen (bv. in een chat). Bewust: bestaande zips eerst weg (`zip -r` op een bestaand
+    # bestand voegt toe en laat verwijderde bestanden achter), en nooit .env of .DS_Store mee.
+    ZIP_DIR="$HOME/Downloads"
+    BACKEND_ZIP="$ZIP_DIR/db_backend.zip"
+    FRONTEND_ZIP="$ZIP_DIR/db_frontend.zip"
+    if [ -n "$DELETE_ZIPS" ]; then
+      rm -f "$BACKEND_ZIP" "$FRONTEND_ZIP"
+      echo "$BACKEND_ZIP en $FRONTEND_ZIP verwijderd."
+    else
+      command -v zip >/dev/null 2>&1 || { echo "zip ontbreekt." >&2; exit 1; }
+      mkdir -p "$ZIP_DIR"
+      make_zip() {  # make_zip <zipbestand> <map>
+        rm -f "$1"
+        zip -qr "$1" "$2" -x "*/node_modules/*" -x "*/.env" -x "*/.env.local" -x "*/.DS_Store"
+        echo "  $1  ($(unzip -Z1 "$1" | grep -vc '/$') bestanden, $(du -h "$1" | cut -f1 | tr -d ' '))"
+      }
+      echo "==> Zips maken in $ZIP_DIR (zonder node_modules, .env en .DS_Store)"
+      make_zip "$BACKEND_ZIP" api
+      make_zip "$FRONTEND_ZIP" web
+      echo "Opruimen met:  doelenboom -zip -d"
+    fi
     ;;
 esac
 
