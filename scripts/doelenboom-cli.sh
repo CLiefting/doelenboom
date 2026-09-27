@@ -219,7 +219,12 @@ case "$ACTION" in
     # een dev-build, maar met een aanknopingspunt op welke release dit
     # ongeveer is. Geen tags in de repo (of geen git-repo)? Dan blijft het
     # gewoon "dev", exact zoals voorheen.
-    GIT_TAG="$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')"
+    # Zelfde "|| true"-patroon als GIT_HASH hierboven: zonder een repo (of
+    # zonder tags) faalt `git describe` met exit 128, en zonder deze fallback
+    # zou set -euo pipefail dan het hele script laten stoppen — juist in het
+    # geval waarvoor "dev" als fallback bedoeld is.
+    GIT_TAG="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+    GIT_TAG="${GIT_TAG#v}"
     if [ -n "$GIT_TAG" ]; then
       LOCAL_VERSION="${GIT_TAG} dev"
     else
