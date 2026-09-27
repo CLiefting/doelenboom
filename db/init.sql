@@ -216,7 +216,16 @@ create unique index if not exists idx_column_configs_doelenboom
 -- projectstatus, project-tijdlijnenoverzicht) vast, ongeacht hoe die kolom
 -- genoemd is. relation_label_to_next is de tekst op de pijl naar de
 -- eerstvolgende kolom (bv. "ontwikkelt") — null bij de laatste kolom, die
--- heeft geen volgende.
+-- heeft geen volgende. aliases (DOEL-56, zie db/migrations/0043) is een
+-- jsonb-array van {"typeName": string, "color": string|null}: extra,
+-- zelfstandig te kiezen elementtypen die in DEZE kolom getoond worden (bv.
+-- "Project 1"/"Project 2" als alias van "Project"), elk met een optionele
+-- eigen kleur (null = val terug op color hierboven). Bewust op de kolom zelf
+-- i.p.v. een aparte tabel: een alias hoort onlosmakelijk bij precies één
+-- kolom en wordt nooit los daarvan gequeried — validatie (unieke typeName
+-- over alle kolommen+aliassen van de config, geldige hexkleur) gebeurt op
+-- API-niveau in columnConfig.ts, niet in de database (zelfde reden als bij
+-- elements.type hieronder).
 create table if not exists columns (
   id bigserial primary key,
   column_config_id bigint not null references column_configs(id) on delete cascade,
@@ -229,6 +238,7 @@ create table if not exists columns (
   node_font_size int,
   is_project_role boolean not null default false,
   relation_label_to_next text,
+  aliases jsonb not null default '[]'::jsonb,
   unique (column_config_id, position),
   unique (column_config_id, type_name)
 );

@@ -732,6 +732,16 @@ export type SystemAnnouncement = {
   updatedAt: string | null;
 };
 
+// Alias van een kolom (DOEL-56): een extra, zelfstandig te kiezen elementtype
+// dat in DEZELFDE kolom getoond wordt als zijn basistype (bv. "Project 1"/
+// "Project 2" als alias van "Project"), met een optionele eigen kleur — null
+// betekent: val terug op de kolomkleur. Zelfde vorm als ColumnAlias in
+// api/src/columnConfig.ts.
+export type ColumnAlias = {
+  typeName: string;
+  color: string | null;
+};
+
 // Eén kolom in een kolomconfiguratie (tenant-default óf één specifieke
 // doelenboom, zie docs/kolommen-configuratie-ontwerp.md) — zelfde vorm als
 // ColumnDef in api/src/columnConfig.ts. `id` ontbreekt bij een nog niet
@@ -747,6 +757,7 @@ export type ColumnDef = {
   nodeFontSize: number | null;
   isProjectRole: boolean;
   relationLabelToNext: string | null;
+  aliases: ColumnAlias[];
 };
 
 // --- Softwarecomponenten / SBOM (sysadmin-only, /system-info) — zie

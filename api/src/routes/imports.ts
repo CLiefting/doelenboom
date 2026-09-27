@@ -8,7 +8,7 @@ import {
   requireWritableDoelenboom,
   tenantIdForDoelenboom,
 } from '../rbac.js';
-import { getColumnsForDoelenboom } from '../columnConfig.js';
+import { getColumnsForDoelenboom, allValidTypeNames } from '../columnConfig.js';
 import { hasModule } from '../license.js';
 import { logAuditEvent } from '../auditLog.js';
 import { sendServerError } from '../errors.js';
@@ -52,8 +52,11 @@ importsRouter.post(
     // De geldige Type-waarden voor déze doelenboom (zie
     // docs/kolommen-configuratie-ontwerp.md) — zonder dit zou excel-service
     // terugvallen op de vaste 8 standaardtypes en elementen met een eigen,
-    // niet-standaard type altijd als "onbekend Type-label" overslaan.
-    const validTypes = (await getColumnsForDoelenboom(req.params.doelenboomId)).map((c) => c.typeName);
+    // niet-standaard type altijd als "onbekend Type-label" overslaan. Sinds
+    // DOEL-56 horen aliassen (columnConfig.ts) hier ook bij: anders zou een
+    // Excel-import van een alias-getypeerd element (bv. "Project 1") daar
+    // ten onrechte als onbekend type worden gemarkeerd.
+    const validTypes = allValidTypeNames(await getColumnsForDoelenboom(req.params.doelenboomId));
     const parseQuery = validTypes.map((t) => `valid_types=${encodeURIComponent(t)}`).join('&');
 
     let parseResult: { status: string; report: unknown; parsed: unknown };

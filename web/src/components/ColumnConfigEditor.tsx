@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ApiError } from '../api';
-import type { ColumnDef } from '../types';
+import type { ColumnAlias, ColumnDef } from '../types';
 
 // Generieke editor voor een kolomconfiguratie (tenant-default óf de eigen
 // config van één doelenboom, zie docs/kolommen-configuratie-ontwerp.md) — de
@@ -21,6 +21,7 @@ function emptyColumn(position: number, color: string): ColumnDef {
     nodeFontSize: null,
     isProjectRole: false,
     relationLabelToNext: '',
+    aliases: [],
   };
 }
 
@@ -86,6 +87,28 @@ export default function ColumnConfigEditor({
     setColumns((cols) => (cols ?? []).map((c, i) => ({ ...c, isProjectRole: i === idx })));
   }
 
+  // Aliassen (DOEL-56): extra, zelfstandig te kiezen elementtypen die in
+  // dezelfde kolom getoond worden als hun basistype, met een optionele eigen
+  // kleur (leeg = valt terug op de kolomkleur hierboven).
+  function addAlias(idx: number) {
+    setSaved(false);
+    setColumns((cols) => (cols ?? []).map((c, i) => (i === idx ? { ...c, aliases: [...c.aliases, { typeName: '', color: null }] } : c)));
+  }
+
+  function updateAlias(idx: number, aliasIdx: number, patch: Partial<ColumnAlias>) {
+    setSaved(false);
+    setColumns((cols) =>
+      (cols ?? []).map((c, i) =>
+        i === idx ? { ...c, aliases: c.aliases.map((a, ai) => (ai === aliasIdx ? { ...a, ...patch } : a)) } : c
+      )
+    );
+  }
+
+  function removeAlias(idx: number, aliasIdx: number) {
+    setSaved(false);
+    setColumns((cols) => (cols ?? []).map((c, i) => (i === idx ? { ...c, aliases: c.aliases.filter((_, ai) => ai !== aliasIdx) } : c)));
+  }
+
   function validateClientSide(cols: ColumnDef[]): string | null {
     if (cols.length === 0) return 'Minstens één kolom is verplicht.';
     const seen = new Set<string>();
@@ -98,6 +121,15 @@ export default function ColumnConfigEditor({
       const key = c.typeName.trim();
       if (seen.has(key)) return `Type-naam "${c.typeName}" komt meer dan één keer voor.`;
       seen.add(key);
+      for (const a of c.aliases) {
+        if (!a.typeName.trim()) return `Elke alias van "${c.typeName}" moet een type-naam hebben.`;
+        if (a.color && !/^#[0-9a-fA-F]{6}$/.test(a.color)) {
+          return `Kleur van alias "${a.typeName}" moet leeg zijn of een geldige hex-waarde (bv. #3E6FA6).`;
+        }
+        const aliasKey = a.typeName.trim();
+        if (seen.has(aliasKey)) return `Type-naam "${a.typeName}" (alias van "${c.typeName}") komt al voor als kolom of andere alias.`;
+        seen.add(aliasKey);
+      }
     }
     if (cols.filter((c) => c.isProjectRole).length !== 1) {
       return 'Precies één kolom moet als "projectrol" zijn aangevinkt (nodig voor de projectkaart/planning-items/tijdlijnenoverzicht).';
@@ -117,11 +149,14 @@ export default function ColumnConfigEditor({
     setSaved(false);
     try {
       // De laatste kolom heeft per definitie geen "volgende" kolom meer —
-      // zelfde regel als validateColumnsInput() server-side.
+      // zelfde regel als validateColumnsInput() server-side. Aliassen worden
+      // hier ook genormaliseerd (getrimd, lege kleur -> null), zelfde als de
+      // server dat doet.
       const toSave = columns!.map((c, i) => ({
         ...c,
         position: i,
         relationLabelToNext: i === columns!.length - 1 ? null : (c.relationLabelToNext?.trim() || null),
+        aliases: c.aliases.map((a) => ({ typeName: a.typeName.trim(), color: a.color?.trim() || null })),
       }));
       const result = await save(toSave);
       setColumns(result.columns);
@@ -138,56 +173,89 @@ export default function ColumnConfigEditor({
       {error && <p style={styles.error}>{error}</p>}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {columns.map((c, idx) => (
-          <div key={idx} style={styles.row}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <button type="button" disabled={busy || idx === 0} onClick={() => move(idx, -1)} style={styles.arrowBtn} title="Omhoog verplaatsen">▲</button>
-              <button type="button" disabled={busy || idx === columns.length - 1} onClick={() => move(idx, 1)} style={styles.arrowBtn} title="Omlaag verplaatsen">▼</button>
-            </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, flex: 1, alignItems: 'center' }}>
-              <input
-                style={styles.input} placeholder="Type-naam" disabled={busy} value={c.typeName}
-                onChange={(e) => update(idx, { typeName: e.target.value })}
-              />
-              <input
-                style={styles.input} placeholder="Titel" disabled={busy} value={c.title}
-                onChange={(e) => update(idx, { title: e.target.value })}
-              />
-              <input
-                style={{ ...styles.input, flex: '1 1 220px' }} placeholder="Ondertitel (optioneel)" disabled={busy} value={c.subtitle}
-                onChange={(e) => update(idx, { subtitle: e.target.value })}
-              />
-              <input
-                type="color" title="Kleur" disabled={busy} style={styles.colorInput}
-                value={/^#[0-9a-fA-F]{6}$/.test(c.color) ? c.color : '#000000'}
-                onChange={(e) => update(idx, { color: e.target.value })}
-              />
-              <input
-                style={{ ...styles.input, width: 90, flex: '0 0 90px' }} placeholder="#RRGGBB" disabled={busy} value={c.color}
-                onChange={(e) => update(idx, { color: e.target.value })}
-              />
-              <input
-                style={{ ...styles.input, width: 150, flex: '0 0 150px' }} type="number" min={1} placeholder="lettergrootte (std. 8)"
-                disabled={busy} value={c.nodeFontSize ?? ''}
-                onChange={(e) => update(idx, { nodeFontSize: e.target.value ? Number(e.target.value) : null })}
-              />
-              {idx < columns.length - 1 && (
+          <div key={idx} style={{ ...styles.row, flexDirection: 'column', alignItems: 'stretch' }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <button type="button" disabled={busy || idx === 0} onClick={() => move(idx, -1)} style={styles.arrowBtn} title="Omhoog verplaatsen">▲</button>
+                <button type="button" disabled={busy || idx === columns.length - 1} onClick={() => move(idx, 1)} style={styles.arrowBtn} title="Omlaag verplaatsen">▼</button>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, flex: 1, alignItems: 'center' }}>
                 <input
-                  style={{ ...styles.input, flex: '1 1 200px' }} placeholder='Relatie naar volgende kolom (bv. "ondersteunt")'
-                  disabled={busy} value={c.relationLabelToNext ?? ''}
-                  onChange={(e) => update(idx, { relationLabelToNext: e.target.value })}
+                  style={styles.input} placeholder="Type-naam" disabled={busy} value={c.typeName}
+                  onChange={(e) => update(idx, { typeName: e.target.value })}
                 />
-              )}
-              <label style={styles.checkLabel}>
-                <input type="checkbox" checked={c.isNarrow} disabled={busy} onChange={(e) => update(idx, { isNarrow: e.target.checked })} />
-                Smal
-              </label>
-              <label style={styles.checkLabel} title='Precies één kolom moet dit hebben — bepaalt welk elementtype als "project" telt (projectkaart/planning/tijdlijnen)'>
-                <input type="radio" name="project-role" checked={c.isProjectRole} disabled={busy} onChange={() => setProjectRole(idx)} />
-                Projectrol
-              </label>
-              <button type="button" disabled={busy} onClick={() => removeRow(idx)} style={styles.removeBtn}>
-                Verwijderen
-              </button>
+                <input
+                  style={styles.input} placeholder="Titel" disabled={busy} value={c.title}
+                  onChange={(e) => update(idx, { title: e.target.value })}
+                />
+                <input
+                  style={{ ...styles.input, flex: '1 1 220px' }} placeholder="Ondertitel (optioneel)" disabled={busy} value={c.subtitle}
+                  onChange={(e) => update(idx, { subtitle: e.target.value })}
+                />
+                <input
+                  type="color" title="Kleur" disabled={busy} style={styles.colorInput}
+                  value={/^#[0-9a-fA-F]{6}$/.test(c.color) ? c.color : '#000000'}
+                  onChange={(e) => update(idx, { color: e.target.value })}
+                />
+                <input
+                  style={{ ...styles.input, width: 90, flex: '0 0 90px' }} placeholder="#RRGGBB" disabled={busy} value={c.color}
+                  onChange={(e) => update(idx, { color: e.target.value })}
+                />
+                <input
+                  style={{ ...styles.input, width: 150, flex: '0 0 150px' }} type="number" min={1} placeholder="lettergrootte (std. 8)"
+                  disabled={busy} value={c.nodeFontSize ?? ''}
+                  onChange={(e) => update(idx, { nodeFontSize: e.target.value ? Number(e.target.value) : null })}
+                />
+                {idx < columns.length - 1 && (
+                  <input
+                    style={{ ...styles.input, flex: '1 1 200px' }} placeholder='Relatie naar volgende kolom (bv. "ondersteunt")'
+                    disabled={busy} value={c.relationLabelToNext ?? ''}
+                    onChange={(e) => update(idx, { relationLabelToNext: e.target.value })}
+                  />
+                )}
+                <label style={styles.checkLabel}>
+                  <input type="checkbox" checked={c.isNarrow} disabled={busy} onChange={(e) => update(idx, { isNarrow: e.target.checked })} />
+                  Smal
+                </label>
+                <label style={styles.checkLabel} title='Precies één kolom moet dit hebben — bepaalt welk elementtype als "project" telt (projectkaart/planning/tijdlijnen)'>
+                  <input type="radio" name="project-role" checked={c.isProjectRole} disabled={busy} onChange={() => setProjectRole(idx)} />
+                  Projectrol
+                </label>
+                <button type="button" disabled={busy} onClick={() => removeRow(idx)} style={styles.removeBtn}>
+                  Verwijderen
+                </button>
+              </div>
+            </div>
+            <div style={styles.aliasBlock}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                <span style={styles.aliasLabel} title='Een alias is een extra, zelfstandig te kiezen elementtype dat in DEZE kolom getoond wordt (bv. "Project 1"/"Project 2" als alias van "Project"), met een optionele eigen kleur.'>
+                  Aliassen van "{c.typeName || '…'}":
+                </span>
+                {c.aliases.map((a, aliasIdx) => (
+                  <span key={aliasIdx} style={styles.aliasChip}>
+                    <input
+                      style={{ ...styles.input, width: 130, flex: '0 0 130px' }} placeholder="Alias-type-naam" disabled={busy} value={a.typeName}
+                      onChange={(e) => updateAlias(idx, aliasIdx, { typeName: e.target.value })}
+                    />
+                    <input
+                      type="color" title="Eigen kleur (optioneel)" disabled={busy} style={styles.colorInput}
+                      value={a.color && /^#[0-9a-fA-F]{6}$/.test(a.color) ? a.color : c.color}
+                      onChange={(e) => updateAlias(idx, aliasIdx, { color: e.target.value })}
+                    />
+                    <input
+                      style={{ ...styles.input, width: 90, flex: '0 0 90px' }} placeholder="valt terug op kolomkleur" disabled={busy}
+                      value={a.color ?? ''}
+                      onChange={(e) => updateAlias(idx, aliasIdx, { color: e.target.value || null })}
+                    />
+                    <button type="button" disabled={busy} onClick={() => removeAlias(idx, aliasIdx)} style={styles.removeBtn} title="Alias verwijderen">
+                      ✕
+                    </button>
+                  </span>
+                ))}
+                <button type="button" disabled={busy} onClick={() => addAlias(idx)} style={styles.ghostBtnSmall}>
+                  + Alias toevoegen
+                </button>
+              </div>
             </div>
           </div>
         ))}
@@ -223,7 +291,11 @@ const styles: Record<string, React.CSSProperties> = {
   checkLabel: { display: 'flex', alignItems: 'center', gap: 5, fontSize: 12.5, whiteSpace: 'nowrap' },
   removeBtn: { border: 'none', background: 'none', color: '#DC3545', fontSize: 12.5, cursor: 'pointer', padding: '4px 6px' },
   ghostBtn: { borderRadius: 8, padding: '7px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer', border: '1.5px solid #d0d4da', background: 'white', color: '#444' },
+  ghostBtnSmall: { borderRadius: 6, padding: '5px 10px', fontSize: 12, fontWeight: 600, cursor: 'pointer', border: '1.5px dashed #d0d4da', background: 'white', color: '#666' },
   primaryBtn: { borderRadius: 8, padding: '7px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer', border: '1.5px solid #2F5597', background: '#2F5597', color: 'white' },
   muted: { color: '#9aa0a8', fontSize: 13, margin: 0 },
   error: { color: '#DC3545', fontSize: 13 },
+  aliasBlock: { marginTop: 8, paddingTop: 8, borderTop: '1px dashed #d0d4da' },
+  aliasLabel: { fontSize: 12, color: '#666', whiteSpace: 'nowrap' },
+  aliasChip: { display: 'flex', gap: 4, alignItems: 'center', background: 'white', border: '1px solid #e4e6ea', borderRadius: 6, padding: '3px 4px' },
 };

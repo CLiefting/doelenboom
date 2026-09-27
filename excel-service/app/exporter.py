@@ -132,11 +132,22 @@ def _type_names_from_columns(columns: list[dict[str, Any]]) -> list[str]:
     """Type-namen van de meegegeven kolommen, op position gesorteerd — de
     dynamische vervanger van de vroeger hardgecodeerde VALIDATIELIJSTEN['Type'].
     Valt terug op STANDARD_TYPE_NAMES als er geen columns zijn meegegeven
-    (defensief; de aanroeper (main.py) geeft deze normaliter altijd mee)."""
+    (defensief; de aanroeper (main.py) geeft deze normaliter altijd mee).
+    Sinds DOEL-56 (aliassen, zie columnConfig.ts) staan een kolom haar eigen
+    aliassen er direct na in de lijst — zonder dit zou de Type-dropdown in het
+    geëxporteerde bestand geen alias-namen aanbieden, en zou een element met
+    een alias-type bij het opnieuw importeren als "onbekend Type" gemarkeerd
+    worden (zie ook allValidTypeNames() in de TS-tegenhanger)."""
     if not columns:
         return list(STANDARD_TYPE_NAMES)
     ordered = sorted(columns, key=lambda c: c.get('position', 0))
-    names = [c.get('typeName') for c in ordered if c.get('typeName')]
+    names: list[str] = []
+    for c in ordered:
+        if c.get('typeName'):
+            names.append(c['typeName'])
+        for alias in c.get('aliases') or []:
+            if alias.get('typeName'):
+                names.append(alias['typeName'])
     return names or list(STANDARD_TYPE_NAMES)
 
 
@@ -209,7 +220,7 @@ def _write_kolommen(wb: Workbook, columns: list[dict[str, Any]]) -> None:
     ws = create_safe_sheet(wb, KOLOMMEN_SHEET_NAME)
     headers = [
         'Volgorde', 'Type', 'Titel', 'Ondertitel', 'Kleur', 'Smal',
-        'Projectrol', 'Label naar volgende kolom', 'Lettergrootte knoop',
+        'Projectrol', 'Label naar volgende kolom', 'Lettergrootte knoop', 'Aliassen',
     ]
     ws.append(headers)
     for cell in ws[1]:
@@ -218,6 +229,14 @@ def _write_kolommen(wb: Workbook, columns: list[dict[str, Any]]) -> None:
     ordered = sorted(columns, key=lambda c: c.get('position', 0))
     for c in ordered:
         node_font_size = c.get('nodeFontSize')
+        # Aliassen (DOEL-56) puur documentair hier bij: "Naam" of "Naam (#kleur)"
+        # als de alias een eigen kleur heeft, anders valt hij terug op de
+        # kolomkleur hierboven.
+        alias_labels = [
+            f"{a.get('typeName', '')} ({a['color']})" if a.get('color') else a.get('typeName', '')
+            for a in (c.get('aliases') or [])
+            if a.get('typeName')
+        ]
         ws.append([
             c.get('position', ''),
             c.get('typeName', ''),
@@ -228,8 +247,9 @@ def _write_kolommen(wb: Workbook, columns: list[dict[str, Any]]) -> None:
             'Ja' if c.get('isProjectRole') else 'Nee',
             c.get('relationLabelToNext') or '',
             node_font_size if node_font_size is not None else '',
+            ', '.join(alias_labels),
         ])
-    widths = [10, 22, 22, 22, 10, 8, 11, 26, 16]
+    widths = [10, 22, 22, 22, 10, 8, 11, 26, 16, 28]
     for idx, width in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(idx)].width = width
 
