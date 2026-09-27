@@ -46,6 +46,17 @@ interface EdgeSnapshot {
   toelichting: string;
 }
 
+// Sjablonen die zijn opgeslagen/vernieuwd vóór DOEL-56 (aliassen) hebben nog
+// geen "aliases"-veld in hun columns_snapshot — die op de tabel (`columns`)
+// zelf staat wél altijd '[]'::jsonb als default, maar dat geldt niet met
+// terugwerkende kracht voor JSONB die al eerder als snapshot is weggeschreven.
+// Zonder deze fallback zou insertColumns() (die aliases verplicht stelt) op
+// zo'n ouder sjabloon stuklopen. Gebruikt door alles wat een snapshot uit de
+// database leest, vóór het bij insertColumns of de editor terechtkomt.
+function withAliasesDefault(columns: ColumnSnapshot[]): ColumnSnapshot[] {
+  return columns.map((c) => ({ ...c, aliases: c.aliases ?? [] }));
+}
+
 // Sjablonen die een tenant mag zien/gebruiken bij het aanmaken van een
 // nieuwe doelenboom: systeembreed (tenant_id is null) + de eigen sjablonen
 // van die tenant. Systeembreed eerst (nulls first), dan op naam — zodat
@@ -106,7 +117,7 @@ async function buildSnapshotFromDoelenboom(
   const columnsResult = await pool.query(
     `select position, type_name as "typeName", title, subtitle, color, is_narrow as "isNarrow",
             node_font_size as "nodeFontSize", is_project_role as "isProjectRole",
-            relation_label_to_next as "relationLabelToNext"
+            relation_label_to_next as "relationLabelToNext", aliases
      from columns
      where column_config_id = (select id from column_configs where scope = 'doelenboom' and doelenboom_id = $1)
      order by position`,
@@ -214,7 +225,7 @@ export async function applyTemplateToNewDoelenboom(
     `insert into column_configs (scope, tenant_id, doelenboom_id) values ('doelenboom', $1, $2) returning id`,
     [tenantId, doelenboomId]
   );
-  const columns = tmpl.rows[0].columns_snapshot as ColumnSnapshot[];
+  const columns = withAliasesDefault(tmpl.rows[0].columns_snapshot as ColumnSnapshot[]);
   await insertColumns(client, cfg.rows[0].id, columns);
 
   const elements = tmpl.rows[0].elements_snapshot as ElementSnapshot[];
@@ -256,7 +267,7 @@ export async function applyTemplateToNewDoelenboom(
 export async function getTemplateColumnsWithIds(templateId: number): Promise<ColumnDef[] | null> {
   const result = await pool.query('select columns_snapshot from doelenboom_templates where id = $1', [templateId]);
   if (!result.rows[0]) return null;
-  const columns = result.rows[0].columns_snapshot as ColumnSnapshot[];
+  const columns = withAliasesDefault(result.rows[0].columns_snapshot as ColumnSnapshot[]);
   return columns.map((c, i) => ({ ...c, id: i }));
 }
 
@@ -268,7 +279,7 @@ export async function getTemplateColumnsWithIds(templateId: number): Promise<Col
 // het sjabloon intern inconsistent maken (elementen zonder bijpassende
 // kolom bij een volgende "toepassen").
 function findRemovedTypesStillInUse(elements: ElementSnapshot[], newColumns: Omit<ColumnDef, 'id'>[]): string[] {
-  const newTypeNames = new Set(newColumns.map((c) => c.typeName));
+  const newTypeNames = new Set(newColumns.flatMap((c) => [c.typeName, ...c.aliases.map((a) => a.typeName)]));
   const counts = new Map<string, number>();
   for (const el of elements) {
     if (!newTypeNames.has(el.type)) {

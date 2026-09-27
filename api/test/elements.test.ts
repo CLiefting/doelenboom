@@ -132,4 +132,28 @@ describe('elements CRUD', () => {
     // Weer terugzetten voor eventuele volgende tests in dit bestand.
     await req('PUT', `/api/doelenbomen/${doelenboomId}`, { token: adminToken, body: { name: 'Testboom', readOnly: false } });
   });
+
+  it('een alias-typenaam (DOEL-56) is een geldig Type, een niet-bestaande naam nog steeds niet', async () => {
+    const boom = await req('POST', `/api/tenants/${tenantId}/doelenbomen`, {
+      token: adminToken, body: { slug: `${PREFIX}-alias-type`, name: 'Alias-type' },
+    });
+    const boomId = boom.body.id as number;
+    const cfg = (await req('GET', `/api/doelenbomen/${boomId}/column-config`, { token: adminToken })).body.columns;
+    const withAlias = cfg.map((c: any) =>
+      c.typeName === 'Project' ? { ...c, aliases: [{ typeName: 'Project 1', color: '#FF0000' }] } : c
+    );
+    const put = await req('PUT', `/api/doelenbomen/${boomId}/column-config`, { token: adminToken, body: { columns: withAlias } });
+    assert.equal(put.status, 200);
+
+    const created = await req('POST', `/api/doelenbomen/${boomId}/elements`, {
+      token: adminToken, body: { code: 'PA1', type: 'Project 1', name: 'Alias-element' },
+    });
+    assert.equal(created.status, 201);
+    assert.equal(created.body.type, 'Project 1');
+
+    const stillRejected = await req('POST', `/api/doelenbomen/${boomId}/elements`, {
+      token: adminToken, body: { code: 'X1', type: 'Niet-bestaand-type', name: 'x' },
+    });
+    assert.equal(stillRejected.status, 400);
+  });
 });

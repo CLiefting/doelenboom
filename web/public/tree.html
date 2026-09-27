@@ -2173,17 +2173,54 @@ function runApp(data) {
   for (let i = 0; i < COLUMNS.length - 1; i++) {
     COL_ARROWS.push({ from: COLUMNS[i].typeName, to: COLUMNS[i + 1].typeName, label: COLUMNS[i].relationLabelToNext || '' });
   }
+  // Aliassen (DOEL-56, zie api/src/columnConfig.ts): een kolom kan naast haar
+  // eigen typeName ook aliassen hebben — extra, zelfstandig te kiezen
+  // elementtypen die in DEZELFDE kolom getoond worden, elk met een optionele
+  // eigen kleur. TYPE_TO_COLUMN vertaalt élk geldig elementtype (kolom-eigen
+  // óf alias) terug naar zijn kolom-object, zodat kolomindeling/project-rol/
+  // titel/subtitle overal via één opzoeking lopen i.p.v. losse aliaslogica op
+  // elke plek. ALIAS_COLOR geeft de eigen kleur van een alias-type, alleen
+  // als die gezet is — colorForType() hieronder is de ene plek die daar
+  // rekening mee houdt (eigen kleur, anders de kolomkleur).
+  const TYPE_TO_COLUMN = {};
+  const ALIAS_COLOR = {};
+  COLUMNS.forEach((c) => {
+    TYPE_TO_COLUMN[c.typeName] = c;
+    (c.aliases || []).forEach((a) => {
+      TYPE_TO_COLUMN[a.typeName] = c;
+      if (a.color) ALIAS_COLOR[a.typeName] = a.color;
+    });
+  });
+  function colorForType(type) {
+    return ALIAS_COLOR[type] || (TYPE_TO_COLUMN[type] || {}).color || '#B5BAC2';
+  }
   // De kolom met isProjectRole=true (precies één, zie validateColumnsInput) —
   // vervangt de vroegere harde d.type === 'Project'-vergelijkingen overal
   // waar de projectkaart/planning-items/tijdlijnenoverzicht een element als
-  // "project" moeten herkennen, ongeacht hoe die kolom nu heet.
+  // "project" moeten herkennen, ongeacht hoe die kolom nu heet. isProjectType()
+  // resolvet daarbij ook een alias-type (bv. "Project 1") naar zijn kolom, zodat
+  // een aliaselement van de project-kolom net zo goed als project telt — puur
+  // de kleur wijkt eventueel af (zie colorForType hierboven). PROJECT_ROLE_TYPE
+  // zelf blijft bestaan voor de paar plekken die specifiek de kolomkleur/titel
+  // van "de" projectkolom nodig hebben (ongeacht welk aliaselement het is).
   const PROJECT_ROLE_TYPE = (COLUMNS.find((c) => c.isProjectRole) || {}).typeName || null;
+  function isProjectType(type) {
+    return !!type && (TYPE_TO_COLUMN[type] || {}).isProjectRole === true;
+  }
 
   // De twee <select>-velden met "Type" (nieuw/bewerk-element-formulier en
   // nieuwe-relatie-formulier) stonden voorheen met de 8 standaardtypes vast
   // in de HTML — nu gevuld vanuit COLUMNS, zodat een tenant met een eigen
   // kolommenconfiguratie ook echt alleen de eigen types ziet/kan kiezen.
-  const typeOptionsHtml = COLUMNS.map((c) => '<option value="' + escapeHtml(c.typeName) + '">' + escapeHtml(c.typeName) + '</option>').join('');
+  // Aliassen staan er als optgroup direct onder hun basistype bij (DOEL-56),
+  // zodat je bij het aanmaken/bewerken van een element ook een alias kunt
+  // kiezen — ze tonen in dezelfde kolom als hun basistype, met hun eigen kleur.
+  const typeOptionsHtml = COLUMNS.map((c) => {
+    const own = '<option value="' + escapeHtml(c.typeName) + '">' + escapeHtml(c.typeName) + '</option>';
+    if (!c.aliases || !c.aliases.length) return own;
+    const aliasOptions = c.aliases.map((a) => '<option value="' + escapeHtml(a.typeName) + '">' + escapeHtml(a.typeName) + '</option>').join('');
+    return own + aliasOptions;
+  }).join('');
   const elementFieldTypeEl = document.getElementById('element-field-type');
   if (elementFieldTypeEl) elementFieldTypeEl.innerHTML = typeOptionsHtml;
   const edgeFieldOtherTypeEl = document.getElementById('edge-field-other-type');
@@ -3142,7 +3179,7 @@ function runApp(data) {
   // toelichting bij project_status.updated_at in db/init.sql.
   function staleAgeDays(code) {
     const d = DETAILS[code];
-    if (!d || !PROJECT_ROLE_TYPE || d.type !== PROJECT_ROLE_TYPE) return null;
+    if (!d || !isProjectType(d.type)) return null;
     const ps = PROJECT_STATUS[code];
     const updatedAt = ps && ps.updatedAt;
     if (!updatedAt) return Infinity;
@@ -3181,9 +3218,12 @@ function runApp(data) {
   function computeColumnSummary(typeName) {
     const col = COLUMNS.find((c) => c.typeName === typeName);
     if (!col) return null;
+    // DOEL-56: een alias-element (bv. "Project 1") hoort net zo goed bij déze
+    // kolomsamenvatting als een element met het kolom-eigen type zelf — vandaar
+    // via TYPE_TO_COLUMN resolven i.p.v. exact op typeName vergelijken.
     const items = Object.keys(DETAILS)
       .map((id) => DETAILS[id])
-      .filter((d) => d.type === typeName)
+      .filter((d) => (TYPE_TO_COLUMN[d.type] || {}).typeName === typeName)
       .sort((a, b) => (a.code || '').localeCompare(b.code || '', 'nl'));
 
     const groupsMap = new Map();
@@ -4381,7 +4421,7 @@ function runApp(data) {
   // Klikken op een rij springt terug naar de boom, gefocust op dat project
   // (enterFocus), net als dubbelklikken op de node zelf.
   function renderTimelinesView() {
-    const allProjectIds = Object.keys(DETAILS).filter((id) => DETAILS[id].type === PROJECT_ROLE_TYPE);
+    const allProjectIds = Object.keys(DETAILS).filter((id) => isProjectType(DETAILS[id].type));
     if (!allProjectIds.length) {
       timelinesViewEl.innerHTML = '<div class="timelines-view-empty">Geen projecten gevonden in deze doelenboom.</div>';
       return;
@@ -4479,7 +4519,7 @@ function runApp(data) {
         statusHtml = '<div class="timelines-gantt-status" style="color:' + col + '">&#9679; ' + titleCase(ps.projectstatus) + '</div>';
       }
       return '<div class="timelines-gantt-label-main">' +
-        '<span class="dp-code" style="background:' + COL_COLORS[PROJECT_ROLE_TYPE] + '">' + escapeHtml(d.code) + '</span>' +
+        '<span class="dp-code" style="background:' + colorForType(d.type) + '">' + escapeHtml(d.code) + '</span>' +
         '<span class="pp-name">' + escapeHtml(d.name) + '</span>' +
       '</div>' + statusHtml;
     }
@@ -4863,7 +4903,7 @@ function runApp(data) {
 
   function renderProjectPanel(id, color) {
     const d = DETAILS[id];
-    if (!d || d.type !== PROJECT_ROLE_TYPE) {
+    if (!d || !isProjectType(d.type)) {
       projectPanelEl.classList.remove('visible');
       projectPanelEl.innerHTML = '';
       // Geen project (meer) open — "Project exporteren/importeren als Excel"
@@ -4924,7 +4964,7 @@ function runApp(data) {
     // in dit algemene detailpaneel is dan overbodige duplicatie. Voor alle
     // andere elementtypen (die geen projectkaart hebben) blijft dit de enige
     // plek om ze te beheren.
-    const isProject = d.type === PROJECT_ROLE_TYPE;
+    const isProject = isProjectType(d.type);
     // d.code/d.type/d.name/d.desc komen rechtstreeks uit element-data
     // (user-controlled) — SEC-001: allemaal via escapeHtml, ook al waren
     // code/type hier voorheen (in tegenstelling tot elders in dit bestand)
@@ -8706,13 +8746,27 @@ function nodeInnerHtml(col, idx, total, el) {
 }
 
 function buildColumnsHtml(details, columns) {
+  // DOEL-56: een alias-type (bv. "Project 1", zie col.aliases) hoort in
+  // dezelfde kolom als zijn basistype, met zijn eigen kleur als die gezet is
+  // (anders de kolomkleur). aliasToCol vertaalt elk alias-type terug naar zijn
+  // kolom-object; aliasColor geeft de eigen kleur, alleen als die gezet is.
+  const aliasToCol = {};
+  const aliasColor = {};
+  columns.forEach((c) => {
+    (c.aliases || []).forEach((a) => {
+      aliasToCol[a.typeName] = c;
+      if (a.color) aliasColor[a.typeName] = a.color;
+    });
+  });
+
   const byCol = {};
   columns.forEach((c) => { byCol[c.typeName] = []; });
   let unknownTypeCount = 0;
   Object.keys(details).forEach((id) => {
     const d = details[id];
-    if (!byCol[d.type]) { unknownTypeCount += 1; return; } // onbekend type: overslaan, niet gokken
-    byCol[d.type].push(d);
+    const col = byCol[d.type] ? d.type : (aliasToCol[d.type] || {}).typeName;
+    if (!col || !byCol[col]) { unknownTypeCount += 1; return; } // onbekend type: overslaan, niet gokken
+    byCol[col].push(d);
   });
   if (unknownTypeCount) {
     console.warn('[doelenboom] ' + unknownTypeCount + ' element(en) met een onbekend/niet-golden-thread Type overgeslagen.');
@@ -8721,7 +8775,7 @@ function buildColumnsHtml(details, columns) {
   return columns.map((col, idx) => {
     const fontSize = col.nodeFontSize || 8;
     const nodesHtml = byCol[col.typeName].map((d) =>
-      '<div class="node" data-id="' + escapeHtml(d.code) + '" style="background:' + col.color +
+      '<div class="node" data-id="' + escapeHtml(d.code) + '" style="background:' + (aliasColor[d.type] || col.color) +
       '; color:#FFFFFF; font-size:' + fontSize + 'px;">' + nodeInnerHtml(col, idx, columns.length, d) + '</div>'
     ).join('');
     const narrowCls = col.isNarrow ? ' narrow' : '';

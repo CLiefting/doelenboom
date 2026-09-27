@@ -10,6 +10,16 @@ import { pool } from './db.js';
 // door routes/columnConfig.ts, routes/tenants.ts (nieuwe tenant), en
 // routes/doelenbomen.ts (nieuwe/gedupliceerde doelenboom).
 
+// Een alias (zie DOEL-56, docs/kolommen-configuratie-ontwerp.md): een extra,
+// zelfstandig te kiezen elementtype dat in dezelfde kolom wordt getoond als
+// zijn basistype (bv. "Project 1"/"Project 2" als alias van "Project"), met
+// een optionele eigen kleur. color = null betekent: val terug op de
+// kolomkleur (columns.color) — zie resolveColor() hieronder.
+export interface ColumnAlias {
+  typeName: string;
+  color: string | null;
+}
+
 export interface ColumnDef {
   id: number;
   position: number;
@@ -21,11 +31,43 @@ export interface ColumnDef {
   nodeFontSize: number | null;
   isProjectRole: boolean;
   relationLabelToNext: string | null;
+  aliases: ColumnAlias[];
 }
 
 const COLUMN_SELECT_FIELDS =
   'id, position, type_name as "typeName", title, subtitle, color, is_narrow as "isNarrow", ' +
-  'node_font_size as "nodeFontSize", is_project_role as "isProjectRole", relation_label_to_next as "relationLabelToNext"';
+  'node_font_size as "nodeFontSize", is_project_role as "isProjectRole", relation_label_to_next as "relationLabelToNext", ' +
+  'aliases';
+
+// Elk geldig elementtype van een kolommenlijst: de kolommen zelf én hun
+// aliassen. Gebruikt door routes/elements.ts en routes/imports.ts, die
+// voorheen allebei zelf `columns.map(c => c.typeName)` opbouwden (dus zonder
+// aliassen als geldig type te accepteren) — nu één gedeelde plek.
+export function allValidTypeNames(columns: ColumnDef[]): string[] {
+  return columns.flatMap((c) => [c.typeName, ...c.aliases.map((a) => a.typeName)]);
+}
+
+// Kolom die bij een gegeven elementtype hoort — rechtstreeks (typeName) of via
+// een alias. Geeft null als het type nergens (meer) bestaat. Gebruikt waar de
+// server het basistype van een element moet kennen (vooralsnog nergens, maar
+// aliassen zijn zo ontworpen dat toekomstige backend-logica die op het
+// basistype moet filteren/rekenen dit één keer kan opzoeken i.p.v. zelf de
+// aliaslijsten te doorzoeken).
+export function columnForTypeName(columns: ColumnDef[], typeName: string): ColumnDef | null {
+  for (const c of columns) {
+    if (c.typeName === typeName) return c;
+    if (c.aliases.some((a) => a.typeName === typeName)) return c;
+  }
+  return null;
+}
+
+// De kleur waarmee een element van dit type getekend moet worden: de eigen
+// kleur van de alias (indien gezet), anders de kolomkleur. Voor een
+// niet-alias type (typeName === column.typeName) is dit altijd column.color.
+export function resolveColor(column: ColumnDef, typeName: string): string {
+  const alias = column.aliases.find((a) => a.typeName === typeName);
+  return alias?.color || column.color;
+}
 
 // De 8 kolommen die tot nu toe hardcoded in web/public/tree.html stonden
 // (COL_LABELS/COL_COLORS/COL_ARROWS/COLUMN_HINTS/TYPE_TO_COLKEY/NARROW_COLS)
@@ -37,14 +79,14 @@ const COLUMN_SELECT_FIELDS =
 // beide de ander als afhankelijkheid zou moeten inladen).
 export function standardColumns(tenantName: string): Omit<ColumnDef, 'id'>[] {
   return [
-    { position: 0, typeName: 'Project', title: 'Project', subtitle: 'Welke projecten ontwikkelen deze capability?', color: '#3E6FA6', isNarrow: true, nodeFontSize: null, isProjectRole: true, relationLabelToNext: 'ontwikkelt' },
-    { position: 1, typeName: 'Capability', title: 'Capability', subtitle: 'Welk vermogen wordt hiermee opgebouwd?', color: '#6B4C8A', isNarrow: true, nodeFontSize: null, isProjectRole: false, relationLabelToNext: 'ondersteunt' },
-    { position: 2, typeName: 'Operationele benefit', title: 'Operationele benefit', subtitle: 'Welke operationele verbetering levert dit op? Wat verandert er in de dagelijkse uitvoering?', color: '#C05A2C', isNarrow: false, nodeFontSize: null, isProjectRole: false, relationLabelToNext: 'realiseert' },
-    { position: 3, typeName: 'Sub-benefit', title: `Sub-benefit ${tenantName}`, subtitle: 'Welk direct effect ontstaat hierdoor?', color: '#B8862E', isNarrow: false, nodeFontSize: null, isProjectRole: false, relationLabelToNext: 'versterkt' },
-    { position: 4, typeName: 'Programmabaat', title: `Programmabaat ${tenantName}`, subtitle: `Welke waarde levert dit aan ${tenantName}?`, color: '#2E7D5B', isNarrow: false, nodeFontSize: null, isProjectRole: false, relationLabelToNext: 'draagt bij aan' },
-    { position: 5, typeName: 'Strategische benefit', title: `Strategisch benefit ${tenantName}`, subtitle: `Wat betekent dit voor ${tenantName}?`, color: '#8FAADC', isNarrow: false, nodeFontSize: 10, isProjectRole: false, relationLabelToNext: 'ondersteunt' },
-    { position: 6, typeName: 'Strategisch doel', title: 'Strategisch doel', subtitle: 'Welk doel ondersteunt dit?', color: '#2F5597', isNarrow: false, nodeFontSize: 12, isProjectRole: false, relationLabelToNext: 'geeft invulling aan' },
-    { position: 7, typeName: 'Missie', title: `Missie ${tenantName}`, subtitle: 'Waarom doen we dit uiteindelijk?', color: '#203864', isNarrow: false, nodeFontSize: 10, isProjectRole: false, relationLabelToNext: null },
+    { position: 0, typeName: 'Project', title: 'Project', subtitle: 'Welke projecten ontwikkelen deze capability?', color: '#3E6FA6', isNarrow: true, nodeFontSize: null, isProjectRole: true, relationLabelToNext: 'ontwikkelt', aliases: [] },
+    { position: 1, typeName: 'Capability', title: 'Capability', subtitle: 'Welk vermogen wordt hiermee opgebouwd?', color: '#6B4C8A', isNarrow: true, nodeFontSize: null, isProjectRole: false, relationLabelToNext: 'ondersteunt', aliases: [] },
+    { position: 2, typeName: 'Operationele benefit', title: 'Operationele benefit', subtitle: 'Welke operationele verbetering levert dit op? Wat verandert er in de dagelijkse uitvoering?', color: '#C05A2C', isNarrow: false, nodeFontSize: null, isProjectRole: false, relationLabelToNext: 'realiseert', aliases: [] },
+    { position: 3, typeName: 'Sub-benefit', title: `Sub-benefit ${tenantName}`, subtitle: 'Welk direct effect ontstaat hierdoor?', color: '#B8862E', isNarrow: false, nodeFontSize: null, isProjectRole: false, relationLabelToNext: 'versterkt', aliases: [] },
+    { position: 4, typeName: 'Programmabaat', title: `Programmabaat ${tenantName}`, subtitle: `Welke waarde levert dit aan ${tenantName}?`, color: '#2E7D5B', isNarrow: false, nodeFontSize: null, isProjectRole: false, relationLabelToNext: 'draagt bij aan', aliases: [] },
+    { position: 5, typeName: 'Strategische benefit', title: `Strategisch benefit ${tenantName}`, subtitle: `Wat betekent dit voor ${tenantName}?`, color: '#8FAADC', isNarrow: false, nodeFontSize: 10, isProjectRole: false, relationLabelToNext: 'ondersteunt', aliases: [] },
+    { position: 6, typeName: 'Strategisch doel', title: 'Strategisch doel', subtitle: 'Welk doel ondersteunt dit?', color: '#2F5597', isNarrow: false, nodeFontSize: 12, isProjectRole: false, relationLabelToNext: 'geeft invulling aan', aliases: [] },
+    { position: 7, typeName: 'Missie', title: `Missie ${tenantName}`, subtitle: 'Waarom doen we dit uiteindelijk?', color: '#203864', isNarrow: false, nodeFontSize: 10, isProjectRole: false, relationLabelToNext: null, aliases: [] },
   ];
 }
 
@@ -56,27 +98,27 @@ export async function insertColumns(client: PoolClient, columnConfigId: number, 
   for (const c of columns) {
     await client.query(
       `insert into columns
-         (column_config_id, position, type_name, title, subtitle, color, is_narrow, node_font_size, is_project_role, relation_label_to_next)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-      [columnConfigId, c.position, c.typeName, c.title, c.subtitle, c.color, c.isNarrow, c.nodeFontSize, c.isProjectRole, c.relationLabelToNext]
+         (column_config_id, position, type_name, title, subtitle, color, is_narrow, node_font_size, is_project_role, relation_label_to_next, aliases)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [columnConfigId, c.position, c.typeName, c.title, c.subtitle, c.color, c.isNarrow, c.nodeFontSize, c.isProjectRole, c.relationLabelToNext, JSON.stringify(c.aliases)]
     );
   }
 }
 
 async function copyColumnsBetweenConfigs(client: PoolClient, sourceConfigId: number, targetConfigId: number) {
   const source = await client.query(
-    `select position, type_name, title, subtitle, color, is_narrow, node_font_size, is_project_role, relation_label_to_next
+    `select position, type_name, title, subtitle, color, is_narrow, node_font_size, is_project_role, relation_label_to_next, aliases
      from columns where column_config_id = $1 order by position`,
     [sourceConfigId]
   );
   for (const r of source.rows) {
     await client.query(
       `insert into columns
-         (column_config_id, position, type_name, title, subtitle, color, is_narrow, node_font_size, is_project_role, relation_label_to_next)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+         (column_config_id, position, type_name, title, subtitle, color, is_narrow, node_font_size, is_project_role, relation_label_to_next, aliases)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
       [
         targetConfigId, r.position, r.type_name, r.title, r.subtitle, r.color,
-        r.is_narrow, r.node_font_size, r.is_project_role, r.relation_label_to_next,
+        r.is_narrow, r.node_font_size, r.is_project_role, r.relation_label_to_next, JSON.stringify(r.aliases),
       ]
     );
   }
@@ -183,6 +225,46 @@ export async function getTenantDefaultColumns(tenantId: number | string): Promis
 // Validatie van een nieuwe kolommenlijst (PUT-body van routes/columnConfig.ts),
 // gedeeld tussen de tenant-default- en doelenboom-variant. Geeft een lijst
 // foutmeldingen terug (leeg = geldig).
+// Valideert de aliaslijst van één kolom (raw.aliases, optioneel — ontbreekt
+// het veld, dan gewoon geen aliassen). seenTypeNames is de GEDEELDE set van
+// de hele PUT-body (alle kolom- én aliasnamen samen): een alias mag geen enkel
+// bestaand type overschaduwen, in welke kolom dan ook, om dezelfde reden als
+// bij kolom-typeName hieronder (elements.type is één platte, tenant-brede
+// naamruimte, zie routes/elements.ts validTypeNames()).
+function validateAliasesInput(
+  raw: unknown,
+  columnTypeName: string,
+  columnIdx: number,
+  seenTypeNames: Set<string>,
+  errors: string[]
+): ColumnAlias[] {
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw)) {
+    errors.push(`Kolom ${columnIdx + 1} ("${columnTypeName || '?'}"): aliassen moet een lijst zijn.`);
+    return [];
+  }
+  const aliases: ColumnAlias[] = [];
+  raw.forEach((rawAlias, aliasIdx) => {
+    const a = (rawAlias ?? {}) as Record<string, unknown>;
+    const typeName = typeof a.typeName === 'string' ? a.typeName.trim() : '';
+    const colorRaw = typeof a.color === 'string' ? a.color.trim() : '';
+    const color = colorRaw && /^#[0-9a-fA-F]{6}$/.test(colorRaw) ? colorRaw : null;
+
+    const where = `Kolom ${columnIdx + 1} ("${columnTypeName || '?'}"), alias ${aliasIdx + 1}`;
+    if (!typeName) {
+      errors.push(`${where}: type-naam is verplicht.`);
+    } else if (colorRaw && !color) {
+      errors.push(`${where} ("${typeName}"): kleur moet leeg zijn of een geldige hex-waarde (bv. #3E6FA6).`);
+    } else if (seenTypeNames.has(typeName)) {
+      errors.push(`Type-naam "${typeName}" (${where}) komt al voor als kolom of andere alias.`);
+    } else {
+      seenTypeNames.add(typeName);
+    }
+    aliases.push({ typeName, color });
+  });
+  return aliases;
+}
+
 export function validateColumnsInput(input: unknown): { errors: string[]; columns: Omit<ColumnDef, 'id'>[] } {
   const errors: string[] = [];
   if (!Array.isArray(input) || input.length === 0) {
@@ -211,7 +293,9 @@ export function validateColumnsInput(input: unknown): { errors: string[]; column
     if (typeName) seenTypeNames.add(typeName);
     if (isProjectRole) projectRoleCount += 1;
 
-    columns.push({ position: idx, typeName, title, subtitle, color, isNarrow, nodeFontSize, isProjectRole, relationLabelToNext });
+    const aliases = validateAliasesInput(c.aliases, typeName, idx, seenTypeNames, errors);
+
+    columns.push({ position: idx, typeName, title, subtitle, color, isNarrow, nodeFontSize, isProjectRole, relationLabelToNext, aliases });
   });
 
   if (projectRoleCount !== 1) {
@@ -242,7 +326,7 @@ export async function replaceColumns(
       `select distinct type from elements where doelenboom_id = $1`,
       [doelenboomIdForTypeCheck]
     );
-    const newTypeNames = new Set(columns.map((c) => c.typeName));
+    const newTypeNames = new Set(columns.flatMap((c) => [c.typeName, ...c.aliases.map((a) => a.typeName)]));
     const removedTypesStillInUse: string[] = [];
     for (const row of existingTypes.rows) {
       if (!newTypeNames.has(row.type)) removedTypesStillInUse.push(row.type);

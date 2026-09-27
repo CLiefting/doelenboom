@@ -269,4 +269,67 @@ describe('imports/exports (Excel round-trip via excel-service)', () => {
     assert.equal(importedDep.type, 'FS');
     assert.equal(importedDep.lagDays, 2);
   });
+
+  it('rondgang met een alias-type (DOEL-56): export (nieuw) neemt de alias mee in de Type-dropdown, import/publiceren accepteert die, geen "onbekend Type"', async (t) => {
+    if (!excelServiceReachable) return t.skip('excel-service niet bereikbaar — zie EXCEL_SERVICE_URL');
+
+    const boom = await req('POST', `/api/tenants/${tenantId}/doelenbomen`, {
+      token: adminToken, body: { slug: `${PREFIX}-alias-rondgang`, name: 'Alias-rondgang' },
+    });
+    const boomId = boom.body.id;
+    const seeded = await req('GET', `/api/doelenbomen/${boomId}/tree`, { token: adminToken });
+    for (const el of seeded.body.elements as { code: string }[]) {
+      await req('DELETE', `/api/doelenbomen/${boomId}/elements/${el.code}`, { token: adminToken });
+    }
+    const cfg = (await req('GET', `/api/doelenbomen/${boomId}/column-config`, { token: adminToken })).body.columns;
+    const withAlias = cfg.map((c: any) =>
+      c.typeName === 'Project' ? { ...c, aliases: [{ typeName: 'Project 1', color: '#FF0000' }] } : c
+    );
+    await req('PUT', `/api/doelenbomen/${boomId}/column-config`, { token: adminToken, body: { columns: withAlias } });
+    await req('POST', `/api/doelenbomen/${boomId}/elements`, {
+      token: adminToken, body: { code: 'PA1', type: 'Project 1', name: 'Alias-element' },
+    });
+
+    const exportRes = await rawReq('GET', `/api/doelenbomen/${boomId}/export?format=nieuw&mode=data`, { token: adminToken });
+    assert.equal(exportRes.status, 200);
+    const xlsxBuffer = await exportRes.arrayBuffer();
+
+    const target = await req('POST', `/api/tenants/${tenantId}/doelenbomen`, {
+      token: adminToken, body: { slug: `${PREFIX}-alias-rondgang-doel`, name: 'Alias-rondgang doel' },
+    });
+    const targetId = target.body.id;
+    // Doelboom moet dezelfde kolomconfiguratie (incl. alias) hebben als de
+    // bron — een import vervangt geen kolomconfiguratie, alleen de inhoud.
+    await req('PUT', `/api/doelenbomen/${targetId}/column-config`, { token: adminToken, body: { columns: withAlias } });
+    const targetSeeded = await req('GET', `/api/doelenbomen/${targetId}/tree`, { token: adminToken });
+    for (const el of targetSeeded.body.elements as { code: string }[]) {
+      await req('DELETE', `/api/doelenbomen/${targetId}/elements/${el.code}`, { token: adminToken });
+    }
+
+    const form = new FormData();
+    form.append('file', new Blob([xlsxBuffer]), 'export.xlsx');
+    const uploadRes = await fetch(`${getBaseUrl()}/api/doelenbomen/${targetId}/imports`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminToken}` },
+      body: form,
+    });
+    const upload = await uploadRes.json();
+    assert.equal(uploadRes.status, 201);
+    // 'warning' zou hier o.a. betekenen dat het alias-type als "onbekend Type"
+    // is overgeslagen (zie excel-service/app/parser.py) — precies de
+    // regressie die deze test moet vangen.
+    assert.equal(upload.status, 'ok', `verwachtte 'ok', kreeg '${upload.status}': ${JSON.stringify(upload.report)}`);
+
+    const publishRes = await fetch(`${getBaseUrl()}/api/imports/${upload.id}/publish`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    const publish = await publishRes.json();
+    assert.equal(publishRes.status, 200);
+    assert.equal(publish.status, 'published');
+
+    const importedTree = await req('GET', `/api/doelenbomen/${targetId}/tree`, { token: adminToken });
+    const importedAliasElement = (importedTree.body.elements as Array<{ code: string; type: string }>).find((e) => e.code === 'PA1');
+    assert.equal(importedAliasElement?.type, 'Project 1');
+  });
 });

@@ -243,7 +243,7 @@ class TestKolommenTab:
 
     HEADERS = [
         'Volgorde', 'Type', 'Titel', 'Ondertitel', 'Kleur', 'Smal',
-        'Projectrol', 'Label naar volgende kolom', 'Lettergrootte knoop',
+        'Projectrol', 'Label naar volgende kolom', 'Lettergrootte knoop', 'Aliassen',
     ]
 
     def test_template_oud_heeft_kolommen_tab_met_standaardkolommen(self):
@@ -273,7 +273,7 @@ class TestKolommenTab:
         wb = load(build_data_workbook('nieuw', tree))
         ws = wb['Kolommen']
         rows = [row for row in ws.iter_rows(min_row=2, values_only=True)]
-        assert rows[0] == (0, 'Initiatief', 'Het initiatief', 'Ondertitel 1', '#3E6FA6', 'Ja', 'Ja', 'draagt bij aan', 12)
+        assert rows[0] == (0, 'Initiatief', 'Het initiatief', 'Ondertitel 1', '#3E6FA6', 'Ja', 'Ja', 'draagt bij aan', 12, None)
         assert rows[1][5] == 'Nee'  # isNarrow default False -> 'Nee'
         assert rows[1][6] == 'Nee'  # isProjectRole False voor de tweede kolom
         # relationLabelToNext/nodeFontSize None -> geschreven als lege string,
@@ -281,6 +281,44 @@ class TestKolommenTab:
         # (zelfde openpyxl-gedrag als elders in deze testsuite, geen bug).
         assert rows[1][7] is None
         assert rows[1][8] is None
+        assert rows[1][9] is None  # geen aliassen -> lege string, ook None na herinladen
+
+
+class TestAliassen:
+    """DOEL-56: een kolom kan aliassen hebben (extra, zelfstandig kiesbare
+    elementtypen die in dezelfde kolom getoond worden, met een optionele eigen
+    kleur) — die moeten meetellen in de Type-dropdown (anders zou een
+    alias-element bij import als onbekend type gelden) en zichtbaar zijn in de
+    documentaire Kolommen-tab."""
+
+    def test_aliassen_staan_in_de_type_dropdown_direct_na_hun_kolom(self):
+        columns = make_columns(['Project', 'Capability'])
+        columns[0]['aliases'] = [
+            {'typeName': 'Project 1', 'color': '#FF0000'},
+            {'typeName': 'Project 2', 'color': None},
+        ]
+        wb = load(build_template_workbook('nieuw', columns=columns))
+        val_ws = wb['_Validatielijsten']
+        type_col_values = [row[0] for row in val_ws.iter_rows(min_row=2, max_col=1, values_only=True) if row[0]]
+        assert type_col_values == ['Project', 'Project 1', 'Project 2', 'Capability']
+
+    def test_zonder_aliassen_verandert_de_type_dropdown_niet(self):
+        columns = make_columns(['Project', 'Capability'])
+        wb = load(build_template_workbook('nieuw', columns=columns))
+        val_ws = wb['_Validatielijsten']
+        type_col_values = [row[0] for row in val_ws.iter_rows(min_row=2, max_col=1, values_only=True) if row[0]]
+        assert type_col_values == ['Project', 'Capability']
+
+    def test_kolommen_tab_toont_aliassen_met_eigen_kleur_of_zonder(self):
+        columns = make_columns(['Project'])
+        columns[0]['aliases'] = [
+            {'typeName': 'Project 1', 'color': '#FF0000'},
+            {'typeName': 'Project 2', 'color': None},
+        ]
+        wb = load(build_template_workbook('nieuw', columns=columns))
+        ws = wb['Kolommen']
+        rows = [row for row in ws.iter_rows(min_row=2, values_only=True)]
+        assert rows[0][9] == 'Project 1 (#FF0000), Project 2'
 
     def test_kolommen_tab_gesorteerd_op_position_ongeacht_invoervolgorde(self):
         columns = make_columns(['A', 'B', 'C'])

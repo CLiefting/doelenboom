@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { pool } from '../db.js';
 import { requireAuth } from '../auth.js';
 import { requireWritableDoelenboom } from '../rbac.js';
-import { getColumnsForDoelenboom } from '../columnConfig.js';
+import { getColumnsForDoelenboom, allValidTypeNames } from '../columnConfig.js';
 import { sendServerError } from '../errors.js';
 
 // CRUD voor losse elementen (fase 1 van de CRUD-uitbreiding — zie ook de latere
@@ -28,10 +28,12 @@ const requireEditor = requireWritableDoelenboom('id', 'editor');
 // déze doelenboom — niet meer van een vaste, globale lijst (de oude
 // check-constraint op elements.type is daarom ook verwijderd, zie
 // db/migrations/0001_column_configs.sql). Vandaar hier een async lookup i.p.v.
-// een module-level constante.
+// een module-level constante. Sinds DOEL-56 telt een alias-type (zie
+// columnConfig.ts) ook mee als geldig — allValidTypeNames() geeft kolommen én
+// hun aliassen samen terug.
 async function validTypeNames(doelenboomId: string): Promise<string[]> {
   const columns = await getColumnsForDoelenboom(doelenboomId);
-  return columns.map((c) => c.typeName);
+  return allValidTypeNames(columns);
 }
 
 type ElementInput = {

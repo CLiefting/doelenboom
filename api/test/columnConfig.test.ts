@@ -267,4 +267,121 @@ describe('kolomconfiguratie', () => {
     const dupCfg = await req('GET', `/api/doelenbomen/${dup.body.id}/column-config`, { token: adminToken });
     assert.deepEqual(dupCfg.body.columns.map((c: any) => c.typeName), ['EigenTypeVanBron']);
   });
+
+  describe('aliassen (DOEL-56)', () => {
+    // Eigen doelenboom per test hieronder (i.p.v. de gedeelde doelenboomId),
+    // want deze tests wijzigen allemaal de kolomconfiguratie en mogen elkaar
+    // niet raken.
+    async function freshBoom(slug: string): Promise<number> {
+      const boom = await req('POST', `/api/tenants/${tenantId}/doelenbomen`, {
+        token: adminToken, body: { slug: `${PREFIX}-${slug}`, name: slug },
+      });
+      const boomId = boom.body.id as number;
+      // Automatisch gezaaide voorbeeldelementen weg, anders blokkeert de
+      // kolomconfig-PUT hieronder (zie eerdere tests in dit bestand).
+      const seeded = await req('GET', `/api/doelenbomen/${boomId}/tree`, { token: adminToken });
+      for (const el of seeded.body.elements as { code: string }[]) {
+        await req('DELETE', `/api/doelenbomen/${boomId}/elements/${el.code}`, { token: adminToken });
+      }
+      return boomId;
+    }
+
+    const baseCol = { title: 'Project', subtitle: '', color: '#3E6FA6', isNarrow: false, nodeFontSize: null, isProjectRole: true, relationLabelToNext: null };
+
+    it('kolom met aliassen opslaan en teruglezen: eigen kleur of terugval op de kolomkleur', async () => {
+      const boomId = await freshBoom('alias-crud');
+      const put = await req('PUT', `/api/doelenbomen/${boomId}/column-config`, {
+        token: adminToken,
+        body: { columns: [{
+          ...baseCol, typeName: 'Project',
+          aliases: [{ typeName: 'Project 1', color: '#FF0000' }, { typeName: 'Project 2', color: null }],
+        }] },
+      });
+      assert.equal(put.status, 200);
+      assert.deepEqual(put.body.columns[0].aliases, [
+        { typeName: 'Project 1', color: '#FF0000' },
+        { typeName: 'Project 2', color: null },
+      ]);
+
+      const get = await req('GET', `/api/doelenbomen/${boomId}/column-config`, { token: adminToken });
+      assert.deepEqual(get.body.columns[0].aliases, [
+        { typeName: 'Project 1', color: '#FF0000' },
+        { typeName: 'Project 2', color: null },
+      ]);
+    });
+
+    it('kolom zonder aliases-veld in de PUT-body krijgt gewoon een lege aliaslijst (achterwaarts compatibel)', async () => {
+      const boomId = await freshBoom('alias-default');
+      const put = await req('PUT', `/api/doelenbomen/${boomId}/column-config`, {
+        token: adminToken, body: { columns: [{ ...baseCol, typeName: 'Project' }] },
+      });
+      assert.equal(put.status, 200);
+      assert.deepEqual(put.body.columns[0].aliases, []);
+    });
+
+    it('validatie: een alias-typenaam mag niet botsen met een bestaande kolom of andere alias', async () => {
+      const boomId = await freshBoom('alias-botsing');
+      const clashesWithColumn = await req('PUT', `/api/doelenbomen/${boomId}/column-config`, {
+        token: adminToken,
+        body: { columns: [
+          { ...baseCol, typeName: 'Project', aliases: [{ typeName: 'Capability', color: null }] },
+          { ...baseCol, typeName: 'Capability', isProjectRole: false },
+        ] },
+      });
+      assert.equal(clashesWithColumn.status, 400);
+
+      const clashesWithOtherAlias = await req('PUT', `/api/doelenbomen/${boomId}/column-config`, {
+        token: adminToken,
+        body: { columns: [
+          { ...baseCol, typeName: 'Project', aliases: [{ typeName: 'X', color: null }] },
+          { ...baseCol, typeName: 'Capability', isProjectRole: false, aliases: [{ typeName: 'X', color: null }] },
+        ] },
+      });
+      assert.equal(clashesWithOtherAlias.status, 400);
+    });
+
+    it('validatie: aliaskleur moet leeg zijn of een geldige hex-waarde', async () => {
+      const boomId = await freshBoom('alias-kleur');
+      const badColor = await req('PUT', `/api/doelenbomen/${boomId}/column-config`, {
+        token: adminToken,
+        body: { columns: [{ ...baseCol, typeName: 'Project', aliases: [{ typeName: 'Project 1', color: 'geen-hex' }] }] },
+      });
+      assert.equal(badColor.status, 400);
+
+      const emptyColorOk = await req('PUT', `/api/doelenbomen/${boomId}/column-config`, {
+        token: adminToken,
+        body: { columns: [{ ...baseCol, typeName: 'Project', aliases: [{ typeName: 'Project 1', color: '' }] }] },
+      });
+      assert.equal(emptyColorOk.status, 200);
+      assert.equal(emptyColorOk.body.columns[0].aliases[0].color, null);
+    });
+
+    it('een element mag een alias-type als Type hebben; de alias kan pas verwijderd worden nadat dat element weg is', async () => {
+      const boomId = await freshBoom('alias-in-gebruik');
+      const withAlias = await req('PUT', `/api/doelenbomen/${boomId}/column-config`, {
+        token: adminToken,
+        body: { columns: [{ ...baseCol, typeName: 'Project', aliases: [{ typeName: 'Project 1', color: '#FF0000' }] }] },
+      });
+      assert.equal(withAlias.status, 200);
+
+      const created = await req('POST', `/api/doelenbomen/${boomId}/elements`, {
+        token: adminToken, body: { code: 'PA1', type: 'Project 1', name: 'Alias-element' },
+      });
+      assert.equal(created.status, 201);
+
+      const withoutAlias = await req('PUT', `/api/doelenbomen/${boomId}/column-config`, {
+        token: adminToken, body: { columns: [{ ...baseCol, typeName: 'Project' }] },
+      });
+      assert.equal(withoutAlias.status, 409);
+      assert.match(withoutAlias.body.error, /Project 1/);
+
+      const del = await req('DELETE', `/api/doelenbomen/${boomId}/elements/PA1`, { token: adminToken });
+      assert.equal(del.status, 204);
+
+      const nowAllowed = await req('PUT', `/api/doelenbomen/${boomId}/column-config`, {
+        token: adminToken, body: { columns: [{ ...baseCol, typeName: 'Project' }] },
+      });
+      assert.equal(nowAllowed.status, 200);
+    });
+  });
 });
