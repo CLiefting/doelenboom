@@ -12,6 +12,9 @@
 #   doelenboom -local -restart            # lokale stack herbouwen (gewijzigde images) en herstarten
 #   doelenboom -local -rebuild -restart   # idem, én eerst alle (nieuwe) db/migrations/*.sql toepassen
 #   doelenboom -local -stop               # lokale containers stoppen (database-data blijft bewaard)
+#   (bij -restart/-stop: Docker Desktop wordt zo nodig automatisch gestart, zie DOEL-57)
+#   doelenboom -local -open               # browser openen op http://localhost:5173 (app draait al)
+#   doelenboom -local -restart -open      # herbouwen/herstarten, en daarna meteen de browser openen
 #   doelenboom -zip                       # ~/Downloads/db_backend.zip (api) en db_frontend.zip (web) maken,
 #                                         # zonder node_modules, .env en .DS_Store
 #   doelenboom -zip -d                    # die twee zips weer verwijderen
@@ -45,6 +48,7 @@ ENVIRONMENT=""
 ACTION=""
 REBUILD_SCHEMA=""
 DELETE_ZIPS=""
+OPEN_BROWSER=""
 
 for arg in "$@"; do
   case "$arg" in
@@ -55,9 +59,10 @@ for arg in "$@"; do
     -zip) ACTION="zip" ;;
     -d) DELETE_ZIPS="1" ;;
     -rebuild) REBUILD_SCHEMA="1" ;;
+    -open) OPEN_BROWSER="1" ;;
     *)
       echo "Onbekende optie: $arg" >&2
-      echo "Bekende opties: -local | -prod, -restart, -stop, -rebuild, -zip [-d]" >&2
+      echo "Bekende opties: -local | -prod, -restart, -stop, -open, -rebuild, -zip [-d]" >&2
       exit 1
       ;;
   esac
@@ -72,8 +77,13 @@ if [ "$ACTION" != "zip" ] && [ -z "$ENVIRONMENT" ]; then
   echo "Geef een omgeving op: -local of -prod" >&2
   exit 1
 fi
-if [ -z "$ACTION" ]; then
-  echo "Geef een actie op: -restart, -stop of -zip" >&2
+# DOEL-58: -open is een los modifier-flag (zelfde patroon als -rebuild/-d), geen
+# eigen ACTION — zo werkt zowel "doelenboom -local -open" (app draait al, alleen
+# een tabblad openen) als "doelenboom -local -restart -open" (herbouwen/herstarten
+# en meteen erna de browser openen). Daarom telt een gezette -open hier ook mee
+# als "er is iets te doen", naast de bestaande ACTION-opties.
+if [ -z "$ACTION" ] && [ -z "$OPEN_BROWSER" ]; then
+  echo "Geef een actie op: -restart, -stop, -open of -zip" >&2
   exit 1
 fi
 if [ "$ACTION" != "restart" ] && [ -n "$REBUILD_SCHEMA" ]; then
@@ -84,6 +94,14 @@ if [ "$ACTION" = "zip" ] && [ -n "$ENVIRONMENT" ]; then
   echo "-zip werkt zonder -local of -prod." >&2
   exit 1
 fi
+if [ -n "$OPEN_BROWSER" ] && [ "$ENVIRONMENT" != "local" ]; then
+  echo "-open werkt alleen met -local (opent http://localhost:5173)." >&2
+  exit 1
+fi
+if [ "$ACTION" = "stop" ] && [ -n "$OPEN_BROWSER" ]; then
+  echo "-open na -stop heeft geen zin (de app staat dan juist stil)." >&2
+  exit 1
+fi
 
 if [ "$ENVIRONMENT" = "prod" ]; then
   # Bewust nog niet geautomatiseerd: een productie-restart/-deploy raakt een
@@ -92,6 +110,49 @@ if [ "$ENVIRONMENT" = "prod" ]; then
   # één commando dat per ongeluk te makkelijk te herhalen is.
   echo "Productie-acties zijn nog niet geautomatiseerd in dit script — volg deploy/README.md." >&2
   exit 1
+fi
+
+# DOEL-57: zonder dit gaf -restart/-stop een cryptische
+# "failed to connect to the docker API at unix:///.../docker.sock ..."
+# als Docker Desktop nog niet (volledig) opgestart was — geen Docker-fout,
+# gewoon nog niet aan. `docker info` is de goedkope, snelle check die zowel
+# de CLI als de daemon dekt; als die al slaagt doen we verder niets. Anders
+# starten we Docker Desktop zelf (macOS: `open -a Docker`) en wachten we tot
+# de daemon reageert, met een harde, uitlegbare timeout i.p.v. voor altijd
+# te blijven hangen als het opstarten om wat voor reden dan ook vastloopt.
+# Overschrijfbaar via DOELENBOOM_DOCKER_TIMEOUT, zelfde patroon als
+# DOELENBOOM_DIR hierboven.
+DOCKER_START_TIMEOUT="${DOELENBOOM_DOCKER_TIMEOUT:-90}"
+
+ensure_docker_running() {
+  if docker info >/dev/null 2>&1; then
+    return 0
+  fi
+
+  echo "==> Docker Desktop lijkt niet te draaien, wordt gestart..."
+  if ! command -v open >/dev/null 2>&1; then
+    echo "Kan Docker Desktop niet automatisch starten ('open' ontbreekt — dit is macOS-only)." >&2
+    echo "Start Docker Desktop handmatig en probeer het opnieuw." >&2
+    exit 1
+  fi
+  open -a Docker
+
+  local waited=0
+  until docker info >/dev/null 2>&1; do
+    if [ "$waited" -ge "$DOCKER_START_TIMEOUT" ]; then
+      echo "Docker Desktop is na ${DOCKER_START_TIMEOUT}s nog niet bereikbaar." >&2
+      echo "Open Docker Desktop, controleer of hij goed opstart, en probeer het daarna opnieuw." >&2
+      echo "(Langere timeout: DOELENBOOM_DOCKER_TIMEOUT=180 doelenboom ...)" >&2
+      exit 1
+    fi
+    sleep 2
+    waited=$((waited + 2))
+  done
+  echo "    Docker Desktop draait (na ${waited}s)."
+}
+
+if [ "$ACTION" = "restart" ] || [ "$ACTION" = "stop" ]; then
+  ensure_docker_running
 fi
 
 # Alle db/migrations/*.sql tegen de lopende (of net gestarte) db-container
@@ -187,6 +248,22 @@ case "$ACTION" in
     fi
     ;;
 esac
+
+# DOEL-58: na een eventuele -restart (of als -open de enige "actie" was, zie
+# hierboven) de browser openen op de lokale web-dev-server (zie README, "Open
+# http://localhost:5173"). Geen wachtlus zoals ensure_docker_running: dit is
+# puur een gemakscommando, en een browser die een paar seconden moet
+# verversen tot vite/nginx klaar is, is geen fout om voor te stoppen.
+if [ -n "$OPEN_BROWSER" ]; then
+  APP_URL="http://localhost:5173"
+  echo "==> Browser openen op $APP_URL"
+  if ! command -v open >/dev/null 2>&1; then
+    echo "Kan de browser niet automatisch openen ('open' ontbreekt — dit is macOS-only)." >&2
+    echo "Open handmatig: $APP_URL" >&2
+    exit 1
+  fi
+  open "$APP_URL"
+fi
 
 echo
 echo "Klaar."
