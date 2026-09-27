@@ -16,15 +16,39 @@
 -- Idempotent: mag zonder gevolgen twee keer gedraaid worden (drop/re-add
 -- constraint, geen data-wijziging — bestaande 'admin'/'gebruiker'-rijen
 -- blijven ongemoeid, niemand wordt automatisch 'bezoeker').
+--
+-- DOEL-59: hierboven klopte niet meer zodra 0037_editor_role_rename.sql ook
+-- was toegepast (wat op elke echte, langer bestaande database het geval is)
+-- — 0037 zet de rol 'gebruiker' om naar 'editor' en verruimt deze zelfde
+-- twee constraints naar ('admin', 'editor', 'bezoeker'). Omdat
+-- scripts/doelenboom-cli.sh's -rebuild ALLE migraties in db/migrations/
+-- opnieuw draait (niet alleen de nog-niet-toegepaste), herstelde dit bestand
+-- daarna onvoorwaardelijk de oude, te nauwe constraint — die dan meteen
+-- faalde op elke rij met role = 'editor' ("check constraint ... is violated
+-- by some row"). Fix: de constraint alleen (opnieuw) toepassen als de
+-- huidige data 'm niet al schendt — op een verse/oude database (nog geen
+-- 'editor'-rijen) doet dit precies wat het altijd deed; zodra 0037 is
+-- geweest is dit blok een no-op en blijft 0037's eigen (bredere) constraint
+-- gewoon staan.
 
 begin;
 
-alter table tenant_users drop constraint if exists tenant_users_role_check;
-alter table tenant_users add constraint tenant_users_role_check
-  check (role in ('admin', 'gebruiker', 'bezoeker'));
+do $$
+begin
+  if not exists (select 1 from tenant_users where role not in ('admin', 'gebruiker', 'bezoeker')) then
+    alter table tenant_users drop constraint if exists tenant_users_role_check;
+    alter table tenant_users add constraint tenant_users_role_check
+      check (role in ('admin', 'gebruiker', 'bezoeker'));
+  end if;
+end $$;
 
-alter table doelenboom_user_roles drop constraint if exists doelenboom_user_roles_role_check;
-alter table doelenboom_user_roles add constraint doelenboom_user_roles_role_check
-  check (role in ('admin', 'gebruiker', 'bezoeker'));
+do $$
+begin
+  if not exists (select 1 from doelenboom_user_roles where role not in ('admin', 'gebruiker', 'bezoeker')) then
+    alter table doelenboom_user_roles drop constraint if exists doelenboom_user_roles_role_check;
+    alter table doelenboom_user_roles add constraint doelenboom_user_roles_role_check
+      check (role in ('admin', 'gebruiker', 'bezoeker'));
+  end if;
+end $$;
 
 commit;
