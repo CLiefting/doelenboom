@@ -201,16 +201,36 @@ case "$ACTION" in
     else
       GIT_REF="unknown"
     fi
-    # BUILD_VERSION expliciet op 'dev' voor de lokale stack (footer toont dan
-    # "vdev"), ONGEACHT een eventueel in deze shell geëxporteerde
-    # BUILD_VERSION — bv. van scripts/build-version.sh, meestal geëxporteerd
-    # vlak vóór een productie-build (zie deploy/README.md) in diezelfde
-    # terminal-sessie. Zonder deze override zou zo'n export blijven hangen en
-    # per ongeluk een productie-versienummer in de lokale footer laten zien,
-    # ook al is dit gewoon een lokale dev-build. Een echte productie-build
-    # blijft altijd BUILD_VERSION expliciet zetten (deploy/README.md, "Images
-    # bouwen"), dus die is hier niet van afhankelijk.
-    BUILD_VERSION=dev GIT_REF="$GIT_REF" docker compose up -d --build
+    # BUILD_VERSION voor de lokale stack: altijd een VERS berekende waarde,
+    # ONGEACHT een eventueel in deze shell geëxporteerde BUILD_VERSION — bv.
+    # van scripts/build-version.sh, meestal geëxporteerd vlak vóór een
+    # productie-build (zie deploy/README.md) in diezelfde terminal-sessie.
+    # Zonder deze override zou zo'n export blijven hangen en per ongeluk een
+    # productie-versienummer in de lokale footer laten zien, ook al is dit
+    # gewoon een lokale dev-build. Een echte productie-build blijft altijd
+    # BUILD_VERSION expliciet zetten (deploy/README.md, "Images bouwen"),
+    # dus die is hier niet van afhankelijk.
+    # DOEL-60: hierboven stond onvoorwaardelijk de vaste string "dev", dus de
+    # footer toonde altijd letterlijk "vdev" — geen enkel functioneel
+    # versienummer, alleen dat het een dev-build was. Net als
+    # scripts/build-version.sh voor productiebuilds zoeken we nu ook lokaal
+    # de dichtstbijzijnde git-tag op en combineren die met "dev", bv.
+    # "3.1.3 dev" (footer: "v3.1.3 dev (branch@hash)") — nog steeds duidelijk
+    # een dev-build, maar met een aanknopingspunt op welke release dit
+    # ongeveer is. Geen tags in de repo (of geen git-repo)? Dan blijft het
+    # gewoon "dev", exact zoals voorheen.
+    # Zelfde "|| true"-patroon als GIT_HASH hierboven: zonder een repo (of
+    # zonder tags) faalt `git describe` met exit 128, en zonder deze fallback
+    # zou set -euo pipefail dan het hele script laten stoppen — juist in het
+    # geval waarvoor "dev" als fallback bedoeld is.
+    GIT_TAG="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+    GIT_TAG="${GIT_TAG#v}"
+    if [ -n "$GIT_TAG" ]; then
+      LOCAL_VERSION="${GIT_TAG} dev"
+    else
+      LOCAL_VERSION="dev"
+    fi
+    BUILD_VERSION="$LOCAL_VERSION" GIT_REF="$GIT_REF" docker compose up -d --build
     echo
     docker compose ps
     ;;
