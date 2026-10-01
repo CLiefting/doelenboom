@@ -632,6 +632,39 @@ waarschuwing in de `api`-container-log, zelfde fallback als bij MFA. Een
 mislukte verzending (bv. relay tijdelijk onbereikbaar) blokkeert de aanvraag
 zelf niet: die wordt sowieso al aangemaakt vóórdat de mail geprobeerd wordt.
 
+## Offsite-kopie (CL-NAS002) en bestandsrechten (DOEL-53)
+
+CL-NAS002 haalt `~/doelenboom/backups/` elke nacht om 07:00 (05:00 UTC) op via
+rsync-over-SSH, als het beperkte account **`doelenboom-pull`** op de VPS
+(rrsync, alleen-lezen; de NAS zelf is niet vanaf internet bereikbaar). Dat
+account leest de back-ups via een **POSIX-ACL**, niet via groep of "other".
+
+**Let op bij elke wijziging aan rechten van back-ups:** een `chmod` op een
+bestand of map mét ACL zet ook het ACL-masker. `chmod 600`/`700` (of bestanden
+aanmaken met modus 0600/0700) maakt dat masker leeg, waardoor de ACL-regel van
+`doelenboom-pull` effectief niets meer mag (`#effective:---` in `getfacl`). Dat
+gebeurde na DOEL-31: de offsite-taak in DSM eindigde daarna elke nacht met
+status **23 (Interrupted)** — rsync-code 23, "partial transfer due to error".
+
+Daarom zetten beide back-upscripts na afloop het leesrecht voor het
+pullaccount expliciet terug (`deploy/offsite-acl.sh`):
+
+- `backup-database.sh`: map en dumps alleen voor de eigenaar én
+  `doelenboom-pull` (groep en "other" `---`, ook in de standaard-ACL);
+- `export-all-doelenbomen.sh`: alle mappen en `.xlsx`-bestanden leesbaar voor
+  `doelenboom-pull` (groep/"other" ongemoeid).
+
+Het account is instelbaar met `OFFSITE_PULL_USER` (standaard
+`doelenboom-pull`); bestaat het niet of ontbreekt `setfacl`, dan doen de
+scripts niets extra. Een ACL-fout laat de back-up zelf niet mislukken (alleen
+een waarschuwing in de cron-log).
+
+Controleren op de VPS (moet `r-x`/`r--` geven, niet `---`):
+```bash
+getfacl -p ~/doelenboom/backups/database | grep -E 'pull|mask'
+f=$(ls -t ~/doelenboom/backups/database/*.sql.gz | head -1); getfacl -p "$f" | grep -E 'pull|mask'
+```
+
 ## Openstaand aandachtspunt: offsite-kopie
 
 De databaseback-up hierboven én de nachtelijke Excel-back-up staan beide

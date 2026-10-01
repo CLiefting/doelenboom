@@ -44,6 +44,21 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml exec -T db \
 SIZE="$(du -h "$OUT_FILE" | cut -f1)"
 echo "[$(date -Iseconds)] Databaseback-up klaar (${SIZE})"
 
+# DOEL-53: rechten opnieuw toepassen NÁ de dump (de nieuwe dump erft anders de
+# standaard-ACL van de map, inclusief leesrecht voor "other") en daarna het
+# offsite-pullaccount expliciet leesrecht geven. Achtergrond: CL-NAS002 haalt
+# ~/doelenboom/backups 's nachts op als OFFSITE_PULL_USER (rrsync, alleen-lezen)
+# en heeft daarvoor een ACL-regel. `chmod 700/600` hierboven zet bij een
+# bestand mét ACL ook het ACL-masker op ---, waardoor die regel effectief
+# niets meer mocht: de offsite-pull faalde sinds DOEL-31 elke nacht met
+# rsync-code 23 ("Interrupted"). Eindtoestand: eigenaar + OFFSITE_PULL_USER
+# (alleen lezen), verder niemand — ook niet de groep.
+chmod 700 "$BACKUP_DIR"
+find "$BACKUP_DIR" -maxdepth 1 -name 'doelenboom-*.sql.gz' -exec chmod 600 {} +
+. "${REPO_DIR}/deploy/offsite-acl.sh"
+grant_offsite_read "$BACKUP_DIR" --private
+find "$BACKUP_DIR" -maxdepth 1 -name 'doelenboom-*.sql.gz' -print0 | grant_offsite_read_stdin --private
+
 # Bewaartermijn toepassen (elke nacht opnieuw op wat er dan op schijf staat,
 # zelfde idempotente aanpak als export-all-doelenbomen.ts).
 find "$BACKUP_DIR" -maxdepth 1 -name 'doelenboom-*.sql.gz' -mtime "+${BACKUP_RETENTION_DAYS}" -print -delete \

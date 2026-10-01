@@ -88,6 +88,8 @@ describe('deploy/backup-database.sh: bestandsrechten (DOEL-31)', () => {
       // Nagebootste projectmap: <tmp>/deploy/backup-database.sh (het script leidt REPO_DIR af van zijn eigen pad).
       mkdirSync(path.join(tmp, 'deploy'));
       cpSync(path.join(repo, 'deploy', 'backup-database.sh'), path.join(tmp, 'deploy', 'backup-database.sh'));
+      // DOEL-53: het script laadt sindsdien deploy/offsite-acl.sh (zonder pullaccount een no-op).
+      cpSync(path.join(repo, 'deploy', 'offsite-acl.sh'), path.join(tmp, 'deploy', 'offsite-acl.sh'));
       const bin = path.join(tmp, 'bin');
       mkdirSync(bin);
       writeFileSync(path.join(bin, 'docker'), '#!/bin/sh\necho "-- nagebootste pg_dump"\n');
