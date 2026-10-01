@@ -343,6 +343,35 @@ export const api = {
       body: JSON.stringify({ columns }),
     }, token),
 
+  // Controleregels (DOEL-62) — doelenboom (module 'controleregels' vereist
+  // voor wijzigen), tenant-default (sysadmin) en sjabloon (sjabloonbeheer).
+  doelenboomControlRules: (token: string, doelenboomId: number) =>
+    request<import('./types').ControlRulesState>(`/api/doelenbomen/${doelenboomId}/control-rules`, {}, token),
+
+  updateDoelenboomControlRules: (token: string, doelenboomId: number, rules: import('./types').ControlRule[]) =>
+    request<{ rules: import('./types').ControlRule[]; invalidRuleIds: string[] }>(`/api/doelenbomen/${doelenboomId}/control-rules`, {
+      method: 'PUT',
+      body: JSON.stringify({ rules }),
+    }, token),
+
+  tenantControlRules: (token: string, tenantId: number) =>
+    request<import('./types').ControlRulesState>(`/api/tenants/${tenantId}/control-rules`, {}, token),
+
+  updateTenantControlRules: (token: string, tenantId: number, rules: import('./types').ControlRule[]) =>
+    request<{ rules: import('./types').ControlRule[]; invalidRuleIds: string[] }>(`/api/tenants/${tenantId}/control-rules`, {
+      method: 'PUT',
+      body: JSON.stringify({ rules }),
+    }, token),
+
+  templateControlRules: (token: string, templateId: number) =>
+    request<import('./types').ControlRulesState>(`/api/doelenboom-templates/${templateId}/control-rules`, {}, token),
+
+  updateTemplateControlRules: (token: string, templateId: number, rules: import('./types').ControlRule[]) =>
+    request<{ rules: import('./types').ControlRule[]; invalidRuleIds: string[] }>(`/api/doelenboom-templates/${templateId}/control-rules`, {
+      method: 'PUT',
+      body: JSON.stringify({ rules }),
+    }, token),
+
   // --- Licentiemodel (zie doelenboom_licentiemodel.md) ---
   // Tiers/modules-catalogus: lezen mag iedereen ingelogd, wijzigen is
   // sysadmin-only (de server handhaaft dit, zie api/src/routes/licenses.ts).

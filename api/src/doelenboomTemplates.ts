@@ -1,6 +1,9 @@
 import { PoolClient } from 'pg';
 import { pool } from './db.js';
-import { insertColumns, validateColumnsInput, ColumnDef } from './columnConfig.js';
+import { insertColumns, validateColumnsInput, ColumnDef, allValidTypeNames } from './columnConfig.js';
+import {
+  ControlRule, brokenRulesMessage, findRulesBrokenByColumns, rulesFromDb, validateControlRulesInput,
+} from './controlRules.js';
 
 // Doelenboom-sjablonen: zie db/migrations/0014_doelenboom_templates.sql voor
 // het datamodel-ontwerp. Dit bestand bundelt alle databasetoegang tot
@@ -113,7 +116,7 @@ export async function listAllTemplatesForUser(
 // refreshTemplateFromDoelenboom (bestaand sjabloon overschrijven).
 async function buildSnapshotFromDoelenboom(
   doelenboomId: number
-): Promise<{ columns: ColumnSnapshot[]; elements: ElementSnapshot[]; edges: EdgeSnapshot[] }> {
+): Promise<{ columns: ColumnSnapshot[]; elements: ElementSnapshot[]; edges: EdgeSnapshot[]; rules: ControlRule[] }> {
   const columnsResult = await pool.query(
     `select position, type_name as "typeName", title, subtitle, color, is_narrow as "isNarrow",
             node_font_size as "nodeFontSize", is_project_role as "isProjectRole",
@@ -140,7 +143,19 @@ async function buildSnapshotFromDoelenboom(
     [doelenboomId]
   );
 
-  return { columns: columnsResult.rows, elements: elementsResult.rows, edges: edgesResult.rows };
+  // Controleregels (DOEL-62) gaan mee in het sjabloon (rules_snapshot) — ze
+  // zijn per definitie geldig t.o.v. de kolommen hierboven (zelfde config).
+  const rulesResult = await pool.query(
+    `select rules from column_configs where scope = 'doelenboom' and doelenboom_id = $1`,
+    [doelenboomId]
+  );
+
+  return {
+    columns: columnsResult.rows,
+    elements: elementsResult.rows,
+    edges: edgesResult.rows,
+    rules: rulesFromDb(rulesResult.rows[0]?.rules),
+  };
 }
 
 // "Opslaan als sjabloon" — snapshot van de huidige kolommen + elementen +
@@ -154,8 +169,8 @@ export async function saveDoelenboomAsTemplate(
 ): Promise<DoelenboomTemplateSummary> {
   const snapshot = await buildSnapshotFromDoelenboom(doelenboomId);
   const result = await pool.query(
-    `insert into doelenboom_templates (tenant_id, name, description, columns_snapshot, elements_snapshot, edges_snapshot)
-     values ($1,$2,$3,$4,$5,$6) returning ${TEMPLATE_SUMMARY_FIELDS}`,
+    `insert into doelenboom_templates (tenant_id, name, description, columns_snapshot, elements_snapshot, edges_snapshot, rules_snapshot)
+     values ($1,$2,$3,$4,$5,$6,$7) returning ${TEMPLATE_SUMMARY_FIELDS}`,
     [
       opts.tenantId,
       opts.name,
@@ -163,6 +178,7 @@ export async function saveDoelenboomAsTemplate(
       JSON.stringify(snapshot.columns),
       JSON.stringify(snapshot.elements),
       JSON.stringify(snapshot.edges),
+      JSON.stringify(snapshot.rules),
     ]
   );
   return result.rows[0];
@@ -176,9 +192,12 @@ export async function refreshTemplateFromDoelenboom(templateId: number, doelenbo
   const snapshot = await buildSnapshotFromDoelenboom(doelenboomId);
   const result = await pool.query(
     `update doelenboom_templates
-     set columns_snapshot = $1, elements_snapshot = $2, edges_snapshot = $3
-     where id = $4`,
-    [JSON.stringify(snapshot.columns), JSON.stringify(snapshot.elements), JSON.stringify(snapshot.edges), templateId]
+     set columns_snapshot = $1, elements_snapshot = $2, edges_snapshot = $3, rules_snapshot = $4
+     where id = $5`,
+    [
+      JSON.stringify(snapshot.columns), JSON.stringify(snapshot.elements), JSON.stringify(snapshot.edges),
+      JSON.stringify(snapshot.rules), templateId,
+    ]
   );
   return (result.rowCount ?? 0) > 0;
 }
@@ -205,27 +224,39 @@ export async function updateTemplateMeta(
 // Sjabloon toepassen op een net aangemaakte, nog lege doelenboom — binnen
 // dezelfde transactie als het aanmaken zelf (zie routes/doelenbomen.ts POST
 // /tenants/:tenantId/doelenbomen), dus vóór er iets anders in kan staan.
-// Geeft false terug als het sjabloon niet bestaat of niet zichtbaar is voor
-// deze tenant (niet systeembreed, en niet van déze tenant) — de aanroeper
-// rolt dan de hele transactie terug.
+// Geeft { ok: false } terug als het sjabloon niet bestaat of niet zichtbaar
+// is voor deze tenant (niet systeembreed, en niet van déze tenant), of als de
+// controleregels van het sjabloon niet (meer) kloppen met de sjabloonkolommen
+// (DOEL-62: bij toepassen valideren) — de aanroeper rolt dan de hele
+// transactie terug en toont `error`.
 export async function applyTemplateToNewDoelenboom(
   client: PoolClient,
   templateId: number,
   tenantId: number,
   doelenboomId: number
-): Promise<boolean> {
+): Promise<{ ok: true } | { ok: false; error: string }> {
   const tmpl = await client.query(
-    `select columns_snapshot, elements_snapshot, edges_snapshot from doelenboom_templates
+    `select columns_snapshot, elements_snapshot, edges_snapshot, rules_snapshot from doelenboom_templates
      where id = $1 and (tenant_id is null or tenant_id = $2)`,
     [templateId, tenantId]
   );
-  if (!tmpl.rows[0]) return false;
+  if (!tmpl.rows[0]) return { ok: false, error: 'Sjabloon niet gevonden of niet beschikbaar voor deze tenant.' };
+
+  const columns = withAliasesDefault(tmpl.rows[0].columns_snapshot as ColumnSnapshot[]);
+  // Fallback voor sjablonen van vóór DOEL-62: rules_snapshot is dan '[]'
+  // (kolomdefault), rulesFromDb vangt ook een onverhoopt ontbrekende waarde af.
+  const { errors: ruleErrors, rules } = validateControlRulesInput(
+    rulesFromDb(tmpl.rows[0].rules_snapshot),
+    allValidTypeNames(columns as ColumnDef[])
+  );
+  if (ruleErrors.length) {
+    return { ok: false, error: 'De controleregels van dit sjabloon passen niet bij de sjabloonkolommen; laat het sjabloon eerst corrigeren.' };
+  }
 
   const cfg = await client.query(
-    `insert into column_configs (scope, tenant_id, doelenboom_id) values ('doelenboom', $1, $2) returning id`,
-    [tenantId, doelenboomId]
+    `insert into column_configs (scope, tenant_id, doelenboom_id, rules) values ('doelenboom', $1, $2, $3) returning id`,
+    [tenantId, doelenboomId, JSON.stringify(rules)]
   );
-  const columns = withAliasesDefault(tmpl.rows[0].columns_snapshot as ColumnSnapshot[]);
   await insertColumns(client, cfg.rows[0].id, columns);
 
   const elements = tmpl.rows[0].elements_snapshot as ElementSnapshot[];
@@ -255,7 +286,7 @@ export async function applyTemplateToNewDoelenboom(
     );
   }
 
-  return true;
+  return { ok: true };
 }
 
 // Kolommen van een sjabloon opvragen voor de editor (Sjablonenbeheer-scherm
@@ -310,12 +341,41 @@ export async function updateTemplateColumns(
   const removalErrors = findRemovedTypesStillInUse(elements, columns);
   if (removalErrors.length) return { errors: removalErrors };
 
+  // Controleregels van het sjabloon (DOEL-62): zelfde weigering als bij een
+  // doelenboom — geen stille verwijdering, regel-id's in de melding.
+  const rulesRow = await pool.query('select rules_snapshot from doelenboom_templates where id = $1', [templateId]);
+  const brokenRuleIds = findRulesBrokenByColumns(rulesFromDb(rulesRow.rows[0]?.rules_snapshot), columns);
+  if (brokenRuleIds.length) return { errors: [brokenRulesMessage(brokenRuleIds)] };
+
   await pool.query('update doelenboom_templates set columns_snapshot = $1 where id = $2', [
     JSON.stringify(columns),
     templateId,
   ]);
   const fresh = await getTemplateColumnsWithIds(templateId);
   return { errors: [], columns: fresh ?? [] };
+}
+
+// Controleregels van een sjabloon (DOEL-62) opvragen/vervangen —
+// Sjablonenbeheer-scherm. Validatie tegen de kolommen uit het sjabloon zelf.
+export async function getTemplateRules(
+  templateId: number
+): Promise<{ rules: ControlRule[]; validTypeNames: string[] } | null> {
+  const r = await pool.query('select columns_snapshot, rules_snapshot from doelenboom_templates where id = $1', [templateId]);
+  if (!r.rows[0]) return null;
+  const columns = withAliasesDefault(r.rows[0].columns_snapshot as ColumnSnapshot[]);
+  return { rules: rulesFromDb(r.rows[0].rules_snapshot), validTypeNames: allValidTypeNames(columns as ColumnDef[]) };
+}
+
+export async function updateTemplateRules(
+  templateId: number,
+  input: unknown
+): Promise<{ notFound?: boolean; errors: string[]; rules?: ControlRule[] }> {
+  const current = await getTemplateRules(templateId);
+  if (!current) return { notFound: true, errors: [] };
+  const { errors, rules } = validateControlRulesInput(input, current.validTypeNames);
+  if (errors.length) return { errors };
+  await pool.query('update doelenboom_templates set rules_snapshot = $1 where id = $2', [JSON.stringify(rules), templateId]);
+  return { errors: [], rules };
 }
 
 // Voor de beheerroutes (routes/doelenboomTemplates.ts): tenant_id van het

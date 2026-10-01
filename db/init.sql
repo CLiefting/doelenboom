@@ -198,6 +198,15 @@ create table if not exists column_configs (
   doelenboom_id bigint references doelenbomen(id) on delete cascade,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
+  -- Controleregels (DOEL-62, zie db/migrations/0044): jsonb-array van
+  -- structuurregels voor deze config, bv. {"id":"R01","kind":"requires_outgoing",
+  -- "subjectTypes":["Capability"],"targetTypes":["Operationele benefit"],...}.
+  -- Op de config (niet op columns) omdat een regel naar typen uit meerdere
+  -- kolommen verwijst; wordt met de config meegekopieerd (tenant-default ->
+  -- nieuwe boom, dupliceren, sjablonen). Schema en validatie op API-niveau in
+  -- api/src/controlRules.ts (zelfde reden als bij columns.aliases hieronder).
+  -- Alleen structuurregels, bewust geen statusregels (epic DOEL-61).
+  rules jsonb not null default '[]'::jsonb,
   check ((scope = 'doelenboom') = (doelenboom_id is not null))
 );
 create unique index if not exists idx_column_configs_tenant_default
@@ -309,7 +318,10 @@ create table if not exists doelenboom_templates (
   columns_snapshot jsonb not null,
   elements_snapshot jsonb not null,
   edges_snapshot jsonb not null,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  -- Controleregels van het sjabloon (DOEL-62, zie column_configs.rules en
+  -- db/migrations/0044); '[]' voor sjablonen van vóór DOEL-62.
+  rules_snapshot jsonb not null default '[]'::jsonb
 );
 create index if not exists idx_doelenboom_templates_tenant on doelenboom_templates(tenant_id);
 
@@ -721,7 +733,10 @@ create table if not exists audit_log (
     'doelenboom_wiped',
     'login_success', 'login_failed', 'account_locked', 'password_changed', 'password_reset',
     'user_created', 'user_updated', 'user_deleted', 'tenant_member_changed',
-    'doelenboom_deleted', 'doelenboom_exported', 'doelenboom_import_published'
+    'doelenboom_deleted', 'doelenboom_exported', 'doelenboom_import_published',
+    -- DOEL-62: wijziging van controleregels (detail: scope, aantal, regel-id's
+    -- — nooit labels/uitleg).
+    'control_rules_updated'
   )),
   user_id bigint references users(id) on delete set null,
   tenant_id bigint references tenants(id) on delete set null,
@@ -904,6 +919,15 @@ insert into modules (key, name, description) values
     'Uitgebreide projectmanagement-features: status, RAG-status, producten/deliverables en planning. ' ||
     'De Project-node en de koppeling naar Capability blijven altijd onderdeel van de basis-boom, ook zonder ' ||
     'deze module — alleen deze verdiepende laag zit erachter.'
+  ),
+  -- DOEL-62 (zie db/migrations/0044): bewust nog zonder opslagrij in
+  -- module_surcharges/module_tier_surcharges.
+  (
+    'controleregels',
+    'Controleregels',
+    'Structuurcontrole op de doelenboom: per doelenboom in te stellen regels (bv. "elk element van type X heeft ' ||
+    'minstens één ouder van type Y"), met signalering van ontbrekende schakels. Alleen structuur, geen ' ||
+    'inhoudelijke of statusinformatie.'
   )
 on conflict (key) do nothing;
 

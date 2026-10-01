@@ -175,9 +175,9 @@ doelenbomenRouter.post(
           Number(req.params.tenantId),
           result.rows[0].id
         );
-        if (!applied) {
+        if (!applied.ok) {
           await client.query('rollback');
-          return res.status(400).json({ error: 'Sjabloon niet gevonden of niet beschikbaar voor deze tenant.' });
+          return res.status(400).json({ error: applied.error });
         }
       } else {
         // Geen sjabloon meegestuurd: oud gedrag — eigen, onafhankelijke

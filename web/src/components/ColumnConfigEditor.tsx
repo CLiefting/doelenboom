@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ApiError } from '../api';
-import type { ColumnAlias, ColumnDef } from '../types';
+import type { ColumnAlias, ColumnDef, ControlRule, ControlRulesState } from '../types';
+import ControlRulesEditor from './ControlRulesEditor';
 
 // Generieke editor voor een kolomconfiguratie (tenant-default óf de eigen
 // config van één doelenboom, zie docs/kolommen-configuratie-ontwerp.md) — de
@@ -32,11 +33,21 @@ const DEFAULT_COLOR_PALETTE = ['#3E6FA6', '#6B4C8A', '#C05A2C', '#B8862E', '#2E7
 export default function ColumnConfigEditor({
   load,
   save,
+  rules,
 }: {
   load: () => Promise<{ columns: ColumnDef[] }>;
   save: (columns: ColumnDef[]) => Promise<{ columns: ColumnDef[] }>;
+  // Optioneel: sectie "Controleregels" (DOEL-62) onder de kolommen. Eigen
+  // laden/opslaan (aparte endpoints, eigen opslaanknop); wordt na elke
+  // kolom-opslag opnieuw geladen zodat de keuzelijsten de nieuwe typen tonen.
+  rules?: {
+    load: () => Promise<ControlRulesState>;
+    save: (rules: ControlRule[]) => Promise<{ rules: ControlRule[]; invalidRuleIds: string[] }>;
+    hideWhenModuleInactive: boolean;
+  };
 }) {
   const [columns, setColumns] = useState<ColumnDef[] | null>(null);
+  const [rulesReloadKey, setRulesReloadKey] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -161,6 +172,7 @@ export default function ColumnConfigEditor({
       const result = await save(toSave);
       setColumns(result.columns);
       setSaved(true);
+      setRulesReloadKey((k) => k + 1);
     } catch (err) {
       setError(errMsg(err));
     } finally {
@@ -269,6 +281,14 @@ export default function ColumnConfigEditor({
         </button>
         {saved && <span style={{ color: '#2e7d32', fontSize: 12.5 }}>Opgeslagen.</span>}
       </div>
+      {rules && (
+        <ControlRulesEditor
+          key={rulesReloadKey}
+          load={rules.load}
+          save={rules.save}
+          hideWhenModuleInactive={rules.hideWhenModuleInactive}
+        />
+      )}
     </div>
   );
 }

@@ -17,6 +17,7 @@ import { productsRouter } from './routes/products.js';
 import { activitiesRouter } from './routes/activities.js';
 import { projectStatusRouter } from './routes/projectStatus.js';
 import { columnConfigRouter } from './routes/columnConfig.js';
+import { controlRulesRouter } from './routes/controlRules.js';
 import { doelenboomTemplatesRouter } from './routes/doelenboomTemplates.js';
 import { licensesRouter } from './routes/licenses.js';
 import { dbstatRouter } from './routes/dbstat.js';
@@ -194,6 +195,9 @@ export function createApp() {
   app.use('/api', activitiesRouter);
   app.use('/api', projectStatusRouter);
   app.use('/api', columnConfigRouter);
+  // Controleregels (DOEL-62): '/doelenbomen/:id/control-rules' en
+  // '/tenants/:tenantId/control-rules' — vandaar op '/api', net als columnConfigRouter.
+  app.use('/api', controlRulesRouter);
   app.use('/api', doelenboomTemplatesRouter);
   // Definieert zelf zowel '/tiers'/'/modules' als '/tenants/:tenantId/license/...'
   // — vandaar op '/api' gemount, net als doelenbomenRouter hierboven.
