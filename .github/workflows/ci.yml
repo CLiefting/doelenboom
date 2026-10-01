@@ -13,6 +13,7 @@ name: CI
 #     sysadmin-recht, SEC-004 MFA-race) -- BLOKKEREND, zoals een testsuite
 #     hoort te zijn.
 #   - owasp-semgrep/secret-scan/dependency-audit: nieuwe, bredere scans over
+#     (npm audit high/critical is sinds DOEL-67 wél blokkerend, zie die job)
 #     de hele repo. Bewust NIET blokkerend bij de eerste uitrol (er is nog
 #     geen baseline, dus een eerste run kan bestaande/onschadelijke
 #     bevindingen laten zien) -- zie de toelichting bij elke job. Charles kan
@@ -165,19 +166,22 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: '3.12'
-      # Niet-blokkerend: dit is een signaal, geen harde eis -- de
-      # Softwarecomponenten-pagina in de app zelf (zie
-      # doelenboom_sbom_ontwerp.md) doet al doorlopende, diepere
-      # kwetsbaarhedenmonitoring (incl. OSV.dev) met een eigen review-flow;
-      # dit is puur een extra, snelle CI-vangnet bij elke push/PR.
+      # npm audit is sinds DOEL-67 (1 oktober 2026, besluit Charles)
+      # BLOKKEREND op high/critical: de baseline is schoon (api en web 0
+      # kwetsbaarheden), dus een nieuwe high/critical advisory laat de CI
+      # falen en daarmee pr-merge.sh stoppen. Gevolg: zo'n advisory kan ook
+      # een PR tegenhouden die er inhoudelijk niets mee te maken heeft — dan
+      # eerst (in een eigen ticket) de dependency bijwerken. De
+      # Softwarecomponenten-pagina in de app (doelenboom_sbom_ontwerp.md) blijft
+      # daarnaast de diepere, doorlopende monitoring (incl. OSV.dev).
       - name: npm audit — api
         working-directory: api
         run: npm audit --audit-level=high
-        continue-on-error: true
       - name: npm audit — web
         working-directory: web
         run: npm audit --audit-level=high
-        continue-on-error: true
+      # pip-audit blijft voorlopig niet-blokkerend: het kent geen drempel per
+      # ernst (elke bevinding, ook "laag", zou de CI breken).
       - name: pip-audit — excel-service
         working-directory: excel-service
         run: |
