@@ -4,6 +4,7 @@ import { requireAuth, AuthedRequest } from '../auth.js';
 import { requireSysadmin } from '../rbac.js';
 import { logAuditEvent } from '../auditLog.js';
 import { getTenantLicense } from '../license.js';
+import { isValidEmailAddress } from '../emailAddress.js';
 
 // Klantbeheer — zie db/migrations/0033_customer_management.sql voor het
 // datamodel-ontwerp. Bewust sysadmin-only (geen enkele route hier is ook
@@ -45,7 +46,7 @@ function parseContactBody(b: Record<string, unknown>): {
   const isPrimary = b.isPrimary === true;
 
   if (!name) return { error: 'Naam is verplicht.' };
-  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { error: 'Een geldig e-mailadres is verplicht.' };
+  if (!email || !isValidEmailAddress(email)) return { error: 'Een geldig e-mailadres is verplicht.' };
   if (!role) return { error: `role moet één van ${CONTACT_ROLES.join(', ')} zijn.` };
   return { name, email, phone, role, isPrimary };
 }
