@@ -8,6 +8,7 @@ import { logAuditEvent } from '../auditLog.js';
 import { hashSql } from '../passwordHash.js';
 import { terminateTenant } from '../tenantRetention.js';
 import { sendServerError } from '../errors.js';
+import { isValidEmailAddress } from '../emailAddress.js';
 
 export const tenantsRouter = Router();
 tenantsRouter.use(requireAuth);
@@ -359,6 +360,10 @@ tenantsRouter.post('/:tenantId/members', requireTenantRoleForTenantParam('admin'
   const role = b.role === 'admin' || b.role === 'editor' || b.role === 'bezoeker' ? b.role : '';
   if (!email || !role) {
     return res.status(400).json({ error: 'E-mailadres en rol (admin/gebruiker/bezoeker) zijn verplicht.' });
+  }
+  // DOEL-67: zie emailAddress.ts — een nieuw lid krijgt o.a. MFA-mail op dit adres.
+  if (!isValidEmailAddress(email)) {
+    return res.status(400).json({ error: 'Een geldig e-mailadres is verplicht.' });
   }
 
   const existing = await pool.query('select id from users where email = $1', [email]);

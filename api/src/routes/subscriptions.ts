@@ -24,6 +24,7 @@ import {
   updateSubscriptionRequestApplicant,
 } from '../subscriptions.js';
 import { sendServerError } from '../errors.js';
+import { isValidEmailAddress } from '../emailAddress.js';
 
 // Zelfbedieningsaanvraag voor een nieuw abonnement — zie
 // doelenboom_licentiemodel.md §2/§9 en subscriptions.ts. De eerste drie
@@ -150,7 +151,7 @@ subscriptionsRouter.post('/subscription-requests', registrationRateLimitPerIp, r
   const errors: string[] = [];
   if (!organizationName) errors.push('Organisatienaam is verplicht.');
   if (!applicantName) errors.push('Naam is verplicht.');
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(applicantEmail)) errors.push('Geldig e-mailadres is verplicht.');
+  if (!isValidEmailAddress(applicantEmail)) errors.push('Geldig e-mailadres is verplicht.');
   if (!password || password.length < 8) errors.push('Wachtwoord (min. 8 tekens) is verplicht.');
   // Bovengrenzen (DOEL-20): geen megabytes aan tekst in tenant-/accountvelden.
   // 72 = bcrypt kapt wachtwoorden daar toch al af.
@@ -257,7 +258,7 @@ subscriptionsRouter.put('/subscription-requests/:id', async (req, res) => {
   }
   if ('applicantEmail' in b) {
     const v = typeof b.applicantEmail === 'string' ? b.applicantEmail.trim().toLowerCase() : '';
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) return res.status(400).json({ error: 'Geldig e-mailadres is verplicht.' });
+    if (!isValidEmailAddress(v)) return res.status(400).json({ error: 'Geldig e-mailadres is verplicht.' });
     updates.applicantEmail = v;
   }
   if ('applicantPhone' in b) {

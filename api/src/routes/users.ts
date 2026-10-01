@@ -5,6 +5,7 @@ import { requireSysadmin } from '../rbac.js';
 import { hashSql } from '../passwordHash.js';
 import { logAuditEvent } from '../auditLog.js';
 import { sendServerError } from '../errors.js';
+import { isValidEmailAddress } from '../emailAddress.js';
 
 // Beheer van gebruikersaccounts zelf (aanmaken/wijzigen/verwijderen, sysadmin-vlag)
 // — uitsluitend voor sysadmins. Het koppelen van een account aan een tenant (met
@@ -64,6 +65,10 @@ usersRouter.post('/', async (req: AuthedRequest, res) => {
   if (!email || !password) {
     return res.status(400).json({ error: 'E-mail en wachtwoord zijn verplicht.' });
   }
+  // DOEL-67: hier gaat o.a. de MFA-code naartoe — geen adreslijst/header-injectie.
+  if (!isValidEmailAddress(email)) {
+    return res.status(400).json({ error: 'Een geldig e-mailadres is verplicht.' });
+  }
   if (password.length < 8) {
     return res.status(400).json({ error: 'Wachtwoord moet minstens 8 tekens zijn.' });
   }
@@ -108,6 +113,9 @@ usersRouter.put('/:id', async (req: AuthedRequest, res) => {
   const mfaEnabled = typeof b.mfaEnabled === 'boolean' ? b.mfaEnabled : undefined;
   const mustChangePassword = password !== undefined ? b.mustChangePassword !== false : undefined;
 
+  if (email !== undefined && !isValidEmailAddress(email)) {
+    return res.status(400).json({ error: 'Een geldig e-mailadres is verplicht.' });
+  }
   if (password !== undefined && password.length < 8) {
     return res.status(400).json({ error: 'Wachtwoord moet minstens 8 tekens zijn.' });
   }

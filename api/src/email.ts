@@ -1,4 +1,5 @@
 import nodemailer, { Transporter } from 'nodemailer';
+import { assertSafeRecipient } from './emailAddress.js';
 
 // E-mailverzending — momenteel uitsluitend voor de MFA-inlogcode (zie mfa.ts
 // en doelenboom_mfa_ontwerp.md in het project). SMTP-relay via nodemailer,
@@ -81,6 +82,7 @@ export let sendMfaEmail = async (to: string, code: string, ttlMinutes = 10): Pro
     console.warn(`WAARSCHUWING: geen SMTP_HOST geconfigureerd — MFA-code voor ${to} is: ${code} (alleen in deze console, niet gemaild).`);
     return;
   }
+  assertSafeRecipient(to); // DOEL-67: geen adreslijst/header-injectie via "to"
   await transport.sendMail({ from: SMTP_FROM, to, subject: 'Je Doelenboom-inlogcode', text, html });
 };
 
@@ -152,6 +154,7 @@ export let sendNewSubscriptionRequestEmail = async (
     );
     return;
   }
+  assertSafeRecipient(SUBSCRIPTION_REQUEST_NOTIFY_EMAIL);
   await transport.sendMail({ from: SMTP_FROM, to: SUBSCRIPTION_REQUEST_NOTIFY_EMAIL, subject, text, html });
 };
 
@@ -202,6 +205,7 @@ export let sendRegistrationVerificationEmail = async (
     }
     return;
   }
+  assertSafeRecipient(to); // DOEL-67: geen adreslijst/header-injectie via "to"
   await transport.sendMail({ from: SMTP_FROM, to, subject, text, html });
 };
 
@@ -230,6 +234,7 @@ export let sendRegistrationExistingAccountEmail = async (to: string, loginUrl: s
     console.warn(`WAARSCHUWING: geen SMTP_HOST geconfigureerd — 'account bestaat al'-mail voor ${to} niet gemaild.`);
     return;
   }
+  assertSafeRecipient(to); // DOEL-67: geen adreslijst/header-injectie via "to"
   await transport.sendMail({ from: SMTP_FROM, to, subject, text, html });
 };
 
