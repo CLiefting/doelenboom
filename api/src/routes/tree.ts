@@ -4,6 +4,7 @@ import { requireAuth, AuthedRequest } from '../auth.js';
 import { requireTenantRoleForDoelenboomParam, getEffectiveRoleForDoelenboom } from '../rbac.js';
 import { getColumnsForDoelenboom } from '../columnConfig.js';
 import { getActiveModuleKeys, isLicenseExpired } from '../license.js';
+import { CONTROLE_REGELS_MODULE, findRulesBrokenByColumns, getRulesForDoelenboom } from '../controlRules.js';
 import { logAuditEvent } from '../auditLog.js';
 
 export const treeRouter = Router();
@@ -243,6 +244,21 @@ export async function fetchTree(doelenboomId: string) {
   // ingelogde gebruiker er hieronder al rekening mee houdt.
   const licenseExpired = await isLicenseExpired(doelenboomResult.rows[0].tenant_id);
 
+  // Controleregels (DOEL-63, evaluatie client-side in tree.html, zie
+  // evaluateControlRules daar): alleen meesturen met de licentiemodule
+  // 'controleregels' — zelfde enforcement-punt als Projecten hierboven, zodat
+  // de frontend zonder module niets toont (zichtbaarheidsprincipe). Regels die
+  // naar een niet meer bestaand type wijzen (kolom gewijzigd terwijl de module
+  // uit stond, zie DOEL-62) gaan niet mee: die zijn ongeldig tot ze in de
+  // editor hersteld zijn. Uitgeschakelde regels gaan wel mee (de frontend slaat
+  // ze over), zodat de weergave later bv. "n regels, waarvan m uit" kan tonen.
+  let controlRules: Awaited<ReturnType<typeof getRulesForDoelenboom>> = [];
+  if (activeModules.includes(CONTROLE_REGELS_MODULE)) {
+    const all = (await getRulesForDoelenboom(doelenboomId)) ?? [];
+    const broken = new Set(findRulesBrokenByColumns(all, columns));
+    controlRules = all.filter((r) => !broken.has(r.id));
+  }
+
   return {
     columns,
     doelenboom: {
@@ -278,6 +294,7 @@ export async function fetchTree(doelenboomId: string) {
     obOrg,
     activeModules,
     licenseExpired,
+    controlRules,
   };
 }
 
