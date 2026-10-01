@@ -176,6 +176,11 @@ function TemplateRow({
           <ColumnConfigEditor
             load={() => api.templateColumnConfig(token, template.id)}
             save={(columns) => api.updateTemplateColumnConfig(token, template.id, columns)}
+            rules={{
+              load: () => api.templateControlRules(token, template.id),
+              save: (rules) => api.updateTemplateControlRules(token, template.id, rules),
+              hideWhenModuleInactive: false,
+            }}
           />
           <div style={{ marginTop: 8 }}>
             <button type="button" onClick={() => setMode('view')} style={btnStyle('ghost')} disabled={busy}>

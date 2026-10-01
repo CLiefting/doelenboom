@@ -31,7 +31,11 @@ export type AuditEventType =
   | 'tenant_member_changed'
   | 'doelenboom_deleted'
   | 'doelenboom_exported'
-  | 'doelenboom_import_published';
+  | 'doelenboom_import_published'
+  // DOEL-62: controleregels gewijzigd (doelenboom, tenant-default of
+  // sjabloon). detail = { scope, templateId?, ruleCount, ruleIds } — bewust
+  // NOOIT labels/uitleg: die zijn vrije tekst van de gebruiker.
+  | 'control_rules_updated';
 
 export interface LogAuditEventInput {
   eventType: AuditEventType;

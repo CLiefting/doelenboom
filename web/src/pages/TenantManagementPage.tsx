@@ -295,6 +295,11 @@ export default function TenantManagementPage({
             key={selectedTenantId}
             load={() => api.tenantColumnConfig(token, selectedTenantId)}
             save={(columns) => api.updateTenantColumnConfig(token, selectedTenantId, columns)}
+            rules={{
+              load: () => api.tenantControlRules(token, selectedTenantId),
+              save: (rules) => api.updateTenantControlRules(token, selectedTenantId, rules),
+              hideWhenModuleInactive: false,
+            }}
           />
         </section>
       )}
@@ -767,6 +772,11 @@ function DoelenbomenSection({
                 <ColumnConfigEditor
                   load={() => api.doelenboomColumnConfig(token, d.id)}
                   save={(columns) => api.updateDoelenboomColumnConfig(token, d.id, columns)}
+                  rules={{
+                    load: () => api.doelenboomControlRules(token, d.id),
+                    save: (rules) => api.updateDoelenboomControlRules(token, d.id, rules),
+                    hideWhenModuleInactive: true,
+                  }}
                 />
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button type="button" onClick={() => setColumnsEditingId(null)} style={btnStyle('ghost')} disabled={busy}>

@@ -106,6 +106,14 @@ export async function insertColumns(client: PoolClient, columnConfigId: number, 
 }
 
 async function copyColumnsBetweenConfigs(client: PoolClient, sourceConfigId: number, targetConfigId: number) {
+  // Controleregels (DOEL-62, zie controlRules.ts) horen bij de config en gaan
+  // dus mee, net als de kolommen zelf: tenant-default -> nieuwe boom en
+  // dupliceren van een boom. Bij elkaar horend gevalideerd (de regels zijn
+  // geldig t.o.v. de kolommen van de bron, en die worden 1-op-1 gekopieerd).
+  await client.query(
+    'update column_configs set rules = (select rules from column_configs where id = $1) where id = $2',
+    [sourceConfigId, targetConfigId]
+  );
   const source = await client.query(
     `select position, type_name, title, subtitle, color, is_narrow, node_font_size, is_project_role, relation_label_to_next, aliases
      from columns where column_config_id = $1 order by position`,

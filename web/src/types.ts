@@ -760,6 +760,43 @@ export type ColumnDef = {
   aliases: ColumnAlias[];
 };
 
+// Controleregels (DOEL-62) — zelfde vorm als ControlRule in
+// api/src/controlRules.ts. Alleen STRUCTUURregels (ontbrekende schakels in de
+// keten), bewust geen statusregels. Richting van relaties: bron -> doel is
+// kind -> ouder, dus requires_outgoing = "heeft een ouder van type…",
+// requires_incoming = "heeft een kind van type…".
+export type ControlRuleKind =
+  | 'requires_outgoing'
+  | 'requires_incoming'
+  | 'primary_parent_count'
+  | 'requires_tag_category'
+  | 'required_field';
+export type ControlRuleField = 'description' | 'kpi' | 'taakveld' | 'subtaakveld';
+export type ControlRule = {
+  id: string;
+  kind: ControlRuleKind;
+  subjectTypes: string[];
+  targetTypes: string[];
+  weight: 'primair' | 'any';
+  min: number | null;
+  max: number | null;
+  tagCategory: string | null;
+  field: ControlRuleField | null;
+  label: string;
+  explanation: string;
+  enabled: boolean;
+};
+// GET .../control-rules: de regels plus de context die de beheer-UI nodig
+// heeft (geldige typen uit kolommen+aliassen, bestaande tag-categorieën, en
+// regels die naar een niet meer bestaand type wijzen).
+export type ControlRulesState = {
+  rules: ControlRule[];
+  moduleActive: boolean;
+  validTypeNames: string[];
+  tagCategories: string[];
+  invalidRuleIds: string[];
+};
+
 // --- Softwarecomponenten / SBOM (sysadmin-only, /system-info) — zie
 // api/src/dependencyHealth.ts en doelenboom_sbom_ontwerp.md in het project.
 

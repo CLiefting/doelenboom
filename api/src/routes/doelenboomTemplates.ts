@@ -17,7 +17,10 @@ import {
   saveDoelenboomAsTemplate,
   updateTemplateColumns,
   updateTemplateMeta,
+  getTemplateRules,
+  updateTemplateRules,
 } from '../doelenboomTemplates.js';
+import { logAuditEvent } from '../auditLog.js';
 
 // Doelenboom-sjablonen: zie db/migrations/0014_doelenboom_templates.sql en
 // api/src/doelenboomTemplates.ts voor het ontwerp. Beheer is "beide
@@ -147,6 +150,44 @@ doelenboomTemplatesRouter.put('/doelenboom-templates/:id/column-config', async (
   const { errors, columns } = await updateTemplateColumns(Number(req.params.id), (req.body as { columns?: unknown })?.columns);
   if (errors.length) return res.status(409).json({ error: errors.join(' ') });
   res.json({ columns });
+});
+
+// Controleregels van een sjabloon (DOEL-62, zie api/src/controlRules.ts) —
+// zelfde toegang als de sjabloonkolommen hierboven. Niet module-gegated: een
+// sjabloon (vaak systeembreed) is configuratie voor nieuwe bomen; de regels
+// worden pas actief in een tenant met de module 'controleregels'.
+doelenboomTemplatesRouter.get('/doelenboom-templates/:id/control-rules', async (req: AuthedRequest, res) => {
+  const ctx = await requireManageTemplate(req, res, Number(req.params.id));
+  if (!ctx) return;
+  const current = await getTemplateRules(Number(req.params.id));
+  if (!current) return res.status(404).json({ error: 'Sjabloon niet gevonden.' });
+  const valid = new Set(current.validTypeNames);
+  res.json({
+    rules: current.rules,
+    moduleActive: true,
+    validTypeNames: current.validTypeNames,
+    tagCategories: [],
+    invalidRuleIds: current.rules
+      .filter((r) => [...(r.subjectTypes ?? []), ...(r.targetTypes ?? [])].some((t) => !valid.has(t)))
+      .map((r) => r.id),
+  });
+});
+
+doelenboomTemplatesRouter.put('/doelenboom-templates/:id/control-rules', async (req: AuthedRequest, res) => {
+  const ctx = await requireManageTemplate(req, res, Number(req.params.id));
+  if (!ctx) return;
+  const body = (req.body ?? {}) as { rules?: unknown };
+  const result = await updateTemplateRules(Number(req.params.id), typeof body === 'object' ? body.rules : undefined);
+  if (result.notFound) return res.status(404).json({ error: 'Sjabloon niet gevonden.' });
+  if (result.errors.length) return res.status(400).json({ error: result.errors.join(' ') });
+  const rules = result.rules ?? [];
+  await logAuditEvent({
+    eventType: 'control_rules_updated',
+    userId: req.user!.id,
+    tenantId: ctx.tenantId,
+    detail: { scope: 'template', templateId: Number(req.params.id), ruleCount: rules.length, ruleIds: rules.map((r) => r.id) },
+  });
+  res.json({ rules, invalidRuleIds: [] });
 });
 
 // "Inhoud vervangen vanuit een boom" (Sjablonenbeheer-scherm) — overschrijft
