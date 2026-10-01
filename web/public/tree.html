@@ -1171,6 +1171,34 @@
     background: #fff3cd; color: #8a6d00; border: 1px solid #d9a520; pointer-events: none;
     box-shadow: 0 0 0 1px rgba(255,255,255,0.7);
   }
+  /* Controleregels (DOEL-63): linksonder — de enige vrije hoek (linksboven
+     RAG, rechtsboven tags, rechtsonder verouderd). Oranje driehoek, bewust
+     anders dan het gele, ronde verouderd-icoon. Wél klikbaar (opent focus). */
+  .node-rule-icon {
+    position: absolute; bottom: 1px; left: 2px; width: 13px; height: 12px; line-height: 14px;
+    text-align: center; font-size: 8px; font-weight: 700; color: #fff; cursor: pointer;
+    background: #ff8c1a; clip-path: polygon(50% 0, 100% 100%, 0 100%);
+  }
+  .node.rule-active { box-shadow: 0 0 0 3px #ff8c1a, 0 1px 2px rgba(0,0,0,0.15); }
+  .node.rule-dimmed { opacity: 0.22; }
+  .control-rules-summary {
+    display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin: -8px 0 16px; font-size: 12px;
+  }
+  .control-rules-summary[hidden] { display: none; }
+  .control-rules-summary .cs-stat-tile { padding: 8px 12px; min-width: 120px; max-width: 260px; text-align: left; font: inherit; }
+  .control-rules-summary .cs-stat-value { font-size: 18px; font-weight: 700; }
+  .control-rules-summary .crs-rule { cursor: pointer; }
+  .control-rules-summary .crs-rule[disabled] { cursor: default; }
+  .control-rules-summary .crs-ok { background: #eef8f0; border-color: #b7dfc0; }
+  .control-rules-summary .crs-ok .cs-stat-value { color: #2e7d32; }
+  .control-rules-summary .crs-rule-active { box-shadow: 0 0 0 2px #ff8c1a; }
+  .dp-rules { margin-top: 10px; padding: 8px 10px; border-left: 3px solid #ff8c1a; background: #fff6ec; border-radius: 4px; }
+  .dp-rules-title { font-weight: 700; font-size: 12px; color: #a85400; margin-bottom: 4px; }
+  .dp-rule { margin: 4px 0; font-size: 12px; }
+  .dp-rule-label { font-weight: 600; }
+  .dp-rule-id { font-family: monospace; font-size: 11px; background: #f0e2d2; border-radius: 3px; padding: 0 4px; }
+  .dp-rule-detail { color: #555; }
+  .dp-rule-expl { color: #777; font-style: italic; white-space: pre-wrap; }
   .node.tag-active { box-shadow: 0 0 0 3px #ffd166, 0 1px 2px rgba(0,0,0,0.15); }
   .node.tag-dimmed { opacity: 0.22; }
   .node.active {
@@ -1383,6 +1411,9 @@
             <button class="btn ghost btn-sm" id="filter-chips-apply-btn" type="button" style="display:none; width:100%; margin-top:6px;"></button>
           </div>
         </div>
+        <!-- Controleweergave (DOEL-63): alleen zichtbaar als de boom actieve
+             controleregels heeft (module 'controleregels', zie runApp()). -->
+        <button class="btn ghost btn-sm" id="control-rules-btn" type="button" aria-pressed="false" style="display:none;">Controleregels</button>
         <button class="btn ghost btn-sm admin-only" id="manage-tags-orgs-btn" type="button" title="Tags &amp; organisatieonderdelen beheren">Beheer</button>
         <!-- Bestand-menu bevat alleen nog acties die een levende parent-app +
              API nodig hebben (Excel-import/export) of die in een al-geëxporteerd
@@ -1437,6 +1468,9 @@
   </div>
 
   <div class="legend"></div>
+
+  <!-- Samenvatting controleregels (DOEL-63), alleen bij aanstaande controleweergave. -->
+  <div class="control-rules-summary" id="control-rules-summary" hidden></div>
 
   <div class="controls">
     <button class="btn ghost" id="expand-left-btn" type="button">&#9664; Kolom links tonen</button>
@@ -2151,7 +2185,11 @@ function flipExpandAnchor() {
 }
 
 function runApp(data) {
-  const { DETAILS, EDGES, TOELICHTING, PROJECT_STATUS, PRODUCTS, PRODUCT_DEPENDENCIES, ACTIVITIES, DEPENDENCIES, TAGS, ELEMENT_TAGS, ORGS, OB_ORG, COLUMNS, ACTIVE_MODULES } = data;
+  const { DETAILS, EDGES, TOELICHTING, PROJECT_STATUS, PRODUCTS, PRODUCT_DEPENDENCIES, ACTIVITIES, DEPENDENCIES, TAGS, ELEMENT_TAGS, ORGS, OB_ORG, COLUMNS, ACTIVE_MODULES, CONTROL_RULES } = data;
+  // Controleweergave (DOEL-63): aan/uit-stand, vroeg gedeclareerd omdat
+  // renderDetailPanel er naar kijkt. Zie applyControlView() verderop.
+  let controlViewOn = false;
+  let CONTROL_EVAL = { byElement: {}, countsByRule: {}, activeRules: [] };
   // Licentiemodel (zie doelenboom_licentiemodel.md §3/§6, api/src/license.ts):
   // welke modules de licentie van deze tenant actief heeft. PROJECT_STATUS/
   // PRODUCTS zijn al server-side leeggemaakt als 'projecten' ontbreekt
@@ -4981,6 +5019,7 @@ function runApp(data) {
         (isProject ? '' : tagsChipsHtml(id) + orgChipsHtml(id)) +
       '</div>' +
       connectionsHtml(id) +
+      (controlViewOn ? controlRuleViolationsHtml(CONTROL_EVAL.byElement[id]) : '') +
       '<div class="dp-crud-actions crud-only">' +
         '<button type="button" class="btn ghost btn-sm dp-edit-btn" data-code="' + escapeHtml(d.code) + '">Bewerken</button>' +
         '<button type="button" class="btn ghost btn-sm dp-delete-btn" data-code="' + escapeHtml(d.code) + '">Verwijderen</button>' +
@@ -5313,10 +5352,117 @@ function runApp(data) {
     n.appendChild(icon);
   });
 
+  // ---- Controleweergave (DOEL-63) ----
+  // Eén evaluatie per runApp(): elke wijziging aan elementen/relaties/tags
+  // herlaadt de pagina (reloadTreeKeepingFocus), dus dit IS het
+  // herevaluatiemoment. Evaluatie op de volledige dataset (DETAILS/EDGES),
+  // los van filters/verborgen kolommen/focus.
+  const TYPE_TO_BASE = {};
+  Object.keys(TYPE_TO_COLUMN).forEach((t) => { TYPE_TO_BASE[t] = TYPE_TO_COLUMN[t].typeName; });
+  CONTROL_EVAL = evaluateControlRules(DETAILS, EDGES, ELEMENT_TAGS, TAGS, CONTROL_RULES, TYPE_TO_BASE);
+  const controlRulesBtn = document.getElementById('control-rules-btn');
+  const controlRulesSummaryEl = document.getElementById('control-rules-summary');
+  function controlViewStorageKey() { return 'doelenboom-control-view-' + (doelenboomId || ''); }
+
+  function clearRuleHighlight() {
+    document.querySelectorAll('.node').forEach(n => n.classList.remove('rule-active', 'rule-dimmed'));
+    if (controlRulesSummaryEl) controlRulesSummaryEl.querySelectorAll('.crs-rule').forEach(b => b.classList.remove('crs-rule-active'));
+  }
+
+  // Klik op een regel in het samenvattingspaneel: markeer de overtredende
+  // elementen (rest gedimd, zelfde idee als de chip-filters), klap hun
+  // kolommen open en spring naar het eerste. Nogmaals klikken heft het op.
+  function highlightRule(ruleId, btn) {
+    const already = btn && btn.classList.contains('crs-rule-active');
+    clearRuleHighlight();
+    if (already) return;
+    const ids = Object.keys(CONTROL_EVAL.byElement).filter(id => CONTROL_EVAL.byElement[id].some(v => v.ruleId === ruleId));
+    if (!ids.length) return;
+    if (btn) btn.classList.add('crs-rule-active');
+    const idSet = new Set(ids);
+    let changed = false;
+    ids.forEach(id => {
+      const el = document.querySelector('.node[data-id="' + CSS.escape(id) + '"]');
+      const col = el && el.closest('.column');
+      if (col && hiddenCols.has(col.dataset.key)) { hiddenCols.delete(col.dataset.key); changed = true; }
+    });
+    if (changed) applyVisibility();
+    document.querySelectorAll('.node').forEach(n => {
+      const on = idSet.has(n.dataset.id);
+      n.classList.toggle('rule-active', on);
+      n.classList.toggle('rule-dimmed', !on);
+    });
+    const first = document.querySelector('.node.rule-active');
+    if (first) first.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+  }
+
+  function applyControlView() {
+    document.body.classList.toggle('control-view-on', controlViewOn);
+    if (controlRulesBtn) {
+      controlRulesBtn.classList.toggle('filters-active', controlViewOn);
+      controlRulesBtn.setAttribute('aria-pressed', controlViewOn ? 'true' : 'false');
+    }
+    document.querySelectorAll('.node-rule-icon').forEach(el => el.remove());
+    clearRuleHighlight();
+    if (controlViewOn) {
+      document.querySelectorAll('.node').forEach(n => {
+        const v = CONTROL_EVAL.byElement[n.dataset.id];
+        if (!v || !v.length) return;
+        const icon = document.createElement('span');
+        icon.className = 'node-rule-icon';
+        icon.textContent = '!';
+        // .title is een DOM-eigenschap: platte tekst, nooit HTML (regel-labels zijn gebruikersinvoer).
+        icon.title = controlRuleTooltipText(v);
+        // Klik op het icoon: focus op dit element, met de sectie
+        // "Controleregels" in het detailpaneel (zie renderDetailPanel).
+        icon.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          if (connectMode) return;
+          enterFocus(n);
+        });
+        n.appendChild(icon);
+      });
+    }
+    if (controlRulesSummaryEl) {
+      controlRulesSummaryEl.innerHTML = controlViewOn ? controlRulesSummaryHtml(CONTROL_EVAL) : '';
+      controlRulesSummaryEl.hidden = !controlViewOn;
+      controlRulesSummaryEl.querySelectorAll('.crs-rule').forEach(b => {
+        b.addEventListener('click', () => highlightRule(b.dataset.ruleId, b));
+      });
+    }
+    // Staat er een detailpaneel open (focusmodus), dan opnieuw opbouwen zodat
+    // de sectie "Controleregels" mee aan/uit gaat.
+    if (focusId !== null) {
+      const fNode = document.querySelector('.node[data-id="' + CSS.escape(focusId) + '"]');
+      const key = fNode && fNode.closest('.column') ? fNode.closest('.column').dataset.key : null;
+      renderDetailPanel(focusId, COL_COLORS[key] || '#002855');
+    }
+  }
+
+  if (controlRulesBtn) {
+    if (CONTROL_EVAL.activeRules.length) {
+      const total = Object.keys(CONTROL_EVAL.byElement).length;
+      controlRulesBtn.textContent = 'Controleregels' + (total ? ' (' + total + ')' : ' \u2713');
+      controlRulesBtn.title = total
+        ? total + ' element(en) voldoen niet aan een controleregel — klik om te tonen/verbergen'
+        : 'Alle elementen voldoen aan de controleregels';
+      controlRulesBtn.style.display = '';
+      try { controlViewOn = localStorage.getItem(controlViewStorageKey()) === '1'; } catch (err) { controlViewOn = false; }
+      controlRulesBtn.addEventListener('click', () => {
+        controlViewOn = !controlViewOn;
+        try { localStorage.setItem(controlViewStorageKey(), controlViewOn ? '1' : '0'); } catch (err) { /* geblokkeerd: alleen deze sessie */ }
+        applyControlView();
+      });
+      if (controlViewOn) applyControlView();
+    } else {
+      controlRulesBtn.style.display = 'none';
+    }
+  }
+
   // ---- SVG-export van de volledige boom (huidige zichtbare stand) ----
   function nodeTextLines(node) {
     const clone = node.cloneNode(true);
-    clone.querySelectorAll('.node-tag-dot, .node-rag-dot, .node-stale-icon').forEach(el => el.remove());
+    clone.querySelectorAll('.node-tag-dot, .node-rag-dot, .node-stale-icon, .node-rule-icon').forEach(el => el.remove());
     clone.querySelectorAll('br').forEach(br => br.replaceWith('\n'));
     return clone.textContent.split('\n').map(s => s.trim());
   }
@@ -5564,6 +5710,24 @@ function runApp(data) {
         bang.setAttribute('x', x + w - 6); bang.setAttribute('y', y + h - 3);
         bang.setAttribute('text-anchor', 'middle'); bang.setAttribute('font-size', '7');
         bang.setAttribute('font-weight', '700'); bang.setAttribute('fill', '#8a6d00');
+        bang.textContent = '!';
+        g.appendChild(bang);
+      }
+      // Controleregels (DOEL-63): alleen aanwezig in de DOM als de
+      // controleweergave aan staat (applyControlView), dus alleen dan in de
+      // export. Linksonder, oranje driehoek; bewust GEEN regeltekst in de SVG.
+      const ruleIcon = node.querySelector('.node-rule-icon');
+      if (ruleIcon) {
+        const tri = document.createElementNS(SVG_NS, 'polygon');
+        const bx = x + 7, by = y + h - 2;
+        tri.setAttribute('points', (bx - 5.5) + ',' + by + ' ' + (bx + 5.5) + ',' + by + ' ' + bx + ',' + (by - 10));
+        tri.setAttribute('fill', '#ff8c1a');
+        tri.setAttribute('stroke', '#ffffff'); tri.setAttribute('stroke-width', '1');
+        g.appendChild(tri);
+        const bang = document.createElementNS(SVG_NS, 'text');
+        bang.setAttribute('x', bx); bang.setAttribute('y', by - 1.5);
+        bang.setAttribute('text-anchor', 'middle'); bang.setAttribute('font-size', '7');
+        bang.setAttribute('font-weight', '700'); bang.setAttribute('fill', '#ffffff');
         bang.textContent = '!';
         g.appendChild(bang);
       }
@@ -8661,6 +8825,134 @@ function escapeHtml(s) {
   }[c]));
 }
 
+// ---- Controleregels (DOEL-63, epic DOEL-61) ----
+// Pure functies op topniveau (net als escapeHtml/nodeInnerHtml), zodat
+// web/test/tree-html-control-rules.test.mjs ze los kan laden en testen.
+// Regels komen uit tree.controlRules (alleen bij actieve module, zie
+// api/src/routes/tree.ts; schema in api/src/controlRules.ts). Alleen
+// STRUCTUURregels: ontbrekende schakels in de gedocumenteerde keten.
+//
+// Richting: een relatie loopt van bron (kind) naar doel (ouder), bv.
+// Project -> Capability. "Uitgaand" = "heeft een ouder van type ...",
+// "inkomend" = "heeft een kind van type ...".
+//
+// Aliassen (DOEL-56; besluit Charles, DOEL-63): een alias telt als zijn
+// basistype. Een regel op "Project" geldt dus ook voor alias "Project 1"; een
+// regel die specifiek "Project 1" noemt geldt alleen voor die alias. Idem voor
+// doeltypen. typeToBase vertaalt elk type naar de typeName van zijn kolom.
+//
+// Altijd op de VOLLEDIGE dataset (details/edges), nooit op wat er zichtbaar
+// is: filters, verborgen kolommen en focusmodus hebben geen invloed.
+// O(elementen + relaties + regels x elementen): indexen eenmalig per aanroep.
+const CONTROL_RULE_FIELD_LABELS = { description: 'Omschrijving', kpi: 'KPI', taakveld: 'Taakveld', subtaakveld: 'Subtaakveld' };
+const CONTROL_RULE_FIELD_KEYS = { description: 'desc', kpi: 'kpi', taakveld: 'taakveld', subtaakveld: 'subtaakveld' };
+
+function controlRuleTypeList(types) {
+  const t = (types || []).map(String);
+  if (t.length <= 1) return t[0] || '…';
+  return t.slice(0, -1).join(', ') + ' of ' + t[t.length - 1];
+}
+
+function evaluateControlRules(details, edges, elementTags, tags, rules, typeToBase) {
+  const base = typeToBase || {};
+  const matches = (type, list) => list.indexOf(type) !== -1 || (base[type] != null && list.indexOf(base[type]) !== -1);
+  const out = {}, inc = {};
+  (edges || []).forEach((e) => {
+    (out[e.source] = out[e.source] || []).push(e);
+    (inc[e.target] = inc[e.target] || []).push(e);
+  });
+  const byElement = {};
+  const countsByRule = {};
+  const activeRules = (rules || []).filter((r) => r && r.enabled !== false);
+  activeRules.forEach((r) => { countsByRule[r.id] = 0; });
+  const codes = Object.keys(details || {});
+
+  activeRules.forEach((r) => {
+    const subjects = r.subjectTypes || [];
+    const targets = r.targetTypes || [];
+    const min = r.min == null ? 1 : r.min;
+    const max = r.max == null ? null : r.max;
+    const prim = r.weight === 'primair';
+    codes.forEach((code) => {
+      const d = details[code];
+      if (!d || !matches(d.type, subjects)) return;
+      let detail = null;
+      if (r.kind === 'requires_outgoing' || r.kind === 'requires_incoming') {
+        const outgoing = r.kind === 'requires_outgoing';
+        const list = (outgoing ? out[code] : inc[code]) || [];
+        let n = 0;
+        list.forEach((e) => {
+          const other = details[outgoing ? e.target : e.source];
+          if (!other || !matches(other.type, targets)) return;
+          if (prim && e.weight !== 'primair') return;
+          n += 1;
+        });
+        const noun = (outgoing ? 'ouder' : 'kind') + (n === 1 ? '' : (outgoing ? 's' : 'eren'));
+        const what = (prim ? 'primaire ' : '') + noun + ' van type ' + controlRuleTypeList(targets);
+        if (n < min) detail = n + ' ' + what + ', minimaal ' + min + ' vereist';
+        else if (max != null && n > max) detail = n + ' ' + what + ', maximaal ' + max + ' toegestaan';
+      } else if (r.kind === 'primary_parent_count') {
+        const n = ((out[code]) || []).filter((e) => e.weight === 'primair' && details[e.target]).length;
+        const what = 'primaire ouder' + (n === 1 ? '' : 's');
+        if (n < min) detail = n + ' ' + what + ', minimaal ' + min + ' vereist';
+        else if (max != null && n > max) detail = n + ' ' + what + ', maximaal ' + max + ' toegestaan';
+      } else if (r.kind === 'requires_tag_category') {
+        const cat = String(r.tagCategory || '').trim();
+        const n = ((elementTags || {})[code] || []).filter((t) => tags && tags[t] && String(tags[t].categorie || '').trim() === cat).length;
+        if (n < min) detail = n + ' tag' + (n === 1 ? '' : 's') + ' in categorie "' + cat + '", minimaal ' + min + ' vereist';
+      } else if (r.kind === 'required_field') {
+        const key = CONTROL_RULE_FIELD_KEYS[r.field];
+        if (key && !String(d[key] == null ? '' : d[key]).trim()) {
+          detail = 'Veld "' + (CONTROL_RULE_FIELD_LABELS[r.field] || r.field) + '" is leeg';
+        }
+      }
+      if (detail) {
+        (byElement[code] = byElement[code] || []).push({
+          ruleId: r.id, label: r.label || r.id, explanation: r.explanation || '', detail: detail,
+        });
+        countsByRule[r.id] += 1;
+      }
+    });
+  });
+  return { byElement: byElement, countsByRule: countsByRule, activeRules: activeRules };
+}
+
+// Platte tekst voor een title-attribuut (via de DOM-eigenschap .title gezet,
+// dus nooit als HTML geïnterpreteerd).
+function controlRuleTooltipText(violations) {
+  return 'Controleregels:\n' + (violations || []).map((v) => '• ' + v.label + ' — ' + v.detail).join('\n');
+}
+
+// Sectie "Controleregels" in het detailpaneel. Alle regeltekst (gebruikers-
+// invoer) via escapeHtml.
+function controlRuleViolationsHtml(violations) {
+  if (!violations || !violations.length) return '';
+  return '<div class="dp-rules"><div class="dp-rules-title">&#9888; Controleregels</div>' +
+    violations.map((v) =>
+      '<div class="dp-rule"><div class="dp-rule-label"><span class="dp-rule-id">' + escapeHtml(v.ruleId) + '</span> ' +
+      escapeHtml(v.label) + '</div><div class="dp-rule-detail">' + escapeHtml(v.detail) + '</div>' +
+      (v.explanation ? '<div class="dp-rule-expl">' + escapeHtml(v.explanation) + '</div>' : '') + '</div>'
+    ).join('') + '</div>';
+}
+
+// Samenvattingspaneel (stat-tegels, zelfde stijl als het kolomoverzicht).
+// Per regel een knop met data-rule-id (gewired in runApp, geen inline handlers).
+function controlRulesSummaryHtml(evaluation) {
+  const rules = (evaluation && evaluation.activeRules) || [];
+  const counts = (evaluation && evaluation.countsByRule) || {};
+  const total = Object.keys((evaluation && evaluation.byElement) || {}).length;
+  let html = '<div class="cs-stat-tile' + (total ? ' cs-stat-tile-warn' : ' crs-ok') + '"><div class="cs-stat-value">' + total +
+    '</div><div class="cs-stat-label">Elementen met een overtreding</div></div>';
+  html += rules.map((r) => {
+    const n = counts[r.id] || 0;
+    return '<button type="button" class="cs-stat-tile crs-rule' + (n ? ' cs-stat-tile-warn' : ' crs-ok') + '" data-rule-id="' +
+      escapeHtml(r.id) + '"' + (n ? '' : ' disabled') + '><div class="cs-stat-value">' + (n ? n : '&#10003;') +
+      '</div><div class="cs-stat-label"><span class="dp-rule-id">' + escapeHtml(r.id) + '</span> ' + escapeHtml(r.label || r.id) +
+      (n ? '' : ' — voldoet') + '</div></button>';
+  }).join('');
+  return html;
+}
+
 // DOEL-21: helpers voor velden die de server als getal/enum levert maar die
 // (bij een vijandige of foute API-respons) tekst met HTML kunnen bevatten.
 // stripHtmlChars: voor 'terugvalwaarden' die als tekst getoond worden (bv. een
@@ -8939,7 +9231,10 @@ function adaptTreeResponse(tree) {
   // Projecten-specifieke UI te verbergen i.p.v. te tonen-maar-te-laten-falen.
   const ACTIVE_MODULES = tree.activeModules || [];
 
-  return { DETAILS, EDGES, TOELICHTING, PROJECT_STATUS, PRODUCTS, PRODUCT_DEPENDENCIES, ACTIVITIES, DEPENDENCIES, TAGS, ELEMENT_TAGS, ORGS, OB_ORG, COLUMNS, ACTIVE_MODULES };
+  // Controleregels (DOEL-63) — leeg zonder module 'controleregels' (server-side).
+  const CONTROL_RULES = Array.isArray(tree.controlRules) ? tree.controlRules : [];
+
+  return { DETAILS, EDGES, TOELICHTING, PROJECT_STATUS, PRODUCTS, PRODUCT_DEPENDENCIES, ACTIVITIES, DEPENDENCIES, TAGS, ELEMENT_TAGS, ORGS, OB_ORG, COLUMNS, ACTIVE_MODULES, CONTROL_RULES };
 }
 
 function renderError(message) {
