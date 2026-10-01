@@ -25,15 +25,20 @@ _offsite_acl_enabled() {
 }
 
 _offsite_acl_one() {
-  local path="$1" private="$2" spec
-  # rX: lezen; uitvoeren (= map openen) alleen voor mappen. m::rX: het masker
-  # weer openzetten, anders blijft de regel hierboven effectief ---.
-  spec="u:${OFFSITE_PULL_USER}:rX,m::rX"
+  local path="$1" private="$2" perm spec
+  # Mappen r-x (openen + lezen), bestanden r-- (alleen lezen). Bewust expliciet
+  # en NIET "rX": hoofdletter-X geeft ook bij een bestand uitvoerrecht zodra er
+  # al ergens een x-bit staat (bv. een geërfde ACL-regel r-x) — gezien in de
+  # test (DOEL-53). m::<perm> zet het masker weer open; anders blijft de regel
+  # voor het pullaccount effectief ---.
+  if [ -d "$path" ]; then perm="r-x"; else perm="r--"; fi
+  spec="u:${OFFSITE_PULL_USER}:${perm},m::${perm}"
   [ "$private" = "--private" ] && spec="${spec},g::---,o::---"
   setfacl -m "$spec" "$path" || return 1
   if [ -d "$path" ]; then
-    # Standaard-ACL: nieuwe bestanden/mappen in deze map erven hetzelfde.
-    setfacl -d -m "u::rwx,u:${OFFSITE_PULL_USER}:rX,m::rX" "$path" || return 1
+    # Standaard-ACL: nieuwe bestanden/mappen in deze map erven hetzelfde
+    # (bestanden krijgen daarbij nooit x: dat bepaalt de aanmaakmodus).
+    setfacl -d -m "u::rwx,u:${OFFSITE_PULL_USER}:r-x,m::r-x" "$path" || return 1
     if [ "$private" = "--private" ]; then
       setfacl -d -m "g::---,o::---" "$path" || return 1
     fi
