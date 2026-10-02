@@ -16,18 +16,30 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends default-jre-headless \
     && rm -rf /var/lib/apt/lists/*
 COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+# DOEL-74: pip is alleen nodig om de requirements te installeren. Daarna
+# meteen weg, in dezelfde laag: de installer hoort niet in de runtime-omgeving
+# (kleiner aanvalsoppervlak, en de in python:3.12-slim meegeleverde pip had
+# bekende kwetsbaarheden die zo ook uit de SBOM verdwijnen). De SBOM-stage
+# hieronder inventariseert deze omgeving, dus zonder pip — precies wat er
+# draait. Later iets bijinstalleren kan alleen nog via een nieuwe image-build.
+RUN pip install --no-cache-dir -r requirements.txt \
+    && python -m pip uninstall -y pip
 
 # SBOM-stage. "sbom_tools" is een named build-context (docker-compose.yml:
 # additional_contexts -> ./scripts), want scripts/ valt buiten de
 # build-context van deze service.
-# Versie van cyclonedx-bom staat vast (zelfde als requirements-dev.txt, dat
-# alleen nog voor generate-sbom.sh lokaal gebruikt wordt). sbom_python_scope.py
-# draait bewust met de python van de omgeving die geïnventariseerd wordt.
+# De versie van cyclonedx-bom komt uit requirements-dev.txt (één bron: zo
+# loopt deze stage niet achter als Dependabot die pin bijwerkt — DOEL-74).
+# sbom_python_scope.py draait bewust met de python van de omgeving die
+# geïnventariseerd wordt. De venv krijgt zijn eigen pip uit de met Python
+# meegeleverde ensurepip-bundel; die venv blijft in deze stage achter.
 FROM base AS sbom
 COPY --from=sbom_tools sbom_python_scope.py /tools/sbom_python_scope.py
+COPY requirements-dev.txt /tmp/requirements-dev.txt
 RUN python -m venv /opt/cyclonedx \
-    && /opt/cyclonedx/bin/pip install --no-cache-dir cyclonedx-bom==7.3.1 \
+    && CYCLONEDX_PIN="$(grep -E '^cyclonedx-bom==[0-9.]+$' /tmp/requirements-dev.txt)" \
+    && test -n "$CYCLONEDX_PIN" \
+    && /opt/cyclonedx/bin/pip install --no-cache-dir "$CYCLONEDX_PIN" \
     && mkdir -p /out \
     && /opt/cyclonedx/bin/cyclonedx-py environment /usr/local/bin/python \
          --of JSON -o /out/excel-service.cdx.json \
@@ -36,6 +48,11 @@ RUN python -m venv /opt/cyclonedx \
     && cp requirements.txt /out/requirements.txt
 
 FROM base
+# DOEL-74: ook de ensurepip-bundel (een pip-wheel in de standaardbibliotheek,
+# waarmee `python -m ensurepip`/`python -m venv` pip opnieuw zou kunnen
+# neerzetten) hoort niet in de runtime-image. Pas hier, niet in base: de
+# SBOM-stage heeft hem nodig voor zijn eigen venv.
+RUN python -c "import ensurepip, os, shutil; shutil.rmtree(os.path.dirname(ensurepip.__file__))"
 # Vóór de app-code, zodat een code-wijziging deze laag niet ongeldig maakt.
 # Buiten /app/app en niet via uvicorn bereikbaar — puur voor `docker cp` en
 # voor de api-image-build (zie hierboven).
