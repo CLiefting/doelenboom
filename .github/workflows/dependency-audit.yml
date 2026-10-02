@@ -1,0 +1,68 @@
+name: Dependency-audit
+
+# DOEL-69: controle op bekende kwetsbaarheden in de dependencies van api, web
+# en excel-service. Drie aanleidingen:
+#   - workflow_call: als job van de gewone CI (.github/workflows/ci.yml) bij
+#     elke push/PR — de stappen staan dus op precies één plek;
+#   - schedule: dagelijks, ook als er niets gepusht wordt. Zonder dit bleef een
+#     kwetsbaarheid die ná een release bekend werd onopgemerkt tot de volgende
+#     PR. Een rode geplande run geeft een GitHub-notificatie aan degene die het
+#     schema het laatst wijzigde (zie deploy/README.md, "Dagelijkse
+#     dependency-audit");
+#   - workflow_dispatch: handmatig starten (bv. om de notificatie te testen).
+#
+# Bewust een EIGEN workflow met een eigen naam, niet een schedule op "CI":
+# scripts/release.sh en pr-merge.sh volgen de nieuwste run van workflow "CI"
+# voor een commit. Een geplande run binnen "CI" (met overgeslagen testjobs)
+# zou daar tussen kunnen komen en een release laten doorgaan zonder dat de
+# tests voor die commit gedraaid hebben.
+#
+# Alles hier is BLOKKEREND:
+#   - npm audit op high/critical (DOEL-67);
+#   - pip-audit op ELKE bevinding (pip-audit kent geen drempel per ernst).
+#     Uitweg als er (nog) geen fix is: een gemotiveerde regel in
+#     excel-service/pip-audit-ignore.txt — zie scripts/pip-audit.sh.
+# Gevolg: een nieuwe advisory kan ook een PR tegenhouden die er inhoudelijk
+# niets mee te maken heeft — dan eerst (in een eigen ticket) de dependency
+# bijwerken. De Softwarecomponenten-pagina in de app
+# (doelenboom_sbom_ontwerp.md) blijft daarnaast de doorlopende monitoring van
+# wat er in productie draait (incl. OSV.dev).
+on:
+  schedule:
+    # Dagelijks 05:17 UTC (06:17 Nederlandse wintertijd, 07:17 zomertijd).
+    # Bewust niet op het hele uur: dan is het bij GitHub het drukst en
+    # starten geplande runs het vaakst te laat. NB: GitHub schakelt geplande
+    # workflows uit na 60 dagen zonder activiteit in de repository.
+    - cron: '17 5 * * *'
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: npm audit + pip-audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.12'
+      - name: npm audit — api
+        working-directory: api
+        run: npm audit --audit-level=high
+      # 'always()' op de volgende stappen: één rode controle mag de andere niet
+      # verbergen — je wilt in één run zien wat er allemaal speelt.
+      - name: npm audit — web
+        if: always()
+        working-directory: web
+        run: npm audit --audit-level=high
+      - name: pip-audit — excel-service
+        if: always()
+        run: |
+          pip install pip-audit==2.10.1
+          bash scripts/pip-audit.sh

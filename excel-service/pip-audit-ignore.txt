@@ -1,0 +1,9 @@
+# Gemotiveerde uitzonderingen voor pip-audit (DOEL-69) — zie scripts/pip-audit.sh.
+#
+# pip-audit is BLOKKEREND op elke bevinding. Zet hier alleen een kwetsbaarheid
+# in als er (nog) geen fix is of als ze ons gebruik aantoonbaar niet raakt:
+#
+#   <kwetsbaarheid-id>  <JJJJ-MM-DD>  <motivatie, bij voorkeur met ticketnummer>
+#
+# Loop deze lijst na bij elke update van requirements.txt en verwijder regels
+# zodra de fix beschikbaar is. Stand 2 oktober 2026: geen uitzonderingen.

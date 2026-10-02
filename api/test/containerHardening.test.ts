@@ -157,7 +157,8 @@ describe('Node-versie: geen end-of-life runtime (DOEL-42, OWASP A06)', () => {
   }
 
   it('Docker-images en CI gebruiken dezelfde Node-major', () => {
-    const ci = stripComments(read('.github/workflows/ci.yml'));
+    // dependency-audit staat sinds DOEL-69 in een eigen workflowbestand.
+    const ci = stripComments(read('.github/workflows/ci.yml')) + '\n' + stripComments(read('.github/workflows/dependency-audit.yml'));
     const ciMajors = [...ci.matchAll(/node-version:\s*'?(\d+)/g)].map((m) => Number(m[1]));
     assert.ok(ciMajors.length >= 3, 'verwacht node-version in de api-, web- en dependency-audit-job');
     const dockerMajors = new Set(dockerfiles.flatMap((f) => nodeMajors(read(f))));
