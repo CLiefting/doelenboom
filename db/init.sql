@@ -764,7 +764,9 @@ create table if not exists audit_log (
     -- DOEL-62: wijziging van controleregels (detail: scope, aantal, regel-id's
     -- — nooit labels/uitleg).
     'control_rules_updated',
-    'control_rule_deviation_set', 'control_rule_deviation_removed'
+    'control_rule_deviation_set', 'control_rule_deviation_removed',
+    -- DOEL-70: mail aan sysadmins over nieuwe kwetsbaarheden (detail: alleen aantallen).
+    'dependency_vulnerability_alert_sent'
   )),
   user_id bigint references users(id) on delete set null,
   tenant_id bigint references tenants(id) on delete set null,
@@ -888,6 +890,25 @@ create table if not exists dependency_vulnerabilities (
   unique (component_id, vulnerability_id)
 );
 create index if not exists idx_dependency_vulnerabilities_component on dependency_vulnerabilities(component_id);
+
+-- Welke kwetsbaarheden al per mail aan de sysadmins gemeld zijn (DOEL-70,
+-- migratie 0046; zie notifySysadminsOfNewVulnerabilities in
+-- api/src/dependencyHealth.ts). Sleutel = pakket (ecosysteem + naam) +
+-- kwetsbaarheid-id, bewust LOS van dependency_components/-vulnerabilities:
+-- die worden bij elke controle gewist en opnieuw opgebouwd en elke uitrol
+-- maakt nieuwe componentrijen, dus zonder deze tabel zou elke bevinding na
+-- elke uitrol opnieuw "nieuw" lijken. Zonder versie in de sleutel: blijft
+-- een pakket na een update kwetsbaar voor hetzelfde id, dan volgt geen
+-- tweede mail. Bevat geen persoonsgegevens (niet wie de mail kreeg).
+create table if not exists dependency_vulnerability_notifications (
+  id bigserial primary key,
+  ecosystem text not null,
+  name text not null,
+  vulnerability_id text not null,
+  severity_level text not null,
+  notified_at timestamptz not null default now(),
+  unique (ecosystem, name, vulnerability_id)
+);
 
 -- Geschiedenis van elke dependency-health-controle (handmatig via "Nu
 -- controleren" of automatisch, zie index.ts-sweep) — geeft "laatste controle"

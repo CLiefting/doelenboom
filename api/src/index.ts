@@ -100,6 +100,15 @@ setInterval(() => {
 // controle-interval hier is puur om een gemiste/herstart-onderbroken run
 // tijdig opnieuw te proberen — geen scherpe klok.
 const DEPENDENCY_HEALTH_SWEEP_INTERVAL_MS = 60 * 60_000;
+// DOEL-47: kort na het opstarten één keer direct, zodat de SBOM van een nieuwe
+// uitrol meteen wordt ingelezen (sweepDependencyHealthCheck slaat de
+// 24-uurswachttijd over voor een nog niet ingelezen build) i.p.v. pas bij de
+// eerste intervaltik een uur later. unref(): houdt het proces niet in leven.
+setTimeout(() => {
+  sweepDependencyHealthCheck().catch((err) => {
+    console.error('Dependency-health-sweep (na opstarten) mislukt:', err);
+  });
+}, 20_000).unref();
 setInterval(() => {
   sweepDependencyHealthCheck().catch((err) => {
     console.error('Dependency-health-sweep mislukt:', err);

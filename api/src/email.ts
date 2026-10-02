@@ -241,3 +241,61 @@ export let sendRegistrationExistingAccountEmail = async (to: string, loginUrl: s
 export function setSendRegistrationExistingAccountEmailImpl(fn: typeof sendRegistrationExistingAccountEmail): void {
   sendRegistrationExistingAccountEmail = fn;
 }
+
+// --- Melding nieuwe kwetsbaarheden aan sysadmins (DOEL-70) -------------------
+// Zie notifySysadminsOfNewVulnerabilities in dependencyHealth.ts. De mail
+// bevat UITSLUITEND getallen en een vaste link naar de pagina
+// Softwarecomponenten: geen pakketnamen, versies, CVE's of tekst afkomstig
+// van OSV.dev/registries (geen injectie mogelijk, en mail is geen
+// vertrouwelijk kanaal voor "waar zijn wij kwetsbaar").
+export interface VulnerabilityAlert {
+  counts: { kritiek: number; hoog: number; onbekend: number };
+  total: number;
+  link: string;
+}
+
+export function renderVulnerabilityAlertEmail(alert: VulnerabilityAlert): { subject: string; text: string; html: string } {
+  const n = (v: number) => String(Math.max(0, Math.trunc(Number(v) || 0)));
+  const total = n(alert.total);
+  const subject = `Doelenboom: ${total} nieuwe kwetsbaarhe${total === '1' ? 'id' : 'den'} in softwarecomponenten`;
+  const lines = [
+    `Kritiek: ${n(alert.counts.kritiek)}`,
+    `Hoog: ${n(alert.counts.hoog)}`,
+    `Ernst onbekend: ${n(alert.counts.onbekend)}`,
+  ];
+  const intro =
+    `De dagelijkse controle van de softwarecomponenten heeft ${total} nieuwe ` +
+    `kwetsbaarhe${total === '1' ? 'id' : 'den'} gevonden in onderdelen die in productie draaien.`;
+  const outro = 'Bekijk de details op de pagina Softwarecomponenten (alleen voor sysadmins, na inloggen):';
+  const why = 'Je ontvangt deze melding omdat je sysadmin bent van Doelenboom. Elke kwetsbaarheid wordt één keer gemeld.';
+  const text = `${intro}\n\n${lines.join('\n')}\n\n${outro}\n${alert.link}\n\n${why}`;
+  const html =
+    `<p>${escapeHtml(intro)}</p>` +
+    `<ul>${lines.map((l) => `<li>${escapeHtml(l)}</li>`).join('')}</ul>` +
+    `<p>${escapeHtml(outro)}<br><a href="${escapeHtml(alert.link)}">${escapeHtml(alert.link)}</a></p>` +
+    `<p style="color:#6c6f76">${escapeHtml(why)}</p>`;
+  return { subject, text, html };
+}
+
+// Geeft true terug als de mail echt verstuurd is; false als er geen SMTP is
+// geconfigureerd (dan alleen een waarschuwing in het log, zelfde fallback als
+// de andere mails). Zelfde `let`-exportbinding-patroon als hierboven, zodat
+// tests een mock kunnen zetten (setSendVulnerabilityAlertEmailImpl).
+export let sendVulnerabilityAlertEmail = async (to: string, alert: VulnerabilityAlert): Promise<boolean> => {
+  const transport = getTransporter();
+  if (!transport) {
+    console.warn(
+      `WAARSCHUWING: geen SMTP_HOST geconfigureerd — melding van ${alert.total} nieuwe kwetsbaarhe(i)d(en) ` +
+        'aan de sysadmins is niet gemaild. Zie de pagina Softwarecomponenten.'
+    );
+    return false;
+  }
+  assertSafeRecipient(to);
+  const { subject, text, html } = renderVulnerabilityAlertEmail(alert);
+  await transport.sendMail({ from: SMTP_FROM, to, subject, text, html });
+  return true;
+};
+
+export function setSendVulnerabilityAlertEmailImpl(fn: typeof sendVulnerabilityAlertEmail): void {
+  sendVulnerabilityAlertEmail = fn;
+}
