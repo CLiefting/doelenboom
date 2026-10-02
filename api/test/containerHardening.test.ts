@@ -121,6 +121,37 @@ describe('deploy/backup-database.sh: bestandsrechten (DOEL-31)', () => {
   });
 });
 
+describe('excel-service: geen pip in de runtime-image (DOEL-74)', () => {
+  const dockerfile = stripComments(read('excel-service/Dockerfile'));
+
+  it('pip wordt in dezelfde laag verwijderd als waarin de requirements geïnstalleerd worden (vóór de SBOM-stage)', () => {
+    const base = dockerfile.slice(0, dockerfile.indexOf('\nFROM base AS sbom'));
+    assert.match(base, /RUN pip install --no-cache-dir -r requirements\.txt \\\n\s+&& python -m pip uninstall -y pip\n/);
+  });
+
+  it('de runtime-stage verwijdert ook de ensurepip-bundel, vóór USER excel, en installeert zelf niets meer', () => {
+    const stage = finalStage(read('excel-service/Dockerfile'));
+    const rm = stage.search(/^RUN python -c "import ensurepip, os, shutil; shutil\.rmtree\(os\.path\.dirname\(ensurepip\.__file__\)\)"$/m);
+    assert.ok(rm >= 0, 'ensurepip wordt niet verwijderd in de runtime-stage');
+    assert.ok(rm < stage.indexOf('USER excel'), 'moet als root gebeuren, vóór USER excel');
+    assert.doesNotMatch(stage, /pip install|ensurepip --|python -m venv/);
+  });
+
+  it('de SBOM-stage haalt de cyclonedx-bom-versie uit requirements-dev.txt (één bron, ook na een Dependabot-update)', () => {
+    const sbom = dockerfile.slice(dockerfile.indexOf('\nFROM base AS sbom'), dockerfile.lastIndexOf('\nFROM '));
+    assert.match(sbom, /COPY requirements-dev\.txt \/tmp\/requirements-dev\.txt/);
+    assert.doesNotMatch(sbom, /cyclonedx-bom==\d/, 'geen vaste versie in de Dockerfile');
+    assert.match(read('excel-service/requirements-dev.txt'), /^cyclonedx-bom==[0-9.]+$/m, 'pin ontbreekt in requirements-dev.txt');
+  });
+
+  it('de image-smoketest bewaakt het aan de gebouwde image', () => {
+    const smoke = read('scripts/image-smoke-test.sh');
+    assert.match(smoke, /python -m pip --version/);
+    assert.match(smoke, /import ensurepip/);
+    assert.match(smoke, /SBOM noemt pip nog/);
+  });
+});
+
 describe('image-leesrechten: niet afhankelijk van de rechten in de werkmap (DOEL-31b)', () => {
   it('excel-service: /app wordt leesbaar gemaakt na COPY en vóór USER excel', () => {
     const stage = finalStage(read('excel-service/Dockerfile'));

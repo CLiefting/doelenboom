@@ -119,6 +119,19 @@ step "excel-service: uvicorn start en /health"
 docker run -d --name "$EXCEL_C" -p "$EXCEL_PORT:8000" "$EXCEL_IMG" >/dev/null
 wait_for_200 "http://127.0.0.1:$EXCEL_PORT/health" "$EXCEL_C" 90
 echo "  /health: 200"
+# DOEL-74: de installer hoort niet in de runtime-image, en de SBOM moet dat
+# weerspiegelen (pip stond er als kwetsbaar component in). Tegelijk bewaken dat
+# de inventarisatie zónder pip nog werkt: de eigen dependencies staan er wel in.
+if docker exec "$EXCEL_C" python -m pip --version >/dev/null 2>&1; then fail "excel-service: pip zit nog in de runtime-image"; fi
+if docker exec "$EXCEL_C" python -c "import ensurepip" >/dev/null 2>&1; then fail "excel-service: ensurepip (pip-bundel) zit nog in de runtime-image"; fi
+docker exec "$EXCEL_C" python -c "
+import json, sys
+names = {c['name'].lower() for c in json.load(open('/sbom/excel-service.cdx.json')).get('components', [])}
+missing = {'fastapi', 'uvicorn', 'openpyxl'} - names
+if 'pip' in names: sys.exit('SBOM noemt pip nog')
+if missing: sys.exit('SBOM mist ' + ', '.join(sorted(missing)))
+print('  geen pip/ensurepip in de image; SBOM: %d componenten, zonder pip' % len(names))
+" || fail "excel-service: SBOM klopt niet met de runtime-image"
 
 step "api: Node-versie en dependencies"
 want="$(sed -nE 's/^FROM node:([0-9]+).*/\1/p' "$REPO/api/Dockerfile.prod" | sort -u)"
