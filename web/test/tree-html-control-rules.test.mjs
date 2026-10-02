@@ -28,10 +28,10 @@ function load() {
   return new Function(
     [
       grab('escapeHtml'), grabConst('CONTROL_RULE_FIELD_LABELS'), grabConst('CONTROL_RULE_FIELD_KEYS'),
-      grab('controlRuleTypeList'), grab('evaluateControlRules'), grab('controlRuleTooltipText'),
+      grab('controlRuleTypeList'), grab('evaluateControlRules'), grab('controlRuleTooltipText'), grab('controlRuleHintHtml'),
       grab('controlRuleViolationsHtml'), grab('controlRulesSummaryHtml'),
     ].join('\n') +
-      '\nreturn { evaluateControlRules, controlRuleTooltipText, controlRuleViolationsHtml, controlRulesSummaryHtml };'
+      '\nreturn { evaluateControlRules, controlRuleTooltipText, controlRuleHintHtml, controlRuleViolationsHtml, controlRulesSummaryHtml };'
   )();
 }
 const F = load();
@@ -198,11 +198,26 @@ describe('weergave controleregels: XSS (OWASP A03, DOEL-63)', () => {
     assert.match(html, /data-rule-id="X&quot;0&gt;&lt;b"/);
   });
 
-  it('tooltip is platte tekst (gezet via de .title-eigenschap, niet als HTML)', () => {
+  it('aria-label van het icoon is platte tekst (setAttribute, niet als HTML)', () => {
     const txt = F.controlRuleTooltipText(evilViolations);
     assert.match(txt, /<img src=x onerror=alert\(1\)>/, 'platte tekst, ongewijzigd');
-    // En de aanroeper zet het via .title (DOM-eigenschap), niet via innerHTML/setAttribute-HTML.
-    assert.match(source, /icon\.title = controlRuleTooltipText\(v\);/);
+    assert.match(source, /icon\.setAttribute\('aria-label', controlRuleTooltipText\(v\)\);/);
+  });
+
+  it('hover-kaartje (DOEL-68): id/label/detail ge-escaped; leeg zonder overtredingen', () => {
+    const html = F.controlRuleHintHtml(evilViolations);
+    assertNoInjectedMarkup(html);
+    assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
+    assert.match(html, /<span class="tt-rule-id">R0<\/span>/);
+    assert.equal(F.controlRuleHintHtml([]), '');
+    assert.equal(F.controlRuleHintHtml(undefined), '');
+    const evilId = F.controlRuleHintHtml([{ ruleId: '<script>x</script>', label: 'l', detail: 'd' }]);
+    assertNoInjectedMarkup(evilId);
+    assert.match(evilId, /&lt;script&gt;x/);
+  });
+
+  it('hover-kaartje toont de reden alleen bij actieve controleweergave', () => {
+    assert.match(source, /\(controlViewOn \? controlRuleHintHtml\(CONTROL_EVAL\.byElement\[node\.dataset\.id\]\) : ''\)/);
   });
 
   it('SVG-export: alleen een symbool, nooit regeltekst; geen innerHTML in de rule-icon-code', () => {
@@ -212,7 +227,7 @@ describe('weergave controleregels: XSS (OWASP A03, DOEL-63)', () => {
   });
 
   it('geen inline event-handlers of javascript:-URL\'s in de nieuwe code (CSP)', () => {
-    const fns = ['controlRuleViolationsHtml', 'controlRulesSummaryHtml', 'controlRuleTooltipText'].map(grab).join('\n');
+    const fns = ['controlRuleViolationsHtml', 'controlRulesSummaryHtml', 'controlRuleTooltipText', 'controlRuleHintHtml'].map(grab).join('\n');
     assert.doesNotMatch(fns, /\son[a-z]+=|javascript:/i);
     const view = extract(/\/\/ ---- Controleweergave \(DOEL-63\) ----[\s\S]*?\n  if \(controlRulesBtn\) \{/, 'controleweergave-blok');
     assert.doesNotMatch(view, /setAttribute\('on|\.on[a-z]+ = /);
