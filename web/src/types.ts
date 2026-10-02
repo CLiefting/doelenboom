@@ -795,6 +795,10 @@ export type ControlRulesState = {
   validTypeNames: string[];
   tagCategories: string[];
   invalidRuleIds: string[];
+  // DOEL-64: aantal gemotiveerde afwijkingen per regel-id (alleen bij een
+  // doelenboom; ontbreekt bij tenant-default en sjabloon). Een regel
+  // verwijderen wist de bijbehorende motivaties bij het opslaan.
+  deviationCounts?: Record<string, number>;
 };
 
 // --- Softwarecomponenten / SBOM (sysadmin-only, /system-info) — zie

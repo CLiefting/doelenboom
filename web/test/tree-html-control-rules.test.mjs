@@ -23,15 +23,22 @@ function extract(re, what) {
 const grab = (name) => extract(new RegExp(`function ${name}\\([^)]*\\) \\{[\\s\\S]*?\\n\\}`), name);
 const grabConst = (name) => extract(new RegExp(`const ${name} = \\{[^\\n]*\\};`), name);
 
+const grabLine = (name) => extract(new RegExp(`const ${name} = [^\\n]*;`), name);
+
 function load() {
   // eslint-disable-next-line no-new-func
   return new Function(
     [
       grab('escapeHtml'), grabConst('CONTROL_RULE_FIELD_LABELS'), grabConst('CONTROL_RULE_FIELD_KEYS'),
-      grab('controlRuleTypeList'), grab('evaluateControlRules'), grab('controlRuleTooltipText'), grab('controlRuleHintHtml'),
-      grab('controlRuleViolationsHtml'), grab('controlRulesSummaryHtml'),
+      grabLine('CONTROL_DEVIATION_MAX_LENGTH'), grabLine('CONTROL_DEVIATION_HINT'),
+      grab('controlRuleTypeList'), grab('controlDeviationKey'), grab('evaluateControlRules'),
+      grab('controlViolationsAllMotivated'), grab('controlDeviationMetaText'),
+      grab('controlRuleTooltipText'), grab('controlRuleHintHtml'),
+      grab('controlRuleDeviationFormHtml'), grab('controlRuleViolationsHtml'), grab('controlRulesSummaryHtml'),
     ].join('\n') +
-      '\nreturn { evaluateControlRules, controlRuleTooltipText, controlRuleHintHtml, controlRuleViolationsHtml, controlRulesSummaryHtml };'
+      '\nreturn { evaluateControlRules, controlRuleTooltipText, controlRuleHintHtml, controlRuleViolationsHtml, ' +
+      'controlRulesSummaryHtml, controlRuleDeviationFormHtml, controlViolationsAllMotivated, controlDeviationMetaText, ' +
+      'CONTROL_DEVIATION_MAX_LENGTH, CONTROL_DEVIATION_HINT };'
   )();
 }
 const F = load();
@@ -231,5 +238,205 @@ describe('weergave controleregels: XSS (OWASP A03, DOEL-63)', () => {
     assert.doesNotMatch(fns, /\son[a-z]+=|javascript:/i);
     const view = extract(/\/\/ ---- Controleweergave \(DOEL-63\) ----[\s\S]*?\n  if \(controlRulesBtn\) \{/, 'controleweergave-blok');
     assert.doesNotMatch(view, /setAttribute\('on|\.on[a-z]+ = /);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DOEL-64: gemotiveerde afwijking per (element, regel)
+// ---------------------------------------------------------------------------
+
+describe('gemotiveerde afwijkingen in de evaluatie (DOEL-64)', () => {
+  const rules = [
+    rule({ id: 'RA', kind: 'requires_outgoing', subjectTypes: ['Doel'], targetTypes: ['Missie'], label: 'Doel heeft missie' }),
+    rule({ id: 'RB', kind: 'required_field', subjectTypes: ['Doel'], field: 'kpi', min: null, label: 'Doel heeft KPI' }),
+  ];
+  const run = (deviations) => {
+    const t = tree();
+    return F.evaluateControlRules(t.details, t.edges, t.elementTags, t.tags, rules, TYPE_TO_BASE, deviations);
+  };
+
+  it('zonder afwijkingen: alles open (gedrag van DOEL-63 ongewijzigd)', () => {
+    const ev = run(undefined);
+    assert.deepEqual(ev.countsByRule, { RA: 1, RB: 2 });
+    assert.deepEqual(ev.motivatedByRule, { RA: 0, RB: 0 });
+    assert.equal(ev.openElements, 2);
+    assert.equal(ev.motivatedOnlyElements, 0);
+    assert.ok(ev.byElement.D2.every((v) => v.deviation === null));
+  });
+
+  it('motiveren van één regel verbergt de andere overtreding van hetzelfde element niet', () => {
+    const ev = run([{ elementCode: 'D2', ruleId: 'RA', motivatie: 'Bewust zo', updatedAt: '2026-10-02T08:00:00Z' }]);
+    assert.deepEqual(ev.countsByRule, { RA: 0, RB: 2 });
+    assert.deepEqual(ev.motivatedByRule, { RA: 1, RB: 0 });
+    const d2 = Object.fromEntries(ev.byElement.D2.map((v) => [v.ruleId, v]));
+    assert.equal(d2.RA.deviation.motivatie, 'Bewust zo');
+    assert.equal(d2.RB.deviation, null);
+    assert.equal(F.controlViolationsAllMotivated(ev.byElement.D2), false, 'nog 1 open -> oranje');
+    assert.equal(ev.openElements, 2);
+    assert.equal(ev.motivatedOnlyElements, 0);
+  });
+
+  it('uitsluitend gemotiveerde afwijkingen: element telt als gemotiveerd (grijs), niet als open', () => {
+    const ev = run([
+      { elementCode: 'D2', ruleId: 'RA', motivatie: 'a' },
+      { elementCode: 'D2', ruleId: 'RB', motivatie: 'b' },
+    ]);
+    assert.equal(F.controlViolationsAllMotivated(ev.byElement.D2), true);
+    assert.equal(F.controlViolationsAllMotivated(ev.byElement.D1), false);
+    assert.equal(ev.openElements, 1);
+    assert.equal(ev.motivatedOnlyElements, 1);
+    assert.deepEqual(ev.countsByRule, { RA: 0, RB: 1 });
+    assert.deepEqual(ev.motivatedByRule, { RA: 1, RB: 1 });
+  });
+
+  it('afwijking zonder (nog) bestaande overtreding of voor een onbekende regel/element wordt genegeerd', () => {
+    const ev = run([
+      { elementCode: 'D1', ruleId: 'RA', motivatie: 'D1 voldoet aan RA' },
+      { elementCode: 'D2', ruleId: 'WEG', motivatie: 'regel bestaat niet' },
+      { elementCode: 'ZZ', ruleId: 'RA', motivatie: 'element bestaat niet' },
+      null,
+    ]);
+    assert.deepEqual(ev.countsByRule, { RA: 1, RB: 2 });
+    assert.deepEqual(ev.motivatedByRule, { RA: 0, RB: 0 });
+    assert.equal(ev.byElement.ZZ, undefined);
+  });
+
+  it('sleutel (element, regel) botst niet bij codes/ids die samen dezelfde tekst vormen', () => {
+    const details = { 'A-B': { code: 'A-B', type: 'Doel', kpi: '' }, A: { code: 'A', type: 'Doel', kpi: '' } };
+    const rs = [
+      rule({ id: 'C', kind: 'required_field', subjectTypes: ['Doel'], field: 'kpi', min: null }),
+      rule({ id: 'B-C', kind: 'required_field', subjectTypes: ['Doel'], field: 'kpi', min: null }),
+    ];
+    const ev = F.evaluateControlRules(details, [], {}, {}, rs, TYPE_TO_BASE, [{ elementCode: 'A-B', ruleId: 'C', motivatie: 'm' }]);
+    assert.ok(ev.byElement['A-B'].find((v) => v.ruleId === 'C').deviation);
+    assert.equal(ev.byElement.A.find((v) => v.ruleId === 'B-C').deviation, null);
+  });
+
+  it('tooltiptekst en door-wie/wanneer', () => {
+    const ev = run([{ elementCode: 'D2', ruleId: 'RA', motivatie: 'm', updatedAt: '2026-10-02T08:00:00Z', updatedByEmail: 'a@b.nl' }]);
+    assert.match(F.controlRuleTooltipText(ev.byElement.D2), /Doel heeft missie — .*\(gemotiveerd afgeweken\)/);
+    assert.match(F.controlDeviationMetaText(ev.byElement.D2[0].deviation), /^Door a@b\.nl op 02-10-2026$/);
+    assert.match(F.controlDeviationMetaText({ updatedAt: '2026-10-02T08:00:00Z' }), /^Op 02-10-2026$/, 'bezoeker: zonder e-mailadres');
+    assert.equal(F.controlDeviationMetaText({ updatedAt: 'geen datum' }), '');
+    assert.equal(F.controlDeviationMetaText(null), '');
+  });
+});
+
+describe('gemotiveerde afwijkingen: weergave en XSS (OWASP A03, DOEL-64)', () => {
+  const payloads = ['<img src=x onerror=alert(1)>', '"><svg onload=alert(2)>', 'javascript:alert(3)', "' onmouseover='alert(4)"];
+  const noInjected = (html) => {
+    for (const t of html.match(/<[^>]*>/g) || []) {
+      assert.doesNotMatch(t, /^<\/?(img|script|svg|a|iframe)\b/i, `geïnjecteerde tag: ${t}`);
+      assert.doesNotMatch(t, /\son[a-z]+\s*=/i, `geïnjecteerde handler: ${t}`);
+      assert.doesNotMatch(t, /javascript:/i, `javascript:-URL in een tag: ${t}`);
+    }
+  };
+  const violations = payloads.map((p, i) => ({
+    ruleId: 'R' + i, label: 'Label ' + i, explanation: '', detail: 'detail',
+    deviation: { elementCode: 'E1', ruleId: 'R' + i, motivatie: p, updatedAt: '2026-10-02T08:00:00Z', updatedByEmail: p },
+  }));
+
+  it('detailpaneel: motivatie en e-mailadres ge-escaped; grijze variant; knoppen alleen met schrijfrecht', () => {
+    const edit = F.controlRuleViolationsHtml(violations, { canEdit: true, elementCode: 'E1' });
+    noInjected(edit);
+    assert.match(edit, /&lt;img src=x onerror=alert\(1\)&gt;/);
+    assert.match(edit, /class="dp-rules dp-rules-motivated"/);
+    assert.match(edit, /Gemotiveerd afgeweken/);
+    assert.equal((edit.match(/data-dev-action="edit"/g) || []).length, 4);
+    assert.equal((edit.match(/data-dev-action="remove"/g) || []).length, 4);
+
+    const read = F.controlRuleViolationsHtml(violations, { canEdit: false, elementCode: 'E1' });
+    noInjected(read);
+    assert.doesNotMatch(read, /data-dev-action|<button|<textarea/);
+    assert.match(read, /Gemotiveerd afgeweken/, 'bezoeker ziet de motivatie wel');
+    // Zonder opts (oude aanroep) ook geen knoppen.
+    assert.doesNotMatch(F.controlRuleViolationsHtml(violations), /data-dev-action/);
+  });
+
+  it('open overtreding: knop "Motiveer afwijking" alleen met schrijfrecht; element-code/regel-id ge-escaped in data-attributen', () => {
+    const open = [{ ruleId: 'R"><b', label: 'l', explanation: '', detail: 'd', deviation: null }];
+    const html = F.controlRuleViolationsHtml(open, { canEdit: true, elementCode: 'E"1<x>' });
+    noInjected(html);
+    assert.match(html, /Motiveer afwijking/);
+    assert.match(html, /data-code="E&quot;1&lt;x&gt;" data-rule-id="R&quot;&gt;&lt;b"/);
+    assert.doesNotMatch(html, /dp-rules-motivated/);
+    assert.doesNotMatch(F.controlRuleViolationsHtml(open, { canEdit: false, elementCode: 'E1' }), /Motiveer afwijking/);
+  });
+
+  it('invoerformulier: bestaande motivatie ge-escaped in de textarea, vaste hint, teller en maxlength 500', () => {
+    for (const p of payloads.concat(['</textarea><script>alert(5)</script>'])) {
+      const html = F.controlRuleDeviationFormHtml('E1', 'R1', p);
+      noInjected(html);
+      assert.equal((html.match(/<\/textarea>/g) || []).length, 1, 'payload kan de textarea niet sluiten');
+    }
+    const html = F.controlRuleDeviationFormHtml('E1', 'R1', 'abc');
+    assert.equal(F.CONTROL_DEVIATION_MAX_LENGTH, 500);
+    assert.match(html, /maxlength="500"/);
+    assert.match(html, />3 \/ 500</);
+    assert.match(F.CONTROL_DEVIATION_HINT, /geen inhoudelijke, gevoelige of gerubriceerde informatie/);
+    assert.ok(html.includes(F.CONTROL_DEVIATION_HINT));
+    assert.match(html, /data-dev-action="save"/);
+    assert.match(html, /data-dev-action="cancel"/);
+    // Het formulier verschijnt alleen voor de regel die bewerkt wordt, en alleen met schrijfrecht.
+    const two = [violations[0], { ...violations[1], deviation: null }];
+    const editing = F.controlRuleViolationsHtml(two, { canEdit: true, elementCode: 'E1', editingRuleId: 'R1' });
+    assert.equal((editing.match(/<textarea/g) || []).length, 1);
+    assert.doesNotMatch(F.controlRuleViolationsHtml(two, { canEdit: false, elementCode: 'E1', editingRuleId: 'R1' }), /<textarea/);
+  });
+
+  it('hover-kaartje: motivatie ge-escaped, gemarkeerd als gemotiveerd', () => {
+    const html = F.controlRuleHintHtml(violations);
+    noInjected(html);
+    assert.match(html, /tt-rules tt-rules-motivated/);
+    assert.match(html, /Gemotiveerd afgeweken: &lt;img src=x onerror=alert\(1\)&gt;/);
+    const mixed = F.controlRuleHintHtml([violations[0], { ruleId: 'X', label: 'l', detail: 'd', deviation: null }]);
+    assert.doesNotMatch(mixed, /tt-rules-motivated/);
+  });
+
+  it('samenvattingspaneel: open en gemotiveerd apart; schakelaar "toon ook gemotiveerde"; standaard alleen open', () => {
+    const ev = {
+      activeRules: [{ id: 'R1', label: 'Een' }, { id: 'R2', label: payloads[0] }, { id: 'R3', label: 'Drie' }],
+      countsByRule: { R1: 2, R2: 0, R3: 0 }, motivatedByRule: { R1: 1, R2: 3, R3: 0 },
+      byElement: {}, openElements: 2, motivatedOnlyElements: 3,
+    };
+    const off = F.controlRulesSummaryHtml(ev, false);
+    noInjected(off);
+    assert.match(off, />2<\/div><div class="cs-stat-label">Elementen met een overtreding/);
+    assert.match(off, />3<\/div><div class="cs-stat-label">Elementen gemotiveerd afgeweken/);
+    assert.match(off, /1 gemotiveerd afgeweken/);
+    assert.match(off, /3 gemotiveerd afgeweken/);
+    assert.match(off, /id="crs-show-motivated">/, 'schakelaar standaard uit');
+    // R2 heeft alleen gemotiveerde afwijkingen: niet klikbaar zolang de schakelaar uit staat.
+    assert.match(off, /crs-motivated" data-rule-id="R2" disabled/);
+    const on = F.controlRulesSummaryHtml(ev, true);
+    assert.match(on, /id="crs-show-motivated" checked>/);
+    assert.match(on, /crs-motivated" data-rule-id="R2"><div/);
+    assert.match(on, /crs-ok" data-rule-id="R3" disabled/);
+    // Zonder gemotiveerde afwijkingen geen schakelaar en geen extra tegel (weergave van DOEL-63).
+    const none = F.controlRulesSummaryHtml({ activeRules: [{ id: 'R1', label: 'Een' }], countsByRule: { R1: 1 }, byElement: { a: [1] } });
+    assert.doesNotMatch(none, /crs-show-motivated|gemotiveerd/);
+  });
+
+  it('geen inline handlers in de nieuwe functies en de afhandeling (CSP)', () => {
+    const fns = ['controlRuleDeviationFormHtml', 'controlRuleViolationsHtml', 'controlRulesSummaryHtml', 'controlRuleHintHtml'].map(grab).join('\n');
+    assert.doesNotMatch(fns, /\son[a-z]+=|javascript:/i);
+    const handler = extract(/\/\/ ---- Gemotiveerde afwijking \(DOEL-64\) ----[\s\S]*?\n  if \(controlRulesBtn\) \{/, 'afhandeling afwijking');
+    assert.doesNotMatch(handler, /innerHTML|setAttribute\('on|\.on[a-z]+ = /);
+    assert.match(handler, /encodeURIComponent\(code\)/);
+    assert.match(handler, /encodeURIComponent\(ruleId\)/);
+  });
+
+  it('SVG-export: grijs symbool voor gemotiveerd, nooit motivatietekst', () => {
+    const block = extract(/const ruleIcon = node\.querySelector\('\.node-rule-icon'\);[\s\S]*?content\.appendChild\(g\);/, 'SVG rule-icon-blok');
+    assert.match(block, /classList\.contains\('motivated'\) \? '#8a8f98' : '#ff8c1a'/);
+    assert.doesNotMatch(block, /innerHTML|motivatie|deviation|label|explanation/);
+  });
+
+  it('statische HTML-export bevat de status, maar geen motivatietekst of e-mailadres', () => {
+    const block = extract(/const exportTree = Object\.assign\(\{\}, lastTreeResponse, \{[\s\S]*?\}\);\n/, 'exportTree');
+    assert.match(block, /motivatie: '\(motivatie niet opgenomen in de export\)'/);
+    assert.doesNotMatch(block, /updatedByEmail|dv\.motivatie/);
+    assert.match(source, /JSON\.stringify\(exportTree\)/);
+    assert.doesNotMatch(source, /__STATIC_TREE__ = ' \+ JSON\.stringify\(lastTreeResponse\)/);
   });
 });

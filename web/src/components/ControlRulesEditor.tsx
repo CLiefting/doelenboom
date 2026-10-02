@@ -188,7 +188,10 @@ export default function ControlRulesEditor({
     try {
       const result = await save(rules.map(normalize));
       setRules(result.rules);
-      setState({ ...state!, rules: result.rules, invalidRuleIds: result.invalidRuleIds });
+      // Na opslaan zijn de motivaties van verwijderde regels opgeruimd (DOEL-64).
+      const kept = new Set(result.rules.map((r) => r.id));
+      const deviationCounts = Object.fromEntries(Object.entries(state!.deviationCounts ?? {}).filter(([id]) => kept.has(id)));
+      setState({ ...state!, rules: result.rules, invalidRuleIds: result.invalidRuleIds, deviationCounts });
       setDirty(false);
       setSaved(true);
     } catch (err) {
@@ -197,6 +200,12 @@ export default function ControlRulesEditor({
       setBusy(false);
     }
   }
+
+  // DOEL-64: motivaties van afwijkingen horen bij een regel-id; verdwijnt de
+  // regel uit de lijst, dan ruimt de server ze bij het opslaan op.
+  const currentIds = new Set(rules.map((r) => r.id));
+  const lostRuleIds = Object.keys(state.deviationCounts ?? {}).filter((id) => !currentIds.has(id) && state.deviationCounts![id] > 0);
+  const lostDeviations = lostRuleIds.reduce((sum, id) => sum + state.deviationCounts![id], 0);
 
   return (
     <section style={styles.section} aria-label="Controleregels">
@@ -219,6 +228,13 @@ export default function ControlRulesEditor({
       {error && <p style={styles.error}>{error}</p>}
 
       {rules.length === 0 && <p style={styles.muted}>Nog geen controleregels.</p>}
+      {lostDeviations > 0 && (
+        <p style={styles.warn} role="alert">
+          Let op: bij opslaan {lostDeviations === 1 ? 'vervalt 1 motivatie' : `vervallen ${lostDeviations} motivaties`} van
+          afwijkingen bij de verwijderde regel{lostRuleIds.length === 1 ? '' : 's'} {lostRuleIds.join(', ')}. Dit kan niet
+          ongedaan worden gemaakt. Wil je de motivaties bewaren, zet de regel dan uit in plaats van hem te verwijderen.
+        </p>
+      )}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         {rules.map((r, i) => (
           <div key={r.id} style={{ ...styles.ruleRow, opacity: r.enabled ? 1 : 0.6 }}>
@@ -232,6 +248,11 @@ export default function ControlRulesEditor({
               <div>
                 <code style={styles.code}>{r.id}</code> <strong>{r.label}</strong>
                 {!r.enabled && <span style={styles.badge}>uit</span>}
+                {(state.deviationCounts?.[r.id] ?? 0) > 0 && (
+                  <span style={styles.badge} title="Aantal elementen waarvoor een afwijking van deze regel is gemotiveerd. Verwijderen van de regel wist deze motivaties.">
+                    {state.deviationCounts![r.id]} gemotiveerd
+                  </span>
+                )}
                 {isInvalid(r) && (
                   <span style={styles.badgeError} title="Deze regel verwijst naar een elementtype dat niet (meer) bestaat; pas hem aan of verwijder hem.">
                     verwijst naar onbekend type

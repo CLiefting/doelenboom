@@ -76,7 +76,8 @@ async function exportOneDoelenboom(
     exportedAt: new Date().toISOString(),
     exportedBy: 'nachtelijke-backup',
   };
-  const body = JSON.stringify({ tree, columns: tree.columns, meta });
+  // DOEL-64: motivaties van afwijkingen gaan niet mee in de (nachtelijke) export.
+  const body = JSON.stringify({ tree: { ...tree, controlRuleDeviations: undefined }, columns: tree.columns, meta });
 
   const upstream = await fetch(`${EXCEL_SERVICE_URL}/export?format=${format}&mode=data`, {
     method: 'POST',

@@ -35,7 +35,11 @@ export type AuditEventType =
   // DOEL-62: controleregels gewijzigd (doelenboom, tenant-default of
   // sjabloon). detail = { scope, templateId?, ruleCount, ruleIds } — bewust
   // NOOIT labels/uitleg: die zijn vrije tekst van de gebruiker.
-  | 'control_rules_updated';
+  | 'control_rules_updated'
+  // DOEL-64: gemotiveerde afwijking van een controleregel gezet/ingetrokken.
+  // detail = { elementCode, ruleId } — bewust NOOIT de motivatietekst.
+  | 'control_rule_deviation_set'
+  | 'control_rule_deviation_removed';
 
 export interface LogAuditEventInput {
   eventType: AuditEventType;

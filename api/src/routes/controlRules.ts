@@ -19,6 +19,7 @@ import {
   setRulesForConfigId,
   validateControlRulesInput,
 } from '../controlRules.js';
+import { countDeviationsPerRule, deleteDeviationsForMissingRules } from '../controlRuleDeviations.js';
 import { hasModule } from '../license.js';
 import { logAuditEvent } from '../auditLog.js';
 import { sendServerError } from '../errors.js';
@@ -74,6 +75,9 @@ controlRulesRouter.get(
       // meer bestaand type wijzen — de editor markeert ze; opslaan kan pas als
       // ze hersteld zijn.
       invalidRuleIds: findRulesBrokenByColumns(rules, columns),
+      // DOEL-64: aantal gemotiveerde afwijkingen per regel-id, zodat de editor
+      // kan waarschuwen dat het verwijderen van een regel die motivaties wist.
+      deviationCounts: await countDeviationsPerRule(req.params.id),
     });
   }
 );
@@ -101,13 +105,17 @@ controlRulesRouter.put(
         return res.status(400).json({ error: errors.join(' ') });
       }
       await setRulesForConfigId(client, cfg.rows[0].id, rules);
+      // DOEL-64: afwijkingen van regels die niet meer bestaan direct opruimen,
+      // in dezelfde transactie (besluit Charles 2 oktober 2026). Een regel
+      // uitschakelen (enabled=false) laat de afwijkingen staan.
+      const removedDeviations = await deleteDeviationsForMissingRules(client, req.params.id, rules.map((r) => r.id));
       await client.query('commit');
       await logAuditEvent({
         eventType: 'control_rules_updated',
         userId: req.user!.id,
         tenantId: cfg.rows[0].tenant_id,
         doelenboomId: req.params.id,
-        detail: auditDetail('doelenboom', rules),
+        detail: auditDetail('doelenboom', rules, removedDeviations ? { removedDeviations } : {}),
       });
       res.json({ rules, invalidRuleIds: [] });
     } catch (err) {

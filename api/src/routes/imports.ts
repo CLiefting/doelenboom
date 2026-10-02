@@ -1,3 +1,4 @@
+import { restoreDeviations, snapshotDeviations } from '../controlRuleDeviations.js';
 import { Router } from 'express';
 import multer from 'multer';
 import { pool } from '../db.js';
@@ -182,6 +183,11 @@ importsRouter.post(
     const projectenActive =
       tenantIdForModuleCheck != null && (await hasModule(tenantIdForModuleCheck, 'projecten'));
 
+    // DOEL-64: gemotiveerde afwijkingen van controleregels hangen via een
+    // cascade aan elements en zouden bij deze volledige vervanging verdwijnen.
+    // Vooraf vastleggen op elementcode, na het opnieuw aanmaken terugzetten.
+    const deviationSnapshot = await snapshotDeviations(client, doelenboomId);
+
     // Volledige vervanging: eerst alles weg wat aan deze doelenboom hangt.
     await client.query('delete from elements where doelenboom_id = $1', [doelenboomId]); // cascade → edges/project_status/products/element_tags/ob_org_relations
     await client.query('delete from tags where doelenboom_id = $1', [doelenboomId]); // cascade → element_tags
@@ -196,6 +202,7 @@ importsRouter.post(
       );
       elementIdByCode.set(el.code, r.rows[0].id);
     }
+    await restoreDeviations(client, doelenboomId, deviationSnapshot, elementIdByCode);
 
     for (const e of parsed.edges) {
       const sourceId = elementIdByCode.get(e.source);

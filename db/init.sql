@@ -345,6 +345,33 @@ create table if not exists project_status (
   updated_by bigint references users(id) on delete set null
 );
 
+-- Gemotiveerde afwijkingen van controleregels (DOEL-64, epic DOEL-61 "Module
+-- Controleregels"; migratie 0045). Sleutel = (element, regel-id): een element
+-- kan meerdere regels overtreden en het motiveren van de ene mag de andere
+-- niet verbergen. rule_id verwijst naar een regel in column_configs.rules
+-- (jsonb, dus geen foreign key) — de API controleert dat de regel bestaat en
+-- ruimt afwijkingen op zodra een regel uit de configuratie verdwijnt
+-- (routes/controlRules.ts). motivatie is een KORTE vrije tekst op
+-- hoofdlijnen (max 500 tekens, ook in de API afgedwongen): geen inhoudelijke
+-- of gerubriceerde informatie, en komt nooit in audit_log. created_/
+-- updated_-velden worden ALLEEN door de server gezet (zelfde patroon als
+-- project_status.updated_at/updated_by). Cascade op element én doelenboom:
+-- element verwijderen, wipe_on_empty en tenant-wipe ruimen de rijen vanzelf
+-- op. Afwijkingen gaan bewust NIET mee in sjablonen of bij dupliceren.
+create table if not exists control_rule_deviations (
+  id bigserial primary key,
+  doelenboom_id bigint not null references doelenbomen(id) on delete cascade,
+  element_id bigint not null references elements(id) on delete cascade,
+  rule_id text not null check (rule_id ~ '^[A-Za-z0-9_-]{1,40}$'),
+  motivatie text not null check (char_length(motivatie) between 1 and 500),
+  created_by bigint references users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_by bigint references users(id) on delete set null,
+  updated_at timestamptz not null default now(),
+  unique (element_id, rule_id)
+);
+create index if not exists idx_crd_doelenboom on control_rule_deviations(doelenboom_id);
+
 -- Generieke wijzigingshistorie per project-element (status, deliverables én
 -- activiteiten door elkaar, nieuwste eerst) — zie
 -- db/migrations/0022_project_history.sql voor de volledige toelichting.
@@ -736,7 +763,8 @@ create table if not exists audit_log (
     'doelenboom_deleted', 'doelenboom_exported', 'doelenboom_import_published',
     -- DOEL-62: wijziging van controleregels (detail: scope, aantal, regel-id's
     -- — nooit labels/uitleg).
-    'control_rules_updated'
+    'control_rules_updated',
+    'control_rule_deviation_set', 'control_rule_deviation_removed'
   )),
   user_id bigint references users(id) on delete set null,
   tenant_id bigint references tenants(id) on delete set null,

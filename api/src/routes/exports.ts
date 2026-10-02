@@ -54,7 +54,10 @@ exportsRouter.get('/doelenbomen/:id/export', requireTenantRoleForDoelenboomParam
   // mode=data): bij mode=template is tree null, maar excel-service heeft de
   // kolomconfiguratie alsnog nodig voor de dynamische Type-dropdown/
   // validatielijst in het 'nieuw' formaat (zie exporter.py).
-  const body = JSON.stringify({ tree: mode === 'data' ? tree : null, columns: tree.columns, meta });
+  // DOEL-64: motivaties van afwijkingen horen niet in de Excel-export en gaan
+  // dus ook niet naar de excel-service (undefined valt weg bij JSON.stringify).
+  const exportTree = { ...tree, controlRuleDeviations: undefined };
+  const body = JSON.stringify({ tree: mode === 'data' ? exportTree : null, columns: tree.columns, meta });
   // Bestandsnaam: Doelenboom_<Tenant>_<Doelenboomnaam>_<JJMMDD> — tenant- en
   // doelenboomnaam gesaneerd voor gebruik in een bestandsnaam (spaties/
   // leestekens -> underscore). Bewust de leesbare naam i.p.v. de slug, zodat
