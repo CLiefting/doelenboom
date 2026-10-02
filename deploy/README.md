@@ -464,6 +464,42 @@ Gevolgen voor de deploy:
   docker run --rm --entrypoint cat doelenboom-api:latest /app/sbom/meta.json
   ```
 
+### Dagelijkse dependency-audit (DOEL-69)
+
+Naast de SBOM-controle in de app draait er op GitHub een eigen workflow
+**Dependency-audit** (`.github/workflows/dependency-audit.yml`):
+
+- **wanneer**: dagelijks om 05:17 UTC (06:17 wintertijd), bij elke push/PR als
+  onderdeel van de CI, en handmatig (`gh workflow run "Dependency-audit"`);
+- **wat**: `npm audit --audit-level=high` voor `api` en `web`, en `pip-audit`
+  voor de `excel-service`. Alles is blokkerend; pip-audit op élke bevinding
+  (het kent geen drempel per ernst).
+
+Zonder de dagelijkse run bleef een kwetsbaarheid die ná een release bekend
+werd onopgemerkt tot de volgende PR. Het is een eigen workflow (niet een
+schema op "CI"), omdat `release.sh`/`pr-merge.sh` de nieuwste "CI"-run van een
+commit volgen en een geplande run daar niet tussen mag komen.
+
+**Bij een rode run:**
+
+1. Open de run (`gh run list --workflow "Dependency-audit" --limit 3`,
+   `gh run view <id> --log-failed`) en lees welke dependency het betreft.
+2. Is er een fix: werk de dependency bij in een eigen ticket/PR (zelfde
+   werkwijze als DOEL-67) en rol een release uit.
+3. Is er voor een Python-dependency (nog) geen fix, of raakt de kwetsbaarheid
+   ons gebruik aantoonbaar niet: zet haar met datum en motivatie in
+   `excel-service/pip-audit-ignore.txt` (formaat: zie `scripts/pip-audit.sh`).
+   Een regel zonder motivatie laat de audit falen. Haal de regel weg zodra de
+   fix er is.
+4. Lokaal dezelfde controle draaien:
+   `pip install pip-audit==2.10.1 && bash scripts/pip-audit.sh`.
+
+Let op: zolang de audit rood is, houdt hij ook PR's tegen die er inhoudelijk
+niets mee te maken hebben. GitHub mailt een mislukte geplande run naar degene
+die het schema het laatst wijzigde, en schakelt geplande workflows uit na 60
+dagen zonder activiteit in de repository (dan opnieuw aanzetten onder
+Actions → Dependency-audit → Enable workflow).
+
 ### Verplichte check: geen actieve gebruikers vóór `up -d`
 
 `docker compose ... up -d` herstart de `api`/`web`-containers zodra hun image
