@@ -16,4 +16,4 @@ httpx==0.28.1
 # doelenboom_sbom_ontwerp.md) — een bouw-/analysehulpmiddel, geen
 # productie-runtime-dependency, dus net als pytest/httpx hierboven bewust hier
 # en niet in requirements.txt.
-cyclonedx-bom==7.3.1
+cyclonedx-bom==7.4.0
