@@ -138,3 +138,30 @@ describe('pip-audit uitzonderingenlijst en scripts/pip-audit.sh (DOEL-69)', () =
     execFileSync('bash', ['-n', path.join(ROOT, 'scripts', 'pip-audit.sh')]);
   });
 });
+
+describe('Dependabot en uitgestelde majors (DOEL-48)', () => {
+  const cfg = stripComments(read('.github/dependabot.yml'));
+  const blocks = cfg.split(/\n  - package-ecosystem: /).slice(1);
+
+  it('dekt github-actions, npm (api en web) en pip (excel-service), elk met cooldown', () => {
+    const seen = blocks.map((b) => `${b.match(/^"([^"]+)"/)![1]}:${b.match(/directory: "([^"]+)"/)![1]}`).sort();
+    assert.deepEqual(seen, ['github-actions:/', 'npm:/api', 'npm:/web', 'pip:/excel-service']);
+    for (const b of blocks) assert.match(b, /cooldown:\n\s+default-days: 7/, 'cooldown ontbreekt');
+  });
+
+  it('npm en pip: patch/minor gegroepeerd, majors niet automatisch voorgesteld', () => {
+    for (const b of blocks.filter((x) => !x.startsWith('"github-actions"'))) {
+      assert.match(b, /groups:\n[^\n]+\n\s+update-types: \["minor", "patch"\]/);
+      assert.match(b, /ignore:\n\s+- dependency-name: "\*"\n\s+update-types: \["version-update:semver-major"\]/);
+      assert.match(b, /open-pull-requests-limit: [1-3]\b/);
+    }
+  });
+
+  it('elke uitgestelde major staat met reden in docs/dependency-updates.md', () => {
+    const doc = read('docs/dependency-updates.md');
+    for (const name of ['express', 'react', 'vite', 'typescript', '@types/node']) {
+      assert.match(doc, new RegExp(`\\| ${name.replace('/', '\\/')}[^|]*\\|`), `${name} ontbreekt in de tabel`);
+    }
+    assert.match(doc, /DOEL-71/); assert.match(doc, /DOEL-72/); assert.match(doc, /DOEL-73/);
+  });
+});
