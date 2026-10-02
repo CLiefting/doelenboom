@@ -240,21 +240,44 @@ function OverzichtTab({ summary }: { summary: DependencyHealthSummaryResponse | 
     );
   }
 
+  // DOEL-48: de teller die om actie vraagt staat vooraan — updates voor
+  // directe dependencies die in productie draaien, uitgesplitst. Het totaal
+  // (incl. transitieve en ontwikkel-dependencies) blijft zichtbaar, maar is
+  // als zodanig benoemd: dat getal daalt vooral vanzelf mee.
+  const dru = summary.directRuntimeUpdates ?? { patch: 0, minor: 0, major: 0 };
   const cards: Array<{ label: string; value: string | number; sub?: string }> = [
     { label: 'Bouwversie', value: summary.buildVersion ?? '—', sub: summary.gitCommit ? `commit ${summary.gitCommit}` : undefined },
     { label: 'SBOM gegenereerd op', value: formatTimestamp(summary.generatedAt) },
     { label: 'Laatst gecontroleerd op', value: formatTimestamp(summary.lastCheckedAt) },
+    { label: 'Componenten met kwetsbaarheden', value: summary.vulnerableComponents },
+    { label: 'Waarvan kritieke kwetsbaarheden', value: summary.criticalVulnerabilities },
+    {
+      label: 'Updates voor directe productie-dependencies',
+      value: dru.patch + dru.minor + dru.major,
+      sub: `patch ${dru.patch} · minor ${dru.minor} · major ${dru.major}`,
+    },
     { label: 'Totaal aantal componenten', value: summary.totalComponents },
     { label: 'Directe dependencies', value: summary.directDependencies },
     { label: 'Transitieve dependencies', value: summary.transitiveDependencies },
-    { label: 'Updates beschikbaar', value: summary.updatesAvailable },
-    { label: 'Waarvan major-updates', value: summary.majorUpdates },
-    { label: 'Componenten met kwetsbaarheden', value: summary.vulnerableComponents },
-    { label: 'Waarvan kritieke kwetsbaarheden', value: summary.criticalVulnerabilities },
+    {
+      label: 'Updates totaal',
+      value: summary.updatesAvailable,
+      sub: `waarvan major ${summary.majorUpdates} · incl. transitief en ontwikkeling`,
+    },
   ];
 
   return (
     <section style={styles.cardsGrid}>
+      {summary.sbomMatchesRunningVersion === false && (
+        <div style={{ ...styles.statCard, gridColumn: '1 / -1', borderColor: '#f0d9a0', background: '#fff6e0' }} role="alert">
+          <div style={{ ...styles.statLabel, color: '#8a5a00' }}>Let op: deze gegevens horen bij een andere versie</div>
+          <div style={{ fontSize: 13.5, color: '#5a3a00' }}>
+            Er draait nu versie <strong>{summary.runningBuildVersion}</strong>, maar de softwarecomponenten hieronder zijn
+            van <strong>{summary.buildVersion ?? '—'}</strong>. Na een uitrol worden ze binnen een minuut automatisch
+            ingelezen; staat deze melding er daarna nog, klik dan op "Nu controleren".
+          </div>
+        </div>
+      )}
       {cards.map((c) => (
         <div key={c.label} style={styles.statCard}>
           <div style={styles.statLabel}>{c.label}</div>
@@ -283,8 +306,11 @@ function ComponentenTab({ token }: { token: string }) {
   const [offset, setOffset] = useState(0);
   const [applicationComponent, setApplicationComponent] = useState<ApplicationComponentKey | ''>('');
   const [ecosystem, setEcosystem] = useState<DependencyEcosystem | ''>('');
-  const [dependencyType, setDependencyType] = useState<DependencyType | ''>('');
-  const [scope, setScope] = useState<DependencyScope | ''>('');
+  // DOEL-48: standaard alleen directe dependencies die in productie draaien —
+  // dat is de lijst waar je zelf iets aan kunt doen. Transitieve en
+  // ontwikkel-dependencies zitten achter de filters ("Toon alles").
+  const [dependencyType, setDependencyType] = useState<DependencyType | ''>('direct');
+  const [scope, setScope] = useState<DependencyScope | ''>('runtime');
   const [updateCategory, setUpdateCategory] = useState<UpdateCategory | ''>('');
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
@@ -334,8 +360,24 @@ function ComponentenTab({ token }: { token: string }) {
     }
   }
 
+  const defaultView = dependencyType === 'direct' && scope === 'runtime';
+
   return (
     <section>
+      <p style={{ fontSize: 12.5, color: '#6c6f76', margin: '0 0 8px' }}>
+        {defaultView
+          ? 'Getoond: directe dependencies die in productie draaien. '
+          : 'Getoond: een eigen selectie. '}
+        <button
+          type="button"
+          onClick={() => {
+            if (defaultView) { setDependencyType(''); setScope(''); } else { setDependencyType('direct'); setScope('runtime'); }
+          }}
+          style={{ background: 'none', border: 'none', padding: 0, color: '#3b5998', cursor: 'pointer', textDecoration: 'underline', font: 'inherit' }}
+        >
+          {defaultView ? 'Toon alles (ook transitief en ontwikkeling)' : 'Terug naar directe productie-dependencies'}
+        </button>
+      </p>
       <div style={styles.filterBar}>
         <select value={applicationComponent} onChange={(e) => setApplicationComponent(e.target.value as ApplicationComponentKey | '')} style={styles.select}>
           <option value="">Alle onderdelen</option>

@@ -3,6 +3,14 @@
 # inclusief de nieuwe SHA en het versiecommentaar. De cooldown wacht 7 dagen met nieuw
 # gepubliceerde versies: die kunnen kwaadaardig of instabiel zijn (Semgrep-regel
 # dependabot-missing-cooldown).
+#
+# DOEL-48: ook npm (api, web) en pip (excel-service). Per onderdeel hooguit één
+# gegroepeerde PR per week met alle patch- en minor-updates; major-updates
+# worden hier bewust NIET voorgesteld — die gaan elk via een eigen ticket (zie
+# docs/dependency-updates.md), omdat ze code-aanpassingen vragen. Dependabot
+# maakt alleen PR's; mergen (na groene CI) en uitrollen blijft handwerk.
+# Kwetsbaarheden lopen los hiervan via de dagelijkse Dependency-audit
+# (DOEL-69) en de melding aan sysadmins (DOEL-70).
 version: 2
 updates:
   - package-ecosystem: "github-actions"
@@ -11,3 +19,45 @@ updates:
       interval: "weekly"
     cooldown:
       default-days: 7
+
+  - package-ecosystem: "npm"
+    directory: "/api"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 2
+    groups:
+      api-minor-patch:
+        update-types: ["minor", "patch"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: "npm"
+    directory: "/web"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 2
+    groups:
+      web-minor-patch:
+        update-types: ["minor", "patch"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: "pip"
+    directory: "/excel-service"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 2
+    groups:
+      excel-service-minor-patch:
+        update-types: ["minor", "patch"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]

@@ -826,6 +826,11 @@ export type DependencyHealthSummary = {
   majorUpdates: number;
   vulnerableComponents: number;
   criticalVulnerabilities: number;
+  // DOEL-47: de draaiende versie en of de getoonde SBOM daarbij hoort.
+  runningBuildVersion: string;
+  sbomMatchesRunningVersion: boolean;
+  // DOEL-48: updates voor directe dependencies die in productie draaien.
+  directRuntimeUpdates: { patch: number; minor: number; major: number };
 };
 // GET /api/system/sbom/summary geeft { available: false } terug zolang er nog
 // nooit een SBOM gegenereerd is (bv. lokaal zonder scripts/generate-sbom.sh

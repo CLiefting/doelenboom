@@ -464,6 +464,24 @@ Gevolgen voor de deploy:
   docker run --rm --entrypoint cat doelenboom-api:latest /app/sbom/meta.json
   ```
 
+### Na een uitrol: SBOM direct ingelezen, mail bij nieuwe kwetsbaarheden (DOEL-47/DOEL-70)
+
+De API leest de SBOM van de zojuist uitgerolde versie binnen een minuut na het
+opstarten in (de 24-uurswachttijd van de dagelijkse controle geldt niet voor
+een nog niet ingelezen build). De pagina Softwarecomponenten toont dus kort na
+`up -d` de bouwversie uit de footer; staat er een gele melding "deze gegevens
+horen bij een andere versie", wacht dan een minuut of klik op "Nu controleren"
+en kijk anders in `docker compose logs api` naar `Dependency-health`.
+
+Vindt de dagelijkse (automatische) controle een **nieuwe** kwetsbaarheid met
+ernst hoog, kritiek of onbekend in een component die in productie draait, dan
+krijgen alle sysadmin-gebruikers één mail met alleen aantallen en een link
+naar de pagina (`APP_BASE_URL` + `/system-info`). Zelfde SMTP-instellingen als
+de MFA-mail; zonder `SMTP_HOST` staat er alleen een waarschuwing in het log en
+volgt de volgende dag een nieuwe poging. Vereist migratie
+`0046_dependency_vulnerability_notifications.sql`. Werkwijze rond updates en
+de bewust uitgestelde majors: `docs/dependency-updates.md`.
+
 ### Dagelijkse dependency-audit (DOEL-69)
 
 Naast de SBOM-controle in de app draait er op GitHub een eigen workflow

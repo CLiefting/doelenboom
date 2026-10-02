@@ -1,6 +1,8 @@
 import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { pool } from './db.js';
+import { logAuditEvent } from './auditLog.js';
+import { sendVulnerabilityAlertEmail } from './email.js';
 
 // Software Bill of Materials / dependency-health (CISO-aandachtspunt, zie
 // doelenboom_sbom_ontwerp.md in het project en db/init.sql voor het
@@ -20,7 +22,12 @@ import { pool } from './db.js';
 // /app, dus cwd is daar ook "/app" — één map omhoog zou "/sbom" geven, een
 // map die niet bestaat) — vandaar dat docker-compose.yml 'm daar altijd
 // expliciet zet i.p.v. op deze fallback te vertrouwen.
-const SBOM_DIR = process.env.SBOM_DIR || path.resolve(process.cwd(), '..', 'sbom');
+// Bewust een functie (niet één keer bij het laden van de module): zo kan een
+// test SBOM_DIR naar een tijdelijke map met een fixture-SBOM laten wijzen
+// (DOEL-47/DOEL-70). In productie staat de waarde vast als ENV in de image.
+function sbomDir(): string {
+  return process.env.SBOM_DIR || path.resolve(process.cwd(), '..', 'sbom');
+}
 
 export type ApplicationComponentKey = 'api' | 'web' | 'excel-service';
 export type Ecosystem = 'npm' | 'pypi';
@@ -109,13 +116,13 @@ export type LoadedSbomBuild = {
 // van Doelenboom niet verstoren), de aanroepers tonen dan "geen SBOM
 // beschikbaar" resp. slaan de refresh over.
 export function loadCurrentSbomBuild(): LoadedSbomBuild | null {
-  const meta = readJsonFile<SbomMeta>(path.join(SBOM_DIR, 'meta.json'));
+  const meta = readJsonFile<SbomMeta>(path.join(sbomDir(), 'meta.json'));
   if (!meta) return null;
 
   const components: NormalizedComponent[] = [];
   for (const key of meta.components) {
-    const doc = readJsonFile<CdxDocument>(path.join(SBOM_DIR, `${key}.cdx.json`));
-    const compMeta = readJsonFile<ComponentMeta>(path.join(SBOM_DIR, `${key}.meta.json`));
+    const doc = readJsonFile<CdxDocument>(path.join(sbomDir(), `${key}.cdx.json`));
+    const compMeta = readJsonFile<ComponentMeta>(path.join(sbomDir(), `${key}.meta.json`));
     if (!doc || !compMeta) continue;
     const directNames = new Set(compMeta.directNames);
     const runtimeNames = new Set(compMeta.runtimeNames);
@@ -394,6 +401,92 @@ async function ensureBuildRow(meta: SbomMeta): Promise<number> {
   return inserted.rows[0].id as number;
 }
 
+// Is de SBOM met deze metadata al ingelezen (build-rij mét componenten)?
+// Een build-rij zonder componenten (inlezen halverwege mislukt) telt niet.
+export async function isBuildIngested(meta: { buildVersion: string; generatedAt: string }): Promise<boolean> {
+  const r = await pool.query(
+    `select 1 from dependency_sbom_builds b
+     where b.build_version = $1 and b.generated_at = $2
+       and exists (select 1 from dependency_components c where c.build_id = b.id)
+     limit 1`,
+    [meta.buildVersion, meta.generatedAt]
+  );
+  return r.rows.length > 0;
+}
+
+// --- Melding aan sysadmins bij nieuwe kwetsbaarheden (DOEL-70) --------------
+// Besluiten Charles 2 oktober 2026: ontvangers = alle sysadmin-gebruikers in
+// de app; ernst hoog, kritiek en onbekend (OSV levert niet altijd een ernst);
+// alleen componenten die in productie draaien (scope runtime). "Nieuw" =
+// nog niet eerder gemeld voor dit pakket (dependency_vulnerability_
+// notifications) — nodig omdat de controle de kwetsbaarhedenlijst elke run
+// opnieuw opbouwt en elke uitrol nieuwe componentrijen maakt.
+// De mail bevat alleen aantallen en een verwijzing naar de pagina
+// Softwarecomponenten; er gaat geen tekst uit OSV/registries de mail in en
+// geen pakketnaam, versie of CVE (mail is geen vertrouwelijk kanaal).
+const NOTIFY_SEVERITY_LEVELS: SeverityLevel[] = ['kritiek', 'hoog', 'onbekend'];
+
+export type VulnerabilityNotificationResult = { newVulnerabilities: number; recipients: number; sent: number };
+
+export async function notifySysadminsOfNewVulnerabilities(buildId: number): Promise<VulnerabilityNotificationResult> {
+  const found = await pool.query(
+    `select distinct c.ecosystem, c.name, v.vulnerability_id, v.severity
+     from dependency_vulnerabilities v
+     join dependency_components c on c.id = v.component_id
+     where c.build_id = $1 and c.scope = 'runtime'
+       and not exists (
+         select 1 from dependency_vulnerability_notifications n
+         where n.ecosystem = c.ecosystem and n.name = c.name and n.vulnerability_id = v.vulnerability_id
+       )`,
+    [buildId]
+  );
+  const byKey = new Map<string, { ecosystem: string; name: string; vulnerabilityId: string; level: SeverityLevel }>();
+  for (const row of found.rows) {
+    const level = classifySeverityLevel(row.severity);
+    if (!NOTIFY_SEVERITY_LEVELS.includes(level)) continue;
+    byKey.set(`${row.ecosystem}|${row.name}|${row.vulnerability_id}`, {
+      ecosystem: row.ecosystem, name: row.name, vulnerabilityId: row.vulnerability_id, level,
+    });
+  }
+  const fresh = [...byKey.values()];
+  if (fresh.length === 0) return { newVulnerabilities: 0, recipients: 0, sent: 0 };
+
+  const counts = { kritiek: 0, hoog: 0, onbekend: 0 };
+  for (const f of fresh) counts[f.level as 'kritiek' | 'hoog' | 'onbekend'] += 1;
+
+  // Alleen sysadmins, elk een eigen mail (ontvangers zien elkaars adres niet).
+  const recipients = await pool.query('select email from users where is_sysadmin = true order by id');
+  const link = `${(process.env.APP_BASE_URL ?? 'http://localhost:5173').replace(/\/+$/, '')}/system-info`;
+  let sent = 0;
+  for (const r of recipients.rows) {
+    try {
+      if (await sendVulnerabilityAlertEmail(r.email, { counts, total: fresh.length, link })) sent += 1;
+    } catch (err) {
+      // Bewust geen adres in het log; de fout zelf volstaat voor diagnose.
+      console.error('Kwetsbaarhedenmelding versturen aan een sysadmin mislukt:', err);
+    }
+  }
+
+  // Pas als "gemeld" vastleggen wanneer minstens één mail echt verstuurd is:
+  // zonder SMTP-configuratie of bij een storing proberen we het de volgende
+  // dag opnieuw i.p.v. de bevinding stil af te vinken.
+  if (sent > 0) {
+    for (const f of fresh) {
+      await pool.query(
+        `insert into dependency_vulnerability_notifications (ecosystem, name, vulnerability_id, severity_level)
+         values ($1, $2, $3, $4) on conflict (ecosystem, name, vulnerability_id) do nothing`,
+        [f.ecosystem, f.name, f.vulnerabilityId, f.level]
+      );
+    }
+    await logAuditEvent({
+      eventType: 'dependency_vulnerability_alert_sent',
+      // Alleen aantallen: geen pakketnamen, kwetsbaarheid-id's of adressen.
+      detail: { newVulnerabilities: fresh.length, counts, recipients: recipients.rows.length, sent },
+    });
+  }
+  return { newVulnerabilities: fresh.length, recipients: recipients.rows.length, sent };
+}
+
 type ComponentRowKey = string; // `${applicationComponent}|${name}|${version}`
 function componentRowKey(c: { applicationComponent: string; name: string; version: string }): ComponentRowKey {
   return `${c.applicationComponent}|${c.name}|${c.version}`;
@@ -562,10 +655,21 @@ export async function getLastCheckRun(): Promise<{ startedAt: string; finishedAt
 // limiting toepassen waar relevant"), zonder een bevoegde beheerder die één
 // keer per minuut wil verversen echt in de weg te zitten.
 export async function refreshDependencyHealth(opts: { triggeredByUserId: number | null; isManual: boolean }): Promise<RefreshResult> {
+  // DOEL-47: staat er een SBOM op schijf die nog niet is ingelezen (nieuwe
+  // uitrol), dan geldt de 24-uurswachttijd van de automatische controle niet.
+  // Voorheen toonde de pagina Softwarecomponenten na een uitrol tot een dag
+  // lang de SBOM van de VORIGE versie, omdat inlezen alleen in deze controle
+  // gebeurt en die pas 24 uur na de vorige weer mocht. Geen risico op een
+  // lus: het inlezen (ensureBuildRow/upsertComponents) gebeurt vóór de
+  // netwerkstappen, dus ook na een mislukte controle telt de build als
+  // ingelezen en geldt de wachttijd weer. De korte wachttijd van de knop
+  // (isManual) blijft altijd gelden.
+  const pendingBuild = opts.isManual ? null : loadCurrentSbomBuild();
+  const newBuildPending = pendingBuild != null && !(await isBuildIngested(pendingBuild.meta));
   const last = await pool.query(
     `select finished_at, status from dependency_check_runs where status <> 'running' order by started_at desc limit 1`
   );
-  if (last.rows.length > 0 && last.rows[0].finished_at) {
+  if (!newBuildPending && last.rows.length > 0 && last.rows[0].finished_at) {
     const elapsed = Date.now() - new Date(last.rows[0].finished_at).getTime();
     const minInterval = opts.isManual ? MIN_MANUAL_REFRESH_INTERVAL_MS : AUTOMATIC_REFRESH_INTERVAL_MS;
     if (elapsed < minInterval) {
@@ -595,6 +699,16 @@ export async function refreshDependencyHealth(opts: { triggeredByUserId: number 
        where id = $1`,
       [runId, build.components.length, vulnerabilitiesFound]
     );
+    // DOEL-70: alleen na de AUTOMATISCHE controle (wie op de knop drukt, kijkt
+    // al naar de pagina). Een fout hier mag de geslaagde controle niet alsnog
+    // laten mislukken; niet-gemelde bevindingen komen de volgende dag opnieuw.
+    if (!opts.isManual) {
+      try {
+        await notifySysadminsOfNewVulnerabilities(buildId);
+      } catch (notifyErr) {
+        console.error('Melding van nieuwe kwetsbaarheden aan sysadmins mislukt:', notifyErr);
+      }
+    }
     return { status: 'success', componentsChecked: build.components.length, vulnerabilitiesFound };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -652,6 +766,16 @@ export type DependencyHealthSummary = {
   majorUpdates: number;
   vulnerableComponents: number;
   criticalVulnerabilities: number;
+  // DOEL-47: de versie die nu draait (zelfde bron als GET /api/version) en of
+  // de getoonde SBOM daarbij hoort. false = de SBOM van deze uitrol is nog
+  // niet ingelezen (controle loopt nog of is mislukt).
+  runningBuildVersion: string;
+  sbomMatchesRunningVersion: boolean;
+  // DOEL-48: de teller die er echt toe doet — updates voor DIRECTE
+  // dependencies die in productie draaien, per soort. De totalen hierboven
+  // (updatesAvailable/majorUpdates) tellen ook transitieve en
+  // ontwikkel-dependencies mee.
+  directRuntimeUpdates: { patch: number; minor: number; major: number };
 };
 
 async function latestBuildId(): Promise<number | null> {
@@ -668,6 +792,7 @@ export async function getSummary(): Promise<DependencyHealthSummary | null> {
   );
   if (buildResult.rows.length === 0) return null;
   const build = buildResult.rows[0];
+  const runningBuildVersion = process.env.BUILD_VERSION || 'dev';
 
   const countsResult = await pool.query(
     `select
@@ -675,7 +800,10 @@ export async function getSummary(): Promise<DependencyHealthSummary | null> {
        count(*) filter (where dependency_type = 'direct') as direct,
        count(*) filter (where dependency_type = 'transitive') as transitive,
        count(*) filter (where update_category in ('patch', 'minor', 'major')) as updates_available,
-       count(*) filter (where update_category = 'major') as major_updates
+       count(*) filter (where update_category = 'major') as major_updates,
+       count(*) filter (where dependency_type = 'direct' and scope = 'runtime' and update_category = 'patch') as dr_patch,
+       count(*) filter (where dependency_type = 'direct' and scope = 'runtime' and update_category = 'minor') as dr_minor,
+       count(*) filter (where dependency_type = 'direct' and scope = 'runtime' and update_category = 'major') as dr_major
      from dependency_components where build_id = $1`,
     [build.id]
   );
@@ -720,6 +848,9 @@ export async function getSummary(): Promise<DependencyHealthSummary | null> {
     majorUpdates: Number(counts.major_updates),
     vulnerableComponents: Number(vulnComponentsResult.rows[0].count),
     criticalVulnerabilities,
+    runningBuildVersion,
+    sbomMatchesRunningVersion: build.build_version === runningBuildVersion,
+    directRuntimeUpdates: { patch: Number(counts.dr_patch), minor: Number(counts.dr_minor), major: Number(counts.dr_major) },
   };
 }
 
@@ -931,9 +1062,9 @@ export async function getVulnerabilities(
 // buildVersion overnemen die als headerinjectie/pad-traversal misbruikt
 // zouden kunnen worden — vandaar de whitelist-regex).
 export function getSbomDownloadInfo(): { filePath: string; fileName: string } | null {
-  const filePath = path.join(SBOM_DIR, 'combined.cdx.json');
+  const filePath = path.join(sbomDir(), 'combined.cdx.json');
   if (!existsSync(filePath)) return null;
-  const meta = readJsonFile<SbomMeta>(path.join(SBOM_DIR, 'meta.json'));
+  const meta = readJsonFile<SbomMeta>(path.join(sbomDir(), 'meta.json'));
   const versionPart = (meta?.buildVersion || 'onbekend').replace(/[^A-Za-z0-9._-]+/g, '-');
   return { filePath, fileName: `doelenboom-sbom-${versionPart}.cdx.json` };
 }

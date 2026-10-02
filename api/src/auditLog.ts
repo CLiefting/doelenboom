@@ -39,7 +39,11 @@ export type AuditEventType =
   // DOEL-64: gemotiveerde afwijking van een controleregel gezet/ingetrokken.
   // detail = { elementCode, ruleId } — bewust NOOIT de motivatietekst.
   | 'control_rule_deviation_set'
-  | 'control_rule_deviation_removed';
+  | 'control_rule_deviation_removed'
+  // DOEL-70: mail aan sysadmins over nieuwe kwetsbaarheden in
+  // softwarecomponenten. detail = alleen aantallen (per ernst, ontvangers,
+  // verstuurd) — nooit pakketnamen, kwetsbaarheid-id's of e-mailadressen.
+  | 'dependency_vulnerability_alert_sent';
 
 export interface LogAuditEventInput {
   eventType: AuditEventType;

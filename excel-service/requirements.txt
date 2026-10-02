@@ -12,9 +12,11 @@
 # aangekondigde breaking changes voor ons gebruik (geen websockets, geen
 # afhankelijkheid van colorama-kleuroutput) — zie Softwarecomponenten-pagina.
 # python-multipart 0.0.32 (i.p.v. 0.0.31) is een performance-only patch
-# (boundary-scan-optimalisatie), geen CVE-fix.
-fastapi==0.141.1
-uvicorn[standard]==0.52.4
+# (boundary-scan-optimalisatie), geen CVE-fix. DOEL-48 (2 oktober 2026):
+# fastapi 0.142.2, uvicorn 0.54.0 en mpxj 16.9.0 — reguliere minor-updates,
+# geen kwetsbaarheden en geen wijzigingen in de door ons gebruikte API's.
+fastapi==0.142.2
+uvicorn[standard]==0.54.0
 openpyxl==3.1.5
 python-multipart==0.0.32
 # Project-PowerPoint-export (app/project_pptx.py) — /project-pptx.
@@ -22,7 +24,7 @@ python-pptx==1.0.2
 # .mpp-import (app/mpp_converter.py) — mpxj bundelt de benodigde Java-.jar's
 # zelf (geen losse download nodig), JPype1 is de Java-brug die mpxj gebruikt.
 # Vereist een JRE in de image, zie Dockerfile.
-mpxj==16.7.0
+mpxj==16.9.0
 JPype1==1.7.1
 # Beveiliging tegen XML-aanvallen (XXE / entity-expansie, "billion laughs") bij
 # het parsen van geüploade .xlsx/.mpp-bestanden (DOEL-31): openpyxl gebruikt
