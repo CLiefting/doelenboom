@@ -1279,6 +1279,9 @@
   #hover-tooltip .tt-desc { color: #333; }
   #hover-tooltip .tt-tags, #hover-tooltip .tt-orgs { margin-top: 6px; font-size: 11px; color: #667; }
   #hover-tooltip .tt-tags b, #hover-tooltip .tt-orgs b { color: var(--navy); }
+  #hover-tooltip .tt-rules { margin-top: 8px; padding-top: 6px; border-top: 1px solid #f0d9bd; font-size: 11px; color: #5a3a00; }
+  #hover-tooltip .tt-rules-title { font-weight: 700; color: #c56200; margin-bottom: 2px; }
+  #hover-tooltip .tt-rule-id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 600; }
 
   footer { text-align: center; color: #888; font-size: 11px; margin-top: 24px; }
 
@@ -5207,7 +5210,9 @@ function runApp(data) {
       '<div class="tt-meta"><span class="tt-code" style="background:' + color + '">' + escapeHtml(d.code) + '</span>' +
       '<span class="tt-type">' + escapeHtml(d.type) + '</span></div>' +
       '<div class="tt-name">' + escapeHtml(d.name) + '</div>' +
-      '<div class="tt-desc">' + escapeHtml(d.desc) + '</div>' + extraHtml;
+      '<div class="tt-desc">' + escapeHtml(d.desc) + '</div>' + extraHtml +
+      // DOEL-68: bij actieve controleweergave ook tonen waaróm er een '!' staat.
+      (controlViewOn ? controlRuleHintHtml(CONTROL_EVAL.byElement[node.dataset.id]) : '');
     positionTooltip(clientX, clientY);
     tooltipEl.classList.add('visible');
   }
@@ -5411,8 +5416,12 @@ function runApp(data) {
         const icon = document.createElement('span');
         icon.className = 'node-rule-icon';
         icon.textContent = '!';
-        // .title is een DOM-eigenschap: platte tekst, nooit HTML (regel-labels zijn gebruikersinvoer).
-        icon.title = controlRuleTooltipText(v);
+        // Geen title (DOEL-68): de reden staat in het hover-kaartje; een
+        // browser-tooltip erbovenop zou dubbel zijn. Wel een toegankelijke
+        // naam — setAttribute met platte tekst, nooit HTML (regel-labels zijn
+        // gebruikersinvoer).
+        icon.setAttribute('role', 'img');
+        icon.setAttribute('aria-label', controlRuleTooltipText(v));
         // Klik op het icoon: focus op dit element, met de sectie
         // "Controleregels" in het detailpaneel (zie renderDetailPanel).
         icon.addEventListener('click', (ev) => {
@@ -8921,6 +8930,17 @@ function evaluateControlRules(details, edges, elementTags, tags, rules, typeToBa
 // dus nooit als HTML geïnterpreteerd).
 function controlRuleTooltipText(violations) {
   return 'Controleregels:\n' + (violations || []).map((v) => '• ' + v.label + ' — ' + v.detail).join('\n');
+}
+
+// Regel(s) "Controleregels" in het hover-kaartje (DOEL-68): waarom heeft dit
+// element een '!'. Alle regeltekst (gebruikersinvoer) via escapeHtml.
+function controlRuleHintHtml(violations) {
+  if (!violations || !violations.length) return '';
+  return '<div class="tt-rules"><div class="tt-rules-title">&#9888; Controleregels</div>' +
+    violations.map((v) =>
+      '<div class="tt-rule"><span class="tt-rule-id">' + escapeHtml(v.ruleId) + '</span> ' + escapeHtml(v.label) +
+      ' &mdash; ' + escapeHtml(v.detail) + '</div>'
+    ).join('') + '</div>';
 }
 
 // Sectie "Controleregels" in het detailpaneel. Alle regeltekst (gebruikers-
