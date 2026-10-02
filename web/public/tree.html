@@ -1179,6 +1179,29 @@
     text-align: center; font-size: 8px; font-weight: 700; color: #fff; cursor: pointer;
     background: #ff8c1a; clip-path: polygon(50% 0, 100% 100%, 0 100%);
   }
+  .node-rule-icon.motivated { background: #8a8f98; }
+  .dp-rules.dp-rules-motivated { border-left-color: #8a8f98; background: #f3f4f6; }
+  .dp-rules.dp-rules-motivated .dp-rules-title { color: #5a5f68; }
+  .dp-rule-motivated .dp-rule-label, .dp-rule-motivated .dp-rule-detail { color: #6b7078; }
+  .dp-dev { margin-top: 4px; padding: 6px 8px; background: #eceef1; border-radius: 4px; }
+  .dp-dev-title { font-weight: 700; font-size: 11px; color: #5a5f68; text-transform: uppercase; letter-spacing: 0.3px; }
+  .dp-dev-text { white-space: pre-wrap; overflow-wrap: anywhere; color: #333; }
+  .dp-dev-meta { color: #777; font-size: 11px; margin-top: 2px; }
+  .dp-dev-actions { margin-top: 4px; display: flex; gap: 6px; }
+  .dp-dev-form { margin-top: 4px; }
+  .dp-dev-input { width: 100%; box-sizing: border-box; font: inherit; font-size: 12px; padding: 6px; border: 1px solid #c9ccd1; border-radius: 4px; resize: vertical; }
+  .dp-dev-hint { color: #777; font-size: 11px; font-style: italic; margin: 3px 0; }
+  .dp-dev-form-row { display: flex; align-items: center; gap: 6px; }
+  .dp-dev-counter { color: #777; font-size: 11px; margin-right: auto; }
+  body.read-only .dp-dev-actions, body.read-only .dp-dev-form { display: none; }
+  .control-rules-summary .crs-motivated { background: #f1f2f4; border-color: #c9ccd1; }
+  .control-rules-summary .crs-motivated .cs-stat-value { color: #5a5f68; }
+  .control-rules-summary .crs-motivated-count { color: #6b7078; font-size: 11px; }
+  .control-rules-summary .crs-toggle { align-self: center; font-size: 12px; color: #555; display: flex; align-items: center; gap: 5px; cursor: pointer; }
+  #hover-tooltip .tt-rules.tt-rules-motivated { border-top-color: #d5d8dd; color: #555; }
+  #hover-tooltip .tt-rules.tt-rules-motivated .tt-rules-title { color: #5a5f68; }
+  #hover-tooltip .tt-rule-dev { color: #555; margin: 1px 0 3px; overflow-wrap: anywhere; }
+  #hover-tooltip .tt-rule-dev-meta { color: #888; }
   .node.rule-active { box-shadow: 0 0 0 3px #ff8c1a, 0 1px 2px rgba(0,0,0,0.15); }
   .node.rule-dimmed { opacity: 0.22; }
   .control-rules-summary {
@@ -2188,11 +2211,16 @@ function flipExpandAnchor() {
 }
 
 function runApp(data) {
-  const { DETAILS, EDGES, TOELICHTING, PROJECT_STATUS, PRODUCTS, PRODUCT_DEPENDENCIES, ACTIVITIES, DEPENDENCIES, TAGS, ELEMENT_TAGS, ORGS, OB_ORG, COLUMNS, ACTIVE_MODULES, CONTROL_RULES } = data;
+  const { DETAILS, EDGES, TOELICHTING, PROJECT_STATUS, PRODUCTS, PRODUCT_DEPENDENCIES, ACTIVITIES, DEPENDENCIES, TAGS, ELEMENT_TAGS, ORGS, OB_ORG, COLUMNS, ACTIVE_MODULES, CONTROL_RULES, CONTROL_DEVIATIONS } = data;
   // Controleweergave (DOEL-63): aan/uit-stand, vroeg gedeclareerd omdat
   // renderDetailPanel er naar kijkt. Zie applyControlView() verderop.
   let controlViewOn = false;
-  let CONTROL_EVAL = { byElement: {}, countsByRule: {}, activeRules: [] };
+  let CONTROL_EVAL = { byElement: {}, countsByRule: {}, motivatedByRule: {}, activeRules: [], openElements: 0, motivatedOnlyElements: 0 };
+  // DOEL-64: voor welke (element, regel) staat het motivatie-invoerveld open
+  // in het detailpaneel ({ code, ruleId } of null), en telt de regel-markering
+  // in het samenvattingspaneel ook gemotiveerde afwijkingen mee (standaard niet).
+  let deviationEditing = null;
+  let showMotivatedDeviations = false;
   // Licentiemodel (zie doelenboom_licentiemodel.md §3/§6, api/src/license.ts):
   // welke modules de licentie van deze tenant actief heeft. PROJECT_STATUS/
   // PRODUCTS zijn al server-side leeggemaakt als 'projecten' ontbreekt
@@ -5022,7 +5050,17 @@ function runApp(data) {
         (isProject ? '' : tagsChipsHtml(id) + orgChipsHtml(id)) +
       '</div>' +
       connectionsHtml(id) +
-      (controlViewOn ? controlRuleViolationsHtml(CONTROL_EVAL.byElement[id]) : '') +
+      (controlViewOn
+        ? controlRuleViolationsHtml(CONTROL_EVAL.byElement[id], {
+            // Zelfde schrijfrecht als de overige boom-inhoud (admin/gebruiker,
+            // niet bij read-only/verlopen licentie — zie applyRole); een
+            // standalone-export heeft geen backend. De server controleert het
+            // opnieuw (requireWritableDoelenboom + module).
+            canEdit: userRole !== 'bezoeker' && !document.body.classList.contains('standalone'),
+            elementCode: id,
+            editingRuleId: deviationEditing && deviationEditing.code === id ? deviationEditing.ruleId : null,
+          })
+        : '') +
       '<div class="dp-crud-actions crud-only">' +
         '<button type="button" class="btn ghost btn-sm dp-edit-btn" data-code="' + escapeHtml(d.code) + '">Bewerken</button>' +
         '<button type="button" class="btn ghost btn-sm dp-delete-btn" data-code="' + escapeHtml(d.code) + '">Verwijderen</button>' +
@@ -5364,7 +5402,7 @@ function runApp(data) {
   // los van filters/verborgen kolommen/focus.
   const TYPE_TO_BASE = {};
   Object.keys(TYPE_TO_COLUMN).forEach((t) => { TYPE_TO_BASE[t] = TYPE_TO_COLUMN[t].typeName; });
-  CONTROL_EVAL = evaluateControlRules(DETAILS, EDGES, ELEMENT_TAGS, TAGS, CONTROL_RULES, TYPE_TO_BASE);
+  CONTROL_EVAL = evaluateControlRules(DETAILS, EDGES, ELEMENT_TAGS, TAGS, CONTROL_RULES, TYPE_TO_BASE, CONTROL_DEVIATIONS);
   const controlRulesBtn = document.getElementById('control-rules-btn');
   const controlRulesSummaryEl = document.getElementById('control-rules-summary');
   function controlViewStorageKey() { return 'doelenboom-control-view-' + (doelenboomId || ''); }
@@ -5381,7 +5419,9 @@ function runApp(data) {
     const already = btn && btn.classList.contains('crs-rule-active');
     clearRuleHighlight();
     if (already) return;
-    const ids = Object.keys(CONTROL_EVAL.byElement).filter(id => CONTROL_EVAL.byElement[id].some(v => v.ruleId === ruleId));
+    // Standaard alleen OPEN overtredingen; met de schakelaar ook gemotiveerde (DOEL-64).
+    const ids = Object.keys(CONTROL_EVAL.byElement).filter(id => CONTROL_EVAL.byElement[id].some(
+      v => v.ruleId === ruleId && (showMotivatedDeviations || !v.deviation)));
     if (!ids.length) return;
     if (btn) btn.classList.add('crs-rule-active');
     const idSet = new Set(ids);
@@ -5414,7 +5454,9 @@ function runApp(data) {
         const v = CONTROL_EVAL.byElement[n.dataset.id];
         if (!v || !v.length) return;
         const icon = document.createElement('span');
-        icon.className = 'node-rule-icon';
+        // Grijs als ALLE overtredingen van dit element gemotiveerd zijn; oranje
+        // zodra er minstens één open is (DOEL-64).
+        icon.className = 'node-rule-icon' + (controlViolationsAllMotivated(v) ? ' motivated' : '');
         icon.textContent = '!';
         // Geen title (DOEL-68): de reden staat in het hover-kaartje; een
         // browser-tooltip erbovenop zou dubbel zijn. Wel een toegankelijke
@@ -5433,28 +5475,104 @@ function runApp(data) {
       });
     }
     if (controlRulesSummaryEl) {
-      controlRulesSummaryEl.innerHTML = controlViewOn ? controlRulesSummaryHtml(CONTROL_EVAL) : '';
+      controlRulesSummaryEl.innerHTML = controlViewOn ? controlRulesSummaryHtml(CONTROL_EVAL, showMotivatedDeviations) : '';
       controlRulesSummaryEl.hidden = !controlViewOn;
       controlRulesSummaryEl.querySelectorAll('.crs-rule').forEach(b => {
         b.addEventListener('click', () => highlightRule(b.dataset.ruleId, b));
       });
+      const motivatedCb = controlRulesSummaryEl.querySelector('#crs-show-motivated');
+      if (motivatedCb) {
+        motivatedCb.addEventListener('change', () => {
+          showMotivatedDeviations = motivatedCb.checked;
+          applyControlView();
+        });
+      }
     }
     // Staat er een detailpaneel open (focusmodus), dan opnieuw opbouwen zodat
     // de sectie "Controleregels" mee aan/uit gaat.
-    if (focusId !== null) {
-      const fNode = document.querySelector('.node[data-id="' + CSS.escape(focusId) + '"]');
-      const key = fNode && fNode.closest('.column') ? fNode.closest('.column').dataset.key : null;
-      renderDetailPanel(focusId, COL_COLORS[key] || '#002855');
+    rerenderFocusDetailPanel();
+  }
+
+  function rerenderFocusDetailPanel() {
+    if (focusId === null) return;
+    const fNode = document.querySelector('.node[data-id="' + CSS.escape(focusId) + '"]');
+    const key = fNode && fNode.closest('.column') ? fNode.closest('.column').dataset.key : null;
+    renderDetailPanel(focusId, COL_COLORS[key] || '#002855');
+  }
+
+  // ---- Gemotiveerde afwijking (DOEL-64) ----
+  // Knoppen in de sectie "Controleregels" van het detailpaneel (data-dev-action,
+  // zie controlRuleViolationsHtml); aangeroepen vanuit onDetailAreaClick.
+  function deviationUrl(code, ruleId) {
+    return apiUrl + '/api/doelenbomen/' + doelenboomId + '/elements/' + encodeURIComponent(code) +
+      '/control-rule-deviations/' + encodeURIComponent(ruleId);
+  }
+
+  async function handleDeviationAction(btn) {
+    const action = btn.dataset.devAction;
+    const code = btn.dataset.code;
+    const ruleId = btn.dataset.ruleId;
+    if (action === 'edit') {
+      deviationEditing = { code: code, ruleId: ruleId };
+      rerenderFocusDetailPanel();
+      const input = detailPanel.querySelector('.dp-dev-input');
+      if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
+      return;
+    }
+    if (action === 'cancel') {
+      deviationEditing = null;
+      rerenderFocusDetailPanel();
+      return;
+    }
+    if (action === 'save') {
+      const form = btn.closest('.dp-dev-form');
+      const input = form && form.querySelector('.dp-dev-input');
+      const motivatie = input ? input.value.trim() : '';
+      if (!motivatie) { showToast('Vul een korte motivatie in.', 'error'); return; }
+      btn.disabled = true;
+      try {
+        const res = await fetch(deviationUrl(code, ruleId), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + authToken },
+          body: JSON.stringify({ motivatie: motivatie }),
+        });
+        if (!res.ok) {
+          const b = await res.json().catch(() => ({}));
+          throw new Error(b.error || ('Opslaan mislukt (HTTP ' + res.status + ')'));
+        }
+        reloadTreeKeepingFocus();
+      } catch (err) {
+        btn.disabled = false;
+        showToast(err && err.message ? err.message : 'Onbekende fout bij opslaan.', 'error');
+      }
+      return;
+    }
+    if (action === 'remove') {
+      const ok = await showConfirm('De motivatie voor regel ' + ruleId + ' intrekken? De overtreding staat daarna weer open.', 'Intrekken');
+      if (!ok) return;
+      try {
+        const res = await fetch(deviationUrl(code, ruleId), { method: 'DELETE', headers: { Authorization: 'Bearer ' + authToken } });
+        if (!res.ok && res.status !== 204) {
+          const b = await res.json().catch(() => ({}));
+          throw new Error(b.error || ('Intrekken mislukt (HTTP ' + res.status + ')'));
+        }
+        reloadTreeKeepingFocus();
+      } catch (err) {
+        showToast(err && err.message ? err.message : 'Onbekende fout bij intrekken.', 'error');
+      }
     }
   }
 
   if (controlRulesBtn) {
     if (CONTROL_EVAL.activeRules.length) {
-      const total = Object.keys(CONTROL_EVAL.byElement).length;
+      // Alleen OPEN overtredingen tellen mee in de knop; gemotiveerde afwijkingen niet (DOEL-64).
+      const total = CONTROL_EVAL.openElements;
       controlRulesBtn.textContent = 'Controleregels' + (total ? ' (' + total + ')' : ' \u2713');
       controlRulesBtn.title = total
         ? total + ' element(en) voldoen niet aan een controleregel — klik om te tonen/verbergen'
-        : 'Alle elementen voldoen aan de controleregels';
+        : (CONTROL_EVAL.motivatedOnlyElements
+            ? 'Geen open overtredingen; ' + CONTROL_EVAL.motivatedOnlyElements + ' element(en) gemotiveerd afgeweken'
+            : 'Alle elementen voldoen aan de controleregels');
       controlRulesBtn.style.display = '';
       try { controlViewOn = localStorage.getItem(controlViewStorageKey()) === '1'; } catch (err) { controlViewOn = false; }
       controlRulesBtn.addEventListener('click', () => {
@@ -5730,7 +5848,9 @@ function runApp(data) {
         const tri = document.createElementNS(SVG_NS, 'polygon');
         const bx = x + 7, by = y + h - 2;
         tri.setAttribute('points', (bx - 5.5) + ',' + by + ' ' + (bx + 5.5) + ',' + by + ' ' + bx + ',' + (by - 10));
-        tri.setAttribute('fill', '#ff8c1a');
+        // Grijs = uitsluitend gemotiveerde afwijkingen (DOEL-64). Alleen het
+        // symbool: er komt geen vrije tekst van de gebruiker in de export.
+        tri.setAttribute('fill', ruleIcon.classList.contains('motivated') ? '#8a8f98' : '#ff8c1a');
         tri.setAttribute('stroke', '#ffffff'); tri.setAttribute('stroke-width', '1');
         g.appendChild(tri);
         const bang = document.createElementNS(SVG_NS, 'text');
@@ -5790,7 +5910,15 @@ function runApp(data) {
         if (idx === -1) throw new Error('Kon het scriptblok niet vinden in de paginabron.');
         // '<' + '/script>' i.p.v. de letterlijke tekenreeks: anders sluit deze
         // JS-string zelf per ongeluk het omringende <script>-blok van tree.html af.
-        const dataScript = '<script>window.__STATIC_TREE__ = ' + JSON.stringify(lastTreeResponse) +
+        // DOEL-64: de status "gemotiveerd afgeweken" gaat mee (anders zou de
+        // export overtredingen als open tonen), de motivatietekst en het
+        // e-mailadres van de bijwerker niet — die blijven in de applicatie.
+        const exportTree = Object.assign({}, lastTreeResponse, {
+          controlRuleDeviations: (lastTreeResponse.controlRuleDeviations || []).map((dv) => ({
+            elementCode: dv.elementCode, ruleId: dv.ruleId, motivatie: '(motivatie niet opgenomen in de export)', updatedAt: dv.updatedAt,
+          })),
+        });
+        const dataScript = '<script>window.__STATIC_TREE__ = ' + JSON.stringify(exportTree) +
           ';<' + '/script>\n';
         const staticHtml = sourceHtml.slice(0, idx) + dataScript + sourceHtml.slice(idx);
 
@@ -8138,6 +8266,8 @@ function runApp(data) {
     if (activityDeleteAllBtn) { deleteAllActivities(activityDeleteAllBtn.dataset.code); return; }
     const mppImportBtn = ev.target.closest('.mpp-import-btn');
     if (mppImportBtn) { openMppImportModal(mppImportBtn.dataset.code); return; }
+    const devBtn = ev.target.closest('[data-dev-action]');
+    if (devBtn) { handleDeviationAction(devBtn); return; }
     const editBtn = ev.target.closest('.dp-edit-btn');
     if (editBtn) { openElementModal('edit', editBtn.dataset.code); return; }
     const delBtn = ev.target.closest('.dp-delete-btn');
@@ -8162,6 +8292,13 @@ function runApp(data) {
     }
   }
   detailPanel.addEventListener('click', onDetailAreaClick);
+  // DOEL-64: tekenteller van het motivatieveld (gedelegeerd, geen inline handler).
+  detailPanel.addEventListener('input', (ev) => {
+    if (!ev.target || !ev.target.classList || !ev.target.classList.contains('dp-dev-input')) return;
+    const form = ev.target.closest('.dp-dev-form');
+    const counter = form && form.querySelector('.dp-dev-counter');
+    if (counter) counter.textContent = ev.target.value.length + ' / ' + CONTROL_DEVIATION_MAX_LENGTH;
+  });
   projectPanelEl.addEventListener('click', onDetailAreaClick);
 
   // Toggle "Geplande datum bij opgeleverde items" op de Tijdlijn (zie
@@ -8862,7 +8999,17 @@ function controlRuleTypeList(types) {
   return t.slice(0, -1).join(', ') + ' of ' + t[t.length - 1];
 }
 
-function evaluateControlRules(details, edges, elementTags, tags, rules, typeToBase) {
+// deviations (DOEL-64): lijst gemotiveerde afwijkingen uit de boomrespons
+// ({ elementCode, ruleId, motivatie, updatedAt, updatedByEmail? }). Een
+// overtreding met een afwijking blijft een overtreding (staat in byElement,
+// met .deviation gevuld) maar telt als "gemotiveerd" i.p.v. open:
+// countsByRule = OPEN per regel, motivatedByRule = gemotiveerd per regel.
+function controlDeviationKey(code, ruleId) { return String(code) + '\u0000' + String(ruleId); }
+
+function evaluateControlRules(details, edges, elementTags, tags, rules, typeToBase, deviations) {
+  const devByKey = {};
+  (deviations || []).forEach((dv) => { if (dv) devByKey[controlDeviationKey(dv.elementCode, dv.ruleId)] = dv; });
+  const motivatedByRule = {};
   const base = typeToBase || {};
   const matches = (type, list) => list.indexOf(type) !== -1 || (base[type] != null && list.indexOf(base[type]) !== -1);
   const out = {}, inc = {};
@@ -8873,7 +9020,7 @@ function evaluateControlRules(details, edges, elementTags, tags, rules, typeToBa
   const byElement = {};
   const countsByRule = {};
   const activeRules = (rules || []).filter((r) => r && r.enabled !== false);
-  activeRules.forEach((r) => { countsByRule[r.id] = 0; });
+  activeRules.forEach((r) => { countsByRule[r.id] = 0; motivatedByRule[r.id] = 0; });
   const codes = Object.keys(details || {});
 
   activeRules.forEach((r) => {
@@ -8916,60 +9063,156 @@ function evaluateControlRules(details, edges, elementTags, tags, rules, typeToBa
         }
       }
       if (detail) {
+        const deviation = devByKey[controlDeviationKey(code, r.id)] || null;
         (byElement[code] = byElement[code] || []).push({
-          ruleId: r.id, label: r.label || r.id, explanation: r.explanation || '', detail: detail,
+          ruleId: r.id, label: r.label || r.id, explanation: r.explanation || '', detail: detail, deviation: deviation,
         });
-        countsByRule[r.id] += 1;
+        if (deviation) motivatedByRule[r.id] += 1; else countsByRule[r.id] += 1;
       }
     });
   });
-  return { byElement: byElement, countsByRule: countsByRule, activeRules: activeRules };
+  let openElements = 0, motivatedOnlyElements = 0;
+  Object.keys(byElement).forEach((code) => {
+    if (byElement[code].some((v) => !v.deviation)) openElements += 1; else motivatedOnlyElements += 1;
+  });
+  return {
+    byElement: byElement, countsByRule: countsByRule, motivatedByRule: motivatedByRule, activeRules: activeRules,
+    openElements: openElements, motivatedOnlyElements: motivatedOnlyElements,
+  };
+}
+
+// Heeft dit element uitsluitend gemotiveerde afwijkingen (grijs signaal)?
+function controlViolationsAllMotivated(violations) {
+  return !!(violations && violations.length) && violations.every((v) => !!v.deviation);
+}
+
+// "door wie, wanneer" van een afwijking als platte tekst. Het e-mailadres
+// ontbreekt voor een bezoeker (de server laat het weg).
+function controlDeviationMetaText(deviation) {
+  if (!deviation) return '';
+  let when = '';
+  const t = Date.parse(deviation.updatedAt);
+  if (!Number.isNaN(t)) when = new Date(t).toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const who = deviation.updatedByEmail ? String(deviation.updatedByEmail) : '';
+  if (who && when) return 'Door ' + who + ' op ' + when;
+  if (who) return 'Door ' + who;
+  return when ? 'Op ' + when : '';
 }
 
 // Platte tekst voor een title-attribuut (via de DOM-eigenschap .title gezet,
 // dus nooit als HTML geïnterpreteerd).
 function controlRuleTooltipText(violations) {
-  return 'Controleregels:\n' + (violations || []).map((v) => '• ' + v.label + ' — ' + v.detail).join('\n');
+  return 'Controleregels:\n' + (violations || []).map((v) =>
+    '• ' + v.label + ' — ' + v.detail + (v.deviation ? ' (gemotiveerd afgeweken)' : '')).join('\n');
 }
 
 // Regel(s) "Controleregels" in het hover-kaartje (DOEL-68): waarom heeft dit
 // element een '!'. Alle regeltekst (gebruikersinvoer) via escapeHtml.
 function controlRuleHintHtml(violations) {
   if (!violations || !violations.length) return '';
-  return '<div class="tt-rules"><div class="tt-rules-title">&#9888; Controleregels</div>' +
+  // DOEL-64: een gemotiveerde afwijking staat erbij als zodanig, met de
+  // motivatie (gebruikersinvoer: escapeHtml) en door wie/wanneer.
+  return '<div class="tt-rules' + (controlViolationsAllMotivated(violations) ? ' tt-rules-motivated' : '') +
+    '"><div class="tt-rules-title">&#9888; Controleregels</div>' +
     violations.map((v) =>
-      '<div class="tt-rule"><span class="tt-rule-id">' + escapeHtml(v.ruleId) + '</span> ' + escapeHtml(v.label) +
-      ' &mdash; ' + escapeHtml(v.detail) + '</div>'
+      '<div class="tt-rule' + (v.deviation ? ' tt-rule-motivated' : '') + '"><span class="tt-rule-id">' + escapeHtml(v.ruleId) +
+      '</span> ' + escapeHtml(v.label) + ' &mdash; ' + escapeHtml(v.detail) +
+      (v.deviation
+        ? '<div class="tt-rule-dev">Gemotiveerd afgeweken: ' + escapeHtml(v.deviation.motivatie) +
+          (controlDeviationMetaText(v.deviation) ? ' <span class="tt-rule-dev-meta">(' + escapeHtml(controlDeviationMetaText(v.deviation)) + ')</span>' : '') +
+          '</div>'
+        : '') +
+      '</div>'
     ).join('') + '</div>';
 }
 
-// Sectie "Controleregels" in het detailpaneel. Alle regeltekst (gebruikers-
-// invoer) via escapeHtml.
-function controlRuleViolationsHtml(violations) {
+// Sectie "Controleregels" in het detailpaneel. Alle regeltekst en motivaties
+// (gebruikersinvoer) via escapeHtml. opts (DOEL-64):
+//   canEdit        — toon de knoppen Motiveer afwijking/Wijzigen/Intrekken
+//   elementCode    — gaat mee als data-code op de knoppen
+//   editingRuleId  — voor deze regel het invoerformulier tonen
+// De knoppen hebben alleen data-attributen; het klikken wordt afgehandeld in
+// onDetailAreaClick (geen inline handlers, CSP).
+const CONTROL_DEVIATION_MAX_LENGTH = 500;
+const CONTROL_DEVIATION_HINT = 'Alleen een korte motivatie op hoofdlijnen — geen inhoudelijke, gevoelige of gerubriceerde informatie. Verwijs zo nodig naar een documentnummer.';
+
+function controlRuleDeviationFormHtml(elementCode, ruleId, currentText) {
+  const text = String(currentText == null ? '' : currentText);
+  const attrs = ' data-code="' + escapeHtml(elementCode) + '" data-rule-id="' + escapeHtml(ruleId) + '"';
+  return '<div class="dp-dev-form"' + attrs + '>' +
+    '<textarea class="dp-dev-input" rows="3" maxlength="' + CONTROL_DEVIATION_MAX_LENGTH + '" aria-label="Motivatie van de afwijking">' +
+    escapeHtml(text) + '</textarea>' +
+    '<div class="dp-dev-hint">' + escapeHtml(CONTROL_DEVIATION_HINT) + '</div>' +
+    '<div class="dp-dev-form-row"><span class="dp-dev-counter">' + text.length + ' / ' + CONTROL_DEVIATION_MAX_LENGTH + '</span>' +
+    '<button type="button" class="btn btn-sm dp-dev-btn" data-dev-action="save"' + attrs + '>Opslaan</button>' +
+    '<button type="button" class="btn ghost btn-sm dp-dev-btn" data-dev-action="cancel"' + attrs + '>Annuleren</button></div>' +
+    '</div>';
+}
+
+function controlRuleViolationsHtml(violations, opts) {
   if (!violations || !violations.length) return '';
-  return '<div class="dp-rules"><div class="dp-rules-title">&#9888; Controleregels</div>' +
-    violations.map((v) =>
-      '<div class="dp-rule"><div class="dp-rule-label"><span class="dp-rule-id">' + escapeHtml(v.ruleId) + '</span> ' +
-      escapeHtml(v.label) + '</div><div class="dp-rule-detail">' + escapeHtml(v.detail) + '</div>' +
-      (v.explanation ? '<div class="dp-rule-expl">' + escapeHtml(v.explanation) + '</div>' : '') + '</div>'
-    ).join('') + '</div>';
+  const o = opts || {};
+  const code = o.elementCode == null ? '' : String(o.elementCode);
+  const allMotivated = controlViolationsAllMotivated(violations);
+  return '<div class="dp-rules' + (allMotivated ? ' dp-rules-motivated' : '') + '"><div class="dp-rules-title">&#9888; Controleregels</div>' +
+    violations.map((v) => {
+      const attrs = ' data-code="' + escapeHtml(code) + '" data-rule-id="' + escapeHtml(v.ruleId) + '"';
+      const editing = o.canEdit && o.editingRuleId != null && String(o.editingRuleId) === String(v.ruleId);
+      let dev = '';
+      if (editing) {
+        dev = controlRuleDeviationFormHtml(code, v.ruleId, v.deviation ? v.deviation.motivatie : '');
+      } else if (v.deviation) {
+        const meta = controlDeviationMetaText(v.deviation);
+        dev = '<div class="dp-dev"><div class="dp-dev-title">Gemotiveerd afgeweken</div>' +
+          '<div class="dp-dev-text">' + escapeHtml(v.deviation.motivatie) + '</div>' +
+          (meta ? '<div class="dp-dev-meta">' + escapeHtml(meta) + '</div>' : '') +
+          (o.canEdit
+            ? '<div class="dp-dev-actions"><button type="button" class="btn ghost btn-sm dp-dev-btn" data-dev-action="edit"' + attrs + '>Wijzigen</button>' +
+              '<button type="button" class="btn ghost btn-sm dp-dev-btn" data-dev-action="remove"' + attrs + '>Intrekken</button></div>'
+            : '') +
+          '</div>';
+      } else if (o.canEdit) {
+        dev = '<div class="dp-dev-actions"><button type="button" class="btn ghost btn-sm dp-dev-btn" data-dev-action="edit"' + attrs + '>Motiveer afwijking</button></div>';
+      }
+      return '<div class="dp-rule' + (v.deviation ? ' dp-rule-motivated' : '') + '"><div class="dp-rule-label"><span class="dp-rule-id">' +
+        escapeHtml(v.ruleId) + '</span> ' + escapeHtml(v.label) + '</div><div class="dp-rule-detail">' + escapeHtml(v.detail) + '</div>' +
+        (v.explanation ? '<div class="dp-rule-expl">' + escapeHtml(v.explanation) + '</div>' : '') + dev + '</div>';
+    }).join('') + '</div>';
 }
 
 // Samenvattingspaneel (stat-tegels, zelfde stijl als het kolomoverzicht).
 // Per regel een knop met data-rule-id (gewired in runApp, geen inline handlers).
-function controlRulesSummaryHtml(evaluation) {
-  const rules = (evaluation && evaluation.activeRules) || [];
-  const counts = (evaluation && evaluation.countsByRule) || {};
-  const total = Object.keys((evaluation && evaluation.byElement) || {}).length;
-  let html = '<div class="cs-stat-tile' + (total ? ' cs-stat-tile-warn' : ' crs-ok') + '"><div class="cs-stat-value">' + total +
+function controlRulesSummaryHtml(evaluation, showMotivated) {
+  const ev = evaluation || {};
+  const rules = ev.activeRules || [];
+  const counts = ev.countsByRule || {};
+  const motivated = ev.motivatedByRule || {};
+  // DOEL-64: open en gemotiveerd apart tellen. Zonder openElements (oude
+  // aanroepers) terugvallen op het totaal aantal elementen met een overtreding.
+  const open = ev.openElements != null ? ev.openElements : Object.keys(ev.byElement || {}).length;
+  const motivatedOnly = ev.motivatedOnlyElements || 0;
+  const anyMotivated = rules.some((r) => (motivated[r.id] || 0) > 0);
+  let html = '<div class="cs-stat-tile' + (open ? ' cs-stat-tile-warn' : ' crs-ok') + '"><div class="cs-stat-value">' + open +
     '</div><div class="cs-stat-label">Elementen met een overtreding</div></div>';
+  if (motivatedOnly) {
+    html += '<div class="cs-stat-tile crs-motivated"><div class="cs-stat-value">' + motivatedOnly +
+      '</div><div class="cs-stat-label">Elementen gemotiveerd afgeweken</div></div>';
+  }
   html += rules.map((r) => {
     const n = counts[r.id] || 0;
-    return '<button type="button" class="cs-stat-tile crs-rule' + (n ? ' cs-stat-tile-warn' : ' crs-ok') + '" data-rule-id="' +
-      escapeHtml(r.id) + '"' + (n ? '' : ' disabled') + '><div class="cs-stat-value">' + (n ? n : '&#10003;') +
+    const m = motivated[r.id] || 0;
+    const clickable = n > 0 || (m > 0 && showMotivated);
+    const cls = n ? ' cs-stat-tile-warn' : (m ? ' crs-motivated' : ' crs-ok');
+    return '<button type="button" class="cs-stat-tile crs-rule' + cls + '" data-rule-id="' +
+      escapeHtml(r.id) + '"' + (clickable ? '' : ' disabled') + '><div class="cs-stat-value">' + (n ? n : '&#10003;') +
       '</div><div class="cs-stat-label"><span class="dp-rule-id">' + escapeHtml(r.id) + '</span> ' + escapeHtml(r.label || r.id) +
-      (n ? '' : ' — voldoet') + '</div></button>';
+      (n || m ? '' : ' — voldoet') + (m ? '<div class="crs-motivated-count">' + m + ' gemotiveerd afgeweken</div>' : '') +
+      '</div></button>';
   }).join('');
+  if (anyMotivated) {
+    html += '<label class="crs-toggle"><input type="checkbox" id="crs-show-motivated"' + (showMotivated ? ' checked' : '') +
+      '> Toon ook gemotiveerde afwijkingen</label>';
+  }
   return html;
 }
 
@@ -9253,8 +9496,10 @@ function adaptTreeResponse(tree) {
 
   // Controleregels (DOEL-63) — leeg zonder module 'controleregels' (server-side).
   const CONTROL_RULES = Array.isArray(tree.controlRules) ? tree.controlRules : [];
+  // DOEL-64: gemotiveerde afwijkingen van controleregels (per element + regel).
+  const CONTROL_DEVIATIONS = Array.isArray(tree.controlRuleDeviations) ? tree.controlRuleDeviations : [];
 
-  return { DETAILS, EDGES, TOELICHTING, PROJECT_STATUS, PRODUCTS, PRODUCT_DEPENDENCIES, ACTIVITIES, DEPENDENCIES, TAGS, ELEMENT_TAGS, ORGS, OB_ORG, COLUMNS, ACTIVE_MODULES, CONTROL_RULES };
+  return { DETAILS, EDGES, TOELICHTING, PROJECT_STATUS, PRODUCTS, PRODUCT_DEPENDENCIES, ACTIVITIES, DEPENDENCIES, TAGS, ELEMENT_TAGS, ORGS, OB_ORG, COLUMNS, ACTIVE_MODULES, CONTROL_RULES, CONTROL_DEVIATIONS };
 }
 
 function renderError(message) {

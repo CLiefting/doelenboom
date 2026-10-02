@@ -5,6 +5,7 @@ import { requireTenantRoleForDoelenboomParam, getEffectiveRoleForDoelenboom } fr
 import { getColumnsForDoelenboom } from '../columnConfig.js';
 import { getActiveModuleKeys, isLicenseExpired } from '../license.js';
 import { CONTROLE_REGELS_MODULE, findRulesBrokenByColumns, getRulesForDoelenboom } from '../controlRules.js';
+import { ControlRuleDeviation, getDeviationsForDoelenboom, stripEditorOnlyFields } from '../controlRuleDeviations.js';
 import { logAuditEvent } from '../auditLog.js';
 
 export const treeRouter = Router();
@@ -258,6 +259,14 @@ export async function fetchTree(doelenboomId: string) {
     const broken = new Set(findRulesBrokenByColumns(all, columns));
     controlRules = all.filter((r) => !broken.has(r.id));
   }
+  // DOEL-64: gemotiveerde afwijkingen, alleen voor regels die ook meegaan
+  // (module actief, regel bestaat en is geldig). updatedByEmail wordt in de
+  // GET-route hieronder voor een bezoeker weggelaten.
+  let controlRuleDeviations: ControlRuleDeviation[] = [];
+  if (controlRules.length) {
+    const ids = new Set(controlRules.map((r) => r.id));
+    controlRuleDeviations = (await getDeviationsForDoelenboom(doelenboomId)).filter((d) => ids.has(d.ruleId));
+  }
 
   return {
     columns,
@@ -295,6 +304,7 @@ export async function fetchTree(doelenboomId: string) {
     activeModules,
     licenseExpired,
     controlRules,
+    controlRuleDeviations,
   };
 }
 
@@ -366,6 +376,7 @@ treeRouter.get('/:id/tree', requireTenantRoleForDoelenboomParam('bezoeker', 'id'
   res.json({
     ...tree,
     projectStatus,
+    controlRuleDeviations: isEditorRole ? tree.controlRuleDeviations : stripEditorOnlyFields(tree.controlRuleDeviations),
     doelenboom: { ...tree.doelenboom, effectiveRole, canWrite, canWriteContent },
   });
 });
