@@ -181,6 +181,11 @@ function TemplateRow({
               save: (rules) => api.updateTemplateControlRules(token, template.id, rules),
               hideWhenModuleInactive: false,
             }}
+            attributes={{
+              load: () => api.templateAttributes(token, template.id),
+              save: (attributes) => api.updateTemplateAttributes(token, template.id, attributes),
+              hideWhenModuleInactive: false,
+            }}
           />
           <div style={{ marginTop: 8 }}>
             <button type="button" onClick={() => setMode('view')} style={btnStyle('ghost')} disabled={busy}>

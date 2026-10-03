@@ -43,7 +43,11 @@ export type AuditEventType =
   // DOEL-70: mail aan sysadmins over nieuwe kwetsbaarheden in
   // softwarecomponenten. detail = alleen aantallen (per ernst, ontvangers,
   // verstuurd) — nooit pakketnamen, kwetsbaarheid-id's of e-mailadressen.
-  | 'dependency_vulnerability_alert_sent';
+  | 'dependency_vulnerability_alert_sent'
+  // DOEL-75: kenmerkdefinities gewijzigd (doelenboom, tenant-default of
+  // sjabloon). detail = { scope, templateId?, attributeCount, attributeIds }
+  // — bewust NOOIT labels, uitleg of keuzelijstwaarden (vrije tekst).
+  | 'attribute_definitions_updated';
 
 export interface LogAuditEventInput {
   eventType: AuditEventType;

@@ -5,6 +5,7 @@ import { requireSysadmin, requireTenantRoleForDoelenboomParam, requireWritableDo
 import { getColumnsForDoelenboom, getTenantDefaultColumns, replaceColumns, validateColumnsInput } from '../columnConfig.js';
 import { sendServerError } from '../errors.js';
 import { brokenRulesMessage, CONTROLE_REGELS_MODULE, findRulesBrokenByColumns, rulesFromDb } from '../controlRules.js';
+import { attributesFromDb, brokenAttributesMessage, findAttributesBrokenByColumns } from '../elementAttributes.js';
 import { hasModule } from '../license.js';
 
 // Kolomconfiguratie: zie docs/kolommen-configuratie-ontwerp.md.
@@ -30,7 +31,7 @@ columnConfigRouter.put('/tenants/:tenantId/column-config', requireSysadmin, asyn
   try {
     await client.query('begin');
     const cfg = await client.query(
-      `select id, rules from column_configs where scope = 'tenant_default' and tenant_id = $1 for update`,
+      `select id, rules, attributes from column_configs where scope = 'tenant_default' and tenant_id = $1 for update`,
       [req.params.tenantId]
     );
     if (!cfg.rows[0]) {
@@ -45,6 +46,12 @@ columnConfigRouter.put('/tenants/:tenantId/column-config', requireSysadmin, asyn
     if (brokenRuleIds.length) {
       await client.query('rollback');
       return res.status(409).json({ error: brokenRulesMessage(brokenRuleIds) });
+    }
+    // Kenmerkdefinities (DOEL-75): zelfde lijn als bij de regels.
+    const brokenAttributeIds = findAttributesBrokenByColumns(attributesFromDb(cfg.rows[0].attributes), columns);
+    if (brokenAttributeIds.length) {
+      await client.query('rollback');
+      return res.status(409).json({ error: brokenAttributesMessage(brokenAttributeIds) });
     }
     // Een tenant-default heeft geen eigen elementen, dus geen "nog in gebruik"-check.
     const { errors } = await replaceColumns(client, cfg.rows[0].id, null, columns);
@@ -83,7 +90,7 @@ columnConfigRouter.put(
     try {
       await client.query('begin');
       const cfg = await client.query(
-        `select id, tenant_id, rules from column_configs where scope = 'doelenboom' and doelenboom_id = $1 for update`,
+        `select id, tenant_id, rules, attributes from column_configs where scope = 'doelenboom' and doelenboom_id = $1 for update`,
         [req.params.id]
       );
       if (!cfg.rows[0]) {
@@ -99,6 +106,12 @@ columnConfigRouter.put(
         if (brokenRuleIds.length) {
           await client.query('rollback');
           return res.status(409).json({ error: brokenRulesMessage(brokenRuleIds) });
+        }
+        // Kenmerkdefinities (DOEL-75): zelfde lijn, ook alleen met actieve module.
+        const brokenAttributeIds = findAttributesBrokenByColumns(attributesFromDb(cfg.rows[0].attributes), columns);
+        if (brokenAttributeIds.length) {
+          await client.query('rollback');
+          return res.status(409).json({ error: brokenAttributesMessage(brokenAttributeIds) });
         }
       }
       const { errors } = await replaceColumns(client, cfg.rows[0].id, req.params.id, columns);

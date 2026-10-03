@@ -110,8 +110,11 @@ async function copyColumnsBetweenConfigs(client: PoolClient, sourceConfigId: num
   // dus mee, net als de kolommen zelf: tenant-default -> nieuwe boom en
   // dupliceren van een boom. Bij elkaar horend gevalideerd (de regels zijn
   // geldig t.o.v. de kolommen van de bron, en die worden 1-op-1 gekopieerd).
+  // Kenmerkdefinities (DOEL-75, zie elementAttributes.ts) gaan om dezelfde
+  // reden mee — alleen de definities; waarden per element (DOEL-76) niet.
   await client.query(
-    'update column_configs set rules = (select rules from column_configs where id = $1) where id = $2',
+    `update column_configs c set rules = s.rules, attributes = s.attributes
+     from column_configs s where s.id = $1 and c.id = $2`,
     [sourceConfigId, targetConfigId]
   );
   const source = await client.query(

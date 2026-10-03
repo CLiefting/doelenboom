@@ -19,6 +19,8 @@ import {
   updateTemplateMeta,
   getTemplateRules,
   updateTemplateRules,
+  getTemplateAttributes,
+  updateTemplateAttributes,
 } from '../doelenboomTemplates.js';
 import { logAuditEvent } from '../auditLog.js';
 
@@ -188,6 +190,44 @@ doelenboomTemplatesRouter.put('/doelenboom-templates/:id/control-rules', async (
     detail: { scope: 'template', templateId: Number(req.params.id), ruleCount: rules.length, ruleIds: rules.map((r) => r.id) },
   });
   res.json({ rules, invalidRuleIds: [] });
+});
+
+// Kenmerkdefinities van een sjabloon (DOEL-75, zie api/src/elementAttributes.ts)
+// — zelfde toegang en dezelfde afweging als de sjabloonregels hierboven.
+doelenboomTemplatesRouter.get('/doelenboom-templates/:id/attributes', async (req: AuthedRequest, res) => {
+  const ctx = await requireManageTemplate(req, res, Number(req.params.id));
+  if (!ctx) return;
+  const current = await getTemplateAttributes(Number(req.params.id));
+  if (!current) return res.status(404).json({ error: 'Sjabloon niet gevonden.' });
+  const valid = new Set(current.validTypeNames);
+  res.json({
+    attributes: current.attributes,
+    moduleActive: true,
+    validTypeNames: current.validTypeNames,
+    invalidAttributeIds: current.attributes
+      .filter((a) => (a.subjectTypes ?? []).some((t) => !valid.has(t)))
+      .map((a) => a.id),
+  });
+});
+
+doelenboomTemplatesRouter.put('/doelenboom-templates/:id/attributes', async (req: AuthedRequest, res) => {
+  const ctx = await requireManageTemplate(req, res, Number(req.params.id));
+  if (!ctx) return;
+  const body = (req.body ?? {}) as { attributes?: unknown };
+  const result = await updateTemplateAttributes(Number(req.params.id), typeof body === 'object' ? body.attributes : undefined);
+  if (result.notFound) return res.status(404).json({ error: 'Sjabloon niet gevonden.' });
+  if (result.errors.length) return res.status(400).json({ error: result.errors.join(' ') });
+  const attributes = result.attributes ?? [];
+  await logAuditEvent({
+    eventType: 'attribute_definitions_updated',
+    userId: req.user!.id,
+    tenantId: ctx.tenantId,
+    detail: {
+      scope: 'template', templateId: Number(req.params.id),
+      attributeCount: attributes.length, attributeIds: attributes.map((a) => a.id),
+    },
+  });
+  res.json({ attributes, invalidAttributeIds: [] });
 });
 
 // "Inhoud vervangen vanuit een boom" (Sjablonenbeheer-scherm) — overschrijft

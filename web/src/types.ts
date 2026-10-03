@@ -801,6 +801,28 @@ export type ControlRulesState = {
   deviationCounts?: Record<string, number>;
 };
 
+// Kenmerkdefinities (DOEL-75) — zelfde vorm als AttributeDef in
+// api/src/elementAttributes.ts. Eigen velden per elementtype; alleen de
+// definities (waarden per element volgen in DOEL-76). Alleen metagegevens.
+export type AttributeKind = 'text' | 'number' | 'date' | 'choice' | 'boolean';
+export type AttributeDef = {
+  id: string;
+  label: string;
+  kind: AttributeKind;
+  subjectTypes: string[];
+  required: boolean;
+  explanation: string;
+  // Alleen gevuld bij kind = 'choice'.
+  options: string[];
+};
+// GET .../attributes: de definities plus de context voor de beheer-UI.
+export type AttributeDefsState = {
+  attributes: AttributeDef[];
+  moduleActive: boolean;
+  validTypeNames: string[];
+  invalidAttributeIds: string[];
+};
+
 // --- Softwarecomponenten / SBOM (sysadmin-only, /system-info) — zie
 // api/src/dependencyHealth.ts en doelenboom_sbom_ontwerp.md in het project.
 
