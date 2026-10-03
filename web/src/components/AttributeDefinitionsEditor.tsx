@@ -89,7 +89,11 @@ export default function AttributeDefinitionsEditor({
   load,
   save,
   hideWhenModuleInactive,
+  onSaved,
 }: {
+  // Aangeroepen na een geslaagde opslag, zodat de regel-editor de nieuwe
+  // kenmerken kan laden (DOEL-77).
+  onSaved?: () => void;
   load: () => Promise<AttributeDefsState>;
   save: (attributes: AttributeDef[]) => Promise<{ attributes: AttributeDef[]; invalidAttributeIds: string[] }>;
   // true voor de kenmerken van één doelenboom: zonder actieve module wordt de
@@ -170,7 +174,13 @@ export default function AttributeDefinitionsEditor({
         const lost = Object.entries(c.byOption).filter(([o]) => !a.options.includes(o)).reduce((sum, [, n]) => sum + n, 0);
         valueCounts[a.id] = { total: c.total - lost, byOption: Object.fromEntries(kept) };
       }
-      setState({ ...state!, attributes: result.attributes, invalidAttributeIds: result.invalidAttributeIds, valueCounts });
+      // DOEL-77: de motivaties op "verplicht" van niet meer verplichte of
+      // verwijderde kenmerken zijn opgeruimd.
+      const requiredDeviationCounts = Object.fromEntries(
+        Object.entries(state!.requiredDeviationCounts ?? {}).filter(([id]) => result.attributes.some((a) => a.id === id && a.required))
+      );
+      setState({ ...state!, attributes: result.attributes, invalidAttributeIds: result.invalidAttributeIds, valueCounts, requiredDeviationCounts });
+      onSaved?.();
       setDirty(false);
       setSaved(true);
     } catch (err) {
@@ -197,6 +207,12 @@ export default function AttributeDefinitionsEditor({
     }
   }
 
+  // DOEL-77: gemotiveerde afwijkingen op "verplicht" vervallen als het
+  // kenmerk niet meer verplicht is of verdwijnt.
+  const requiredCounts = state.requiredDeviationCounts ?? {};
+  const lostRequiredIds = Object.keys(requiredCounts).filter((id) => requiredCounts[id] > 0 && !currentById.get(id)?.required);
+  const lostMotivations = lostRequiredIds.reduce((sum, id) => sum + requiredCounts[id], 0);
+
   return (
     <section style={styles.section} aria-label="Kenmerken">
       <h3 style={styles.h3}>Kenmerken</h3>
@@ -206,7 +222,9 @@ export default function AttributeDefinitionsEditor({
       </p>
       <p style={styles.muted}>
         Het id en de soort van een kenmerk liggen vast na het opslaan. De keuzelijst met elementtypen toont de{' '}
-        <em>opgeslagen</em> kolommen en aliassen — sla gewijzigde kolommen eerst op.
+        <em>opgeslagen</em> kolommen en aliassen — sla gewijzigde kolommen eerst op. Een leeg <em>verplicht</em>{' '}
+        kenmerk geeft een signaal in de controleweergave. Een kenmerk dat in een controleregel wordt gebruikt kan
+        niet worden verwijderd; pas eerst de regel aan.
       </p>
       {!state.moduleActive && (
         <p style={styles.warn}>
@@ -225,6 +243,13 @@ export default function AttributeDefinitionsEditor({
           {removedIds.length > 0 && removedOptionIds.length > 0 && ' en'}
           {removedOptionIds.length > 0 && <> door verwijderde keuzelijstwaarden bij {removedOptionIds.join(', ')}</>}
           . Dit kan niet ongedaan worden gemaakt.
+        </p>
+      )}
+      {lostMotivations > 0 && (
+        <p style={styles.warn} role="alert">
+          Let op: bij opslaan {lostMotivations === 1 ? 'vervalt 1 motivatie' : `vervallen ${lostMotivations} motivaties`} van
+          afwijkingen op "verplicht" bij {lostRequiredIds.join(', ')} (niet meer verplicht of verwijderd). Dit kan niet
+          ongedaan worden gemaakt.
         </p>
       )}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>

@@ -4,7 +4,9 @@ import { requireAuth, AuthedRequest } from '../auth.js';
 import { requireTenantRoleForDoelenboomParam, getEffectiveRoleForDoelenboom } from '../rbac.js';
 import { getColumnsForDoelenboom } from '../columnConfig.js';
 import { getActiveModuleKeys, isLicenseExpired } from '../license.js';
-import { CONTROLE_REGELS_MODULE, findRulesBrokenByColumns, getRulesForDoelenboom } from '../controlRules.js';
+import {
+  CONTROLE_REGELS_MODULE, findRulesBrokenByAttributes, findRulesBrokenByColumns, getRulesForDoelenboom, requiredAttributeRuleIds,
+} from '../controlRules.js';
 import { ControlRuleDeviation, getDeviationsForDoelenboom, stripEditorOnlyFields } from '../controlRuleDeviations.js';
 import { AttributeDef, attributesFromDb, findAttributesBrokenByColumns } from '../elementAttributes.js';
 import { AttributeValuesByElement, getAttributeValues } from '../elementAttributeValues.js';
@@ -255,21 +257,6 @@ export async function fetchTree(doelenboomId: string) {
   // uit stond, zie DOEL-62) gaan niet mee: die zijn ongeldig tot ze in de
   // editor hersteld zijn. Uitgeschakelde regels gaan wel mee (de frontend slaat
   // ze over), zodat de weergave later bv. "n regels, waarvan m uit" kan tonen.
-  let controlRules: Awaited<ReturnType<typeof getRulesForDoelenboom>> = [];
-  if (activeModules.includes(CONTROLE_REGELS_MODULE)) {
-    const all = (await getRulesForDoelenboom(doelenboomId)) ?? [];
-    const broken = new Set(findRulesBrokenByColumns(all, columns));
-    controlRules = all.filter((r) => !broken.has(r.id));
-  }
-  // DOEL-64: gemotiveerde afwijkingen, alleen voor regels die ook meegaan
-  // (module actief, regel bestaat en is geldig). updatedByEmail wordt in de
-  // GET-route hieronder voor een bezoeker weggelaten.
-  let controlRuleDeviations: ControlRuleDeviation[] = [];
-  if (controlRules.length) {
-    const ids = new Set(controlRules.map((r) => r.id));
-    controlRuleDeviations = (await getDeviationsForDoelenboom(doelenboomId)).filter((d) => ids.has(d.ruleId));
-  }
-
   // Kenmerken (DOEL-75/76): definities en ingevulde waarden, alleen met de
   // module 'controleregels' — zonder module blijven ze bewaard maar gaat er
   // niets mee (zichtbaarheidsprincipe). Definities die naar een niet meer
@@ -287,6 +274,29 @@ export async function fetchTree(doelenboomId: string) {
     const broken = new Set(findAttributesBrokenByColumns(all, columns));
     attributes = all.filter((a) => !broken.has(a.id));
     attributeValues = await getAttributeValues(doelenboomId, attributes, columns);
+  }
+
+  let controlRules: Awaited<ReturnType<typeof getRulesForDoelenboom>> = [];
+  if (activeModules.includes(CONTROLE_REGELS_MODULE)) {
+    const all = (await getRulesForDoelenboom(doelenboomId)) ?? [];
+    // DOEL-77: ook kenmerkregels die naar een niet (meer) bestaand kenmerk
+    // wijzen gaan niet mee.
+    const broken = new Set([
+      ...findRulesBrokenByColumns(all, columns),
+      ...findRulesBrokenByAttributes(all, { attributes, columns }),
+    ]);
+    controlRules = all.filter((r) => !broken.has(r.id));
+  }
+  // DOEL-64: gemotiveerde afwijkingen, alleen voor regels die ook meegaan
+  // (module actief, regel bestaat en is geldig). updatedByEmail wordt in de
+  // GET-route hieronder voor een bezoeker weggelaten.
+  let controlRuleDeviations: ControlRuleDeviation[] = [];
+  // DOEL-77: ook de afwijkingen van de ingebouwde regels voor verplichte
+  // kenmerken (req-<kenmerk-id>).
+  const requiredRuleIds = requiredAttributeRuleIds(attributes);
+  if (controlRules.length || requiredRuleIds.length) {
+    const ids = new Set([...controlRules.map((r) => r.id), ...requiredRuleIds]);
+    controlRuleDeviations = (await getDeviationsForDoelenboom(doelenboomId)).filter((d) => ids.has(d.ruleId));
   }
 
   return {

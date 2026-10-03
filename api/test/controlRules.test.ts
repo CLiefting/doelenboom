@@ -120,7 +120,8 @@ describe('controleregels (DOEL-62)', () => {
     assert.equal(byId['R_05-x'].min, null);
     assert.equal(byId.R04.max, null);
     assert.deepEqual(Object.keys(byId.R01).sort(), [
-      'enabled', 'explanation', 'field', 'id', 'kind', 'label', 'max', 'min', 'subjectTypes', 'tagCategory', 'targetTypes', 'weight',
+      'attributeId', 'enabled', 'explanation', 'field', 'id', 'kind', 'label', 'max', 'min', 'operator', 'subjectTypes',
+      'tagCategory', 'targetTypes', 'value', 'value2', 'weight',
     ]);
   });
 

@@ -770,7 +770,9 @@ export type ControlRuleKind =
   | 'requires_incoming'
   | 'primary_parent_count'
   | 'requires_tag_category'
-  | 'required_field';
+  | 'required_field'
+  // DOEL-77: eis aan de waarde van een kenmerk.
+  | 'attribute_condition';
 export type ControlRuleField = 'description' | 'kpi' | 'taakveld' | 'subtaakveld';
 export type ControlRule = {
   id: string;
@@ -782,6 +784,12 @@ export type ControlRule = {
   max: number | null;
   tagCategory: string | null;
   field: ControlRuleField | null;
+  // Alleen bij attribute_condition (DOEL-77); regels van vóór DOEL-77 hebben
+  // deze velden niet.
+  attributeId?: string | null;
+  operator?: string | null;
+  value?: string | number | string[] | null;
+  value2?: number | null;
   label: string;
   explanation: string;
   enabled: boolean;
@@ -792,6 +800,9 @@ export type ControlRule = {
 export type ControlRulesState = {
   rules: ControlRule[];
   moduleActive: boolean;
+  // DOEL-77: de kenmerkdefinities van dezelfde configuratie, voor het
+  // regeltype "Kenmerk voldoet aan…".
+  attributes?: AttributeDef[];
   validTypeNames: string[];
   tagCategories: string[];
   invalidRuleIds: string[];
@@ -825,6 +836,9 @@ export type AttributeDefsState = {
   // keuzelijstwaarde (alleen bij een doelenboom). Een kenmerk of
   // keuzelijstwaarde verwijderen wist die waarden bij het opslaan.
   valueCounts?: Record<string, { total: number; byOption: Record<string, number> }>;
+  // DOEL-77: aantal gemotiveerde afwijkingen op "verplicht" per kenmerk-id.
+  // "Verplicht" uitzetten of het kenmerk verwijderen wist die motivaties.
+  requiredDeviationCounts?: Record<string, number>;
 };
 
 // --- Softwarecomponenten / SBOM (sysadmin-only, /system-info) — zie

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ApiError } from '../api';
-import type { ControlRule, ControlRuleField, ControlRuleKind, ControlRulesState } from '../types';
+import type { AttributeDef, AttributeKind, ControlRule, ControlRuleField, ControlRuleKind, ControlRulesState } from '../types';
 
 // Beheer van controleregels (DOEL-62, epic DOEL-61) — sectie onder de kolommen
 // in <ColumnConfigEditor>, voor de drie soorten config (tenant-default,
@@ -21,6 +21,7 @@ export const KIND_LABELS: Record<ControlRuleKind, string> = {
   primary_parent_count: 'Aantal primaire ouders',
   requires_tag_category: 'Heeft tag in categorie…',
   required_field: 'Veld is ingevuld',
+  attribute_condition: 'Kenmerk voldoet aan…',
 };
 
 export const FIELD_LABELS: Record<ControlRuleField, string> = {
@@ -34,6 +35,78 @@ const KINDS = Object.keys(KIND_LABELS) as ControlRuleKind[];
 const FIELDS = Object.keys(FIELD_LABELS) as ControlRuleField[];
 const RELATION_KINDS: ControlRuleKind[] = ['requires_outgoing', 'requires_incoming'];
 
+// Kenmerkregels (DOEL-77): de eisen per soort kenmerk, met het soort waarde
+// dat erbij hoort. Zelfde lijst als ATTRIBUTE_OPERATORS in
+// api/src/controlRules.ts; de formulering van de eis is dezelfde als in
+// attributeRequirementText (web/public/tree.html).
+type ValueShape = 'none' | 'text' | 'number' | 'range' | 'date' | 'days' | 'options';
+export const ATTRIBUTE_OPERATORS: Array<{ op: string; kind: AttributeKind | 'any'; shape: ValueShape; label: string }> = [
+  { op: 'text_contains', kind: 'text', shape: 'text', label: 'bevat' },
+  { op: 'text_not_contains', kind: 'text', shape: 'text', label: 'bevat niet' },
+  { op: 'text_equals', kind: 'text', shape: 'text', label: 'is gelijk aan' },
+  { op: 'text_starts_with', kind: 'text', shape: 'text', label: 'begint met' },
+  { op: 'num_eq', kind: 'number', shape: 'number', label: 'is gelijk aan' },
+  { op: 'num_ne', kind: 'number', shape: 'number', label: 'is niet gelijk aan' },
+  { op: 'num_lt', kind: 'number', shape: 'number', label: 'is kleiner dan' },
+  { op: 'num_lte', kind: 'number', shape: 'number', label: 'is hooguit' },
+  { op: 'num_gt', kind: 'number', shape: 'number', label: 'is groter dan' },
+  { op: 'num_gte', kind: 'number', shape: 'number', label: 'is minstens' },
+  { op: 'num_between', kind: 'number', shape: 'range', label: 'ligt tussen' },
+  { op: 'date_before', kind: 'date', shape: 'date', label: 'ligt vóór datum' },
+  { op: 'date_on_or_before', kind: 'date', shape: 'date', label: 'ligt op of vóór datum' },
+  { op: 'date_after', kind: 'date', shape: 'date', label: 'ligt na datum' },
+  { op: 'date_on_or_after', kind: 'date', shape: 'date', label: 'ligt op of na datum' },
+  { op: 'date_max_days_old', kind: 'date', shape: 'days', label: 'is hooguit N dagen oud' },
+  { op: 'date_min_days_old', kind: 'date', shape: 'days', label: 'is minstens N dagen oud' },
+  { op: 'date_not_in_past', kind: 'date', shape: 'none', label: 'ligt niet in het verleden' },
+  { op: 'date_max_days_ahead', kind: 'date', shape: 'days', label: 'ligt hooguit N dagen in de toekomst' },
+  { op: 'choice_one_of', kind: 'choice', shape: 'options', label: 'is een van' },
+  { op: 'choice_none_of', kind: 'choice', shape: 'options', label: 'is geen van' },
+  { op: 'bool_true', kind: 'boolean', shape: 'none', label: 'is ja' },
+  { op: 'bool_false', kind: 'boolean', shape: 'none', label: 'is nee' },
+  { op: 'is_empty', kind: 'any', shape: 'none', label: 'is leeg' },
+];
+const operatorSpec = (op: string | null | undefined) => ATTRIBUTE_OPERATORS.find((o) => o.op === op);
+
+const nlNumber = (v: unknown) => String(v ?? '…').replace('.', ',');
+function nlDate(v: unknown): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v ?? ''));
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : '…';
+}
+const nlDays = (v: unknown) => (typeof v === 'number' ? `${v} ${v === 1 ? 'dag' : 'dagen'}` : '… dagen');
+
+// De eis als leesbare tekst, bv. "is hooguit 180 dagen oud".
+export function requirementText(r: ControlRule): string {
+  const v = r.value;
+  switch (r.operator) {
+    case 'text_contains': return `bevat "${v ?? '…'}"`;
+    case 'text_not_contains': return `bevat niet "${v ?? '…'}"`;
+    case 'text_equals': return `is gelijk aan "${v ?? '…'}"`;
+    case 'text_starts_with': return `begint met "${v ?? '…'}"`;
+    case 'num_eq': return `is gelijk aan ${nlNumber(v)}`;
+    case 'num_ne': return `is niet gelijk aan ${nlNumber(v)}`;
+    case 'num_lt': return `is kleiner dan ${nlNumber(v)}`;
+    case 'num_lte': return `is hooguit ${nlNumber(v)}`;
+    case 'num_gt': return `is groter dan ${nlNumber(v)}`;
+    case 'num_gte': return `is minstens ${nlNumber(v)}`;
+    case 'num_between': return `ligt tussen ${nlNumber(v)} en ${nlNumber(r.value2)}`;
+    case 'date_before': return `ligt vóór ${nlDate(v)}`;
+    case 'date_on_or_before': return `ligt op of vóór ${nlDate(v)}`;
+    case 'date_after': return `ligt na ${nlDate(v)}`;
+    case 'date_on_or_after': return `ligt op of na ${nlDate(v)}`;
+    case 'date_max_days_old': return `is hooguit ${nlDays(v)} oud`;
+    case 'date_min_days_old': return `is minstens ${nlDays(v)} oud`;
+    case 'date_not_in_past': return 'ligt niet in het verleden';
+    case 'date_max_days_ahead': return `ligt hooguit ${nlDays(v)} in de toekomst`;
+    case 'choice_one_of': return `is een van: ${Array.isArray(v) && v.length ? v.join(', ') : '…'}`;
+    case 'choice_none_of': return `is geen van: ${Array.isArray(v) && v.length ? v.join(', ') : '…'}`;
+    case 'bool_true': return 'is ja';
+    case 'bool_false': return 'is nee';
+    case 'is_empty': return 'is leeg';
+    default: return '…';
+  }
+}
+
 function typeList(types: string[]): string {
   if (types.length === 0) return '…';
   if (types.length === 1) return types[0];
@@ -42,7 +115,7 @@ function typeList(types: string[]): string {
 
 // Leesbare samenvatting, bv. "Elk element van type Control heeft minstens 1
 // ouder van type Capability." Geëxporteerd voor hergebruik in DOEL-63.
-export function summarizeRule(r: ControlRule): string {
+export function summarizeRule(r: ControlRule, attributes: AttributeDef[] = []): string {
   const subject = `Elk element van type ${typeList(r.subjectTypes)}`;
   const min = r.min ?? 1;
   const range = (noun: string, plural: string) => {
@@ -63,6 +136,11 @@ export function summarizeRule(r: ControlRule): string {
       return `${subject} heeft ${range('tag', 'tags')} in categorie "${r.tagCategory ?? '…'}".`;
     case 'required_field':
       return `${subject} heeft een ingevuld veld "${r.field ? FIELD_LABELS[r.field] : '…'}".`;
+    case 'attribute_condition': {
+      const label = attributes.find((a) => a.id === r.attributeId)?.label ?? r.attributeId ?? '…';
+      const note = r.operator === 'is_empty' ? '' : ' Lege waarden worden niet getoetst.';
+      return `Bij elk element van type ${typeList(r.subjectTypes)} geldt: kenmerk "${label}" ${requirementText(r)}.${note}`;
+    }
   }
 }
 
@@ -76,7 +154,8 @@ function nextRuleId(rules: ControlRule[]): string {
 function emptyRule(id: string): ControlRule {
   return {
     id, kind: 'requires_outgoing', subjectTypes: [], targetTypes: [], weight: 'any',
-    min: 1, max: null, tagCategory: null, field: null, label: '', explanation: '', enabled: true,
+    min: 1, max: null, tagCategory: null, field: null, attributeId: null, operator: null, value: null, value2: null,
+    label: '', explanation: '', enabled: true,
   };
 }
 
@@ -84,6 +163,14 @@ function emptyRule(id: string): ControlRule {
 // (niet-toepasselijke velden leeg) — zelfde normalisatie als de server.
 function normalize(r: ControlRule): ControlRule {
   const isRelation = RELATION_KINDS.includes(r.kind);
+  const isAttribute = r.kind === 'attribute_condition';
+  const shape = isAttribute ? operatorSpec(r.operator)?.shape : undefined;
+  const noCount = r.kind === 'required_field' || isAttribute;
+  let value: ControlRule['value'] = null;
+  if (shape === 'text') value = typeof r.value === 'string' ? r.value.trim() : null;
+  else if (shape === 'date') value = typeof r.value === 'string' && r.value ? r.value : null;
+  else if (shape === 'number' || shape === 'range' || shape === 'days') value = typeof r.value === 'number' ? r.value : null;
+  else if (shape === 'options') value = Array.isArray(r.value) ? r.value : [];
   return {
     ...r,
     id: r.id.trim(),
@@ -91,15 +178,20 @@ function normalize(r: ControlRule): ControlRule {
     explanation: r.explanation.trim(),
     targetTypes: isRelation ? r.targetTypes : [],
     weight: isRelation ? r.weight : 'any',
-    min: r.kind === 'required_field' ? null : (r.min ?? 1),
-    max: r.kind === 'required_field' || r.kind === 'requires_tag_category' ? null : r.max,
+    min: noCount ? null : (r.min ?? 1),
+    max: noCount || r.kind === 'requires_tag_category' ? null : r.max,
     tagCategory: r.kind === 'requires_tag_category' ? (r.tagCategory?.trim() || null) : null,
     field: r.kind === 'required_field' ? r.field : null,
+    attributeId: isAttribute ? (r.attributeId ?? null) : null,
+    operator: isAttribute ? (r.operator ?? null) : null,
+    value,
+    value2: shape === 'range' && typeof r.value2 === 'number' ? r.value2 : null,
   };
 }
 
-function validateRule(r: ControlRule, others: ControlRule[], validTypes: Set<string>): string | null {
+function validateRule(r: ControlRule, others: ControlRule[], validTypes: Set<string>, attributes: AttributeDef[]): string | null {
   if (!/^[A-Za-z0-9_-]{1,40}$/.test(r.id)) return 'Id: alleen letters, cijfers, - en _ (max. 40 tekens).';
+  if (/^req-/i.test(r.id)) return 'Een id mag niet met "req-" beginnen; dat is gereserveerd voor verplichte kenmerken.';
   if (others.some((o) => o.id === r.id)) return `Id "${r.id}" bestaat al.`;
   if (!r.label) return 'Label is verplicht.';
   if (r.label.length > 120) return 'Label mag maximaal 120 tekens zijn.';
@@ -108,6 +200,22 @@ function validateRule(r: ControlRule, others: ControlRule[], validTypes: Set<str
   if (RELATION_KINDS.includes(r.kind) && r.targetTypes.length === 0) return 'Kies minstens één type voor de relatie.';
   if (r.kind === 'requires_tag_category' && !r.tagCategory) return 'Kies of typ een tag-categorie.';
   if (r.kind === 'required_field' && !r.field) return 'Kies het verplichte veld.';
+  if (r.kind === 'attribute_condition') {
+    const def = attributes.find((a) => a.id === r.attributeId);
+    if (!def) return 'Kies het kenmerk.';
+    const spec = operatorSpec(r.operator);
+    if (!spec || (spec.kind !== 'any' && spec.kind !== def.kind)) return 'Kies de eis.';
+    if (spec.shape === 'text' && !r.value) return 'Vul de tekst in waarmee vergeleken wordt.';
+    if (spec.shape === 'text' && String(r.value).length > 200) return 'De tekst mag maximaal 200 tekens zijn.';
+    if (spec.shape === 'number' && typeof r.value !== 'number') return 'Vul een getal in.';
+    if (spec.shape === 'range' && (typeof r.value !== 'number' || typeof r.value2 !== 'number')) return 'Vul een onder- en bovengrens in.';
+    if (spec.shape === 'range' && (r.value as number) > (r.value2 as number)) return 'De ondergrens mag niet groter zijn dan de bovengrens.';
+    if (spec.shape === 'date' && !r.value) return 'Kies een datum.';
+    if (spec.shape === 'days' && (typeof r.value !== 'number' || !Number.isInteger(r.value) || r.value < 0 || r.value > 36500)) {
+      return 'Vul een aantal dagen in (geheel getal van 0 t/m 36500).';
+    }
+    if (spec.shape === 'options' && (!Array.isArray(r.value) || r.value.length === 0)) return 'Kies minstens één waarde uit de keuzelijst.';
+  }
   if (r.min != null && r.max != null && r.min > r.max) return 'Min mag niet groter zijn dan max.';
   const unknown = [...r.subjectTypes, ...r.targetTypes].filter((t) => !validTypes.has(t));
   if (unknown.length) return `Onbekend(e) type(n): ${unknown.join(', ')}.`;
@@ -150,7 +258,13 @@ export default function ControlRulesEditor({
   if (hideWhenModuleInactive && !state.moduleActive) return null;
 
   const validTypes = new Set(state.validTypeNames);
-  const isInvalid = (r: ControlRule) => [...r.subjectTypes, ...r.targetTypes].some((t) => !validTypes.has(t));
+  const attributes = state.attributes ?? [];
+  // Ongeldig: een onbekend type, of (DOEL-77, door de server gemeld) een
+  // kenmerkregel waarvan het kenmerk of een keuzelijstwaarde niet meer bestaat.
+  const isInvalid = (r: ControlRule) =>
+    [...r.subjectTypes, ...r.targetTypes].some((t) => !validTypes.has(t)) ||
+    (r.kind === 'attribute_condition' && !attributes.some((a) => a.id === r.attributeId)) ||
+    (!dirty && state.invalidRuleIds.includes(r.id));
 
   function change(next: ControlRule[]) {
     setRules(next);
@@ -172,7 +286,7 @@ export default function ControlRulesEditor({
     if (!editing) return;
     const draft = normalize(editing.draft);
     const others = rules.filter((_, i) => i !== editing.index);
-    const problem = validateRule(draft, others, validTypes);
+    const problem = validateRule(draft, others, validTypes, attributes);
     if (problem) {
       setFormError(problem);
       return;
@@ -212,7 +326,9 @@ export default function ControlRulesEditor({
       <h3 style={styles.h3}>Controleregels</h3>
       <p style={styles.hint}>
         Regels die controleren of de keten <em>gedocumenteerd</em> sluitend is (ontbrekende schakels) — niet of iets
-        werkt. <strong>Leg alleen structuur vast; geen inhoudelijke of gerubriceerde informatie.</strong>
+        werkt. <strong>Leg alleen structuur vast; geen inhoudelijke of gerubriceerde informatie.</strong> Een
+        kenmerkregel toetst een kenmerk (metagegevens) aan een eis; een verplicht kenmerk is zonder regel al een
+        signaal.
       </p>
       <p style={styles.muted}>
         Een relatie loopt van kind naar ouder (bv. Project → Capability): "ouder van type…" is een uitgaande relatie,
@@ -254,12 +370,12 @@ export default function ControlRulesEditor({
                   </span>
                 )}
                 {isInvalid(r) && (
-                  <span style={styles.badgeError} title="Deze regel verwijst naar een elementtype dat niet (meer) bestaat; pas hem aan of verwijder hem.">
-                    verwijst naar onbekend type
+                  <span style={styles.badgeError} title="Deze regel verwijst naar een elementtype, kenmerk of keuzelijstwaarde die niet (meer) bestaat; pas hem aan of verwijder hem.">
+                    verwijst naar onbekend type of kenmerk
                   </span>
                 )}
               </div>
-              <div style={styles.summary}>{summarizeRule(r)}</div>
+              <div style={styles.summary}>{summarizeRule(r, attributes)}</div>
               {r.explanation && <div style={styles.explanation}>{r.explanation}</div>}
             </div>
             <button type="button" disabled={busy} onClick={() => startEdit(i)} style={styles.linkBtn}>Bewerken</button>
@@ -276,6 +392,7 @@ export default function ControlRulesEditor({
           isNew={editing.index == null}
           typeNames={state.validTypeNames}
           tagCategories={state.tagCategories}
+          attributes={attributes}
           error={formError}
           onChange={(draft) => setEditing({ ...editing, draft })}
           onApply={applyDraft}
@@ -328,12 +445,13 @@ function TypeChecklist({
 }
 
 function RuleForm({
-  draft, isNew, typeNames, tagCategories, error, onChange, onApply, onCancel,
+  draft, isNew, typeNames, tagCategories, attributes, error, onChange, onApply, onCancel,
 }: {
   draft: ControlRule;
   isNew: boolean;
   typeNames: string[];
   tagCategories: string[];
+  attributes: AttributeDef[];
   error: string | null;
   onChange: (d: ControlRule) => void;
   onApply: () => void;
@@ -343,6 +461,13 @@ function RuleForm({
   const isRelation = RELATION_KINDS.includes(draft.kind);
   const numOrNull = (v: string) => (v === '' ? null : Math.max(0, Math.floor(Number(v))));
   const relNoun = draft.kind === 'requires_incoming' ? 'kind' : 'ouder';
+  // Kenmerkregel (DOEL-77): het gekozen kenmerk bepaalt welke eisen passen.
+  const isAttribute = draft.kind === 'attribute_condition';
+  const attribute = attributes.find((a) => a.id === draft.attributeId);
+  const operators = attribute ? ATTRIBUTE_OPERATORS.filter((o) => o.kind === 'any' || o.kind === attribute.kind) : [];
+  const shape = operatorSpec(draft.operator)?.shape;
+  const numberOrNull = (v: string) => (v.trim() === '' || !Number.isFinite(Number(v)) ? null : Number(v));
+  const selectedOptions = Array.isArray(draft.value) ? draft.value : [];
 
   return (
     <div style={styles.form}>
@@ -414,7 +539,77 @@ function RuleForm({
             </select>
           </label>
         )}
-        {draft.kind !== 'required_field' && (
+        {isAttribute && (
+          <label style={styles.fieldLabel}>
+            Kenmerk
+            <select
+              style={styles.input} value={draft.attributeId ?? ''}
+              onChange={(e) => set({ attributeId: e.target.value || null, operator: null, value: null, value2: null })}
+            >
+              <option value="">— kies —</option>
+              {attributes.map((a) => <option key={a.id} value={a.id}>{a.label} ({a.id})</option>)}
+            </select>
+          </label>
+        )}
+        {isAttribute && attribute && (
+          <label style={styles.fieldLabel}>
+            Eis
+            <select
+              style={styles.input} value={draft.operator ?? ''}
+              onChange={(e) => set({ operator: e.target.value || null, value: null, value2: null })}
+            >
+              <option value="">— kies —</option>
+              {operators.map((o) => <option key={o.op} value={o.op}>{o.label}</option>)}
+            </select>
+          </label>
+        )}
+        {isAttribute && shape === 'text' && (
+          <label style={{ ...styles.fieldLabel, flex: '1 1 200px' }}>
+            Tekst (niet hoofdlettergevoelig)
+            <input
+              style={styles.input} maxLength={200} value={typeof draft.value === 'string' ? draft.value : ''}
+              placeholder="Geen inhoudelijke of gerubriceerde informatie."
+              onChange={(e) => set({ value: e.target.value })}
+            />
+          </label>
+        )}
+        {isAttribute && (shape === 'number' || shape === 'range') && (
+          <label style={styles.fieldLabel}>
+            {shape === 'range' ? 'Van' : 'Getal'}
+            <input
+              style={{ ...styles.input, width: 110 }} type="number" step="any" value={typeof draft.value === 'number' ? draft.value : ''}
+              onChange={(e) => set({ value: numberOrNull(e.target.value) })}
+            />
+          </label>
+        )}
+        {isAttribute && shape === 'range' && (
+          <label style={styles.fieldLabel}>
+            Tot en met
+            <input
+              style={{ ...styles.input, width: 110 }} type="number" step="any" value={typeof draft.value2 === 'number' ? draft.value2 : ''}
+              onChange={(e) => set({ value2: numberOrNull(e.target.value) })}
+            />
+          </label>
+        )}
+        {isAttribute && shape === 'date' && (
+          <label style={styles.fieldLabel}>
+            Datum
+            <input
+              style={styles.input} type="date" value={typeof draft.value === 'string' ? draft.value : ''}
+              onChange={(e) => set({ value: e.target.value || null })}
+            />
+          </label>
+        )}
+        {isAttribute && shape === 'days' && (
+          <label style={styles.fieldLabel}>
+            Aantal dagen
+            <input
+              style={{ ...styles.input, width: 90 }} type="number" min={0} max={36500} step={1} value={typeof draft.value === 'number' ? draft.value : ''}
+              onChange={(e) => set({ value: e.target.value === '' ? null : Math.max(0, Math.floor(Number(e.target.value))) })}
+            />
+          </label>
+        )}
+        {!isAttribute && draft.kind !== 'required_field' && (
           <label style={styles.fieldLabel}>
             Minimaal
             <input
@@ -434,6 +629,34 @@ function RuleForm({
         )}
       </div>
 
+      {isAttribute && attributes.length === 0 && (
+        <p style={styles.muted}>
+          Er zijn nog geen kenmerken. Leg ze eerst vast in de sectie Kenmerken hierboven en sla ze op.
+        </p>
+      )}
+      {isAttribute && shape === 'options' && attribute && (
+        <fieldset style={styles.fieldset}>
+          <legend style={styles.legend}>Waarden uit de keuzelijst</legend>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px' }}>
+            {attribute.options.map((o) => (
+              <label key={o} style={styles.checkLabel}>
+                <input
+                  type="checkbox" checked={selectedOptions.includes(o)}
+                  onChange={(e) => set({ value: e.target.checked ? [...selectedOptions, o] : selectedOptions.filter((x) => x !== o) })}
+                />
+                {o}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      )}
+      {isAttribute && (shape === 'days' || draft.operator === 'date_not_in_past') && (
+        <p style={styles.muted}>
+          Deze eis wordt getoetst tegen de datum van vandaag op het moment dat de boom wordt geopend. Een element kan
+          dus een signaal krijgen zonder dat iemand iets wijzigt.
+        </p>
+      )}
+
       <label style={styles.fieldLabel}>
         Uitleg (optioneel) — waarom bestaat deze regel?
         <textarea
@@ -443,7 +666,7 @@ function RuleForm({
         />
       </label>
 
-      <p style={styles.summary}>Voorbeeld: {summarizeRule(normalize(draft))}</p>
+      <p style={styles.summary}>Voorbeeld: {summarizeRule(normalize(draft), attributes)}</p>
 
       <div style={{ display: 'flex', gap: 8 }}>
         <button type="button" onClick={onApply} style={styles.primaryBtn}>{isNew ? 'Toevoegen' : 'Bijwerken'}</button>

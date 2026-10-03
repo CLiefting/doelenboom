@@ -1,6 +1,8 @@
 import { PoolClient } from 'pg';
 import { pool } from './db.js';
 import { allValidTypeNames, ColumnDef } from './columnConfig.js';
+import { ATTRIBUTE_ID_PATTERN, AttributeDef, AttributeKind } from './elementAttributes.js';
+import { ATTRIBUTE_TEXT_MAX_LENGTH, attributeAppliesToType, isRealDate, isValidAttributeNumber } from './elementAttributeValues.js';
 
 // Controleregels (DOEL-62, epic DOEL-61 "Module Controleregels"): per
 // kolomconfiguratie (doelenboom, tenant-default of sjabloon) een lijst
@@ -31,6 +33,8 @@ export const CONTROL_RULE_KINDS = [
   'primary_parent_count',
   'requires_tag_category',
   'required_field',
+  // DOEL-77: eis aan de waarde van een kenmerk (zie ATTRIBUTE_OPERATORS).
+  'attribute_condition',
 ] as const;
 export type ControlRuleKind = (typeof CONTROL_RULE_KINDS)[number];
 
@@ -49,6 +53,12 @@ export interface ControlRule {
   max: number | null;
   tagCategory: string | null;
   field: ControlRuleField | null;
+  // Alleen bij attribute_condition (DOEL-77); anders null. Regels van vóór
+  // DOEL-77 hebben deze velden niet in de opgeslagen jsonb.
+  attributeId: string | null;
+  operator: string | null;
+  value: ControlRuleValue;
+  value2: number | null;
   label: string;
   explanation: string;
   enabled: boolean;
@@ -66,6 +76,7 @@ const MAX_TYPE_NAME = 200;
 const ALLOWED_KEYS = new Set([
   'id', 'kind', 'subjectTypes', 'targetTypes', 'weight', 'min', 'max',
   'tagCategory', 'field', 'label', 'explanation', 'enabled',
+  'attributeId', 'operator', 'value', 'value2',
 ]);
 
 const RELATION_KINDS: ReadonlySet<string> = new Set(['requires_outgoing', 'requires_incoming']);
@@ -77,6 +88,168 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 // "Niet ingevuld" voor optionele velden: afwezig of expliciet null.
 function isUnset(v: unknown): boolean {
   return v === undefined || v === null;
+}
+
+// --- Kenmerkregels (DOEL-77): regeltype attribute_condition ------------------
+// "Kenmerk voldoet aan…": een eis aan de waarde van een kenmerk
+// (elementAttributes.ts). Net als de andere regels geformuleerd als EIS waaraan
+// het element moet voldoen. Een vergelijkingsregel toetst alleen ingevulde
+// waarden; een leeg kenmerk is alleen een overtreding als het kenmerk zelf
+// "verplicht" is (ingebouwde regel req-<kenmerk-id>, zie
+// requiredAttributeRuleId) — zo ontstaan er geen dubbele signalen. De
+// evaluatie gebeurt client-side in web/public/tree.html.
+//
+// Per eis: bij welke soort kenmerk hij hoort ('any' = elke soort) en wat voor
+// waarde erbij hoort.
+type OperatorValueShape = 'none' | 'text' | 'number' | 'range' | 'date' | 'days' | 'options';
+export const ATTRIBUTE_OPERATORS: Record<string, { kind: AttributeKind | 'any'; value: OperatorValueShape }> = {
+  text_contains: { kind: 'text', value: 'text' },
+  text_not_contains: { kind: 'text', value: 'text' },
+  text_equals: { kind: 'text', value: 'text' },
+  text_starts_with: { kind: 'text', value: 'text' },
+  num_eq: { kind: 'number', value: 'number' },
+  num_ne: { kind: 'number', value: 'number' },
+  num_lt: { kind: 'number', value: 'number' },
+  num_lte: { kind: 'number', value: 'number' },
+  num_gt: { kind: 'number', value: 'number' },
+  num_gte: { kind: 'number', value: 'number' },
+  num_between: { kind: 'number', value: 'range' },
+  date_before: { kind: 'date', value: 'date' },
+  date_on_or_before: { kind: 'date', value: 'date' },
+  date_after: { kind: 'date', value: 'date' },
+  date_on_or_after: { kind: 'date', value: 'date' },
+  date_max_days_old: { kind: 'date', value: 'days' },
+  date_min_days_old: { kind: 'date', value: 'days' },
+  date_not_in_past: { kind: 'date', value: 'none' },
+  date_max_days_ahead: { kind: 'date', value: 'days' },
+  choice_one_of: { kind: 'choice', value: 'options' },
+  choice_none_of: { kind: 'choice', value: 'options' },
+  bool_true: { kind: 'boolean', value: 'none' },
+  bool_false: { kind: 'boolean', value: 'none' },
+  is_empty: { kind: 'any', value: 'none' },
+};
+export type ControlRuleValue = string | number | string[] | null;
+export const MAX_RULE_DAYS = 36500;
+
+export interface AttributeRuleContext { attributes: AttributeDef[]; columns: ColumnDef[] }
+
+// Ingebouwde regel voor een verplicht kenmerk. Het voorvoegsel is
+// gereserveerd: een eigen regel mag er niet mee beginnen (besluit Charles
+// 3 oktober 2026), zodat de sleutel (element, regel-id) van een afwijking
+// nooit dubbelzinnig is.
+export const REQUIRED_RULE_PREFIX = 'req-';
+export function requiredAttributeRuleId(attributeId: string): string {
+  return `${REQUIRED_RULE_PREFIX}${attributeId}`;
+}
+export function requiredAttributeRuleIds(attributes: AttributeDef[]): string[] {
+  return attributes.filter((a) => a.required).map((a) => requiredAttributeRuleId(a.id));
+}
+
+// Valideert de kenmerk-velden van één regel (invoer óf een opgeslagen regel).
+// Voegt foutmeldingen toe aan `errors` en geeft de genormaliseerde velden
+// terug. Foutmeldingen kaatsen geen vrije invoer terug.
+function parseAttributeCondition(
+  raw: Record<string, unknown>,
+  where: string,
+  subjectTypes: string[],
+  ctx: AttributeRuleContext | undefined,
+  errors: string[]
+): { attributeId: string | null; operator: string | null; value: ControlRuleValue; value2: number | null } {
+  const none = { attributeId: null, operator: null, value: null, value2: null };
+  const attributeId = typeof raw.attributeId === 'string' ? raw.attributeId.trim() : '';
+  const def = ATTRIBUTE_ID_PATTERN.test(attributeId) ? ctx?.attributes.find((a) => a.id === attributeId) : undefined;
+  if (!def) {
+    errors.push(`${where}: kies een bestaand kenmerk voor een kenmerkregel.`);
+    return none;
+  }
+  const notCovered = subjectTypes.filter((t) => !attributeAppliesToType(def, t, ctx!.columns));
+  if (notCovered.length) {
+    errors.push(`${where}: kenmerk ${def.id} geldt niet voor alle elementtypen van deze regel.`);
+  }
+  const operator = typeof raw.operator === 'string' ? raw.operator : '';
+  const spec = Object.prototype.hasOwnProperty.call(ATTRIBUTE_OPERATORS, operator) ? ATTRIBUTE_OPERATORS[operator] : undefined;
+  if (!spec) {
+    errors.push(`${where}: onbekende eis voor een kenmerkregel.`);
+    return none;
+  }
+  if (spec.kind !== 'any' && spec.kind !== def.kind) {
+    errors.push(`${where}: deze eis past niet bij de soort (${def.kind}) van kenmerk ${def.id}.`);
+    return none;
+  }
+  const v = raw.value;
+  const v2 = raw.value2;
+  let value: ControlRuleValue = null;
+  let value2: number | null = null;
+  if (spec.value !== 'range' && !isUnset(v2)) errors.push(`${where}: een tweede waarde is niet van toepassing op deze eis.`);
+  switch (spec.value) {
+    case 'none':
+      if (!isUnset(v)) errors.push(`${where}: een waarde is niet van toepassing op deze eis.`);
+      break;
+    case 'text': {
+      const text = typeof v === 'string' ? v.trim() : '';
+      if (!text) errors.push(`${where}: vul de tekst in waarmee vergeleken wordt.`);
+      else if (text.length > ATTRIBUTE_TEXT_MAX_LENGTH) errors.push(`${where}: de tekst mag maximaal ${ATTRIBUTE_TEXT_MAX_LENGTH} tekens zijn.`);
+      else value = text;
+      break;
+    }
+    case 'number':
+      if (!isValidAttributeNumber(v)) errors.push(`${where}: vul een getal in (maximaal 15 cijfers, waarvan hooguit 6 achter de komma).`);
+      else value = v as number;
+      break;
+    case 'range':
+      if (!isValidAttributeNumber(v) || !isValidAttributeNumber(v2)) {
+        errors.push(`${where}: vul voor "tussen" een onder- en bovengrens in (getallen).`);
+      } else if ((v as number) > (v2 as number)) {
+        errors.push(`${where}: de ondergrens mag niet groter zijn dan de bovengrens.`);
+      } else {
+        value = v as number;
+        value2 = v2 as number;
+      }
+      break;
+    case 'date':
+      if (typeof v !== 'string' || !isRealDate(v.trim())) errors.push(`${where}: vul een bestaande datum in (JJJJ-MM-DD).`);
+      else value = v.trim();
+      break;
+    case 'days':
+      if (typeof v !== 'number' || !Number.isInteger(v) || v < 0 || v > MAX_RULE_DAYS) {
+        errors.push(`${where}: het aantal dagen moet een geheel getal van 0 t/m ${MAX_RULE_DAYS} zijn.`);
+      } else value = v;
+      break;
+    case 'options': {
+      const options = def.options ?? [];
+      const list = Array.isArray(v) ? v.map((o) => (typeof o === 'string' ? o.trim() : null)) : null;
+      if (!list || !list.length || list.length > options.length || list.some((o) => o == null || !options.includes(o)) || new Set(list).size !== list.length) {
+        errors.push(`${where}: kies één of meer waarden uit de keuzelijst van kenmerk ${def.id}.`);
+      } else value = list as string[];
+      break;
+    }
+  }
+  return { attributeId, operator, value, value2 };
+}
+
+// Kenmerkregels die (na een wijziging van de kenmerkdefinities) niet meer
+// kloppen: het kenmerk bestaat niet meer, geldt niet meer voor een type van de
+// regel, of een keuzelijstwaarde uit de regel is verdwenen. Zo'n
+// definitiewijziging wordt GEWEIGERD met de regel-id's (ticket DOEL-77: een
+// kenmerk dat in een regel wordt gebruikt kan niet worden verwijderd; eerst
+// de regel aanpassen).
+export function findRulesBrokenByAttributes(rules: ControlRule[], ctx: AttributeRuleContext): string[] {
+  return rules
+    .filter((r) => r.kind === 'attribute_condition')
+    .filter((r) => {
+      const errors: string[] = [];
+      parseAttributeCondition(r as unknown as Record<string, unknown>, r.id, r.subjectTypes ?? [], ctx, errors);
+      return errors.length > 0;
+    })
+    .map((r) => r.id);
+}
+
+export function brokenRulesByAttributesMessage(ids: string[]): string {
+  return (
+    `Deze wijziging zou controleregel(s) ${ids.join(', ')} laten verwijzen naar een kenmerk, elementtype of ` +
+    'keuzelijstwaarde die niet meer bestaat. Pas die regel(s) eerst aan of verwijder ze (sectie Controleregels), ' +
+    'en sla daarna de kenmerken op.'
+  );
 }
 
 function parseTypeList(
@@ -128,7 +301,10 @@ function parseCount(raw: unknown, where: string, what: string, errors: string[])
 // interne details (DOEL-32).
 export function validateControlRulesInput(
   input: unknown,
-  validTypeNames: string[]
+  validTypeNames: string[],
+  // DOEL-77: de kenmerkdefinities en kolommen van dezelfde configuratie, voor
+  // kenmerkregels. Zonder context is elke kenmerkregel ongeldig.
+  attributeContext?: AttributeRuleContext
 ): { errors: string[]; rules: ControlRule[] } {
   const errors: string[] = [];
   if (!Array.isArray(input)) {
@@ -159,6 +335,8 @@ export function validateControlRulesInput(
 
     if (!RULE_ID_PATTERN.test(id)) {
       errors.push(`${where}: id is verplicht en mag alleen letters, cijfers, - en _ bevatten (max. 40 tekens).`);
+    } else if (id.toLowerCase().startsWith(REQUIRED_RULE_PREFIX)) {
+      errors.push(`${where}: een id mag niet met "${REQUIRED_RULE_PREFIX}" beginnen; dat is gereserveerd voor verplichte kenmerken.`);
     } else if (seenIds.has(id)) {
       errors.push(`${where}: id "${id}" komt meer dan één keer voor.`);
     } else {
@@ -246,14 +424,26 @@ export function validateControlRulesInput(
     }
     if (k !== 'required_field') notApplicable('field', field != null);
     else if (!field && isUnset(raw.field)) errors.push(`${where}: kies het verplichte veld.`);
-    if (k === 'required_field') {
+    const noCount = k === 'required_field' || k === 'attribute_condition';
+    if (noCount) {
       notApplicable('min', minRaw != null);
       notApplicable('max', maxRaw != null);
     }
     if (k === 'requires_tag_category') notApplicable('max', maxRaw != null);
 
-    const min = k === 'required_field' ? null : (minRaw ?? 1);
-    const max = k === 'required_field' || k === 'requires_tag_category' ? null : maxRaw;
+    // DOEL-77: kenmerk-velden alleen bij een kenmerkregel.
+    let condition: ReturnType<typeof parseAttributeCondition> = { attributeId: null, operator: null, value: null, value2: null };
+    if (k === 'attribute_condition') {
+      condition = parseAttributeCondition(raw, where, subjectTypes, attributeContext, errors);
+    } else {
+      notApplicable('attributeId', !isUnset(raw.attributeId));
+      notApplicable('operator', !isUnset(raw.operator));
+      notApplicable('value', !isUnset(raw.value));
+      notApplicable('value2', !isUnset(raw.value2));
+    }
+
+    const min = noCount ? null : (minRaw ?? 1);
+    const max = noCount || k === 'requires_tag_category' ? null : maxRaw;
     if (max != null && min != null && min > max) errors.push(`${where}: min (${min}) mag niet groter zijn dan max (${max}).`);
 
     const unknownTypes = [...subjectTypes, ...targetTypes].filter((t) => !validTypes.has(t));
@@ -269,6 +459,7 @@ export function validateControlRulesInput(
       weight: isRelation ? weight : 'any', min, max,
       tagCategory: k === 'requires_tag_category' ? tagCategory : null,
       field: k === 'required_field' ? field : null,
+      attributeId: condition.attributeId, operator: condition.operator, value: condition.value, value2: condition.value2,
       label, explanation, enabled,
     });
   });

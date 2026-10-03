@@ -16,7 +16,15 @@ import {
   getAttributeValues,
   validateElementValuesInput,
 } from '../elementAttributeValues.js';
-import { CONTROLE_REGELS_MODULE } from '../controlRules.js';
+import {
+  CONTROLE_REGELS_MODULE,
+  brokenRulesByAttributesMessage,
+  findRulesBrokenByAttributes,
+  requiredAttributeRuleId,
+  requiredAttributeRuleIds,
+  rulesFromDb,
+} from '../controlRules.js';
+import { countDeviationsPerRule, deleteDeviationsForMissingRules } from '../controlRuleDeviations.js';
 import {
   AttributeDef,
   attributesFromDb,
@@ -56,6 +64,16 @@ export function attributeAuditDetail(scope: string, attributes: AttributeDef[], 
   return { scope, ...extra, attributeCount: attributes.length, attributeIds: attributes.map((a) => a.id) };
 }
 
+async function requiredDeviationCounts(doelenboomId: string, attributes: AttributeDef[]): Promise<Record<string, number>> {
+  const perRule = await countDeviationsPerRule(doelenboomId);
+  const out: Record<string, number> = {};
+  for (const a of attributes) {
+    const n = perRule[requiredAttributeRuleId(a.id)] ?? 0;
+    if (n > 0) out[a.id] = n;
+  }
+  return out;
+}
+
 elementAttributesRouter.get(
   '/doelenbomen/:id/attributes',
   requireTenantRoleForDoelenboomParam('bezoeker', 'id'),
@@ -81,6 +99,9 @@ elementAttributesRouter.get(
       // DOEL-76: aantal ingevulde waarden per kenmerk (en per keuzelijstwaarde),
       // zodat de editor kan waarschuwen dat verwijderen die waarden wist.
       valueCounts: await countValuesPerAttribute(req.params.id, attributes),
+      // DOEL-77: aantal gemotiveerde afwijkingen op "verplicht" per kenmerk-id;
+      // "verplicht" uitzetten of het kenmerk verwijderen wist die motivaties.
+      requiredDeviationCounts: await requiredDeviationCounts(req.params.id, attributes),
     });
   }
 );
@@ -94,7 +115,7 @@ elementAttributesRouter.put(
     try {
       await client.query('begin');
       const cfg = await client.query(
-        `select id, tenant_id, attributes from column_configs where scope = 'doelenboom' and doelenboom_id = $1 for update`,
+        `select id, tenant_id, attributes, rules from column_configs where scope = 'doelenboom' and doelenboom_id = $1 for update`,
         [req.params.id]
       );
       if (!cfg.rows[0]) {
@@ -109,7 +130,20 @@ elementAttributesRouter.put(
         await client.query('rollback');
         return res.status(400).json({ error: errors.join(' ') });
       }
+      // DOEL-77: een kenmerk (of type/keuzelijstwaarde) dat nog in een
+      // controleregel wordt gebruikt kan niet weg — eerst de regel aanpassen.
+      const storedRules = rulesFromDb(cfg.rows[0].rules);
+      const brokenRuleIds = findRulesBrokenByAttributes(storedRules, { attributes, columns });
+      if (brokenRuleIds.length) {
+        await client.query('rollback');
+        return res.status(409).json({ error: brokenRulesByAttributesMessage(brokenRuleIds) });
+      }
       await setAttributesForConfigId(client, cfg.rows[0].id, attributes);
+      // DOEL-77: afwijkingen op de ingebouwde regel "verplicht" (req-<id>)
+      // vervallen zodra het kenmerk niet meer verplicht is of niet meer bestaat.
+      const removedDeviations = await deleteDeviationsForMissingRules(
+        client, req.params.id, [...storedRules.map((r) => r.id), ...requiredAttributeRuleIds(attributes)]
+      );
       // DOEL-76: waarden van verwijderde kenmerken en verwijderde
       // keuzelijstwaarden direct opruimen, in dezelfde transactie (besluit
       // Charles 3 oktober 2026; de editor waarschuwt vooraf met het aantal).
@@ -120,7 +154,10 @@ elementAttributesRouter.put(
         userId: req.user!.id,
         tenantId: cfg.rows[0].tenant_id,
         doelenboomId: req.params.id,
-        detail: attributeAuditDetail('doelenboom', attributes, removedValues ? { removedValues } : {}),
+        detail: attributeAuditDetail('doelenboom', attributes, {
+          ...(removedValues ? { removedValues } : {}),
+          ...(removedDeviations ? { removedDeviations } : {}),
+        }),
       });
       res.json({ attributes, invalidAttributeIds: [] });
     } catch (err) {
@@ -206,7 +243,7 @@ elementAttributesRouter.put('/tenants/:tenantId/attributes', requireSysadmin, as
   try {
     await client.query('begin');
     const cfg = await client.query(
-      `select id, attributes from column_configs where scope = 'tenant_default' and tenant_id = $1 for update`,
+      `select id, attributes, rules from column_configs where scope = 'tenant_default' and tenant_id = $1 for update`,
       [req.params.tenantId]
     );
     if (!cfg.rows[0]) {
@@ -220,6 +257,11 @@ elementAttributesRouter.put('/tenants/:tenantId/attributes', requireSysadmin, as
     if (errors.length) {
       await client.query('rollback');
       return res.status(400).json({ error: errors.join(' ') });
+    }
+    const brokenRuleIds = findRulesBrokenByAttributes(rulesFromDb(cfg.rows[0].rules), { attributes, columns });
+    if (brokenRuleIds.length) {
+      await client.query('rollback');
+      return res.status(409).json({ error: brokenRulesByAttributesMessage(brokenRuleIds) });
     }
     await setAttributesForConfigId(client, cfg.rows[0].id, attributes);
     await client.query('commit');

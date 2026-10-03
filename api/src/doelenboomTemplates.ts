@@ -2,7 +2,8 @@ import { PoolClient } from 'pg';
 import { pool } from './db.js';
 import { insertColumns, validateColumnsInput, ColumnDef, allValidTypeNames } from './columnConfig.js';
 import {
-  ControlRule, brokenRulesMessage, findRulesBrokenByColumns, rulesFromDb, validateControlRulesInput,
+  ControlRule, brokenRulesByAttributesMessage, brokenRulesMessage, findRulesBrokenByAttributes, findRulesBrokenByColumns,
+  rulesFromDb, validateControlRulesInput,
 } from './controlRules.js';
 import {
   AttributeDef, attributesFromDb, brokenAttributesMessage, findAttributesBrokenByColumns, validateAttributeDefsInput,
@@ -253,13 +254,6 @@ export async function applyTemplateToNewDoelenboom(
   const columns = withAliasesDefault(tmpl.rows[0].columns_snapshot as ColumnSnapshot[]);
   // Fallback voor sjablonen van vóór DOEL-62: rules_snapshot is dan '[]'
   // (kolomdefault), rulesFromDb vangt ook een onverhoopt ontbrekende waarde af.
-  const { errors: ruleErrors, rules } = validateControlRulesInput(
-    rulesFromDb(tmpl.rows[0].rules_snapshot),
-    allValidTypeNames(columns as ColumnDef[])
-  );
-  if (ruleErrors.length) {
-    return { ok: false, error: 'De controleregels van dit sjabloon passen niet bij de sjabloonkolommen; laat het sjabloon eerst corrigeren.' };
-  }
 
   // Kenmerkdefinities (DOEL-75): zelfde validatie bij toepassen. `existing`
   // is leeg — de nieuwe boom heeft nog geen kenmerken waarvan de soort vastligt.
@@ -270,6 +264,17 @@ export async function applyTemplateToNewDoelenboom(
   );
   if (attributeErrors.length) {
     return { ok: false, error: 'De kenmerken van dit sjabloon passen niet bij de sjabloonkolommen; laat het sjabloon eerst corrigeren.' };
+  }
+
+  // De regels ná de kenmerken: een kenmerkregel (DOEL-77) wordt tegen de
+  // zojuist gevalideerde definities gecontroleerd.
+  const { errors: ruleErrors, rules } = validateControlRulesInput(
+    rulesFromDb(tmpl.rows[0].rules_snapshot),
+    allValidTypeNames(columns as ColumnDef[]),
+    { attributes, columns: columns as ColumnDef[] }
+  );
+  if (ruleErrors.length) {
+    return { ok: false, error: 'De controleregels van dit sjabloon passen niet bij de sjabloonkolommen; laat het sjabloon eerst corrigeren.' };
   }
 
   const cfg = await client.query(
@@ -381,11 +386,20 @@ export async function updateTemplateColumns(
 // Sjablonenbeheer-scherm. Validatie tegen de kolommen uit het sjabloon zelf.
 export async function getTemplateRules(
   templateId: number
-): Promise<{ rules: ControlRule[]; validTypeNames: string[] } | null> {
-  const r = await pool.query('select columns_snapshot, rules_snapshot from doelenboom_templates where id = $1', [templateId]);
+): Promise<{ rules: ControlRule[]; validTypeNames: string[]; attributes: AttributeDef[]; columns: ColumnDef[] } | null> {
+  const r = await pool.query(
+    'select columns_snapshot, rules_snapshot, attributes_snapshot from doelenboom_templates where id = $1',
+    [templateId]
+  );
   if (!r.rows[0]) return null;
-  const columns = withAliasesDefault(r.rows[0].columns_snapshot as ColumnSnapshot[]);
-  return { rules: rulesFromDb(r.rows[0].rules_snapshot), validTypeNames: allValidTypeNames(columns as ColumnDef[]) };
+  const columns = withAliasesDefault(r.rows[0].columns_snapshot as ColumnSnapshot[]) as ColumnDef[];
+  return {
+    rules: rulesFromDb(r.rows[0].rules_snapshot),
+    validTypeNames: allValidTypeNames(columns),
+    // DOEL-77: voor kenmerkregels.
+    attributes: attributesFromDb(r.rows[0].attributes_snapshot),
+    columns,
+  };
 }
 
 export async function updateTemplateRules(
@@ -394,7 +408,7 @@ export async function updateTemplateRules(
 ): Promise<{ notFound?: boolean; errors: string[]; rules?: ControlRule[] }> {
   const current = await getTemplateRules(templateId);
   if (!current) return { notFound: true, errors: [] };
-  const { errors, rules } = validateControlRulesInput(input, current.validTypeNames);
+  const { errors, rules } = validateControlRulesInput(input, current.validTypeNames, { attributes: current.attributes, columns: current.columns });
   if (errors.length) return { errors };
   await pool.query('update doelenboom_templates set rules_snapshot = $1 where id = $2', [JSON.stringify(rules), templateId]);
   return { errors: [], rules };
@@ -418,11 +432,17 @@ export async function getTemplateAttributes(
 export async function updateTemplateAttributes(
   templateId: number,
   input: unknown
-): Promise<{ notFound?: boolean; errors: string[]; attributes?: AttributeDef[] }> {
+): Promise<{ notFound?: boolean; conflict?: boolean; errors: string[]; attributes?: AttributeDef[] }> {
   const current = await getTemplateAttributes(templateId);
   if (!current) return { notFound: true, errors: [] };
   const { errors, attributes } = validateAttributeDefsInput(input, current.validTypeNames, current.attributes);
   if (errors.length) return { errors };
+  // DOEL-77: een kenmerk dat nog in een sjabloonregel wordt gebruikt kan niet weg.
+  const ruleCtx = await getTemplateRules(templateId);
+  if (ruleCtx) {
+    const brokenRuleIds = findRulesBrokenByAttributes(ruleCtx.rules, { attributes, columns: ruleCtx.columns });
+    if (brokenRuleIds.length) return { errors: [brokenRulesByAttributesMessage(brokenRuleIds)], conflict: true };
+  }
   await pool.query('update doelenboom_templates set attributes_snapshot = $1 where id = $2', [JSON.stringify(attributes), templateId]);
   return { errors: [], attributes };
 }
