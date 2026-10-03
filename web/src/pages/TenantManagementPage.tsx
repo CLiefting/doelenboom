@@ -300,6 +300,11 @@ export default function TenantManagementPage({
               save: (rules) => api.updateTenantControlRules(token, selectedTenantId, rules),
               hideWhenModuleInactive: false,
             }}
+            attributes={{
+              load: () => api.tenantAttributes(token, selectedTenantId),
+              save: (attributes) => api.updateTenantAttributes(token, selectedTenantId, attributes),
+              hideWhenModuleInactive: false,
+            }}
           />
         </section>
       )}
@@ -775,6 +780,11 @@ function DoelenbomenSection({
                   rules={{
                     load: () => api.doelenboomControlRules(token, d.id),
                     save: (rules) => api.updateDoelenboomControlRules(token, d.id, rules),
+                    hideWhenModuleInactive: true,
+                  }}
+                  attributes={{
+                    load: () => api.doelenboomAttributes(token, d.id),
+                    save: (attributes) => api.updateDoelenboomAttributes(token, d.id, attributes),
                     hideWhenModuleInactive: true,
                   }}
                 />

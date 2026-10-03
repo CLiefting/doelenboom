@@ -207,6 +207,13 @@ create table if not exists column_configs (
   -- api/src/controlRules.ts (zelfde reden als bij columns.aliases hieronder).
   -- Alleen structuurregels, bewust geen statusregels (epic DOEL-61).
   rules jsonb not null default '[]'::jsonb,
+  -- Kenmerkdefinities (DOEL-75, zie db/migrations/0047): jsonb-array van eigen
+  -- velden per elementtype, bv. {"id":"K01","label":"Laatst beoordeeld",
+  -- "kind":"date","subjectTypes":["Capability"],"required":false,...}. Alleen
+  -- de definities (waarden per element: DOEL-76); wordt met de config
+  -- meegekopieerd, net als rules. Schema en validatie op API-niveau in
+  -- api/src/elementAttributes.ts. Alleen metagegevens.
+  attributes jsonb not null default '[]'::jsonb,
   check ((scope = 'doelenboom') = (doelenboom_id is not null))
 );
 create unique index if not exists idx_column_configs_tenant_default
@@ -321,7 +328,10 @@ create table if not exists doelenboom_templates (
   created_at timestamptz not null default now(),
   -- Controleregels van het sjabloon (DOEL-62, zie column_configs.rules en
   -- db/migrations/0044); '[]' voor sjablonen van vóór DOEL-62.
-  rules_snapshot jsonb not null default '[]'::jsonb
+  rules_snapshot jsonb not null default '[]'::jsonb,
+  -- Kenmerkdefinities van het sjabloon (DOEL-75, zie column_configs.attributes
+  -- en db/migrations/0047); '[]' voor sjablonen van vóór DOEL-75.
+  attributes_snapshot jsonb not null default '[]'::jsonb
 );
 create index if not exists idx_doelenboom_templates_tenant on doelenboom_templates(tenant_id);
 
@@ -766,7 +776,10 @@ create table if not exists audit_log (
     'control_rules_updated',
     'control_rule_deviation_set', 'control_rule_deviation_removed',
     -- DOEL-70: mail aan sysadmins over nieuwe kwetsbaarheden (detail: alleen aantallen).
-    'dependency_vulnerability_alert_sent'
+    'dependency_vulnerability_alert_sent',
+    -- DOEL-75: wijziging van kenmerkdefinities (detail: scope, aantal,
+    -- kenmerk-id's — nooit labels, uitleg of keuzelijstwaarden).
+    'attribute_definitions_updated'
   )),
   user_id bigint references users(id) on delete set null,
   tenant_id bigint references tenants(id) on delete set null,

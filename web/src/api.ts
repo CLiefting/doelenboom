@@ -372,6 +372,34 @@ export const api = {
       body: JSON.stringify({ rules }),
     }, token),
 
+  // Kenmerkdefinities (DOEL-75) — zelfde drie niveaus als de controleregels.
+  doelenboomAttributes: (token: string, doelenboomId: number) =>
+    request<import('./types').AttributeDefsState>(`/api/doelenbomen/${doelenboomId}/attributes`, {}, token),
+
+  updateDoelenboomAttributes: (token: string, doelenboomId: number, attributes: import('./types').AttributeDef[]) =>
+    request<{ attributes: import('./types').AttributeDef[]; invalidAttributeIds: string[] }>(`/api/doelenbomen/${doelenboomId}/attributes`, {
+      method: 'PUT',
+      body: JSON.stringify({ attributes }),
+    }, token),
+
+  tenantAttributes: (token: string, tenantId: number) =>
+    request<import('./types').AttributeDefsState>(`/api/tenants/${tenantId}/attributes`, {}, token),
+
+  updateTenantAttributes: (token: string, tenantId: number, attributes: import('./types').AttributeDef[]) =>
+    request<{ attributes: import('./types').AttributeDef[]; invalidAttributeIds: string[] }>(`/api/tenants/${tenantId}/attributes`, {
+      method: 'PUT',
+      body: JSON.stringify({ attributes }),
+    }, token),
+
+  templateAttributes: (token: string, templateId: number) =>
+    request<import('./types').AttributeDefsState>(`/api/doelenboom-templates/${templateId}/attributes`, {}, token),
+
+  updateTemplateAttributes: (token: string, templateId: number, attributes: import('./types').AttributeDef[]) =>
+    request<{ attributes: import('./types').AttributeDef[]; invalidAttributeIds: string[] }>(`/api/doelenboom-templates/${templateId}/attributes`, {
+      method: 'PUT',
+      body: JSON.stringify({ attributes }),
+    }, token),
+
   // --- Licentiemodel (zie doelenboom_licentiemodel.md) ---
   // Tiers/modules-catalogus: lezen mag iedereen ingelogd, wijzigen is
   // sysadmin-only (de server handhaaft dit, zie api/src/routes/licenses.ts).

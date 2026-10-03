@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ApiError } from '../api';
-import type { ColumnAlias, ColumnDef, ControlRule, ControlRulesState } from '../types';
+import type { AttributeDef, AttributeDefsState, ColumnAlias, ColumnDef, ControlRule, ControlRulesState } from '../types';
+import AttributeDefinitionsEditor from './AttributeDefinitionsEditor';
 import ControlRulesEditor from './ControlRulesEditor';
 
 // Generieke editor voor een kolomconfiguratie (tenant-default óf de eigen
@@ -34,6 +35,7 @@ export default function ColumnConfigEditor({
   load,
   save,
   rules,
+  attributes,
 }: {
   load: () => Promise<{ columns: ColumnDef[] }>;
   save: (columns: ColumnDef[]) => Promise<{ columns: ColumnDef[] }>;
@@ -43,6 +45,14 @@ export default function ColumnConfigEditor({
   rules?: {
     load: () => Promise<ControlRulesState>;
     save: (rules: ControlRule[]) => Promise<{ rules: ControlRule[]; invalidRuleIds: string[] }>;
+    hideWhenModuleInactive: boolean;
+  };
+  // Optioneel: sectie "Kenmerken" (DOEL-75) tussen de kolommen en de
+  // controleregels. Zelfde opzet als `rules`: eigen endpoints en opslaanknop,
+  // herladen na elke kolom-opslag.
+  attributes?: {
+    load: () => Promise<AttributeDefsState>;
+    save: (attributes: AttributeDef[]) => Promise<{ attributes: AttributeDef[]; invalidAttributeIds: string[] }>;
     hideWhenModuleInactive: boolean;
   };
 }) {
@@ -281,6 +291,14 @@ export default function ColumnConfigEditor({
         </button>
         {saved && <span style={{ color: '#2e7d32', fontSize: 12.5 }}>Opgeslagen.</span>}
       </div>
+      {attributes && (
+        <AttributeDefinitionsEditor
+          key={`attributes-${rulesReloadKey}`}
+          load={attributes.load}
+          save={attributes.save}
+          hideWhenModuleInactive={attributes.hideWhenModuleInactive}
+        />
+      )}
       {rules && (
         <ControlRulesEditor
           key={rulesReloadKey}
