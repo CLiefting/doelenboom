@@ -421,6 +421,7 @@
   .app-toast.visible { display: block; }
   .app-toast.error { background: #DC3545; }
   .app-toast.ok { background: #2E7D5B; }
+  .app-toast.warn { background: #B26A00; }
 
   .btn.btn-xs { padding: 3px 9px; font-size: 11.5px; }
 
@@ -5202,6 +5203,21 @@ function runApp(data) {
   function focusStorageKey() {
     return 'doelenboom-focus-' + (doelenboomId || '');
   }
+  // DOEL-78: een melding die een herlaadbeurt moet overleven (zie
+  // handleAttributeAction en showPendingToastAfterReload).
+  function pendingToastKey() {
+    return 'doelenboom-pending-toast-' + (doelenboomId || '');
+  }
+  function showPendingToastAfterReload() {
+    let message;
+    try {
+      message = sessionStorage.getItem(pendingToastKey());
+      sessionStorage.removeItem(pendingToastKey());
+    } catch (err) {
+      return;
+    }
+    if (message) showToast(String(message).slice(0, 2000), 'warn');
+  }
 
   function reloadTreeKeepingFocus(delayMs) {
     try {
@@ -5582,6 +5598,20 @@ function runApp(data) {
           throw new Error(b.error || ('Opslaan mislukt (HTTP ' + res.status + ')'));
         }
         attributesEditingCode = null;
+        // DOEL-78: niet blokkeren, wel melden welke verplichte kenmerken nog
+        // leeg zijn. De pagina herlaadt na het opslaan, dus de melding gaat via
+        // sessionStorage mee en verschijnt na het herladen.
+        const missing = attributeMissingRequiredText(defs, values);
+        if (missing) {
+          try {
+            sessionStorage.setItem(pendingToastKey(), 'Opgeslagen. ' + missing);
+          } catch (storageErr) {
+            // sessionStorage geblokkeerd: de melding nu tonen en iets later herladen.
+            showToast('Opgeslagen. ' + missing, 'warn');
+            reloadTreeKeepingFocus(2500);
+            return;
+          }
+        }
         reloadTreeKeepingFocus();
       } catch (err) {
         btn.disabled = false;
@@ -8989,6 +9019,7 @@ function runApp(data) {
   // reloadTreeKeepingFocus()/restoreFocusAfterReload() hierboven. Geen effect
   // bij een "gewone" eerste load, want dan staat er niets in sessionStorage.
   restoreFocusAfterReload();
+  showPendingToastAfterReload();
 }
 
 // ============================================================================
@@ -9381,6 +9412,19 @@ function attributesPanelHtml(defs, values, opts) {
     '</div>';
 }
 
+// Melding na het opslaan van kenmerken (DOEL-78): welke verplichte kenmerken
+// zijn nog leeg? Het opslaan wordt niet geblokkeerd (een leeg verplicht
+// kenmerk is een signaal in de controleweergave en is te motiveren), maar de
+// gebruiker hoort het wel meteen. Geeft '' terug als er niets openstaat. De
+// labels zijn gebruikersinvoer: de aanroeper toont de tekst als platte tekst
+// (showToast gebruikt textContent).
+function attributeMissingRequiredText(defs, values) {
+  const vals = values || {};
+  const missing = (defs || []).filter((a) => a && a.required && !attributeHasValue(vals[a.id])).map((a) => a.label || a.id);
+  if (!missing.length) return '';
+  return (missing.length === 1 ? 'Verplicht kenmerk nog leeg: ' : 'Verplichte kenmerken nog leeg: ') + missing.join(', ') + '.';
+}
+
 // Hint-kaartje: alleen de INGEVULDE kenmerken.
 function attributesHintHtml(defs, values) {
   const vals = values || {};
@@ -9667,9 +9711,10 @@ function showToast(message, kind) {
   const el = document.getElementById('app-toast');
   if (!el) { window.alert(message); return; }
   el.textContent = message;
-  el.className = 'app-toast visible ' + (kind === 'error' ? 'error' : 'ok');
+  // 'warn' (DOEL-78): gelukt, maar er staat nog iets open — blijft wat langer staan.
+  el.className = 'app-toast visible ' + (kind === 'error' ? 'error' : (kind === 'warn' ? 'warn' : 'ok'));
   if (toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.classList.remove('visible'); }, 4500);
+  toastTimer = setTimeout(() => { el.classList.remove('visible'); }, kind === 'warn' ? 8000 : 4500);
 }
 
 // Kolommen komen sinds de configureerbare kolommen (zie

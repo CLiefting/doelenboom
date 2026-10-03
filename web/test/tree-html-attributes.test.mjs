@@ -25,7 +25,7 @@ const grabLine = (name) => extract(new RegExp(`const ${name} = [^\\n]*;`), name)
 
 const NAMES = [
   'attributesForType', 'attributeHasValue', 'attributeDisplayValue', 'attributeValueFromInput',
-  'attributeInputHtml', 'attributesPanelHtml', 'attributesHintHtml',
+  'attributeInputHtml', 'attributesPanelHtml', 'attributesHintHtml', 'attributeMissingRequiredText',
 ];
 // eslint-disable-next-line no-new-func
 const F = new Function(
@@ -155,6 +155,30 @@ describe('kenmerken in tree.html (DOEL-76)', () => {
     assert.match(html, /<b>Getoetst:<\/b> Nee/);
     assert.match(html, /<b>Aantal:<\/b> 0/);
     assert.doesNotMatch(html, /Fase/);
+  });
+
+  it('melding na opslaan (DOEL-78): noemt de verplichte kenmerken die nog leeg zijn, zonder te blokkeren', () => {
+    const defs = [
+      def({ id: 'A', label: 'Type', required: true }), def({ id: 'B', label: 'Is aanwezig', kind: 'boolean', required: true }),
+      def({ id: 'C', label: 'Optioneel' }), def({ id: 'D', label: 'Aantal', kind: 'number', required: true }),
+    ];
+    assert.equal(F.attributeMissingRequiredText(defs, { A: 'x', B: false, D: 0 }), '', 'nee en 0 zijn ingevuld');
+    assert.equal(F.attributeMissingRequiredText(defs, { A: null, B: true, D: 1 }), 'Verplicht kenmerk nog leeg: Type.');
+    assert.equal(F.attributeMissingRequiredText(defs, { B: null, C: null }), 'Verplichte kenmerken nog leeg: Type, Is aanwezig, Aantal.');
+    assert.equal(F.attributeMissingRequiredText(defs, undefined), 'Verplichte kenmerken nog leeg: Type, Is aanwezig, Aantal.');
+    assert.equal(F.attributeMissingRequiredText([def({ id: 'C' })], {}), '');
+    assert.equal(F.attributeMissingRequiredText(undefined, {}), '');
+    // Het opslaan zelf gaat door: de melding wordt pas ná een geslaagd verzoek bepaald en overleeft het herladen.
+    const handler = extract(/async function handleAttributeAction\(btn\) \{[\s\S]*?\n  \}/, 'handleAttributeAction');
+    const okAt = handler.indexOf('if (!res.ok)');
+    const missingAt = handler.indexOf('attributeMissingRequiredText(defs, values)');
+    assert.ok(okAt > 0 && missingAt > okAt, 'melding na het geslaagde verzoek');
+    assert.match(handler, /sessionStorage\.setItem\(pendingToastKey\(\), 'Opgeslagen\. ' \+ missing\)/);
+    assert.match(source, /restoreFocusAfterReload\(\);\n  showPendingToastAfterReload\(\);/);
+    // De melding bevat labels (gebruikersinvoer) en wordt als platte tekst getoond.
+    const toast = extract(/function showToast\(message, kind\) \{[\s\S]*?\n\}/, 'showToast');
+    assert.match(toast, /el\.textContent = message;/);
+    assert.doesNotMatch(toast, /innerHTML/);
   });
 
   it('A03: label, uitleg, keuzelijstwaarden, tekstwaarden, id en elementcode worden overal ge-escaped', () => {
