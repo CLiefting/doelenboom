@@ -1201,7 +1201,8 @@
   .dp-attr-label { flex: 0 0 38%; color: #555; overflow-wrap: anywhere; }
   .dp-attr-value { flex: 1 1 auto; color: #222; white-space: pre-wrap; overflow-wrap: anywhere; }
   .dp-attr-row.empty .dp-attr-value { color: #9aa0a8; }
-  .dp-attr-req { font-size: 10px; color: #777; border: 1px solid #c9ccd1; border-radius: 8px; padding: 0 5px; white-space: nowrap; }
+  .dp-attr-req { color: #DC3545; font-weight: 700; }
+  .dp-attr-legend { color: #777; font-size: 11px; margin-top: 4px; }
   .dp-attr-field { flex: 1 1 auto; min-width: 0; }
   .dp-attr-input { box-sizing: border-box; max-width: 100%; font: inherit; font-size: 12px; padding: 4px 6px; border: 1px solid #c9ccd1; border-radius: 4px; }
   .dp-attr-text { width: 100%; }
@@ -9349,7 +9350,12 @@ function attributesPanelHtml(defs, values, opts) {
   const o = opts || {};
   const vals = values || {};
   const code = ' data-code="' + escapeHtml(o.elementCode == null ? '' : String(o.elementCode)) + '"';
-  const required = (a) => (a.required ? ' <span class="dp-attr-req">verplicht</span>' : '');
+  // Verplicht: een rode * achter het label (DOEL-78), met een legenda onder
+  // de lijst. title/aria-label voor wie de kleur of het teken niet ziet.
+  const required = (a) => (a.required ? ' <span class="dp-attr-req" title="Verplicht" aria-label="verplicht">*</span>' : '');
+  const legend = defs.some((a) => a.required)
+    ? '<div class="dp-attr-legend"><span class="dp-attr-req" aria-hidden="true">*</span> verplicht</div>'
+    : '';
   if (o.canEdit && o.editing) {
     return '<div class="dp-attrs dp-attrs-form"' + code + '><div class="dp-attrs-title">Kenmerken</div>' +
       '<div class="dp-attr-hint">' + escapeHtml(ATTRIBUTE_HINT) + '</div>' +
@@ -9358,7 +9364,7 @@ function attributesPanelHtml(defs, values, opts) {
         '<div class="dp-attr-field">' + attributeInputHtml(a, vals[a.id]) +
         (a.explanation ? '<div class="dp-attr-expl">' + escapeHtml(a.explanation) + '</div>' : '') +
         '</div></div>'
-      ).join('') +
+      ).join('') + legend +
       '<div class="dp-attr-actions">' +
       '<button type="button" class="btn btn-sm dp-attr-btn" data-attr-action="save"' + code + '>Opslaan</button>' +
       '<button type="button" class="btn ghost btn-sm dp-attr-btn" data-attr-action="cancel"' + code + '>Annuleren</button></div></div>';
@@ -9368,7 +9374,7 @@ function attributesPanelHtml(defs, values, opts) {
       const shown = attributeDisplayValue(a, vals[a.id]);
       return '<div class="dp-attr-row' + (shown === '' ? ' empty' : '') + '"><span class="dp-attr-label">' + escapeHtml(a.label) + required(a) + '</span>' +
         '<span class="dp-attr-value">' + (shown === '' ? '&mdash;' : escapeHtml(shown)) + '</span></div>';
-    }).join('') +
+    }).join('') + legend +
     (o.canEdit
       ? '<div class="dp-attr-actions"><button type="button" class="btn ghost btn-sm dp-attr-btn" data-attr-action="edit"' + code + '>Kenmerken bewerken</button></div>'
       : '') +
