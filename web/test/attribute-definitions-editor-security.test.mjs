@@ -51,6 +51,12 @@ describe('AttributeDefinitionsEditor (DOEL-75)', () => {
     assert.match(source, /value=\{draft\.kind\} disabled=\{kindLocked\}/);
   });
 
+  it('waarschuwt vooraf hoeveel ingevulde waarden vervallen (DOEL-76)', () => {
+    assert.match(source, /bij opslaan \{lostValues === 1 \? 'vervalt 1 ingevulde waarde' : `vervallen \$\{lostValues\} ingevulde waarden`\}/);
+    assert.match(source, /Dit kan niet ongedaan worden gemaakt\./);
+    assert.match(source, /counts\[a\.id\]\.total\} ingevuld/);
+  });
+
   it('staat in ColumnConfigEditor tussen de kolommen en de controleregels', () => {
     const editor = stripComments(src('components', 'ColumnConfigEditor.tsx'));
     const attributesAt = editor.indexOf('<AttributeDefinitionsEditor');

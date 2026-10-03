@@ -1,4 +1,5 @@
 import { restoreDeviations, snapshotDeviations } from '../controlRuleDeviations.js';
+import { restoreAttributeValues, snapshotAttributeValues } from '../elementAttributeValues.js';
 import { Router } from 'express';
 import multer from 'multer';
 import { pool } from '../db.js';
@@ -187,6 +188,8 @@ importsRouter.post(
     // cascade aan elements en zouden bij deze volledige vervanging verdwijnen.
     // Vooraf vastleggen op elementcode, na het opnieuw aanmaken terugzetten.
     const deviationSnapshot = await snapshotDeviations(client, doelenboomId);
+    // DOEL-76: idem voor de ingevulde kenmerkwaarden.
+    const attributeValueSnapshot = await snapshotAttributeValues(client, doelenboomId);
 
     // Volledige vervanging: eerst alles weg wat aan deze doelenboom hangt.
     await client.query('delete from elements where doelenboom_id = $1', [doelenboomId]); // cascade → edges/project_status/products/element_tags/ob_org_relations
@@ -203,6 +206,7 @@ importsRouter.post(
       elementIdByCode.set(el.code, r.rows[0].id);
     }
     await restoreDeviations(client, doelenboomId, deviationSnapshot, elementIdByCode);
+    await restoreAttributeValues(client, doelenboomId, attributeValueSnapshot, elementIdByCode);
 
     for (const e of parsed.edges) {
       const sourceId = elementIdByCode.get(e.source);

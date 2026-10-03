@@ -6,6 +6,8 @@ import { getColumnsForDoelenboom } from '../columnConfig.js';
 import { getActiveModuleKeys, isLicenseExpired } from '../license.js';
 import { CONTROLE_REGELS_MODULE, findRulesBrokenByColumns, getRulesForDoelenboom } from '../controlRules.js';
 import { ControlRuleDeviation, getDeviationsForDoelenboom, stripEditorOnlyFields } from '../controlRuleDeviations.js';
+import { AttributeDef, attributesFromDb, findAttributesBrokenByColumns } from '../elementAttributes.js';
+import { AttributeValuesByElement, getAttributeValues } from '../elementAttributeValues.js';
 import { logAuditEvent } from '../auditLog.js';
 
 export const treeRouter = Router();
@@ -268,6 +270,25 @@ export async function fetchTree(doelenboomId: string) {
     controlRuleDeviations = (await getDeviationsForDoelenboom(doelenboomId)).filter((d) => ids.has(d.ruleId));
   }
 
+  // Kenmerken (DOEL-75/76): definities en ingevulde waarden, alleen met de
+  // module 'controleregels' — zonder module blijven ze bewaard maar gaat er
+  // niets mee (zichtbaarheidsprincipe). Definities die naar een niet meer
+  // bestaand type wijzen gaan niet mee (zelfde lijn als de regels hierboven).
+  // De waarden bevatten geen door-wie/wanneer; er valt voor een bezoeker dus
+  // niets weg te laten.
+  let attributes: AttributeDef[] = [];
+  let attributeValues: AttributeValuesByElement = {};
+  if (activeModules.includes(CONTROLE_REGELS_MODULE)) {
+    const cfg = await pool.query(
+      `select attributes from column_configs where scope = 'doelenboom' and doelenboom_id = $1`,
+      [doelenboomId]
+    );
+    const all = attributesFromDb(cfg.rows[0]?.attributes);
+    const broken = new Set(findAttributesBrokenByColumns(all, columns));
+    attributes = all.filter((a) => !broken.has(a.id));
+    attributeValues = await getAttributeValues(doelenboomId, attributes, columns);
+  }
+
   return {
     columns,
     doelenboom: {
@@ -305,6 +326,8 @@ export async function fetchTree(doelenboomId: string) {
     licenseExpired,
     controlRules,
     controlRuleDeviations,
+    attributes,
+    attributeValues,
   };
 }
 
