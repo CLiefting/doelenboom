@@ -821,6 +821,10 @@ export type AttributeDefsState = {
   moduleActive: boolean;
   validTypeNames: string[];
   invalidAttributeIds: string[];
+  // DOEL-76: aantal ingevulde waarden per kenmerk-id en, bij keuzelijsten, per
+  // keuzelijstwaarde (alleen bij een doelenboom). Een kenmerk of
+  // keuzelijstwaarde verwijderen wist die waarden bij het opslaan.
+  valueCounts?: Record<string, { total: number; byOption: Record<string, number> }>;
 };
 
 // --- Softwarecomponenten / SBOM (sysadmin-only, /system-info) — zie

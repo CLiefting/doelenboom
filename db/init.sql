@@ -382,6 +382,29 @@ create table if not exists control_rule_deviations (
 );
 create index if not exists idx_crd_doelenboom on control_rule_deviations(doelenboom_id);
 
+-- Kenmerkwaarden per element (DOEL-76, zie db/migrations/0048): één rij per
+-- (element, kenmerk) met een ingevulde waarde; een leeg kenmerk heeft geen
+-- rij. attribute_id verwijst naar een definitie in column_configs.attributes
+-- van dezelfde boom (jsonb, dus geen foreign key — de API bewaakt dat, zie
+-- api/src/elementAttributeValues.ts). Eén waardekolom per soort, precies één
+-- gevuld; value_text ook voor keuzelijsten. Alleen metagegevens; de waarden
+-- komen nooit in audit_log.
+create table if not exists element_attribute_values (
+  id bigserial primary key,
+  doelenboom_id bigint not null references doelenbomen(id) on delete cascade,
+  element_id bigint not null references elements(id) on delete cascade,
+  attribute_id text not null check (attribute_id ~ '^[A-Za-z0-9_-]{1,30}$'),
+  value_text text check (value_text is null or char_length(value_text) between 1 and 200),
+  value_number numeric check (value_number is null or abs(value_number) <= 999999999999999),
+  value_date date,
+  value_bool boolean,
+  updated_by bigint references users(id) on delete set null,
+  updated_at timestamptz not null default now(),
+  unique (element_id, attribute_id),
+  check (num_nonnulls(value_text, value_number, value_date, value_bool) = 1)
+);
+create index if not exists idx_eav_doelenboom on element_attribute_values(doelenboom_id);
+
 -- Generieke wijzigingshistorie per project-element (status, deliverables én
 -- activiteiten door elkaar, nieuwste eerst) — zie
 -- db/migrations/0022_project_history.sql voor de volledige toelichting.

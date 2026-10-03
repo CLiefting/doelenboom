@@ -1194,6 +1194,24 @@
   .dp-dev-form-row { display: flex; align-items: center; gap: 6px; }
   .dp-dev-counter { color: #777; font-size: 11px; margin-right: auto; }
   body.read-only .dp-dev-actions, body.read-only .dp-dev-form { display: none; }
+  /* Kenmerken per element (DOEL-76) */
+  .dp-attrs { margin-top: 10px; padding: 8px 10px; border-left: 3px solid #8FAADC; background: #f4f7fc; border-radius: 4px; }
+  .dp-attrs-title { font-weight: 700; font-size: 12px; color: var(--navy); margin-bottom: 4px; }
+  .dp-attr-row { display: flex; gap: 10px; align-items: baseline; margin: 3px 0; font-size: 12px; }
+  .dp-attr-label { flex: 0 0 38%; color: #555; overflow-wrap: anywhere; }
+  .dp-attr-value { flex: 1 1 auto; color: #222; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .dp-attr-row.empty .dp-attr-value { color: #9aa0a8; }
+  .dp-attr-req { font-size: 10px; color: #777; border: 1px solid #c9ccd1; border-radius: 8px; padding: 0 5px; white-space: nowrap; }
+  .dp-attr-field { flex: 1 1 auto; min-width: 0; }
+  .dp-attr-input { box-sizing: border-box; max-width: 100%; font: inherit; font-size: 12px; padding: 4px 6px; border: 1px solid #c9ccd1; border-radius: 4px; }
+  .dp-attr-text { width: 100%; }
+  .dp-attr-counter { display: block; color: #777; font-size: 11px; text-align: right; }
+  .dp-attr-hint, .dp-attr-expl { color: #777; font-size: 11px; font-style: italic; margin: 2px 0; overflow-wrap: anywhere; }
+  .dp-attr-actions { margin-top: 6px; display: flex; gap: 6px; }
+  body.read-only .dp-attr-actions { display: none; }
+  #hover-tooltip .tt-attrs { margin-top: 8px; padding-top: 6px; border-top: 1px solid #d5dbe6; font-size: 11px; color: #445; overflow-wrap: anywhere; }
+  #hover-tooltip .tt-attrs-title { font-weight: 700; color: var(--navy); margin-bottom: 2px; }
+  #hover-tooltip .tt-attrs b { font-weight: 600; }
   .control-rules-summary .crs-motivated { background: #f1f2f4; border-color: #c9ccd1; }
   .control-rules-summary .crs-motivated .cs-stat-value { color: #5a5f68; }
   .control-rules-summary .crs-motivated-count { color: #6b7078; font-size: 11px; }
@@ -2211,7 +2229,7 @@ function flipExpandAnchor() {
 }
 
 function runApp(data) {
-  const { DETAILS, EDGES, TOELICHTING, PROJECT_STATUS, PRODUCTS, PRODUCT_DEPENDENCIES, ACTIVITIES, DEPENDENCIES, TAGS, ELEMENT_TAGS, ORGS, OB_ORG, COLUMNS, ACTIVE_MODULES, CONTROL_RULES, CONTROL_DEVIATIONS } = data;
+  const { DETAILS, EDGES, TOELICHTING, PROJECT_STATUS, PRODUCTS, PRODUCT_DEPENDENCIES, ACTIVITIES, DEPENDENCIES, TAGS, ELEMENT_TAGS, ORGS, OB_ORG, COLUMNS, ACTIVE_MODULES, CONTROL_RULES, CONTROL_DEVIATIONS, ATTRIBUTES, ATTRIBUTE_VALUES } = data;
   // Controleweergave (DOEL-63): aan/uit-stand, vroeg gedeclareerd omdat
   // renderDetailPanel er naar kijkt. Zie applyControlView() verderop.
   let controlViewOn = false;
@@ -2220,6 +2238,8 @@ function runApp(data) {
   // in het detailpaneel ({ code, ruleId } of null), en telt de regel-markering
   // in het samenvattingspaneel ook gemotiveerde afwijkingen mee (standaard niet).
   let deviationEditing = null;
+  // DOEL-76: elementcode waarvan het kenmerkenformulier openstaat (of null).
+  let attributesEditingCode = null;
   let showMotivatedDeviations = false;
   // Licentiemodel (zie doelenboom_licentiemodel.md §3/§6, api/src/license.ts):
   // welke modules de licentie van deze tenant actief heeft. PROJECT_STATUS/
@@ -2260,6 +2280,16 @@ function runApp(data) {
       if (a.color) ALIAS_COLOR[a.typeName] = a.color;
     });
   });
+  // DOEL-76: de kenmerken die voor het type van dit element gelden (een
+  // alias volgt zijn basistype).
+  function attributeDefsFor(code) {
+    const d = DETAILS[code];
+    if (!d || !ATTRIBUTES.length) return [];
+    const col = TYPE_TO_COLUMN[d.type];
+    const base = {};
+    if (col) base[d.type] = col.typeName;
+    return attributesForType(ATTRIBUTES, d.type, base);
+  }
   function colorForType(type) {
     return ALIAS_COLOR[type] || (TYPE_TO_COLUMN[type] || {}).color || '#B5BAC2';
   }
@@ -5050,6 +5080,13 @@ function runApp(data) {
         (isProject ? '' : tagsChipsHtml(id) + orgChipsHtml(id)) +
       '</div>' +
       connectionsHtml(id) +
+      // DOEL-76: kenmerken van dit element. Zelfde schrijfrecht als de overige
+      // boom-inhoud; de server controleert het opnieuw.
+      attributesPanelHtml(attributeDefsFor(id), ATTRIBUTE_VALUES[id], {
+        canEdit: userRole !== 'bezoeker' && !document.body.classList.contains('standalone'),
+        elementCode: id,
+        editing: attributesEditingCode === id,
+      }) +
       (controlViewOn
         ? controlRuleViolationsHtml(CONTROL_EVAL.byElement[id], {
             // Zelfde schrijfrecht als de overige boom-inhoud (admin/gebruiker,
@@ -5249,6 +5286,8 @@ function runApp(data) {
       '<span class="tt-type">' + escapeHtml(d.type) + '</span></div>' +
       '<div class="tt-name">' + escapeHtml(d.name) + '</div>' +
       '<div class="tt-desc">' + escapeHtml(d.desc) + '</div>' + extraHtml +
+      // DOEL-76: de ingevulde kenmerken van dit element.
+      attributesHintHtml(attributeDefsFor(node.dataset.id), ATTRIBUTE_VALUES[node.dataset.id]) +
       // DOEL-68: bij actieve controleweergave ook tonen waaróm er een '!' staat.
       (controlViewOn ? controlRuleHintHtml(CONTROL_EVAL.byElement[node.dataset.id]) : '');
     positionTooltip(clientX, clientY);
@@ -5498,6 +5537,56 @@ function runApp(data) {
     const fNode = document.querySelector('.node[data-id="' + CSS.escape(focusId) + '"]');
     const key = fNode && fNode.closest('.column') ? fNode.closest('.column').dataset.key : null;
     renderDetailPanel(focusId, COL_COLORS[key] || '#002855');
+  }
+
+  // ---- Kenmerken invullen (DOEL-76) ----
+  // Knoppen in de sectie "Kenmerken" van het detailpaneel (data-attr-action,
+  // zie attributesPanelHtml); aangeroepen vanuit onDetailAreaClick.
+  async function handleAttributeAction(btn) {
+    const action = btn.dataset.attrAction;
+    const code = btn.dataset.code;
+    if (action === 'edit') {
+      attributesEditingCode = code;
+      rerenderFocusDetailPanel();
+      const first = detailPanel.querySelector('.dp-attr-input');
+      if (first) first.focus();
+      return;
+    }
+    if (action === 'cancel') {
+      attributesEditingCode = null;
+      rerenderFocusDetailPanel();
+      return;
+    }
+    if (action === 'save') {
+      const form = btn.closest('.dp-attrs-form');
+      if (!form) return;
+      const defs = attributeDefsFor(code);
+      const values = {};
+      for (let i = 0; i < defs.length; i += 1) {
+        const input = form.querySelector('.dp-attr-input[data-attr-id="' + CSS.escape(defs[i].id) + '"]');
+        if (!input) continue;
+        const parsed = attributeValueFromInput(defs[i], input.value);
+        if (parsed.error) { showToast(parsed.error, 'error'); input.focus(); return; }
+        values[defs[i].id] = parsed.value;
+      }
+      btn.disabled = true;
+      try {
+        const res = await fetch(apiUrl + '/api/doelenbomen/' + doelenboomId + '/elements/' + encodeURIComponent(code) + '/attributes', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + authToken },
+          body: JSON.stringify({ values: values }),
+        });
+        if (!res.ok) {
+          const b = await res.json().catch(() => ({}));
+          throw new Error(b.error || ('Opslaan mislukt (HTTP ' + res.status + ')'));
+        }
+        attributesEditingCode = null;
+        reloadTreeKeepingFocus();
+      } catch (err) {
+        btn.disabled = false;
+        showToast(err && err.message ? err.message : 'Onbekende fout bij opslaan.', 'error');
+      }
+    }
   }
 
   // ---- Gemotiveerde afwijking (DOEL-64) ----
@@ -8266,6 +8355,8 @@ function runApp(data) {
     if (activityDeleteAllBtn) { deleteAllActivities(activityDeleteAllBtn.dataset.code); return; }
     const mppImportBtn = ev.target.closest('.mpp-import-btn');
     if (mppImportBtn) { openMppImportModal(mppImportBtn.dataset.code); return; }
+    const attrBtn = ev.target.closest('[data-attr-action]');
+    if (attrBtn) { handleAttributeAction(attrBtn); return; }
     const devBtn = ev.target.closest('[data-dev-action]');
     if (devBtn) { handleDeviationAction(devBtn); return; }
     const editBtn = ev.target.closest('.dp-edit-btn');
@@ -8294,6 +8385,12 @@ function runApp(data) {
   detailPanel.addEventListener('click', onDetailAreaClick);
   // DOEL-64: tekenteller van het motivatieveld (gedelegeerd, geen inline handler).
   detailPanel.addEventListener('input', (ev) => {
+    // DOEL-76: tekenteller van een tekstkenmerk.
+    if (ev.target && ev.target.classList && ev.target.classList.contains('dp-attr-text')) {
+      const attrCounter = ev.target.parentElement && ev.target.parentElement.querySelector('.dp-attr-counter');
+      if (attrCounter) attrCounter.textContent = ev.target.value.length + ' / ' + ATTRIBUTE_TEXT_MAX_LENGTH;
+      return;
+    }
     if (!ev.target || !ev.target.classList || !ev.target.classList.contains('dp-dev-input')) return;
     const form = ev.target.closest('.dp-dev-form');
     const counter = form && form.querySelector('.dp-dev-counter');
@@ -9126,6 +9223,149 @@ function controlRuleHintHtml(violations) {
     ).join('') + '</div>';
 }
 
+// ---- Kenmerken per element (DOEL-76, epic DOEL-61) ----
+// Definities (tree.attributes) en ingevulde waarden (tree.attributeValues)
+// komen alleen mee met de module 'controleregels'. Alle labels, uitleg,
+// keuzelijstwaarden en tekstwaarden zijn gebruikersinvoer: overal via
+// escapeHtml. Knoppen hebben alleen data-attributen (data-attr-action); het
+// klikken wordt afgehandeld in onDetailAreaClick (geen inline handlers, CSP).
+const ATTRIBUTE_TEXT_MAX_LENGTH = 200;
+const ATTRIBUTE_HINT = 'Alleen metagegevens — geen inhoudelijke of gerubriceerde informatie.';
+
+// De kenmerken die voor een elementtype gelden: rechtstreeks, of via het
+// basistype van een alias (zelfde regel als `matches` in evaluateControlRules
+// en attributeAppliesToType in api/src/elementAttributeValues.ts).
+function attributesForType(attributes, type, typeToBase) {
+  const base = (typeToBase || {})[type];
+  return (attributes || []).filter((a) => {
+    const subjects = (a && a.subjectTypes) || [];
+    return subjects.indexOf(type) !== -1 || (base != null && subjects.indexOf(base) !== -1);
+  });
+}
+
+function attributeHasValue(value) {
+  return value !== undefined && value !== null && value !== '';
+}
+
+// Waarde als leesbare tekst (nog NIET ge-escaped): ja/nee, datum als
+// DD-MM-JJJJ, getal met decimale komma. Leeg = ''.
+function attributeDisplayValue(def, value) {
+  if (!attributeHasValue(value)) return '';
+  if (def.kind === 'boolean') return value === true ? 'Ja' : 'Nee';
+  if (def.kind === 'date') {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value));
+    return m ? m[3] + '-' + m[2] + '-' + m[1] : String(value);
+  }
+  if (def.kind === 'number') return String(value).replace('.', ',');
+  return String(value);
+}
+
+// Invoer uit het formulier -> waarde voor de API. Leeg = null (wissen).
+// Geeft { value } of { error } terug; de server valideert opnieuw.
+function attributeValueFromInput(def, raw) {
+  const text = String(raw == null ? '' : raw).trim();
+  if (text === '') return { value: null };
+  const label = def.label || def.id;
+  if (def.kind === 'number') {
+    if (!/^-?\d+([.,]\d+)?$/.test(text)) return { error: label + ': vul een getal in (bijvoorbeeld 12 of 12,5).' };
+    const n = Number(text.replace(',', '.'));
+    if (!isFinite(n) || Math.abs(n) > 999999999999999 || Number(n.toPrecision(15)) !== n || Number(n.toFixed(6)) !== n) {
+      return { error: label + ': een getal mag maximaal 15 cijfers hebben, waarvan hooguit 6 achter de komma.' };
+    }
+    return { value: n };
+  }
+  if (def.kind === 'boolean') {
+    if (text !== 'true' && text !== 'false') return { error: label + ': kies ja, nee of niet ingevuld.' };
+    return { value: text === 'true' };
+  }
+  if (def.kind === 'date') {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return { error: label + ': vul een geldige datum in.' };
+    return { value: text };
+  }
+  if (def.kind === 'choice') {
+    if ((def.options || []).indexOf(text) === -1) return { error: label + ': kies een waarde uit de lijst.' };
+    return { value: text };
+  }
+  if (text.length > ATTRIBUTE_TEXT_MAX_LENGTH) return { error: label + ': maximaal ' + ATTRIBUTE_TEXT_MAX_LENGTH + ' tekens.' };
+  return { value: text };
+}
+
+// Eén invoerveld per soort. data-attr-id koppelt het veld aan het kenmerk.
+function attributeInputHtml(def, value) {
+  const id = ' data-attr-id="' + escapeHtml(def.id) + '"';
+  const aria = ' aria-label="' + escapeHtml(def.label) + '"';
+  const has = attributeHasValue(value);
+  if (def.kind === 'choice') {
+    return '<select class="dp-attr-input"' + id + aria + '><option value="">— niet ingevuld —</option>' +
+      (def.options || []).map((o) =>
+        '<option value="' + escapeHtml(o) + '"' + (has && String(value) === o ? ' selected' : '') + '>' + escapeHtml(o) + '</option>'
+      ).join('') + '</select>';
+  }
+  if (def.kind === 'boolean') {
+    return '<select class="dp-attr-input"' + id + aria + '>' +
+      '<option value="">— niet ingevuld —</option>' +
+      '<option value="true"' + (value === true ? ' selected' : '') + '>Ja</option>' +
+      '<option value="false"' + (value === false ? ' selected' : '') + '>Nee</option></select>';
+  }
+  if (def.kind === 'date') {
+    return '<input type="date" class="dp-attr-input"' + id + aria + ' value="' + escapeHtml(has ? String(value) : '') + '">';
+  }
+  if (def.kind === 'number') {
+    return '<input type="text" inputmode="decimal" class="dp-attr-input" autocomplete="off"' + id + aria +
+      ' value="' + escapeHtml(has ? String(value).replace('.', ',') : '') + '">';
+  }
+  const text = has ? String(value) : '';
+  return '<input type="text" class="dp-attr-input dp-attr-text" autocomplete="off" maxlength="' + ATTRIBUTE_TEXT_MAX_LENGTH + '"' + id + aria +
+    ' value="' + escapeHtml(text) + '">' +
+    '<span class="dp-attr-counter">' + text.length + ' / ' + ATTRIBUTE_TEXT_MAX_LENGTH + '</span>';
+}
+
+// Sectie "Kenmerken" in het detailpaneel. opts:
+//   canEdit     — toon de knop Bewerken (admin/gebruiker, niet in een export)
+//   elementCode — gaat mee als data-code op de knoppen
+//   editing     — toon het invulformulier in plaats van de waarden
+function attributesPanelHtml(defs, values, opts) {
+  if (!defs || !defs.length) return '';
+  const o = opts || {};
+  const vals = values || {};
+  const code = ' data-code="' + escapeHtml(o.elementCode == null ? '' : String(o.elementCode)) + '"';
+  const required = (a) => (a.required ? ' <span class="dp-attr-req">verplicht</span>' : '');
+  if (o.canEdit && o.editing) {
+    return '<div class="dp-attrs dp-attrs-form"' + code + '><div class="dp-attrs-title">Kenmerken</div>' +
+      '<div class="dp-attr-hint">' + escapeHtml(ATTRIBUTE_HINT) + '</div>' +
+      defs.map((a) =>
+        '<div class="dp-attr-row"><label class="dp-attr-label">' + escapeHtml(a.label) + required(a) + '</label>' +
+        '<div class="dp-attr-field">' + attributeInputHtml(a, vals[a.id]) +
+        (a.explanation ? '<div class="dp-attr-expl">' + escapeHtml(a.explanation) + '</div>' : '') +
+        '</div></div>'
+      ).join('') +
+      '<div class="dp-attr-actions">' +
+      '<button type="button" class="btn btn-sm dp-attr-btn" data-attr-action="save"' + code + '>Opslaan</button>' +
+      '<button type="button" class="btn ghost btn-sm dp-attr-btn" data-attr-action="cancel"' + code + '>Annuleren</button></div></div>';
+  }
+  return '<div class="dp-attrs"><div class="dp-attrs-title">Kenmerken</div>' +
+    defs.map((a) => {
+      const shown = attributeDisplayValue(a, vals[a.id]);
+      return '<div class="dp-attr-row' + (shown === '' ? ' empty' : '') + '"><span class="dp-attr-label">' + escapeHtml(a.label) + required(a) + '</span>' +
+        '<span class="dp-attr-value">' + (shown === '' ? '&mdash;' : escapeHtml(shown)) + '</span></div>';
+    }).join('') +
+    (o.canEdit
+      ? '<div class="dp-attr-actions"><button type="button" class="btn ghost btn-sm dp-attr-btn" data-attr-action="edit"' + code + '>Kenmerken bewerken</button></div>'
+      : '') +
+    '</div>';
+}
+
+// Hint-kaartje: alleen de INGEVULDE kenmerken.
+function attributesHintHtml(defs, values) {
+  const vals = values || {};
+  const filled = (defs || []).filter((a) => attributeHasValue(vals[a.id]));
+  if (!filled.length) return '';
+  return '<div class="tt-attrs"><div class="tt-attrs-title">Kenmerken</div>' +
+    filled.map((a) =>
+      '<div><b>' + escapeHtml(a.label) + ':</b> ' + escapeHtml(attributeDisplayValue(a, vals[a.id])) + '</div>'
+    ).join('') + '</div>';
+}
+
 // Sectie "Controleregels" in het detailpaneel. Alle regeltekst en motivaties
 // (gebruikersinvoer) via escapeHtml. opts (DOEL-64):
 //   canEdit        — toon de knoppen Motiveer afwijking/Wijzigen/Intrekken
@@ -9499,7 +9739,12 @@ function adaptTreeResponse(tree) {
   // DOEL-64: gemotiveerde afwijkingen van controleregels (per element + regel).
   const CONTROL_DEVIATIONS = Array.isArray(tree.controlRuleDeviations) ? tree.controlRuleDeviations : [];
 
-  return { DETAILS, EDGES, TOELICHTING, PROJECT_STATUS, PRODUCTS, PRODUCT_DEPENDENCIES, ACTIVITIES, DEPENDENCIES, TAGS, ELEMENT_TAGS, ORGS, OB_ORG, COLUMNS, ACTIVE_MODULES, CONTROL_RULES, CONTROL_DEVIATIONS };
+  // DOEL-76: kenmerkdefinities en ingevulde waarden per elementcode — beide
+  // leeg zonder module 'controleregels' (server-side).
+  const ATTRIBUTES = Array.isArray(tree.attributes) ? tree.attributes : [];
+  const ATTRIBUTE_VALUES = (tree.attributeValues && typeof tree.attributeValues === 'object') ? tree.attributeValues : {};
+
+  return { DETAILS, EDGES, TOELICHTING, PROJECT_STATUS, PRODUCTS, PRODUCT_DEPENDENCIES, ACTIVITIES, DEPENDENCIES, TAGS, ELEMENT_TAGS, ORGS, OB_ORG, COLUMNS, ACTIVE_MODULES, CONTROL_RULES, CONTROL_DEVIATIONS, ATTRIBUTES, ATTRIBUTE_VALUES };
 }
 
 function renderError(message) {

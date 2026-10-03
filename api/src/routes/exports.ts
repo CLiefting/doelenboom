@@ -56,7 +56,9 @@ exportsRouter.get('/doelenbomen/:id/export', requireTenantRoleForDoelenboomParam
   // validatielijst in het 'nieuw' formaat (zie exporter.py).
   // DOEL-64: motivaties van afwijkingen horen niet in de Excel-export en gaan
   // dus ook niet naar de excel-service (undefined valt weg bij JSON.stringify).
-  const exportTree = { ...tree, controlRuleDeviations: undefined };
+  // DOEL-76: kenmerken in Excel zijn buiten scope (DOEL-66), dus definities en
+  // waarden gaan evenmin naar de excel-service.
+  const exportTree = { ...tree, controlRuleDeviations: undefined, attributes: undefined, attributeValues: undefined };
   const body = JSON.stringify({ tree: mode === 'data' ? exportTree : null, columns: tree.columns, meta });
   // Bestandsnaam: Doelenboom_<Tenant>_<Doelenboomnaam>_<JJMMDD> — tenant- en
   // doelenboomnaam gesaneerd voor gebruik in een bestandsnaam (spaties/

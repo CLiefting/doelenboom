@@ -160,13 +160,40 @@ export default function AttributeDefinitionsEditor({
     try {
       const result = await save(attributes.map(normalize));
       setAttributes(result.attributes);
-      setState({ ...state!, attributes: result.attributes, invalidAttributeIds: result.invalidAttributeIds });
+      // Na opslaan zijn de waarden van verwijderde kenmerken en
+      // keuzelijstwaarden opgeruimd (DOEL-76): de aantallen bijwerken.
+      const valueCounts: NonNullable<AttributeDefsState['valueCounts']> = {};
+      for (const a of result.attributes) {
+        const c = state!.valueCounts?.[a.id];
+        if (!c) continue;
+        const kept = Object.entries(c.byOption).filter(([o]) => a.options.includes(o));
+        const lost = Object.entries(c.byOption).filter(([o]) => !a.options.includes(o)).reduce((sum, [, n]) => sum + n, 0);
+        valueCounts[a.id] = { total: c.total - lost, byOption: Object.fromEntries(kept) };
+      }
+      setState({ ...state!, attributes: result.attributes, invalidAttributeIds: result.invalidAttributeIds, valueCounts });
       setDirty(false);
       setSaved(true);
     } catch (err) {
       setError(errMsg(err));
     } finally {
       setBusy(false);
+    }
+  }
+
+  // DOEL-76: ingevulde waarden horen bij een kenmerk-id (en bij een
+  // keuzelijst bij een waarde uit de lijst); verdwijnt die, dan wist de server
+  // de waarden bij het opslaan. Vooraf melden hoeveel dat er zijn.
+  const counts = state.valueCounts ?? {};
+  const currentById = new Map(attributes.map((a) => [a.id, a]));
+  const removedIds = Object.keys(counts).filter((id) => !currentById.has(id) && counts[id].total > 0);
+  const removedOptionIds: string[] = [];
+  let lostValues = removedIds.reduce((sum, id) => sum + counts[id].total, 0);
+  for (const a of attributes) {
+    if (a.kind !== 'choice' || !counts[a.id]) continue;
+    const lost = Object.entries(counts[a.id].byOption).filter(([o]) => !a.options.includes(o)).reduce((sum, [, n]) => sum + n, 0);
+    if (lost > 0) {
+      removedOptionIds.push(a.id);
+      lostValues += lost;
     }
   }
 
@@ -190,6 +217,16 @@ export default function AttributeDefinitionsEditor({
       {error && <p style={styles.error}>{error}</p>}
 
       {attributes.length === 0 && <p style={styles.muted}>Nog geen kenmerken.</p>}
+      {lostValues > 0 && (
+        <p style={styles.warn} role="alert">
+          Let op: bij opslaan {lostValues === 1 ? 'vervalt 1 ingevulde waarde' : `vervallen ${lostValues} ingevulde waarden`} op
+          elementen
+          {removedIds.length > 0 && <> van {removedIds.length === 1 ? 'het verwijderde kenmerk' : 'de verwijderde kenmerken'} {removedIds.join(', ')}</>}
+          {removedIds.length > 0 && removedOptionIds.length > 0 && ' en'}
+          {removedOptionIds.length > 0 && <> door verwijderde keuzelijstwaarden bij {removedOptionIds.join(', ')}</>}
+          . Dit kan niet ongedaan worden gemaakt.
+        </p>
+      )}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         {attributes.map((a, i) => (
           <div key={a.id} style={styles.row}>
@@ -198,6 +235,11 @@ export default function AttributeDefinitionsEditor({
                 <code style={styles.code}>{a.id}</code> <strong>{a.label}</strong>
                 <span style={styles.badge}>{ATTRIBUTE_KIND_LABELS[a.kind]}</span>
                 <span style={styles.badge}>{a.required ? 'verplicht' : 'optioneel'}</span>
+                {(counts[a.id]?.total ?? 0) > 0 && (
+                  <span style={styles.badge} title="Aantal elementen waarbij dit kenmerk is ingevuld. Verwijderen van het kenmerk wist deze waarden.">
+                    {counts[a.id].total} ingevuld
+                  </span>
+                )}
                 {isInvalid(a) && (
                   <span style={styles.badgeError} title="Dit kenmerk verwijst naar een elementtype dat niet (meer) bestaat; pas het aan of verwijder het.">
                     verwijst naar onbekend type
