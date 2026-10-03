@@ -22,6 +22,7 @@ import {
   getTemplateAttributes,
   updateTemplateAttributes,
 } from '../doelenboomTemplates.js';
+import { findRulesBrokenByAttributes } from '../controlRules.js';
 import { logAuditEvent } from '../auditLog.js';
 
 // Doelenboom-sjablonen: zie db/migrations/0014_doelenboom_templates.sql en
@@ -167,11 +168,15 @@ doelenboomTemplatesRouter.get('/doelenboom-templates/:id/control-rules', async (
   res.json({
     rules: current.rules,
     moduleActive: true,
+    attributes: current.attributes,
     validTypeNames: current.validTypeNames,
     tagCategories: [],
-    invalidRuleIds: current.rules
-      .filter((r) => [...(r.subjectTypes ?? []), ...(r.targetTypes ?? [])].some((t) => !valid.has(t)))
-      .map((r) => r.id),
+    invalidRuleIds: [...new Set([
+      ...current.rules
+        .filter((r) => [...(r.subjectTypes ?? []), ...(r.targetTypes ?? [])].some((t) => !valid.has(t)))
+        .map((r) => r.id),
+      ...findRulesBrokenByAttributes(current.rules, { attributes: current.attributes, columns: current.columns }),
+    ])],
   });
 });
 
@@ -216,7 +221,7 @@ doelenboomTemplatesRouter.put('/doelenboom-templates/:id/attributes', async (req
   const body = (req.body ?? {}) as { attributes?: unknown };
   const result = await updateTemplateAttributes(Number(req.params.id), typeof body === 'object' ? body.attributes : undefined);
   if (result.notFound) return res.status(404).json({ error: 'Sjabloon niet gevonden.' });
-  if (result.errors.length) return res.status(400).json({ error: result.errors.join(' ') });
+  if (result.errors.length) return res.status(result.conflict ? 409 : 400).json({ error: result.errors.join(' ') });
   const attributes = result.attributes ?? [];
   await logAuditEvent({
     eventType: 'attribute_definitions_updated',

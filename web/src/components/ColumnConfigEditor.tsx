@@ -58,6 +58,8 @@ export default function ColumnConfigEditor({
 }) {
   const [columns, setColumns] = useState<ColumnDef[] | null>(null);
   const [rulesReloadKey, setRulesReloadKey] = useState(0);
+  // DOEL-77: na het opslaan van kenmerken herlaadt alleen de regel-editor.
+  const [attributesSavedKey, setAttributesSavedKey] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -297,11 +299,12 @@ export default function ColumnConfigEditor({
           load={attributes.load}
           save={attributes.save}
           hideWhenModuleInactive={attributes.hideWhenModuleInactive}
+          onSaved={() => setAttributesSavedKey((k) => k + 1)}
         />
       )}
       {rules && (
         <ControlRulesEditor
-          key={rulesReloadKey}
+          key={`${rulesReloadKey}-${attributesSavedKey}`}
           load={rules.load}
           save={rules.save}
           hideWhenModuleInactive={rules.hideWhenModuleInactive}

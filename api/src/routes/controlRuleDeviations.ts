@@ -8,7 +8,10 @@ import {
   requireWritableDoelenboom,
   tenantIdForDoelenboom,
 } from '../rbac.js';
-import { CONTROLE_REGELS_MODULE, RULE_ID_PATTERN, getRulesForDoelenboom } from '../controlRules.js';
+import { CONTROLE_REGELS_MODULE, REQUIRED_RULE_PREFIX, RULE_ID_PATTERN, getRulesForDoelenboom } from '../controlRules.js';
+import { getColumnsForDoelenboom } from '../columnConfig.js';
+import { attributesFromDb } from '../elementAttributes.js';
+import { attributeAppliesToType } from '../elementAttributeValues.js';
 import {
   MOTIVATIE_MAX_LENGTH,
   getDeviation,
@@ -47,6 +50,23 @@ async function findElementId(doelenboomId: string, code: string): Promise<number
   return r.rows[0]?.id ?? null;
 }
 
+// DOEL-77: de ingebouwde regel voor een verplicht kenmerk (req-<kenmerk-id>)
+// is te motiveren zolang het kenmerk bestaat, verplicht is en voor het type
+// van dít element geldt.
+async function isRequiredAttributeRule(doelenboomId: string, elementId: number, ruleId: string): Promise<boolean> {
+  if (!ruleId.startsWith(REQUIRED_RULE_PREFIX)) return false;
+  const attributeId = ruleId.slice(REQUIRED_RULE_PREFIX.length);
+  const cfg = await pool.query(
+    `select attributes from column_configs where scope = 'doelenboom' and doelenboom_id = $1`,
+    [doelenboomId]
+  );
+  const def = attributesFromDb(cfg.rows[0]?.attributes).find((a) => a.id === attributeId);
+  if (!def || !def.required) return false;
+  const el = await pool.query('select type from elements where id = $1 and doelenboom_id = $2', [elementId, doelenboomId]);
+  if (!el.rows[0]) return false;
+  return attributeAppliesToType(def, el.rows[0].type, await getColumnsForDoelenboom(doelenboomId));
+}
+
 controlRuleDeviationsRouter.get(
   '/doelenbomen/:id/control-rule-deviations',
   requireTenantRoleForDoelenboomParam('bezoeker', 'id'),
@@ -83,7 +103,7 @@ controlRuleDeviationsRouter.put(DEVIATION_PATH, requireEditor, requireControlere
     if (!elementId) return res.status(404).json({ error: 'Element niet gevonden.' });
 
     const rules = (await getRulesForDoelenboom(req.params.id)) ?? [];
-    if (!rules.some((r) => r.id === ruleId)) {
+    if (!rules.some((r) => r.id === ruleId) && !(await isRequiredAttributeRule(req.params.id, elementId, ruleId))) {
       return res.status(400).json({ error: 'Deze controleregel bestaat niet (meer) voor deze doelenboom.' });
     }
 

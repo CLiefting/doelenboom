@@ -5441,7 +5441,7 @@ function runApp(data) {
   // los van filters/verborgen kolommen/focus.
   const TYPE_TO_BASE = {};
   Object.keys(TYPE_TO_COLUMN).forEach((t) => { TYPE_TO_BASE[t] = TYPE_TO_COLUMN[t].typeName; });
-  CONTROL_EVAL = evaluateControlRules(DETAILS, EDGES, ELEMENT_TAGS, TAGS, CONTROL_RULES, TYPE_TO_BASE, CONTROL_DEVIATIONS);
+  CONTROL_EVAL = evaluateControlRules(DETAILS, EDGES, ELEMENT_TAGS, TAGS, CONTROL_RULES, TYPE_TO_BASE, CONTROL_DEVIATIONS, ATTRIBUTES, ATTRIBUTE_VALUES);
   const controlRulesBtn = document.getElementById('control-rules-btn');
   const controlRulesSummaryEl = document.getElementById('control-rules-summary');
   function controlViewStorageKey() { return 'doelenboom-control-view-' + (doelenboomId || ''); }
@@ -9103,7 +9103,7 @@ function controlRuleTypeList(types) {
 // countsByRule = OPEN per regel, motivatedByRule = gemotiveerd per regel.
 function controlDeviationKey(code, ruleId) { return String(code) + '\u0000' + String(ruleId); }
 
-function evaluateControlRules(details, edges, elementTags, tags, rules, typeToBase, deviations) {
+function evaluateControlRules(details, edges, elementTags, tags, rules, typeToBase, deviations, attributes, attributeValues, today) {
   const devByKey = {};
   (deviations || []).forEach((dv) => { if (dv) devByKey[controlDeviationKey(dv.elementCode, dv.ruleId)] = dv; });
   const motivatedByRule = {};
@@ -9116,7 +9116,16 @@ function evaluateControlRules(details, edges, elementTags, tags, rules, typeToBa
   });
   const byElement = {};
   const countsByRule = {};
-  const activeRules = (rules || []).filter((r) => r && r.enabled !== false);
+  // DOEL-77: kenmerken. Elk verplicht kenmerk levert een ingebouwde regel
+  // req-<kenmerk-id>; die staan achter de eigen regels en zijn niet uit te
+  // zetten (daarvoor zet je "verplicht" uit bij het kenmerk).
+  const attrById = {};
+  (attributes || []).forEach((a) => { if (a && a.id) attrById[a.id] = a; });
+  const requiredRules = (attributes || []).filter((a) => a && a.id && a.required).map((a) => ({
+    id: REQUIRED_RULE_PREFIX + a.id, kind: 'attribute_required', attributeId: a.id, subjectTypes: a.subjectTypes || [],
+    label: 'Verplicht: ' + (a.label || a.id), explanation: a.explanation || '', enabled: true, builtIn: true,
+  }));
+  const activeRules = (rules || []).filter((r) => r && r.enabled !== false).concat(requiredRules);
   activeRules.forEach((r) => { countsByRule[r.id] = 0; motivatedByRule[r.id] = 0; });
   const codes = Object.keys(details || {});
 
@@ -9157,6 +9166,17 @@ function evaluateControlRules(details, edges, elementTags, tags, rules, typeToBa
         const key = CONTROL_RULE_FIELD_KEYS[r.field];
         if (key && !String(d[key] == null ? '' : d[key]).trim()) {
           detail = 'Veld "' + (CONTROL_RULE_FIELD_LABELS[r.field] || r.field) + '" is leeg';
+        }
+      } else if (r.kind === 'attribute_required' || r.kind === 'attribute_condition') {
+        // Alleen als het kenmerk (nog) bestaat en voor dit type geldt.
+        const def = attrById[r.attributeId];
+        if (def && matches(d.type, def.subjectTypes || [])) {
+          const value = ((attributeValues || {})[code] || {})[r.attributeId];
+          if (r.kind === 'attribute_required') {
+            if (!attributeHasValue(value)) detail = 'Verplicht kenmerk "' + (def.label || def.id) + '" is niet ingevuld';
+          } else {
+            detail = attributeConditionViolation(def, r, value, today || localTodayIso());
+          }
         }
       }
       if (detail) {
@@ -9364,6 +9384,138 @@ function attributesHintHtml(defs, values) {
     filled.map((a) =>
       '<div><b>' + escapeHtml(a.label) + ':</b> ' + escapeHtml(attributeDisplayValue(a, vals[a.id])) + '</div>'
     ).join('') + '</div>';
+}
+
+// ---- Regels op kenmerken (DOEL-77, epic DOEL-61) ----
+// Twee manieren waarop een kenmerk een '!' kan geven:
+//  1. het kenmerk is "verplicht" en leeg — ingebouwde regel req-<kenmerk-id>
+//     (label "Verplicht: <label>"), zodat motiveren (sleutel element +
+//     regel-id) ongewijzigd werkt;
+//  2. een kenmerkregel (kind attribute_condition): een EIS aan de waarde. Zo'n
+//     regel toetst alleen ingevulde waarden; alleen "verplicht" maakt leeg tot
+//     overtreding (geen dubbele signalen). Uitzondering: de eis "is leeg".
+// Datumeisen zijn tijdsafhankelijk: "hooguit 180 dagen oud" wordt getoetst
+// tegen vandaag (lokale datum van de browser) op het moment dat de boom wordt
+// geopend. Een element kan dus een '!' krijgen zonder dat iemand iets wijzigt.
+const REQUIRED_RULE_PREFIX = 'req-';
+
+function localTodayIso() {
+  const now = new Date();
+  const pad = (n) => (n < 10 ? '0' : '') + n;
+  return now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate());
+}
+
+// 'JJJJ-MM-DD' -> dagnummer (hele dagen), of null. Rekenen in UTC voorkomt
+// verschuivingen door zomertijd.
+function attributeDayNumber(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso == null ? '' : iso));
+  if (!m) return null;
+  return Math.round(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) / 86400000);
+}
+
+// De eis van een kenmerkregel als leesbare tekst (nog NIET ge-escaped), bv.
+// "is hooguit 180 dagen oud". Zelfde formulering als in de regel-editor.
+function attributeRequirementText(rule) {
+  const num = (v) => String(v).replace('.', ',');
+  const date = (v) => attributeDisplayValue({ kind: 'date' }, v);
+  const days = (v) => v + (Number(v) === 1 ? ' dag' : ' dagen');
+  const list = (v) => (Array.isArray(v) ? v : []).join(', ');
+  const v = rule.value;
+  switch (rule.operator) {
+    case 'text_contains': return 'bevat "' + v + '"';
+    case 'text_not_contains': return 'bevat niet "' + v + '"';
+    case 'text_equals': return 'is gelijk aan "' + v + '"';
+    case 'text_starts_with': return 'begint met "' + v + '"';
+    case 'num_eq': return 'is gelijk aan ' + num(v);
+    case 'num_ne': return 'is niet gelijk aan ' + num(v);
+    case 'num_lt': return 'is kleiner dan ' + num(v);
+    case 'num_lte': return 'is hooguit ' + num(v);
+    case 'num_gt': return 'is groter dan ' + num(v);
+    case 'num_gte': return 'is minstens ' + num(v);
+    case 'num_between': return 'ligt tussen ' + num(v) + ' en ' + num(rule.value2);
+    case 'date_before': return 'ligt vóór ' + date(v);
+    case 'date_on_or_before': return 'ligt op of vóór ' + date(v);
+    case 'date_after': return 'ligt na ' + date(v);
+    case 'date_on_or_after': return 'ligt op of na ' + date(v);
+    case 'date_max_days_old': return 'is hooguit ' + days(v) + ' oud';
+    case 'date_min_days_old': return 'is minstens ' + days(v) + ' oud';
+    case 'date_not_in_past': return 'ligt niet in het verleden';
+    case 'date_max_days_ahead': return 'ligt hooguit ' + days(v) + ' in de toekomst';
+    case 'choice_one_of': return 'is een van: ' + list(v);
+    case 'choice_none_of': return 'is geen van: ' + list(v);
+    case 'bool_true': return 'is ja';
+    case 'bool_false': return 'is nee';
+    case 'is_empty': return 'is leeg';
+    default: return '';
+  }
+}
+
+// Voldoet de waarde aan de eis? true/false, of null als de eis niet te
+// toetsen is (onbekende eis, of een waarde die niet bij de soort past).
+function attributeConditionHolds(def, rule, value, todayIso) {
+  const v = rule.value;
+  const op = String(rule.operator || '');
+  if (op.indexOf('text_') === 0) {
+    const have = String(value).toLowerCase();
+    const want = String(v == null ? '' : v).toLowerCase();
+    if (op === 'text_contains') return have.indexOf(want) !== -1;
+    if (op === 'text_not_contains') return have.indexOf(want) === -1;
+    if (op === 'text_equals') return have.trim() === want.trim();
+    if (op === 'text_starts_with') return have.indexOf(want) === 0;
+    return null;
+  }
+  if (op.indexOf('num_') === 0) {
+    const n = Number(value);
+    if (typeof value !== 'number' || !isFinite(n)) return null;
+    if (op === 'num_eq') return n === v;
+    if (op === 'num_ne') return n !== v;
+    if (op === 'num_lt') return n < v;
+    if (op === 'num_lte') return n <= v;
+    if (op === 'num_gt') return n > v;
+    if (op === 'num_gte') return n >= v;
+    if (op === 'num_between') return n >= v && n <= rule.value2;
+    return null;
+  }
+  if (op.indexOf('date_') === 0) {
+    const day = attributeDayNumber(value);
+    if (day == null) return null;
+    if (op === 'date_before' || op === 'date_on_or_before' || op === 'date_after' || op === 'date_on_or_after') {
+      const ref = attributeDayNumber(v);
+      if (ref == null) return null;
+      if (op === 'date_before') return day < ref;
+      if (op === 'date_on_or_before') return day <= ref;
+      if (op === 'date_after') return day > ref;
+      return day >= ref;
+    }
+    const today = attributeDayNumber(todayIso);
+    if (today == null) return null;
+    // Leeftijd in hele dagen: vandaag = 0, gisteren = 1, morgen = -1.
+    const age = today - day;
+    if (op === 'date_max_days_old') return age <= v;
+    if (op === 'date_min_days_old') return age >= v;
+    if (op === 'date_not_in_past') return age <= 0;
+    if (op === 'date_max_days_ahead') return -age <= v;
+    return null;
+  }
+  if (op === 'choice_one_of') return Array.isArray(v) && v.indexOf(String(value)) !== -1;
+  if (op === 'choice_none_of') return Array.isArray(v) && v.indexOf(String(value)) === -1;
+  if (op === 'bool_true') return value === true;
+  if (op === 'bool_false') return value === false;
+  return null;
+}
+
+// Overtredingstekst voor één element (nog NIET ge-escaped), of null als het
+// element voldoet. Lege waarde: alleen een overtreding bij... niets — dat is
+// de taak van "verplicht". De eis "is leeg" is juist overtreden door een
+// ingevulde waarde.
+function attributeConditionViolation(def, rule, value, todayIso) {
+  const has = attributeHasValue(value);
+  const shown = '"' + def.label + '" is ' + attributeDisplayValue(def, value);
+  if (rule.operator === 'is_empty') return has ? shown + '; eis: is leeg' : null;
+  if (!has) return null;
+  const holds = attributeConditionHolds(def, rule, value, todayIso);
+  if (holds !== false) return null;
+  return shown + '; eis: ' + attributeRequirementText(rule);
 }
 
 // Sectie "Controleregels" in het detailpaneel. Alle regeltekst en motivaties

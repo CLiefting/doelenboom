@@ -12,7 +12,9 @@ import { allValidTypeNames, getColumnsForDoelenboom, getTenantDefaultColumns } f
 import {
   CONTROLE_REGELS_MODULE,
   ControlRule,
+  findRulesBrokenByAttributes,
   findRulesBrokenByColumns,
+  requiredAttributeRuleIds,
   getTagCategoriesForDoelenboom,
   getTenantDefaultRules,
   rulesFromDb,
@@ -20,6 +22,7 @@ import {
   validateControlRulesInput,
 } from '../controlRules.js';
 import { countDeviationsPerRule, deleteDeviationsForMissingRules } from '../controlRuleDeviations.js';
+import { attributesFromDb, getTenantDefaultAttributes } from '../elementAttributes.js';
 import { hasModule } from '../license.js';
 import { logAuditEvent } from '../auditLog.js';
 import { sendServerError } from '../errors.js';
@@ -60,21 +63,30 @@ controlRulesRouter.get(
     const tenantId = await tenantIdForDoelenboom(req.params.id);
     if (tenantId == null) return res.status(404).json({ error: 'Niet gevonden.' });
     const cfg = await pool.query(
-      `select rules from column_configs where scope = 'doelenboom' and doelenboom_id = $1`,
+      `select rules, attributes from column_configs where scope = 'doelenboom' and doelenboom_id = $1`,
       [req.params.id]
     );
     if (!cfg.rows[0]) return res.status(404).json({ error: 'Doelenboom heeft nog geen kolomconfiguratie.' });
     const rules = rulesFromDb(cfg.rows[0].rules);
     const columns = await getColumnsForDoelenboom(req.params.id);
+    const moduleActive = await hasModule(tenantId, CONTROLE_REGELS_MODULE);
+    const attributes = attributesFromDb(cfg.rows[0].attributes);
     res.json({
       rules,
-      moduleActive: await hasModule(tenantId, CONTROLE_REGELS_MODULE),
+      moduleActive,
+      // DOEL-77: de kenmerkdefinities voor het regeltype "Kenmerk voldoet
+      // aan…" — zonder module niet (zichtbaarheidsprincipe, zie de
+      // attributes-route).
+      attributes: moduleActive ? attributes : [],
       validTypeNames: allValidTypeNames(columns),
       tagCategories: await getTagCategoriesForDoelenboom(req.params.id),
       // Regels die (na een kolomwijziging zonder actieve module) naar een niet
       // meer bestaand type wijzen — de editor markeert ze; opslaan kan pas als
       // ze hersteld zijn.
-      invalidRuleIds: findRulesBrokenByColumns(rules, columns),
+      invalidRuleIds: [...new Set([
+        ...findRulesBrokenByColumns(rules, columns),
+        ...findRulesBrokenByAttributes(rules, { attributes, columns }),
+      ])],
       // DOEL-64: aantal gemotiveerde afwijkingen per regel-id, zodat de editor
       // kan waarschuwen dat het verwijderen van een regel die motivaties wist.
       deviationCounts: await countDeviationsPerRule(req.params.id),
@@ -91,7 +103,7 @@ controlRulesRouter.put(
     try {
       await client.query('begin');
       const cfg = await client.query(
-        `select id, tenant_id from column_configs where scope = 'doelenboom' and doelenboom_id = $1 for update`,
+        `select id, tenant_id, attributes from column_configs where scope = 'doelenboom' and doelenboom_id = $1 for update`,
         [req.params.id]
       );
       if (!cfg.rows[0]) {
@@ -99,7 +111,8 @@ controlRulesRouter.put(
         return res.status(404).json({ error: 'Doelenboom heeft nog geen kolomconfiguratie — neem contact op met support.' });
       }
       const columns = await getColumnsForDoelenboom(req.params.id);
-      const { errors, rules } = validateControlRulesInput(rulesFromBody(req.body), allValidTypeNames(columns));
+      const attributes = attributesFromDb(cfg.rows[0].attributes);
+      const { errors, rules } = validateControlRulesInput(rulesFromBody(req.body), allValidTypeNames(columns), { attributes, columns });
       if (errors.length) {
         await client.query('rollback');
         return res.status(400).json({ error: errors.join(' ') });
@@ -108,7 +121,11 @@ controlRulesRouter.put(
       // DOEL-64: afwijkingen van regels die niet meer bestaan direct opruimen,
       // in dezelfde transactie (besluit Charles 2 oktober 2026). Een regel
       // uitschakelen (enabled=false) laat de afwijkingen staan.
-      const removedDeviations = await deleteDeviationsForMissingRules(client, req.params.id, rules.map((r) => r.id));
+      // DOEL-77: de afwijkingen van de ingebouwde regels voor verplichte kenmerken
+      // (req-<kenmerk-id>) horen niet bij deze lijst en blijven staan.
+      const removedDeviations = await deleteDeviationsForMissingRules(
+        client, req.params.id, [...rules.map((r) => r.id), ...requiredAttributeRuleIds(attributes)]
+      );
       await client.query('commit');
       await logAuditEvent({
         eventType: 'control_rules_updated',
@@ -131,12 +148,17 @@ controlRulesRouter.get('/tenants/:tenantId/control-rules', requireSysadmin, asyn
   const rules = await getTenantDefaultRules(req.params.tenantId);
   if (rules == null) return res.status(404).json({ error: 'Tenant heeft nog geen kolomconfiguratie.' });
   const columns = await getTenantDefaultColumns(req.params.tenantId);
+  const attributes = (await getTenantDefaultAttributes(req.params.tenantId)) ?? [];
   res.json({
     rules,
     moduleActive: await hasModule(req.params.tenantId, CONTROLE_REGELS_MODULE),
+    attributes,
     validTypeNames: allValidTypeNames(columns),
     tagCategories: [],
-    invalidRuleIds: findRulesBrokenByColumns(rules, columns),
+    invalidRuleIds: [...new Set([
+      ...findRulesBrokenByColumns(rules, columns),
+      ...findRulesBrokenByAttributes(rules, { attributes, columns }),
+    ])],
   });
 });
 
@@ -145,7 +167,7 @@ controlRulesRouter.put('/tenants/:tenantId/control-rules', requireSysadmin, asyn
   try {
     await client.query('begin');
     const cfg = await client.query(
-      `select id from column_configs where scope = 'tenant_default' and tenant_id = $1 for update`,
+      `select id, attributes from column_configs where scope = 'tenant_default' and tenant_id = $1 for update`,
       [req.params.tenantId]
     );
     if (!cfg.rows[0]) {
@@ -153,7 +175,9 @@ controlRulesRouter.put('/tenants/:tenantId/control-rules', requireSysadmin, asyn
       return res.status(404).json({ error: 'Tenant heeft nog geen kolomconfiguratie — neem contact op met support.' });
     }
     const columns = await getTenantDefaultColumns(req.params.tenantId);
-    const { errors, rules } = validateControlRulesInput(rulesFromBody(req.body), allValidTypeNames(columns));
+    const { errors, rules } = validateControlRulesInput(
+      rulesFromBody(req.body), allValidTypeNames(columns), { attributes: attributesFromDb(cfg.rows[0].attributes), columns }
+    );
     if (errors.length) {
       await client.query('rollback');
       return res.status(400).json({ error: errors.join(' ') });

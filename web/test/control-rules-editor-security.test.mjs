@@ -39,10 +39,21 @@ describe('ControlRulesEditor (DOEL-62)', () => {
     assert.match(source, /Leg alleen structuur vast; geen inhoudelijke of gerubriceerde informatie\./);
   });
 
-  it('kent geen statusregels (alleen de vijf structuurregeltypen)', () => {
-    const kinds = [...source.matchAll(/^\s+(requires_outgoing|requires_incoming|primary_parent_count|requires_tag_category|required_field):/gm)].map((m) => m[1]);
+  it('kent geen statusregels (de vijf structuurregeltypen plus de kenmerkregel uit DOEL-77)', () => {
+    const kinds = [...source.matchAll(/^\s+(requires_outgoing|requires_incoming|primary_parent_count|requires_tag_category|required_field|attribute_condition):/gm)].map((m) => m[1]);
     assert.deepEqual([...new Set(kinds)].sort(), [
-      'primary_parent_count', 'required_field', 'requires_incoming', 'requires_outgoing', 'requires_tag_category',
+      'attribute_condition', 'primary_parent_count', 'required_field', 'requires_incoming', 'requires_outgoing', 'requires_tag_category',
     ]);
+  });
+
+  it('kenmerkregel (DOEL-77): dezelfde eisen als de server, hint bij de vrije tekst, melding bij tijdsafhankelijke eisen', () => {
+    const api = readFileSync(path.join(__dirname, '..', '..', 'api', 'src', 'controlRules.ts'), 'utf8');
+    const serverOps = [...api.matchAll(/^  ([a-z_]+): \{ kind: '[a-z]+', value: '[a-z]+' \},$/gm)].map((m) => m[1]).sort();
+    const editorOps = [...source.matchAll(/\{ op: '([a-z_]+)', kind: '[a-z]+', shape: '[a-z]+', label: /g)].map((m) => m[1]).sort();
+    assert.equal(serverOps.length, 24);
+    assert.deepEqual(editorOps, serverOps);
+    assert.match(source, /placeholder="Geen inhoudelijke of gerubriceerde informatie\."\s+onChange=\{\(e\) => set\(\{ value: e\.target\.value \}\)\}/);
+    assert.match(source, /getoetst tegen de datum van vandaag/);
+    assert.match(source, /mag niet met "req-" beginnen/);
   });
 });

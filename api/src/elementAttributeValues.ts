@@ -25,6 +25,12 @@ export const ATTRIBUTE_TEXT_MAX_LENGTH = 200;
 // dezelfde waarde.
 const NUMBER_MAX_ABS = 999_999_999_999_999;
 
+// Ook gebruikt voor de vergelijkingswaarde van een kenmerkregel (DOEL-77).
+export function isValidAttributeNumber(raw: unknown): raw is number {
+  return typeof raw === 'number' && Number.isFinite(raw) && Math.abs(raw) <= NUMBER_MAX_ABS &&
+    Number(raw.toPrecision(15)) === raw && Number(raw.toFixed(6)) === raw;
+}
+
 export type AttributeValue = string | number | boolean;
 // Per elementcode: kenmerk-id -> waarde. Datum als 'JJJJ-MM-DD'.
 export type AttributeValuesByElement = Record<string, Record<string, AttributeValue>>;
@@ -39,7 +45,7 @@ export function attributeAppliesToType(def: AttributeDef, elementType: string, c
   return base != null && subjects.includes(base);
 }
 
-function isRealDate(value: string): boolean {
+export function isRealDate(value: string): boolean {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   if (!m) return false;
   const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
@@ -75,7 +81,7 @@ export function parseAttributeValue(def: AttributeDef, raw: unknown): { error: s
     }
     case 'number': {
       if (typeof raw !== 'number' || !Number.isFinite(raw)) return { error: `${where}: de waarde moet een getal zijn.` };
-      if (Math.abs(raw) > NUMBER_MAX_ABS || Number(raw.toPrecision(15)) !== raw || Number(raw.toFixed(6)) !== raw) {
+      if (!isValidAttributeNumber(raw)) {
         return { error: `${where}: een getal mag maximaal 15 cijfers hebben, waarvan hooguit 6 achter de komma.` };
       }
       // -0 opslaan als 0.
