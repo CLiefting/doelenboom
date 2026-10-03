@@ -421,6 +421,7 @@
   .app-toast.visible { display: block; }
   .app-toast.error { background: #DC3545; }
   .app-toast.ok { background: #2E7D5B; }
+  .app-toast.warn { background: #B26A00; }
 
   .btn.btn-xs { padding: 3px 9px; font-size: 11.5px; }
 
@@ -1201,7 +1202,8 @@
   .dp-attr-label { flex: 0 0 38%; color: #555; overflow-wrap: anywhere; }
   .dp-attr-value { flex: 1 1 auto; color: #222; white-space: pre-wrap; overflow-wrap: anywhere; }
   .dp-attr-row.empty .dp-attr-value { color: #9aa0a8; }
-  .dp-attr-req { font-size: 10px; color: #777; border: 1px solid #c9ccd1; border-radius: 8px; padding: 0 5px; white-space: nowrap; }
+  .dp-attr-req { color: #DC3545; font-weight: 700; }
+  .dp-attr-legend { color: #777; font-size: 11px; margin-top: 4px; }
   .dp-attr-field { flex: 1 1 auto; min-width: 0; }
   .dp-attr-input { box-sizing: border-box; max-width: 100%; font: inherit; font-size: 12px; padding: 4px 6px; border: 1px solid #c9ccd1; border-radius: 4px; }
   .dp-attr-text { width: 100%; }
@@ -5201,6 +5203,21 @@ function runApp(data) {
   function focusStorageKey() {
     return 'doelenboom-focus-' + (doelenboomId || '');
   }
+  // DOEL-78: een melding die een herlaadbeurt moet overleven (zie
+  // handleAttributeAction en showPendingToastAfterReload).
+  function pendingToastKey() {
+    return 'doelenboom-pending-toast-' + (doelenboomId || '');
+  }
+  function showPendingToastAfterReload() {
+    let message;
+    try {
+      message = sessionStorage.getItem(pendingToastKey());
+      sessionStorage.removeItem(pendingToastKey());
+    } catch (err) {
+      return;
+    }
+    if (message) showToast(String(message).slice(0, 2000), 'warn');
+  }
 
   function reloadTreeKeepingFocus(delayMs) {
     try {
@@ -5581,6 +5598,20 @@ function runApp(data) {
           throw new Error(b.error || ('Opslaan mislukt (HTTP ' + res.status + ')'));
         }
         attributesEditingCode = null;
+        // DOEL-78: niet blokkeren, wel melden welke verplichte kenmerken nog
+        // leeg zijn. De pagina herlaadt na het opslaan, dus de melding gaat via
+        // sessionStorage mee en verschijnt na het herladen.
+        const missing = attributeMissingRequiredText(defs, values);
+        if (missing) {
+          try {
+            sessionStorage.setItem(pendingToastKey(), 'Opgeslagen. ' + missing);
+          } catch (storageErr) {
+            // sessionStorage geblokkeerd: de melding nu tonen en iets later herladen.
+            showToast('Opgeslagen. ' + missing, 'warn');
+            reloadTreeKeepingFocus(2500);
+            return;
+          }
+        }
         reloadTreeKeepingFocus();
       } catch (err) {
         btn.disabled = false;
@@ -8988,6 +9019,7 @@ function runApp(data) {
   // reloadTreeKeepingFocus()/restoreFocusAfterReload() hierboven. Geen effect
   // bij een "gewone" eerste load, want dan staat er niets in sessionStorage.
   restoreFocusAfterReload();
+  showPendingToastAfterReload();
 }
 
 // ============================================================================
@@ -9349,7 +9381,12 @@ function attributesPanelHtml(defs, values, opts) {
   const o = opts || {};
   const vals = values || {};
   const code = ' data-code="' + escapeHtml(o.elementCode == null ? '' : String(o.elementCode)) + '"';
-  const required = (a) => (a.required ? ' <span class="dp-attr-req">verplicht</span>' : '');
+  // Verplicht: een rode * achter het label (DOEL-78), met een legenda onder
+  // de lijst. title/aria-label voor wie de kleur of het teken niet ziet.
+  const required = (a) => (a.required ? ' <span class="dp-attr-req" title="Verplicht" aria-label="verplicht">*</span>' : '');
+  const legend = defs.some((a) => a.required)
+    ? '<div class="dp-attr-legend"><span class="dp-attr-req" aria-hidden="true">*</span> verplicht</div>'
+    : '';
   if (o.canEdit && o.editing) {
     return '<div class="dp-attrs dp-attrs-form"' + code + '><div class="dp-attrs-title">Kenmerken</div>' +
       '<div class="dp-attr-hint">' + escapeHtml(ATTRIBUTE_HINT) + '</div>' +
@@ -9358,7 +9395,7 @@ function attributesPanelHtml(defs, values, opts) {
         '<div class="dp-attr-field">' + attributeInputHtml(a, vals[a.id]) +
         (a.explanation ? '<div class="dp-attr-expl">' + escapeHtml(a.explanation) + '</div>' : '') +
         '</div></div>'
-      ).join('') +
+      ).join('') + legend +
       '<div class="dp-attr-actions">' +
       '<button type="button" class="btn btn-sm dp-attr-btn" data-attr-action="save"' + code + '>Opslaan</button>' +
       '<button type="button" class="btn ghost btn-sm dp-attr-btn" data-attr-action="cancel"' + code + '>Annuleren</button></div></div>';
@@ -9368,11 +9405,24 @@ function attributesPanelHtml(defs, values, opts) {
       const shown = attributeDisplayValue(a, vals[a.id]);
       return '<div class="dp-attr-row' + (shown === '' ? ' empty' : '') + '"><span class="dp-attr-label">' + escapeHtml(a.label) + required(a) + '</span>' +
         '<span class="dp-attr-value">' + (shown === '' ? '&mdash;' : escapeHtml(shown)) + '</span></div>';
-    }).join('') +
+    }).join('') + legend +
     (o.canEdit
       ? '<div class="dp-attr-actions"><button type="button" class="btn ghost btn-sm dp-attr-btn" data-attr-action="edit"' + code + '>Kenmerken bewerken</button></div>'
       : '') +
     '</div>';
+}
+
+// Melding na het opslaan van kenmerken (DOEL-78): welke verplichte kenmerken
+// zijn nog leeg? Het opslaan wordt niet geblokkeerd (een leeg verplicht
+// kenmerk is een signaal in de controleweergave en is te motiveren), maar de
+// gebruiker hoort het wel meteen. Geeft '' terug als er niets openstaat. De
+// labels zijn gebruikersinvoer: de aanroeper toont de tekst als platte tekst
+// (showToast gebruikt textContent).
+function attributeMissingRequiredText(defs, values) {
+  const vals = values || {};
+  const missing = (defs || []).filter((a) => a && a.required && !attributeHasValue(vals[a.id])).map((a) => a.label || a.id);
+  if (!missing.length) return '';
+  return (missing.length === 1 ? 'Verplicht kenmerk nog leeg: ' : 'Verplichte kenmerken nog leeg: ') + missing.join(', ') + '.';
 }
 
 // Hint-kaartje: alleen de INGEVULDE kenmerken.
@@ -9661,9 +9711,10 @@ function showToast(message, kind) {
   const el = document.getElementById('app-toast');
   if (!el) { window.alert(message); return; }
   el.textContent = message;
-  el.className = 'app-toast visible ' + (kind === 'error' ? 'error' : 'ok');
+  // 'warn' (DOEL-78): gelukt, maar er staat nog iets open — blijft wat langer staan.
+  el.className = 'app-toast visible ' + (kind === 'error' ? 'error' : (kind === 'warn' ? 'warn' : 'ok'));
   if (toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.classList.remove('visible'); }, 4500);
+  toastTimer = setTimeout(() => { el.classList.remove('visible'); }, kind === 'warn' ? 8000 : 4500);
 }
 
 // Kolommen komen sinds de configureerbare kolommen (zie

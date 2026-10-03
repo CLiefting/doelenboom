@@ -25,7 +25,7 @@ const grabLine = (name) => extract(new RegExp(`const ${name} = [^\\n]*;`), name)
 
 const NAMES = [
   'attributesForType', 'attributeHasValue', 'attributeDisplayValue', 'attributeValueFromInput',
-  'attributeInputHtml', 'attributesPanelHtml', 'attributesHintHtml',
+  'attributeInputHtml', 'attributesPanelHtml', 'attributesHintHtml', 'attributeMissingRequiredText',
 ];
 // eslint-disable-next-line no-new-func
 const F = new Function(
@@ -105,7 +105,16 @@ describe('kenmerken in tree.html (DOEL-76)', () => {
     assert.match(html, /Referentie<\/span><span class="dp-attr-value">REF-1</);
     assert.match(html, /Aantal<\/span><span class="dp-attr-value">0</);
     assert.match(html, /Getoetst<\/span><span class="dp-attr-value">Nee</);
-    assert.match(html, /<div class="dp-attr-row empty"><span class="dp-attr-label">Laatst beoordeeld <span class="dp-attr-req">verplicht<\/span><\/span><span class="dp-attr-value">&mdash;</);
+    // DOEL-78: verplicht als rode * achter het label, met een legenda eronder.
+    assert.match(html, /<div class="dp-attr-row empty"><span class="dp-attr-label">Laatst beoordeeld <span class="dp-attr-req" title="Verplicht" aria-label="verplicht">\*<\/span><\/span><span class="dp-attr-value">&mdash;</);
+    assert.match(html, /<div class="dp-attr-legend"><span class="dp-attr-req" aria-hidden="true">\*<\/span> verplicht<\/div>/);
+    assert.equal((html.match(/dp-attr-req/g) ?? []).length, 2, 'één verplicht kenmerk + de legenda');
+    assert.doesNotMatch(html, />verplicht<\/span>/, 'het oude label is weg');
+    // Zonder verplichte kenmerken geen legenda; in het formulier dezelfde * en legenda.
+    assert.doesNotMatch(F.attributesPanelHtml(DEFS.filter((a) => !a.required), {}, { canEdit: true }), /dp-attr-legend|dp-attr-req/);
+    const form = F.attributesPanelHtml(DEFS, {}, { canEdit: true, elementCode: 'C1', editing: true });
+    assert.match(form, /Laatst beoordeeld <span class="dp-attr-req" title="Verplicht" aria-label="verplicht">\*<\/span><\/label>/);
+    assert.match(form, /dp-attr-legend/);
   });
 
   it('bezoeker (canEdit=false) krijgt geen knoppen en geen formulier, ook niet met editing=true', () => {
@@ -146,6 +155,30 @@ describe('kenmerken in tree.html (DOEL-76)', () => {
     assert.match(html, /<b>Getoetst:<\/b> Nee/);
     assert.match(html, /<b>Aantal:<\/b> 0/);
     assert.doesNotMatch(html, /Fase/);
+  });
+
+  it('melding na opslaan (DOEL-78): noemt de verplichte kenmerken die nog leeg zijn, zonder te blokkeren', () => {
+    const defs = [
+      def({ id: 'A', label: 'Type', required: true }), def({ id: 'B', label: 'Is aanwezig', kind: 'boolean', required: true }),
+      def({ id: 'C', label: 'Optioneel' }), def({ id: 'D', label: 'Aantal', kind: 'number', required: true }),
+    ];
+    assert.equal(F.attributeMissingRequiredText(defs, { A: 'x', B: false, D: 0 }), '', 'nee en 0 zijn ingevuld');
+    assert.equal(F.attributeMissingRequiredText(defs, { A: null, B: true, D: 1 }), 'Verplicht kenmerk nog leeg: Type.');
+    assert.equal(F.attributeMissingRequiredText(defs, { B: null, C: null }), 'Verplichte kenmerken nog leeg: Type, Is aanwezig, Aantal.');
+    assert.equal(F.attributeMissingRequiredText(defs, undefined), 'Verplichte kenmerken nog leeg: Type, Is aanwezig, Aantal.');
+    assert.equal(F.attributeMissingRequiredText([def({ id: 'C' })], {}), '');
+    assert.equal(F.attributeMissingRequiredText(undefined, {}), '');
+    // Het opslaan zelf gaat door: de melding wordt pas ná een geslaagd verzoek bepaald en overleeft het herladen.
+    const handler = extract(/async function handleAttributeAction\(btn\) \{[\s\S]*?\n  \}/, 'handleAttributeAction');
+    const okAt = handler.indexOf('if (!res.ok)');
+    const missingAt = handler.indexOf('attributeMissingRequiredText(defs, values)');
+    assert.ok(okAt > 0 && missingAt > okAt, 'melding na het geslaagde verzoek');
+    assert.match(handler, /sessionStorage\.setItem\(pendingToastKey\(\), 'Opgeslagen\. ' \+ missing\)/);
+    assert.match(source, /restoreFocusAfterReload\(\);\n  showPendingToastAfterReload\(\);/);
+    // De melding bevat labels (gebruikersinvoer) en wordt als platte tekst getoond.
+    const toast = extract(/function showToast\(message, kind\) \{[\s\S]*?\n\}/, 'showToast');
+    assert.match(toast, /el\.textContent = message;/);
+    assert.doesNotMatch(toast, /innerHTML/);
   });
 
   it('A03: label, uitleg, keuzelijstwaarden, tekstwaarden, id en elementcode worden overal ge-escaped', () => {
