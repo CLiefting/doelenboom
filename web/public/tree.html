@@ -380,6 +380,23 @@
   }
   .checkbox-list-item input { width: auto !important; margin: 0 !important; }
   .checkbox-list-empty { font-size: 12px; color: #999; font-style: italic; margin: 0; }
+  /* PowerPoint-export (DOEL-88) */
+  .pptx-export-modal { max-width: 480px; }
+  .pptx-export-label {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-size: 12.5px; font-weight: 600; color: #444;
+  }
+  .pptx-export-links { display: flex; gap: 10px; }
+  .pptx-export-links .link-btn {
+    background: none; border: none; padding: 0; font: inherit; font-size: 12px; font-weight: 400;
+    color: var(--navy); text-decoration: underline; cursor: pointer;
+  }
+  .pptx-export-columns { max-height: 240px; margin-bottom: 12px; }
+  .pptx-export-columns .checkbox-list-item.is-hidden { color: #999; cursor: default; }
+  .pptx-export-columns .pptx-col-swatch { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+  .pptx-export-columns .pptx-col-count { margin-left: auto; color: #888; font-size: 12px; white-space: nowrap; }
+  .pptx-export-summary { font-size: 13px; color: #333; margin: 4px 0 8px; }
+  .pptx-export-summary.too-many { color: #DC3545; font-weight: 600; }
   .value-picker-empty { padding: 8px; font-size: 12px; color: #999; font-style: italic; }
 
   .dp-crud-actions { display: flex; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 1px solid #eee; }
@@ -1556,6 +1573,7 @@
             <button type="button" class="file-menu-item admin-only" id="nav-import-btn">Importeer Excel</button>
             <div class="file-menu-separator admin-only"></div>
             <button type="button" class="file-menu-item" id="export-xlsx-btn">Exporteer als Excel</button>
+            <button type="button" class="file-menu-item" id="export-pptx-btn">Exporteer als PowerPoint</button>
             <button type="button" class="file-menu-item" id="export-html-btn">Exporteer als HTML-bestand</button>
             <!-- Alleen zichtbaar met een geselecteerd project (zie .project-
                  selected-only-CSS-regel + renderProjectPanel die de body-klasse
@@ -1681,6 +1699,41 @@
         </div>
       </div>
       <p class="export-modal-status" id="export-modal-status"></p>
+    </div>
+  </div>
+
+  <!-- PowerPoint-export van de doelenboom (DOEL-88): welke kolommen per
+       element uitwerken en hoeveel kolommen per regel op de eerste slide. -->
+  <div class="element-modal-backdrop" id="pptx-export-modal-backdrop">
+    <div class="element-modal pptx-export-modal">
+      <h3>Exporteer als PowerPoint</h3>
+      <p class="element-modal-hint">De eerste slide toont de kolommen als snoer. Voor elke kolom die je hieronder aanvinkt volgt een slide per element, met de keten van dat element, de beschrijving en de verbindingen.</p>
+      <form id="pptx-export-form">
+        <div class="pptx-export-label">
+          <span>Per element uitwerken</span>
+          <span class="pptx-export-links">
+            <button type="button" class="link-btn" id="pptx-export-all">Alles</button>
+            <button type="button" class="link-btn" id="pptx-export-none">Niets</button>
+          </span>
+        </div>
+        <div class="checkbox-list pptx-export-columns" id="pptx-export-columns"></div>
+        <p class="element-modal-hint" id="pptx-export-hidden-hint" style="display:none;">Verborgen kolommen komen niet in de presentatie. Maak een kolom eerst zichtbaar in de boom om hem mee te nemen.</p>
+        <label>Kolommen per regel op de eerste slide
+          <select id="pptx-export-per-row">
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4" selected>4</option>
+            <option value="5">5</option>
+            <option value="6">6</option>
+          </select>
+        </label>
+        <p class="pptx-export-summary" id="pptx-export-summary"></p>
+        <p class="element-modal-status" id="pptx-export-status"></p>
+        <div class="element-modal-actions">
+          <button type="button" class="btn ghost" id="pptx-export-cancel">Annuleren</button>
+          <button type="submit" class="btn" id="pptx-export-save">Downloaden</button>
+        </div>
+      </form>
     </div>
   </div>
 
@@ -6456,6 +6509,107 @@ function runApp(data) {
     if (currentProjectCode) openProjectExcelModal(currentProjectCode);
   });
 
+  // ---- PowerPoint-export van de doelenboom (DOEL-88) ----
+  // De keuzes gaan als JSON naar POST .../export-pptx (api/src/routes/
+  // exports.ts); de server valideert ze opnieuw tegen de kolommen van deze
+  // boom. Kolommen die nu op het scherm verborgen zijn (hiddenCols) komen niet
+  // in de presentatie. De pure hulpfuncties (pptxExport*) staan op topniveau.
+  const pptxExportBtn = document.getElementById('export-pptx-btn');
+  const pptxExportBackdrop = document.getElementById('pptx-export-modal-backdrop');
+  const pptxExportForm = document.getElementById('pptx-export-form');
+  const pptxExportColumnsEl = document.getElementById('pptx-export-columns');
+  const pptxExportPerRowEl = document.getElementById('pptx-export-per-row');
+  const pptxExportSummaryEl = document.getElementById('pptx-export-summary');
+  const pptxExportStatusEl = document.getElementById('pptx-export-status');
+  const pptxExportSaveBtn = document.getElementById('pptx-export-save');
+  const pptxExportHiddenHint = document.getElementById('pptx-export-hidden-hint');
+  let pptxExportRows = [];
+  let pptxExportBusy = false;
+
+  function pptxExportChecked() {
+    return Array.from(pptxExportColumnsEl.querySelectorAll('input[type="checkbox"]:checked')).map((i) => i.value);
+  }
+
+  function updatePptxExportSummary() {
+    const count = pptxExportSlideCount(pptxExportRows, pptxExportChecked(), pptxExportPerRowEl.value);
+    const tooMany = count > PPTX_EXPORT_MAX_SLIDES;
+    pptxExportSummaryEl.textContent = pptxExportSummaryText(count, PPTX_EXPORT_MAX_SLIDES);
+    pptxExportSummaryEl.classList.toggle('too-many', tooMany);
+    pptxExportSaveBtn.disabled = tooMany || pptxExportBusy || !pptxExportRows.some((r) => !r.hidden);
+  }
+
+  function openPptxExportModal() {
+    const counts = {};
+    Object.keys(DETAILS).forEach((code) => {
+      const col = TYPE_TO_COLUMN[DETAILS[code].type];
+      if (col) counts[col.typeName] = (counts[col.typeName] || 0) + 1;
+    });
+    pptxExportRows = pptxExportColumnRows(COLUMNS, Array.from(hiddenCols), counts);
+    pptxExportColumnsEl.innerHTML = pptxExportColumnsHtml(pptxExportRows, []);
+    pptxExportHiddenHint.style.display = pptxExportRows.some((r) => r.hidden) ? '' : 'none';
+    pptxExportBusy = false;
+    setBulkStatus(pptxExportStatusEl, '');
+    updatePptxExportSummary();
+    pptxExportBackdrop.classList.add('visible');
+  }
+
+  function closePptxExportModal() {
+    if (pptxExportBusy) return;
+    pptxExportBackdrop.classList.remove('visible');
+  }
+
+  function setAllPptxExportColumns(on) {
+    pptxExportColumnsEl.querySelectorAll('input[type="checkbox"]:not(:disabled)').forEach((i) => { i.checked = on; });
+    updatePptxExportSummary();
+  }
+
+  if (pptxExportBtn && pptxExportBackdrop) {
+    pptxExportBtn.addEventListener('click', openPptxExportModal);
+    document.getElementById('pptx-export-cancel').addEventListener('click', closePptxExportModal);
+    document.getElementById('pptx-export-all').addEventListener('click', () => setAllPptxExportColumns(true));
+    document.getElementById('pptx-export-none').addEventListener('click', () => setAllPptxExportColumns(false));
+    pptxExportBackdrop.addEventListener('click', (ev) => { if (ev.target === pptxExportBackdrop) closePptxExportModal(); });
+    pptxExportColumnsEl.addEventListener('change', updatePptxExportSummary);
+    pptxExportPerRowEl.addEventListener('change', updatePptxExportSummary);
+    pptxExportForm.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      if (pptxExportBusy) return;
+      const payload = pptxExportPayload(pptxExportRows, pptxExportChecked(), pptxExportPerRowEl.value);
+      pptxExportBusy = true;
+      pptxExportSaveBtn.disabled = true;
+      setBulkStatus(pptxExportStatusEl, 'Bezig met genereren\u2026', 'busy');
+      try {
+        const res = await fetch(apiUrl + '/api/doelenbomen/' + doelenboomId + '/export-pptx', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + authToken },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error || ('Export mislukt (HTTP ' + res.status + ')'));
+        }
+        const blob = await res.blob();
+        const disposition = res.headers.get('Content-Disposition') || '';
+        const match = disposition.match(/filename="([^"]+)"/);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = match ? match[1] : 'Doelenboom.pptx';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+        pptxExportBusy = false;
+        closePptxExportModal();
+        showToast('De PowerPoint is gedownload.', 'ok');
+      } catch (err) {
+        pptxExportBusy = false;
+        setBulkStatus(pptxExportStatusEl, err && err.message ? err.message : 'Onbekende fout bij exporteren.');
+        updatePptxExportSummary();
+      }
+    });
+  }
+
   // ---- Excel-export: eerst formaat (oud/nieuw) kiezen, dan template/data ----
   const exportXlsxBtn = document.getElementById('export-xlsx-btn');
   const exportModalBackdrop = document.getElementById('export-modal-backdrop');
@@ -9866,6 +10020,74 @@ function columnSortResultText(result) {
   const moved = typeof r.moved === 'number' ? r.moved : 0;
   if (!moved) return 'De kolom stond al in deze volgorde.';
   return 'Kolom gesorteerd: ' + moved + ' van de ' + sorted + (sorted === 1 ? ' element' : ' elementen') + ' verplaatst.';
+}
+
+// ---- PowerPoint-export van de doelenboom (DOEL-88) ----
+// Pure functies op topniveau, zodat web/test/tree-html-pptx-export.test.mjs
+// ze los kan laden en testen. De grenzen zijn dezelfde als in
+// api/src/routes/exports.ts en excel-service/app/tree_pptx.py; de server
+// controleert alles opnieuw.
+const PPTX_EXPORT_MAX_SLIDES = 300;
+const PPTX_EXPORT_SNOER_MAX_ROWS = 4;
+
+function pptxExportClampPerRow(value) {
+  const n = parseInt(value, 10);
+  if (!Number.isFinite(n)) return 4;
+  return Math.max(2, Math.min(6, n));
+}
+
+function pptxExportColumnRows(columns, hiddenKeys, countsByColumn) {
+  const hidden = new Set(hiddenKeys || []);
+  const counts = countsByColumn || {};
+  return (columns || []).map((c) => ({
+    typeName: c.typeName,
+    title: c.title || c.typeName,
+    color: /^#[0-9a-fA-F]{6}$/.test(c.color || '') ? c.color : '#999999',
+    count: typeof counts[c.typeName] === 'number' ? counts[c.typeName] : 0,
+    hidden: hidden.has(c.typeName),
+  }));
+}
+
+function pptxExportSlideCount(rows, checkedNames, perRow) {
+  const checked = new Set(checkedNames || []);
+  const visible = (rows || []).filter((r) => !r.hidden);
+  const snoerRows = Math.ceil(visible.length / pptxExportClampPerRow(perRow));
+  let total = Math.max(1, Math.ceil(snoerRows / PPTX_EXPORT_SNOER_MAX_ROWS));
+  visible.forEach((r) => { if (checked.has(r.typeName)) total += 1 + r.count; });
+  return total;
+}
+
+function pptxExportSummaryText(count, max) {
+  const slides = count === 1 ? '1 slide' : count + ' slides';
+  if (count > max) {
+    return 'Dit worden ' + slides + '; het maximum is ' + max + '. Vink minder kolommen aan.';
+  }
+  return 'Dit worden ' + slides + (count === 1 ? ' (alleen het overzicht van de kolommen).' : '.');
+}
+
+function pptxExportColumnsHtml(rows, checkedNames) {
+  const checked = new Set(checkedNames || []);
+  if (!rows || !rows.length) return '<p class="checkbox-list-empty">Deze doelenboom heeft geen kolommen.</p>';
+  return rows.map((r) => {
+    const count = r.count === 1 ? '1 element' : r.count + ' elementen';
+    return '<label class="checkbox-list-item' + (r.hidden ? ' is-hidden' : '') + '">' +
+      '<input type="checkbox" value="' + escapeHtml(r.typeName) + '"' +
+      (r.hidden ? ' disabled' : (checked.has(r.typeName) ? ' checked' : '')) + '>' +
+      '<span class="pptx-col-swatch" style="background:' + escapeHtml(r.color) + '"></span>' +
+      '<span>' + escapeHtml(r.title) + '</span>' +
+      '<span class="pptx-col-count">' + (r.hidden ? 'verborgen' : count) + '</span>' +
+      '</label>';
+  }).join('');
+}
+
+function pptxExportPayload(rows, checkedNames, perRow) {
+  const checked = new Set(checkedNames || []);
+  const visible = (rows || []).filter((r) => !r.hidden).map((r) => r.typeName);
+  return {
+    visibleColumns: visible,
+    slideColumns: visible.filter((name) => checked.has(name)),
+    perRow: pptxExportClampPerRow(perRow),
+  };
 }
 
 // ---- Bulkacties op de selectie (DOEL-81 bewerken, DOEL-82 verwijderen) ----

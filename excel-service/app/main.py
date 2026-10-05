@@ -20,6 +20,7 @@ from .mpp_converter import MppConversionError, mpp_to_mspdi_xml
 from .parser import parse_workbook
 from .project_pptx import build_project_pptx
 from .project_workbook import build_project_workbook, parse_project_workbook
+from .tree_pptx import TreePptxError, build_tree_pptx
 
 app = FastAPI(title='doelenboom-excel-service', version='0.1.0')
 
@@ -150,6 +151,25 @@ async def project_pptx(body: dict[str, Any] = Body(...)):
         content=content,
         media_type=PPTX_MEDIA_TYPE,
         headers={'Content-Disposition': f'attachment; filename="{filename}"'},
+    )
+
+
+@app.post('/tree-pptx')
+async def tree_pptx(body: dict[str, Any] = Body(...)):
+    """Bouwt de PowerPoint van een hele doelenboom (DOEL-88, zie
+    tree_pptx.py): de kolommen als snoer, en per gekozen kolom een slide per
+    element met de keten van dat element. Aangeroepen door
+    api/src/routes/exports.ts (POST .../export-pptx), dat de boom ('data'),
+    de keuzes uit het dialoogvenster ('options') en 'meta' aanlevert. Een
+    ongeldige keuze (bv. te veel slides) geeft 422 met een leesbare melding."""
+    try:
+        content = build_tree_pptx(body.get('data'), body.get('options'), body.get('meta'))
+    except TreePptxError as exc:
+        return JSONResponse(status_code=422, content={'error': str(exc)})
+    return Response(
+        content=content,
+        media_type=PPTX_MEDIA_TYPE,
+        headers={'Content-Disposition': 'attachment; filename="Doelenboom.pptx"'},
     )
 
 
