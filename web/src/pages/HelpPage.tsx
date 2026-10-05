@@ -161,6 +161,13 @@ const SECTIONS: { id: string; title: string; content: JSX.Element }[] = [
           geen prullenbak, dus maak zo nodig eerst een export.
         </p>
         <p style={styles.p}>
+          <strong>… de volgorde van elementen in een kolom wijzigen?</strong> Een nieuw element komt vanzelf op
+          codevolgorde in zijn kolom te staan. Eén element verplaatsen: dubbelklik erop en gebruik de pijltjes omhoog
+          en omlaag of "Plaats na…" onderaan het detailpaneel. Een hele kolom in één keer sorteren (alleen admin):
+          klik op het pijltjes-knopje in de kolomkop en kies "op code" of "op bovenliggend element". De volgorde
+          wordt opgeslagen en is voor iedereen gelijk.
+        </p>
+        <p style={styles.p}>
           <strong>… een relatie tussen twee elementen leggen?</strong> Dubbelklik op een element om het
           detailpaneel te openen en klik daar op "+ Relatie".
         </p>

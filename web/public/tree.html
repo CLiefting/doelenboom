@@ -1138,6 +1138,20 @@
     font-size: 9px; cursor: pointer;
   }
   .col-hide-btn:hover { background: #eef0f3; color: var(--navy); border-color: #c5cad3; }
+  /* Kolom sorteren (DOEL-85): zelfde vorm als het ✕-knopje, links ervan.
+     Alleen voor admins (admin-only); de API dwingt dat af. */
+  .col-sort-btn {
+    position: absolute; top: 2px; right: 22px; z-index: 11;
+    width: 16px; height: 16px; line-height: 14px; padding: 0;
+    border: 1px solid #dfe3e8; border-radius: 50%; background: #ffffff; color: #7a8699;
+    font-size: 10px; cursor: pointer;
+  }
+  .col-sort-btn:hover { background: #eef0f3; color: var(--navy); border-color: #c5cad3; }
+  /* Verplaatsknoppen in het detailpaneel (DOEL-86). */
+  .dp-crud-actions { flex-wrap: wrap; }
+  .dp-move-group { display: inline-flex; flex: 0 0 auto; gap: 6px; align-items: center; margin-right: 10px; white-space: nowrap; }
+  .dp-move-group .btn { white-space: nowrap; flex: 0 0 auto; }
+  .dp-move-pos { font-size: 11.5px; color: #888; }
   .col-hint {
     display: block; font-weight: 400; font-style: italic; font-size: 10px;
     color: #7a8699; margin-top: 4px; line-height: 1.25; white-space: normal;
@@ -1705,6 +1719,40 @@
         <div class="element-modal-actions">
           <button type="button" class="btn ghost" id="element-modal-cancel">Annuleren</button>
           <button type="submit" class="btn" id="element-modal-save">Opslaan</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Kolom sorteren (DOEL-85): alleen admin. De server rekent de volgorde uit. -->
+  <div class="element-modal-backdrop" id="column-sort-modal-backdrop">
+    <div class="element-modal">
+      <h3 id="column-sort-title">Kolom sorteren</h3>
+      <p class="element-modal-hint">De nieuwe volgorde wordt opgeslagen en is voor iedereen gelijk. Een handmatig gekozen volgorde in deze kolom gaat daarbij verloren.</p>
+      <form id="column-sort-form">
+        <label class="checkbox-list-item"><input type="radio" name="column-sort-by" value="code" checked> Op code (B9 komt v&oacute;&oacute;r B10)</label>
+        <label class="checkbox-list-item"><input type="radio" name="column-sort-by" value="parent"> Op bovenliggend element (elementen met dezelfde ouder bij elkaar)</label>
+        <p class="element-modal-status" id="column-sort-status"></p>
+        <div class="element-modal-actions">
+          <button type="button" class="btn ghost" id="column-sort-cancel">Annuleren</button>
+          <button type="submit" class="btn" id="column-sort-save">Sorteren</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Element verplaatsen (DOEL-86): direct na een ander element in dezelfde kolom. -->
+  <div class="element-modal-backdrop" id="move-after-modal-backdrop">
+    <div class="element-modal">
+      <h3 id="move-after-title">Element verplaatsen</h3>
+      <form id="move-after-form">
+        <label>Nieuwe plek in de kolom
+          <select id="move-after-select"></select>
+        </label>
+        <p class="element-modal-status" id="move-after-status"></p>
+        <div class="element-modal-actions">
+          <button type="button" class="btn ghost" id="move-after-cancel">Annuleren</button>
+          <button type="submit" class="btn" id="move-after-save">Verplaatsen</button>
         </div>
       </form>
     </div>
@@ -2677,6 +2725,18 @@ function runApp(data) {
       applyVisibility();
     });
     header.appendChild(hideBtn);
+    // Kolom sorteren (DOEL-85) — alleen zichtbaar voor admins (admin-only).
+    const sortBtn = document.createElement('button');
+    sortBtn.type = 'button';
+    sortBtn.className = 'col-sort-btn admin-only';
+    sortBtn.setAttribute('aria-label', 'Sorteer deze kolom');
+    sortBtn.title = 'Sorteer deze kolom';
+    sortBtn.textContent = '\u21C5';
+    sortBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openColumnSortModal(col.dataset.key);
+    });
+    header.appendChild(sortBtn);
   });
 
   // Small dot marker on nodes that carry one or more tags, hover/detail panel show the full list.
@@ -3753,7 +3813,7 @@ function runApp(data) {
     const header = ev.target.closest('.col-header');
     if (!header) return;
     if (selectMode) return; // in selectiemodus (DOEL-80) selecteert een klik op de kolomkop de hele kolom
-    if (ev.target.closest('.col-hide-btn')) return; // ✕-knop heeft zijn eigen (click-)gedrag, niet openen
+    if (ev.target.closest('.col-hide-btn, .col-sort-btn')) return; // ✕- en sorteerknop hebben hun eigen (click-)gedrag, niet openen
     const col = header.closest('.column');
     if (!col) return;
     openColumnSummaryModal(col.dataset.key);
@@ -5374,6 +5434,8 @@ function runApp(data) {
           })
         : '') +
       '<div class="dp-crud-actions crud-only">' +
+        // DOEL-86: plek binnen de kolom wijzigen.
+        elementMoveButtonsHtml(d.code, columnPositionOf(columnCodesOf(d.code), d.code)) +
         '<button type="button" class="btn ghost btn-sm dp-edit-btn" data-code="' + escapeHtml(d.code) + '">Bewerken</button>' +
         '<button type="button" class="btn ghost btn-sm dp-delete-btn" data-code="' + escapeHtml(d.code) + '">Verwijderen</button>' +
       '</div>';
@@ -6756,6 +6818,110 @@ function runApp(data) {
       showToast(err && err.message ? err.message : 'Onbekende fout bij verwijderen.', 'error');
     }
   }
+
+  // ---- Volgorde binnen een kolom (DOEL-85 kolom sorteren, DOEL-86 element
+  // verplaatsen) ---- De volgorde wordt op de server opgeslagen
+  // (elements.sort_order) en is voor iedereen gelijk; hier staan alleen de
+  // knoppen en dialogen. Na elke wijziging herladen we de boom. Een nieuw
+  // element komt sinds DOEL-84 vanzelf op codevolgorde in zijn kolom (server).
+  const columnSortBackdrop = document.getElementById('column-sort-modal-backdrop');
+  const columnSortForm = document.getElementById('column-sort-form');
+  const columnSortTitle = document.getElementById('column-sort-title');
+  const columnSortStatus = document.getElementById('column-sort-status');
+  const columnSortSaveBtn = document.getElementById('column-sort-save');
+  const moveAfterBackdrop = document.getElementById('move-after-modal-backdrop');
+  const moveAfterForm = document.getElementById('move-after-form');
+  const moveAfterTitle = document.getElementById('move-after-title');
+  const moveAfterSelect = document.getElementById('move-after-select');
+  const moveAfterStatus = document.getElementById('move-after-status');
+  const moveAfterSaveBtn = document.getElementById('move-after-save');
+  let columnSortKey = null;
+  let moveAfterCode = null;
+
+  // Codes van de kolom waarin dit element staat, in de volgorde van de boom.
+  function columnCodesOf(code) {
+    const node = columnsEl.querySelector('.node[data-id="' + CSS.escape(code) + '"]');
+    const wrap = node ? node.closest('.col-nodes') : null;
+    return wrap ? Array.from(wrap.querySelectorAll('.node')).map((n) => n.dataset.id) : [];
+  }
+
+  function openColumnSortModal(columnKey) {
+    if (userRole !== 'admin' || !TYPE_TO_COLUMN[columnKey]) return;
+    columnSortKey = columnKey;
+    columnSortForm.reset();
+    columnSortTitle.textContent = 'Kolom "' + (TYPE_TO_COLUMN[columnKey].title || columnKey) + '" sorteren';
+    setBulkStatus(columnSortStatus, '');
+    columnSortSaveBtn.disabled = false;
+    columnSortBackdrop.classList.add('visible');
+  }
+
+  function closeColumnSortModal() {
+    columnSortBackdrop.classList.remove('visible');
+  }
+
+  document.getElementById('column-sort-cancel').addEventListener('click', closeColumnSortModal);
+  columnSortBackdrop.addEventListener('click', (ev) => { if (ev.target === columnSortBackdrop) closeColumnSortModal(); });
+  columnSortForm.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    if (!columnSortKey) return;
+    const chosen = columnSortForm.querySelector('input[name="column-sort-by"]:checked');
+    columnSortSaveBtn.disabled = true;
+    setBulkStatus(columnSortStatus, 'Bezig met sorteren\u2026', 'busy');
+    try {
+      const result = await postBulk('sort-column', { column: columnSortKey, by: chosen ? chosen.value : 'code' });
+      setBulkStatus(columnSortStatus, 'Gesorteerd, boom wordt herladen\u2026', 'ok');
+      reloadWithBulkToast(columnSortResultText(result));
+    } catch (err) {
+      columnSortSaveBtn.disabled = false;
+      setBulkStatus(columnSortStatus, err && err.message ? err.message : 'Onbekende fout bij sorteren.');
+    }
+  });
+
+  async function moveElementInColumn(code, payload, btn) {
+    if (btn) btn.disabled = true;
+    try {
+      await postBulk(encodeURIComponent(code) + '/move', payload);
+      reloadTreeKeepingFocus();
+      return true;
+    } catch (err) {
+      if (btn) btn.disabled = false;
+      showToast(err && err.message ? err.message : 'Onbekende fout bij verplaatsen.', 'error');
+      return false;
+    }
+  }
+
+  function openMoveAfterModal(code) {
+    const d = DETAILS[code];
+    if (!d) return;
+    const codes = columnCodesOf(code);
+    moveAfterCode = code;
+    moveAfterTitle.textContent = 'Element ' + code + ' verplaatsen';
+    moveAfterSelect.innerHTML = moveAfterOptionsHtml(codes, DETAILS, code);
+    setBulkStatus(moveAfterStatus, '');
+    moveAfterSaveBtn.disabled = false;
+    moveAfterBackdrop.classList.add('visible');
+    moveAfterSelect.focus();
+  }
+
+  function closeMoveAfterModal() {
+    moveAfterBackdrop.classList.remove('visible');
+  }
+
+  document.getElementById('move-after-cancel').addEventListener('click', closeMoveAfterModal);
+  moveAfterBackdrop.addEventListener('click', (ev) => { if (ev.target === moveAfterBackdrop) closeMoveAfterModal(); });
+  moveAfterForm.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    if (!moveAfterCode) return;
+    moveAfterSaveBtn.disabled = true;
+    setBulkStatus(moveAfterStatus, 'Bezig met verplaatsen\u2026', 'busy');
+    try {
+      await postBulk(encodeURIComponent(moveAfterCode) + '/move', { after: moveAfterSelect.value === '' ? null : moveAfterSelect.value });
+      reloadTreeKeepingFocus();
+    } catch (err) {
+      moveAfterSaveBtn.disabled = false;
+      setBulkStatus(moveAfterStatus, err && err.message ? err.message : 'Onbekende fout bij verplaatsen.');
+    }
+  });
 
   // ---- Bulkacties op de selectie (DOEL-81 bewerken, DOEL-82 verwijderen) ----
   // De selectie zelf komt uit de Selectiemodus (DOEL-80, bulkSelection). Eén
@@ -8901,6 +9067,10 @@ function runApp(data) {
     if (attrBtn) { handleAttributeAction(attrBtn); return; }
     const devBtn = ev.target.closest('[data-dev-action]');
     if (devBtn) { handleDeviationAction(devBtn); return; }
+    const moveBtn = ev.target.closest('.dp-move-btn');
+    if (moveBtn) { moveElementInColumn(moveBtn.dataset.code, { direction: moveBtn.dataset.move }, moveBtn); return; }
+    const moveAfterBtn = ev.target.closest('.dp-move-after-btn');
+    if (moveAfterBtn) { openMoveAfterModal(moveAfterBtn.dataset.code); return; }
     const editBtn = ev.target.closest('.dp-edit-btn');
     if (editBtn) { openElementModal('edit', editBtn.dataset.code); return; }
     const delBtn = ev.target.closest('.dp-delete-btn');
@@ -9637,6 +9807,53 @@ function bulkSelectionStatusText(count, hiddenCount) {
   let text = count + (count === 1 ? ' element' : ' elementen') + ' geselecteerd';
   if (hiddenCount > 0) text += ' (waarvan ' + hiddenCount + ' nu niet zichtbaar)';
   return text;
+}
+
+// ---- Volgorde binnen een kolom (DOEL-85, DOEL-86) ----
+// Pure functies op topniveau, zodat web/test/tree-html-order.test.mjs ze los
+// kan laden en testen.
+function columnPositionOf(codes, code) {
+  const list = codes || [];
+  return { index: list.indexOf(code), count: list.length };
+}
+
+// Knoppen omhoog/omlaag/"Plaats na…" voor het detailpaneel. Omhoog is
+// uitgeschakeld op de bovenste plek, omlaag op de onderste; met één element
+// in de kolom valt er niets te verplaatsen.
+function elementMoveButtonsHtml(code, position) {
+  const pos = position || { index: -1, count: 0 };
+  if (pos.index < 0 || pos.count < 2) return '';
+  const data = ' data-code="' + escapeHtml(code) + '"';
+  return '<span class="dp-move-group">' +
+    '<button type="button" class="btn ghost btn-sm dp-move-btn" data-move="up"' + data +
+      ' title="E\u00e9n plek omhoog in de kolom" aria-label="Omhoog"' + (pos.index === 0 ? ' disabled' : '') + '>&#9650;</button>' +
+    '<button type="button" class="btn ghost btn-sm dp-move-btn" data-move="down"' + data +
+      ' title="E\u00e9n plek omlaag in de kolom" aria-label="Omlaag"' + (pos.index === pos.count - 1 ? ' disabled' : '') + '>&#9660;</button>' +
+    '<button type="button" class="btn ghost btn-sm dp-move-after-btn"' + data + '>Plaats na&hellip;</button>' +
+    '<span class="dp-move-pos">plek ' + (pos.index + 1) + ' van ' + pos.count + '</span>' +
+    '</span>';
+}
+
+// Keuzelijst voor "Plaats na…": bovenaan, of na elk ander element van de
+// kolom. De huidige plek is voorgeselecteerd.
+function moveAfterOptionsHtml(codes, details, selfCode) {
+  const others = (codes || []).filter((c) => c !== selfCode);
+  const selfIndex = (codes || []).indexOf(selfCode);
+  const currentAfter = selfIndex > 0 ? codes[selfIndex - 1] : '';
+  return '<option value=""' + (currentAfter === '' ? ' selected' : '') + '>Bovenaan de kolom</option>' +
+    others.map((c) => {
+      const d = (details || {})[c] || {};
+      return '<option value="' + escapeHtml(c) + '"' + (c === currentAfter ? ' selected' : '') + '>Na ' +
+        escapeHtml(c) + (d.name ? ' \u2014 ' + escapeHtml(d.name) : '') + '</option>';
+    }).join('');
+}
+
+function columnSortResultText(result) {
+  const r = result || {};
+  const sorted = typeof r.sorted === 'number' ? r.sorted : 0;
+  const moved = typeof r.moved === 'number' ? r.moved : 0;
+  if (!moved) return 'De kolom stond al in deze volgorde.';
+  return 'Kolom gesorteerd: ' + moved + ' van de ' + sorted + (sorted === 1 ? ' element' : ' elementen') + ' verplaatst.';
 }
 
 // ---- Bulkacties op de selectie (DOEL-81 bewerken, DOEL-82 verwijderen) ----
