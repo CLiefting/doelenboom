@@ -1123,6 +1123,11 @@
     opacity: 0; max-width: 0; width: 0; flex-basis: 0; margin: 0; pointer-events: none;
     overflow: hidden; height: 0; max-height: 0;
   }
+  /* Boven de streep staan de knoppen sorteren/verbergen (DOEL-87, zie
+     .col-hide-btn/.col-sort-btn). Als de kop bij het scrollen blijft plakken,
+     vallen ze in de padding-strook van .canvas-wrap en blijven ze in beeld;
+     ::before is de witte strook waar ze dan op staan, zodat de boom er niet
+     doorheen schemert. */
   .col-header {
     position: sticky; top: 0; z-index: 10;
     font-weight: 700; font-size: 12px; text-align: center; color: var(--navy);
@@ -1131,8 +1136,13 @@
     box-shadow: 0 6px 6px -6px rgba(0,0,0,0.15);
   }
   .column.narrow .col-header { width: 180px; }
+  .col-header::before {
+    content: ""; position: absolute; left: 0; right: 0; top: -23px; height: 20px; background: #ffffff;
+  }
+  /* DOEL-87: beide knoppen boven de gekleurde streep, samen gecentreerd — in de
+     kop zelf vielen ze bij een langere titel door de tekst heen. */
   .col-hide-btn {
-    position: absolute; top: 2px; right: 2px; z-index: 11;
+    position: absolute; top: -20px; left: calc(50% + 2px); z-index: 11;
     width: 16px; height: 16px; line-height: 14px; padding: 0;
     border: 1px solid #dfe3e8; border-radius: 50%; background: #ffffff; color: #7a8699;
     font-size: 9px; cursor: pointer;
@@ -1141,12 +1151,14 @@
   /* Kolom sorteren (DOEL-85): zelfde vorm als het ✕-knopje, links ervan.
      Alleen voor admins (admin-only); de API dwingt dat af. */
   .col-sort-btn {
-    position: absolute; top: 2px; right: 22px; z-index: 11;
+    position: absolute; top: -20px; left: calc(50% - 18px); z-index: 11;
     width: 16px; height: 16px; line-height: 14px; padding: 0;
     border: 1px solid #dfe3e8; border-radius: 50%; background: #ffffff; color: #7a8699;
     font-size: 10px; cursor: pointer;
   }
   .col-sort-btn:hover { background: #eef0f3; color: var(--navy); border-color: #c5cad3; }
+  /* Zonder sorteerknop (geen admin) staat het kruisje alleen in het midden. */
+  body:not(.role-admin) .col-hide-btn { left: calc(50% - 8px); }
   /* Verplaatsknoppen in het detailpaneel (DOEL-86). */
   .dp-crud-actions { flex-wrap: wrap; }
   .dp-move-group { display: inline-flex; flex: 0 0 auto; gap: 6px; align-items: center; margin-right: 10px; white-space: nowrap; }
