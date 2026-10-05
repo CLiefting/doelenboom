@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { pool } from '../db.js';
 import { AuthedRequest, requireAuth } from '../auth.js';
 import { requireWritableDoelenboom, tenantIdForDoelenboom } from '../rbac.js';
-import { getColumnsForDoelenboom, allValidTypeNames } from '../columnConfig.js';
+import { ColumnDef, getColumnsForDoelenboom, allValidTypeNames, columnForTypeName } from '../columnConfig.js';
 import { attributesFromDb, findAttributesBrokenByColumns } from '../elementAttributes.js';
 import { applyElementValueChanges, validateElementValuesInput, ParsedValue } from '../elementAttributeValues.js';
 import { CONTROLE_REGELS_MODULE } from '../controlRules.js';
@@ -86,38 +86,68 @@ const ELEMENT_SELECT_FIELDS =
   'code, type, name, description, parent_text, kpi, taakveld, subtaakveld, sort_order';
 
 // POST /api/doelenbomen/:id/elements — nieuw element aanmaken.
+//
+// Plek in de kolom (DOEL-84): zonder expliciete sortOrder komt het nieuwe
+// element op codevolgorde tussen de elementen van zijn kolom te staan (B3.3
+// na B3.2, B10 na B9) in plaats van achteraan — zie insertIndexByCode
+// onderaan dit bestand. Met een expliciete sortOrder (getal) in de body
+// gebeurt er niets extra's: die waarde wordt opgeslagen zoals hij is.
 elementsRouter.post('/doelenbomen/:id/elements', requireEditor, async (req, res) => {
   const input = readElementBody(req.body);
   if (input.errors.length) return res.status(400).json({ error: input.errors.join(' ') });
 
   const doelenboomId = req.params.id;
-  const validTypes = await validTypeNames(doelenboomId);
+  const columns = await getColumnsForDoelenboom(doelenboomId);
+  const validTypes = allValidTypeNames(columns);
   if (!validTypes.includes(input.type)) {
     return res.status(400).json({ error: `Type moet één van de volgende zijn: ${validTypes.join(', ')}.` });
   }
-  try {
-    const maxOrder = await pool.query(
-      'select coalesce(max(sort_order), 0) as max_order from elements where doelenboom_id = $1',
-      [doelenboomId]
-    );
-    const requestedOrder = (req.body ?? {}) as { sortOrder?: unknown };
-    const sortOrder =
-      typeof requestedOrder.sortOrder === 'number' && Number.isFinite(requestedOrder.sortOrder)
-        ? requestedOrder.sortOrder
-        : Number(maxOrder.rows[0].max_order) + 1;
+  const requestedOrder = (req.body ?? {}) as { sortOrder?: unknown };
+  const explicitOrder =
+    typeof requestedOrder.sortOrder === 'number' && Number.isFinite(requestedOrder.sortOrder) ? requestedOrder.sortOrder : null;
+  const insertSql = `insert into elements (doelenboom_id, code, type, name, description, kpi, taakveld, subtaakveld, sort_order)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`;
+  const insertValues = (sortOrder: number) =>
+    [doelenboomId, input.code, input.type, input.name, input.description, input.kpi, input.taakveld, input.subtaakveld, sortOrder];
+  const duplicate = () => res.status(409).json({ error: `Element met code "${input.code}" bestaat al in deze doelenboom.` });
 
-    const result = await pool.query(
-      `insert into elements (doelenboom_id, code, type, name, description, kpi, taakveld, subtaakveld, sort_order)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-       returning ${ELEMENT_SELECT_FIELDS}`,
-      [doelenboomId, input.code, input.type, input.name, input.description, input.kpi, input.taakveld, input.subtaakveld, sortOrder]
-    );
+  if (explicitOrder !== null) {
+    try {
+      const result = await pool.query(`${insertSql} returning ${ELEMENT_SELECT_FIELDS}`, insertValues(explicitOrder));
+      return res.status(201).json(result.rows[0]);
+    } catch (err) {
+      if (isUniqueViolation(err)) return duplicate();
+      return sendServerError(res, err, 'Aanmaken van element mislukt');
+    }
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('begin');
+    const all = await lockElementsInOrder(client, doelenboomId);
+    const inserted = await client.query(`${insertSql} returning id`, insertValues(all.length + 1));
+    const newRow: OrderedRow = { id: String(inserted.rows[0].id), code: input.code, type: input.type, sort_order: -1 };
+
+    const columnKey = columnKeyOf(columns, input.type);
+    const columnRows = all.filter((row) => columnKeyOf(columns, row.type) === columnKey);
+    const at = insertIndexByCode(columnRows, input.code);
+    // Plek in de totale volgorde: direct na de voorganger in de kolom, of —
+    // als het nieuwe element vooraan komt — direct vóór het eerste element
+    // van de kolom. Een lege kolom: achteraan.
+    const globalIndex = !columnRows.length
+      ? all.length
+      : at > 0 ? all.indexOf(columnRows[at - 1]) + 1 : all.indexOf(columnRows[0]);
+    await writeOrder(client, [...all.slice(0, globalIndex), newRow, ...all.slice(globalIndex)]);
+
+    const result = await client.query(`select ${ELEMENT_SELECT_FIELDS} from elements where id = $1`, [newRow.id]);
+    await client.query('commit');
     res.status(201).json(result.rows[0]);
   } catch (err) {
-    if (isUniqueViolation(err)) {
-      return res.status(409).json({ error: `Element met code "${input.code}" bestaat al in deze doelenboom.` });
-    }
+    await client.query('rollback');
+    if (isUniqueViolation(err)) return duplicate();
     sendServerError(res, err, 'Aanmaken van element mislukt');
+  } finally {
+    client.release();
   }
 });
 
@@ -452,6 +482,220 @@ elementsRouter.post('/doelenbomen/:id/elements/bulk-delete', requireAdminForBulk
   } catch (err) {
     await client.query('rollback');
     sendServerError(res, err, 'Bulk-verwijderen van elementen mislukt');
+  } finally {
+    client.release();
+  }
+});
+
+// ---- Volgorde van elementen binnen een kolom (DOEL-84 invoegen op code,
+// DOEL-85 kolom sorteren, DOEL-86 handmatig verplaatsen) ----
+//
+// De volgorde is elements.sort_order en geldt voor de hele boom (routes/
+// tree.ts: order by sort_order, code); de boomweergave verdeelt de elementen
+// daarna over de kolommen. "De volgorde binnen een kolom" is dus de
+// onderlinge volgorde van de elementen van die kolom (het basistype en zijn
+// aliassen) in die ene lijst. Elke wijziging hieronder:
+// - vergrendelt de volgorde van de boom voor de duur van de transactie
+//   (advisory lock + for update), zodat twee gelijktijdige acties geen
+//   dubbele of ontbrekende plekken opleveren;
+// - herschikt alleen de elementen van één kolom: de plekken die de kolom in
+//   de totale lijst inneemt blijven van die kolom, de onderlinge volgorde
+//   van alle andere elementen blijft gelijk;
+// - schrijft de volgorde daarna weg als 1..n (alleen de rijen die wijzigen).
+// De volgorde is voor iedereen gelijk; exports volgen dezelfde sort_order.
+const CODE_COLLATOR = new Intl.Collator('nl', { numeric: true, sensitivity: 'base' });
+
+// Natuurlijke codevolgorde: B9 vóór B10, B3.2 vóór B3.10. Bij gelijke
+// uitkomst (bv. alleen verschil in hoofdletters) beslist de kale tekst, zodat
+// de volgorde altijd vastligt.
+export function compareElementCodes(a: string, b: string): number {
+  return CODE_COLLATOR.compare(a, b) || (a < b ? -1 : a > b ? 1 : 0);
+}
+
+type OrderedRow = { id: string; code: string; type: string; sort_order: number };
+
+async function lockElementsInOrder(client: import('pg').PoolClient, doelenboomId: string): Promise<OrderedRow[]> {
+  await client.query(`select pg_advisory_xact_lock(hashtextextended('doelenboom-volgorde:' || $1::text, 0))`, [doelenboomId]);
+  const r = await client.query(
+    'select id, code, type, sort_order from elements where doelenboom_id = $1 order by sort_order, code, id for update',
+    [doelenboomId]
+  );
+  return r.rows.map((row) => ({ id: String(row.id), code: row.code as string, type: row.type as string, sort_order: Number(row.sort_order) }));
+}
+
+// De kolom waarin een type getoond wordt: het basistype (een alias volgt
+// zijn basistype). null = type dat in geen enkele kolom voorkomt.
+function columnKeyOf(columns: ColumnDef[], type: string): string | null {
+  return columnForTypeName(columns, type)?.typeName ?? null;
+}
+
+async function writeOrder(client: import('pg').PoolClient, ordered: OrderedRow[]): Promise<number> {
+  const ids: string[] = [];
+  const orders: number[] = [];
+  ordered.forEach((row, i) => {
+    if (row.sort_order !== i + 1) { ids.push(row.id); orders.push(i + 1); }
+  });
+  if (!ids.length) return 0;
+  await client.query(
+    `update elements e set sort_order = v.ord
+     from unnest($1::bigint[], $2::int[]) as v(id, ord) where e.id = v.id`,
+    [ids, orders]
+  );
+  return ids.length;
+}
+
+// Zet de elementen van één kolom in de nieuwe volgorde op de plekken die de
+// kolom al innam; alle andere elementen blijven staan waar ze stonden.
+function withColumnReordered(all: OrderedRow[], inColumn: (row: OrderedRow) => boolean, newColumnOrder: OrderedRow[]): OrderedRow[] {
+  let i = 0;
+  return all.map((row) => (inColumn(row) ? newColumnOrder[i++] : row));
+}
+
+// DOEL-84: waar hoort een nieuw element met deze code in de kolom? Direct na
+// het element dat op code voorafgaat; is er geen voorganger, dan direct vóór
+// zijn opvolger op code. Dat werkt ook in een kolom die niet (meer) op code
+// staat: het nieuwe element komt dan naast zijn "buur op code" te staan.
+export function insertIndexByCode(columnRows: Array<{ code: string }>, code: string): number {
+  let pred = -1;
+  let succ = -1;
+  columnRows.forEach((row, i) => {
+    const c = compareElementCodes(row.code, code);
+    if (c < 0 && (pred === -1 || compareElementCodes(row.code, columnRows[pred].code) > 0)) pred = i;
+    if (c > 0 && (succ === -1 || compareElementCodes(row.code, columnRows[succ].code) < 0)) succ = i;
+  });
+  if (pred !== -1) return pred + 1;
+  if (succ !== -1) return succ;
+  return columnRows.length;
+}
+
+// POST /api/doelenbomen/:id/elements/sort-column (DOEL-85) —
+// { column: <type-naam van de kolom>, by: 'code' | 'parent' } zet één kolom in
+// één keer op volgorde:
+// - 'code':   natuurlijke codevolgorde;
+// - 'parent': elementen met hetzelfde bovenliggende element bij elkaar, in
+//   de volgorde waarin die bovenliggende elementen zelf staan; binnen één
+//   ouder op code. De ouder is het doel van een uitgaande relatie (een
+//   relatie loopt van kind naar ouder); bij meerdere ouders gaat een
+//   primaire relatie voor, daarna de ouder die het eerst in de boom staat.
+//   Elementen zonder ouder komen achteraan.
+// Alleen admin: het is een ingreep op de hele kolom en een handmatige
+// volgorde gaat erdoor verloren. De server rekent de volgorde uit; de
+// browser stuurt alleen kolom en sorteerwijze.
+const requireAdminForColumnSort = requireWritableDoelenboom('id', 'admin');
+const COLUMN_SORT_MODES = ['code', 'parent'];
+
+elementsRouter.post('/doelenbomen/:id/elements/sort-column', requireAdminForColumnSort, async (req, res) => {
+  const body = asRecord(req.body);
+  const columnName = typeof body.column === 'string' ? body.column.trim() : '';
+  const by = typeof body.by === 'string' ? body.by : '';
+  if (!COLUMN_SORT_MODES.includes(by)) return res.status(400).json({ error: 'Onbekende sorteerwijze.' });
+
+  const doelenboomId = req.params.id;
+  const columns = await getColumnsForDoelenboom(doelenboomId);
+  const column = columns.find((c) => c.typeName === columnName);
+  if (!columnName || !column) return res.status(400).json({ error: 'Onbekende kolom.' });
+
+  const client = await pool.connect();
+  try {
+    await client.query('begin');
+    const all = await lockElementsInOrder(client, doelenboomId);
+    const inColumn = (row: OrderedRow) => columnKeyOf(columns, row.type) === column.typeName;
+    const columnRows = all.filter(inColumn);
+    let sorted: OrderedRow[];
+    if (by === 'code') {
+      sorted = [...columnRows].sort((a, b) => compareElementCodes(a.code, b.code));
+    } else {
+      const edges = await client.query(
+        'select source_element_id, target_element_id, weight from edges where doelenboom_id = $1',
+        [doelenboomId]
+      );
+      const indexById = new Map(all.map((row, i) => [row.id, i]));
+      // Rang van een ouder: [primaire relatie eerst, kolompositie, plek in de boom].
+      const parentRank = new Map<string, [number, number, number]>();
+      for (const e of edges.rows) {
+        const source = String(e.source_element_id);
+        const targetIndex = indexById.get(String(e.target_element_id));
+        if (targetIndex === undefined) continue;
+        const targetColumn = columnForTypeName(columns, all[targetIndex].type);
+        const rank: [number, number, number] = [e.weight === 'primair' ? 0 : 1, targetColumn ? targetColumn.position : Number.MAX_SAFE_INTEGER, targetIndex];
+        const current = parentRank.get(source);
+        if (!current || rank[0] < current[0] || (rank[0] === current[0] && (rank[1] < current[1] || (rank[1] === current[1] && rank[2] < current[2])))) {
+          parentRank.set(source, rank);
+        }
+      }
+      sorted = [...columnRows].sort((a, b) => {
+        const pa = parentRank.get(a.id);
+        const pb = parentRank.get(b.id);
+        if (!pa || !pb) return pa ? -1 : pb ? 1 : compareElementCodes(a.code, b.code);
+        return pa[1] - pb[1] || pa[2] - pb[2] || compareElementCodes(a.code, b.code);
+      });
+    }
+    const moved = sorted.filter((row, i) => row !== columnRows[i]).length;
+    await writeOrder(client, withColumnReordered(all, inColumn, sorted));
+    await client.query('commit');
+    res.json({ sorted: columnRows.length, moved });
+  } catch (err) {
+    await client.query('rollback');
+    sendServerError(res, err, 'Sorteren van de kolom mislukt');
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/doelenbomen/:id/elements/:code/move (DOEL-86) — één element
+// binnen zijn kolom verplaatsen. Body: óf { direction: 'up' | 'down' } (één
+// plek), óf { after: <code> } (direct na dat element) / { after: null }
+// (bovenaan de kolom). Het doelelement moet in dezelfde kolom van dezelfde
+// boom staan. Rechten als het bewerken van een element: editor of admin.
+elementsRouter.post('/doelenbomen/:id/elements/:code/move', requireEditor, async (req, res) => {
+  const body = asRecord(req.body);
+  const hasDirection = body.direction !== undefined;
+  const hasAfter = Object.prototype.hasOwnProperty.call(body, 'after');
+  if (hasDirection === hasAfter) return res.status(400).json({ error: 'Geef óf een richting óf een element om na te plaatsen.' });
+  if (hasDirection && body.direction !== 'up' && body.direction !== 'down') return res.status(400).json({ error: 'Onbekende richting.' });
+  if (hasAfter && body.after !== null && (typeof body.after !== 'string' || !body.after.trim() || body.after.length > BULK_MAX_CODE_LENGTH)) {
+    return res.status(400).json({ error: 'Ongeldig element om na te plaatsen.' });
+  }
+
+  const doelenboomId = req.params.id;
+  const columns = await getColumnsForDoelenboom(doelenboomId);
+  const client = await pool.connect();
+  try {
+    await client.query('begin');
+    const fail = async (status: number, error: string) => {
+      await client.query('rollback');
+      return res.status(status).json({ error });
+    };
+    const all = await lockElementsInOrder(client, doelenboomId);
+    const element = all.find((row) => row.code === req.params.code);
+    if (!element) return await fail(404, 'Element niet gevonden.');
+    const columnKey = columnKeyOf(columns, element.type);
+    const inColumn = (row: OrderedRow) => columnKeyOf(columns, row.type) === columnKey;
+    const columnRows = all.filter(inColumn);
+    const from = columnRows.indexOf(element);
+    const rest = columnRows.filter((row) => row !== element);
+
+    let to: number;
+    if (hasDirection) {
+      to = Math.min(Math.max(from + (body.direction === 'up' ? -1 : 1), 0), columnRows.length - 1);
+    } else if (body.after === null) {
+      to = 0;
+    } else {
+      const afterCode = (body.after as string).trim();
+      if (afterCode === element.code) return await fail(400, 'Een element kan niet na zichzelf worden geplaatst.');
+      const target = all.find((row) => row.code === afterCode);
+      if (!target) return await fail(404, 'Het element om na te plaatsen bestaat niet in deze doelenboom.');
+      if (!inColumn(target)) return await fail(400, 'Het element om na te plaatsen staat in een andere kolom.');
+      to = rest.indexOf(target) + 1;
+    }
+    const reordered = [...rest.slice(0, to), element, ...rest.slice(to)];
+    const moved = to !== from;
+    if (moved) await writeOrder(client, withColumnReordered(all, inColumn, reordered));
+    await client.query('commit');
+    res.json({ moved, position: to + 1, of: columnRows.length });
+  } catch (err) {
+    await client.query('rollback');
+    sendServerError(res, err, 'Verplaatsen van het element mislukt');
   } finally {
     client.release();
   }
