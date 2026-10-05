@@ -47,7 +47,10 @@ export type AuditEventType =
   // DOEL-75: kenmerkdefinities gewijzigd (doelenboom, tenant-default of
   // sjabloon). detail = { scope, templateId?, attributeCount, attributeIds }
   // — bewust NOOIT labels, uitleg of keuzelijstwaarden (vrije tekst).
-  | 'attribute_definitions_updated';
+  | 'attribute_definitions_updated'
+  // DOEL-82: meerdere elementen in één keer verwijderd. detail = { count,
+  // codes } — bewust NOOIT namen of andere vrije tekst van de elementen.
+  | 'elements_bulk_deleted';
 
 export interface LogAuditEventInput {
   eventType: AuditEventType;

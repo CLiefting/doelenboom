@@ -60,6 +60,13 @@ const EVENT_LABELS: Record<AuditLogEntry['eventType'], string> = {
   doelenboom_deleted: 'Doelenboom verwijderd',
   doelenboom_exported: 'Doelenboom geëxporteerd',
   doelenboom_import_published: 'Import gepubliceerd',
+  control_rules_updated: 'Controleregels gewijzigd',
+  control_rule_deviation_set: 'Afwijking van controleregel gemotiveerd',
+  control_rule_deviation_removed: 'Afwijking van controleregel ingetrokken',
+  dependency_vulnerability_alert_sent: 'Melding kwetsbaarheden verstuurd',
+  attribute_definitions_updated: 'Kenmerken gewijzigd',
+  // DOEL-82: detail = { count, codes } — loopt via formatGenericDetail.
+  elements_bulk_deleted: 'Elementen in bulk verwijderd',
 };
 
 // Generieke weergave voor de DOEL-29-gebeurtenissen: "sleutel: waarde" per

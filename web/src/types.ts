@@ -140,7 +140,13 @@ export type AuditEventType =
   | 'tenant_member_changed'
   | 'doelenboom_deleted'
   | 'doelenboom_exported'
-  | 'doelenboom_import_published';
+  | 'doelenboom_import_published'
+  | 'control_rules_updated'
+  | 'control_rule_deviation_set'
+  | 'control_rule_deviation_removed'
+  | 'dependency_vulnerability_alert_sent'
+  | 'attribute_definitions_updated'
+  | 'elements_bulk_deleted';
 
 export type AuditLogEntry = {
   id: number;

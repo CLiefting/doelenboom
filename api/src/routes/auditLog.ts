@@ -55,6 +55,12 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   doelenboom_deleted: 'Doelenboom verwijderd',
   doelenboom_exported: 'Doelenboom geëxporteerd',
   doelenboom_import_published: 'Import gepubliceerd',
+  control_rules_updated: 'Controleregels gewijzigd',
+  control_rule_deviation_set: 'Afwijking van controleregel gemotiveerd',
+  control_rule_deviation_removed: 'Afwijking van controleregel ingetrokken',
+  dependency_vulnerability_alert_sent: 'Melding kwetsbaarheden verstuurd',
+  attribute_definitions_updated: 'Kenmerken gewijzigd',
+  elements_bulk_deleted: 'Elementen in bulk verwijderd',
 };
 
 // Optioneel filteren op tenantId en/of eventType via query-string — voor de

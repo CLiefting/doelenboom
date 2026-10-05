@@ -154,6 +154,13 @@ const SECTIONS: { id: string; title: string; content: JSX.Element }[] = [
           boom, kies het type en vul de velden in.
         </p>
         <p style={styles.p}>
+          <strong>… meerdere elementen tegelijk bewerken of verwijderen?</strong> Klik op "Selecteren" in de
+          knoppenbalk en klik de elementen aan; een klik op een kolomkop neemt de hele kolom. In de balk die
+          verschijnt kies je "Bewerken…" om type, taakveld, sub-taakveld, tags, organisatieonderdelen of kenmerken
+          voor de hele selectie te wijzigen, of "Verwijderen…" (alleen admin). Verwijderen is definitief: er is
+          geen prullenbak, dus maak zo nodig eerst een export.
+        </p>
+        <p style={styles.p}>
           <strong>… een relatie tussen twee elementen leggen?</strong> Dubbelklik op een element om het
           detailpaneel te openen en klik daar op "+ Relatie".
         </p>

@@ -802,7 +802,10 @@ create table if not exists audit_log (
     'dependency_vulnerability_alert_sent',
     -- DOEL-75: wijziging van kenmerkdefinities (detail: scope, aantal,
     -- kenmerk-id's — nooit labels, uitleg of keuzelijstwaarden).
-    'attribute_definitions_updated'
+    'attribute_definitions_updated',
+    -- DOEL-82: meerdere elementen in één keer verwijderd (detail: aantal en
+    -- codes — nooit namen of andere vrije tekst).
+    'elements_bulk_deleted'
   )),
   user_id bigint references users(id) on delete set null,
   tenant_id bigint references tenants(id) on delete set null,
