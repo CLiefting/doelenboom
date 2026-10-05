@@ -171,6 +171,50 @@
     font-family: inherit; font-size: 12px; padding: 3px 6px; border-radius: 6px; border: 1px solid #ccc;
   }
 
+  /* Selectiemodus (DOEL-80): statusbalk met het aantal geselecteerde
+     elementen en de bulkacties (DOEL-81 bewerken, DOEL-82 verwijderen). */
+  .select-status {
+    display: none; align-items: center; gap: 8px; font-size: 12.5px; color: #666;
+    background: #e9f7f5; border: 1px solid #b9e2dd; border-radius: 999px;
+    padding: 6px 8px 6px 14px; flex-wrap: wrap;
+  }
+  .select-status.visible { display: flex; }
+  .select-status .select-status-text { font-weight: 600; color: #0d9488; }
+  .select-status .select-actions { display: inline-flex; gap: 8px; }
+  .select-status .select-actions:empty { display: none; }
+  /* Bulkdialogen (DOEL-81 bewerken, DOEL-82 verwijderen) — hergebruiken
+     .element-modal; hieronder alleen wat de lijsten daarbinnen nodig hebben. */
+  .bulk-field { margin-bottom: 12px; }
+  .bulk-field-label { display: block; font-size: 12.5px; font-weight: 600; color: #444; }
+  .bulk-list {
+    max-height: 170px; overflow-y: auto; border: 1.5px solid #ccc; border-radius: 6px;
+    padding: 6px 10px; margin-top: 4px; background: #fafbfc;
+  }
+  .bulk-link-row, .bulk-attr-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+  .bulk-attr-row { flex-wrap: wrap; }
+  .bulk-link-name { flex: 1 1 auto; font-size: 13px; color: #333; min-width: 0; overflow-wrap: anywhere; }
+  .bulk-link-count { font-size: 11px; color: #999; white-space: nowrap; }
+  .element-modal .bulk-link-select { width: 170px; flex: 0 0 170px; margin-top: 0; padding: 4px 6px; font-size: 12.5px; }
+  .element-modal .bulk-attr-toggle {
+    display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 400; color: #333;
+    margin-bottom: 0; flex: 1 1 100%; cursor: pointer;
+  }
+  .element-modal .bulk-attr-check { display: inline-block; width: auto; margin: 0; }
+  .bulk-attr-input-wrap { flex: 1 1 100%; }
+  .bulk-attr-input-wrap[hidden] { display: none; }
+  .bulk-attr-row .dp-attr-counter { display: none; }
+  .element-modal .bulk-mode-input { margin-top: 6px; }
+  .bulk-delete-summary { font-size: 13.5px; color: #444; line-height: 1.5; margin: 0 0 10px; }
+  .bulk-delete-list {
+    max-height: 180px; overflow-y: auto; border: 1.5px solid #f1c0c5; border-radius: 6px;
+    padding: 6px 10px; margin: 0 0 10px; background: #fff8f8; font-size: 12.5px; color: #333;
+  }
+  .bulk-delete-list ul { margin: 0; padding-left: 18px; }
+  .bulk-delete-list li { padding: 1px 0; overflow-wrap: anywhere; }
+  .bulk-delete-type { color: #999; }
+  .bulk-delete-warning { font-size: 12px; color: #a12a36; margin: 0 0 12px; }
+  body.select-mode .col-header { cursor: pointer; user-select: none; -webkit-user-select: none; }
+
   .controls {
     display: flex; justify-content: center; align-items: center; gap: 10px;
     flex-wrap: wrap; margin-bottom: 22px;
@@ -1153,6 +1197,19 @@
     display: flex; align-items: center; justify-content: center;
     box-shadow: 0 1px 3px rgba(0,0,0,0.35); pointer-events: none; z-index: 2;
   }
+  /* Selectiemodus (DOEL-80, zie "---- Selectiemodus ----" verderop in het
+     script): een vierde, eigen kleuraccent (groenblauw) naast oranje
+     (pad-highlight), blauw (Boomfilter) en paars (Verbindmodus), plus een
+     vinkje zodat de selectie ook zonder kleur herkenbaar is. */
+  .node.bulk-picked {
+    box-shadow: 0 0 0 3px #0d9488, 0 0 0 7px rgba(13,148,136,0.35), 0 3px 8px rgba(0,0,0,0.3);
+  }
+  .node-bulk-badge {
+    position: absolute; top: -9px; left: -9px; width: 20px; height: 20px; border-radius: 50%;
+    background: #0d9488; color: #fff; font-size: 12px; font-weight: 700; font-family: inherit;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.35); pointer-events: none; z-index: 2;
+  }
   .node.dimmed { opacity: 0.25; }
   .node-tag-dot {
     position: absolute; top: 3px; right: 3px; width: 6px; height: 6px; border-radius: 50%;
@@ -1510,7 +1567,7 @@
   </div>
 
   <div class="page-header">
-    <p class="hint">Klik op een vak om het volledige verbonden pad te markeren. Houd de muis boven een vak voor de omschrijving. Dubbelklik om in te zoomen op dat element, &eacute;&eacute;n niveau erboven en alle onderliggende elementen. Ctrl/Cmd-klik (op mobiel: lang indrukken) om een vak toe te voegen aan de boomfilter en druk daarna op "Toon deze bomen" om alleen de bomen te zien die de geselecteerde elementen raken. Klik op &quot;Verbinden&quot; en klik daarna elementen in de gewenste volgorde aan om relaties tussen ze te maken.</p>
+    <p class="hint">Klik op een vak om het volledige verbonden pad te markeren. Houd de muis boven een vak voor de omschrijving. Dubbelklik om in te zoomen op dat element, &eacute;&eacute;n niveau erboven en alle onderliggende elementen. Ctrl/Cmd-klik (op mobiel: lang indrukken) om een vak toe te voegen aan de boomfilter en druk daarna op "Toon deze bomen" om alleen de bomen te zien die de geselecteerde elementen raken. Klik op &quot;Verbinden&quot; en klik daarna elementen in de gewenste volgorde aan om relaties tussen ze te maken. Klik op "Selecteren" om meerdere elementen te kiezen en ze in één keer te bewerken of te verwijderen.</p>
   </div>
 
   <div class="legend"></div>
@@ -1527,6 +1584,10 @@
          te maken, zie script hieronder ("---- Verbindmodus ----"). Alleen
          voor editors+ (crud-only), net als "+ Nieuw element" hierboven. -->
     <button class="btn ghost crud-only" id="connect-mode-btn" type="button" title="Klik elementen na elkaar aan om relaties te maken">Verbinden</button>
+    <!-- Selectiemodus (DOEL-80): meerdere elementen aanklikken om ze in één
+         keer te bewerken (DOEL-81) of te verwijderen (DOEL-82). Alleen voor
+         editors+ (crud-only); sluit de Verbindmodus uit en andersom. -->
+    <button class="btn ghost crud-only" id="select-mode-btn" type="button" title="Meerdere elementen selecteren om ze in één keer te bewerken of te verwijderen">Selecteren</button>
     <button class="btn back-btn" id="back-btn" style="display:none;">&#8592; Terug naar vorig scherm</button>
     <!-- Boomfilter: Ctrl/Cmd-klik (of op touch: lang indrukken) op een vak
          voegt het toe aan filter-selection (zie tree.html-script hieronder,
@@ -1551,6 +1612,20 @@
       <input type="text" id="connect-field-toelichting" placeholder="Toelichting (optioneel)" style="width:140px;">
       <button class="btn ghost btn-xs" id="connect-make-btn" type="button" disabled>Maak relaties</button>
       <button class="btn ghost btn-xs" id="connect-clear-btn" type="button" disabled>Wissen</button>
+    </span>
+    <!-- Selectiemodus-statusbalk (DOEL-80): aantal geselecteerde elementen,
+         snelkoppelingen om de zoekresultaten of de Boomfilter-selectie over
+         te nemen, en #select-actions als plek voor de bulkacties. -->
+    <span class="select-status crud-only" id="select-status">
+      <span class="select-status-text" id="select-status-text"></span>
+      <button class="btn ghost btn-xs" id="select-add-search-btn" type="button" style="display:none;">+ Zoekresultaten</button>
+      <button class="btn ghost btn-xs" id="select-add-filter-btn" type="button" style="display:none;">+ Boomfilter-selectie</button>
+      <span class="select-actions" id="select-actions">
+        <button class="btn ghost btn-xs" id="select-edit-btn" type="button" disabled>Bewerken&hellip;</button>
+        <!-- Bulk-verwijderen is alleen voor admins (DOEL-82); de API dwingt dat af. -->
+        <button class="btn danger btn-xs admin-only" id="select-delete-btn" type="button" disabled>Verwijderen&hellip;</button>
+      </span>
+      <button class="btn ghost btn-xs" id="select-clear-btn" type="button" disabled>Wissen</button>
     </span>
   </div>
 
@@ -1632,6 +1707,76 @@
           <button type="submit" class="btn" id="element-modal-save">Opslaan</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- Bulk-bewerken (DOEL-81): dezelfde wijziging op alle geselecteerde
+       elementen. De lijsten worden bij het openen gevuld (openBulkEditModal). -->
+  <div class="element-modal-backdrop" id="bulk-edit-modal-backdrop">
+    <div class="element-modal">
+      <h3>Selectie bewerken</h3>
+      <p class="element-modal-hint" id="bulk-edit-hint"></p>
+      <form id="bulk-edit-form">
+        <label>Type
+          <select id="bulk-edit-type"></select>
+          <span class="field-note">Een ander type verplaatst de elementen naar een andere kolom. Kenmerken die voor het nieuwe type niet gelden worden niet meer getoond.</span>
+        </label>
+        <label>Taakveld
+          <select id="bulk-edit-taakveld-mode" data-bulk-mode-for="bulk-edit-taakveld">
+            <option value="">Ongewijzigd</option>
+            <option value="set">Instellen op&hellip;</option>
+            <option value="clear">Leegmaken</option>
+          </select>
+          <input type="text" class="bulk-mode-input" id="bulk-edit-taakveld" autocomplete="off" maxlength="500" aria-label="Nieuw taakveld" style="display:none;">
+        </label>
+        <label>Sub-taakveld
+          <select id="bulk-edit-subtaakveld-mode" data-bulk-mode-for="bulk-edit-subtaakveld">
+            <option value="">Ongewijzigd</option>
+            <option value="set">Instellen op&hellip;</option>
+            <option value="clear">Leegmaken</option>
+          </select>
+          <input type="text" class="bulk-mode-input" id="bulk-edit-subtaakveld" autocomplete="off" maxlength="500" aria-label="Nieuw sub-taakveld" style="display:none;">
+        </label>
+        <div class="bulk-field">
+          <span class="bulk-field-label">Tags</span>
+          <div class="bulk-list" id="bulk-edit-tags"></div>
+        </div>
+        <div class="bulk-field">
+          <span class="bulk-field-label">Organisatieonderdelen</span>
+          <div class="bulk-list" id="bulk-edit-orgs"></div>
+          <span class="field-note">Nieuwe koppelingen krijgen relatietype "Betrokken" en status "Concept"; bestaande koppelingen blijven zoals ze zijn.</span>
+        </div>
+        <div class="bulk-field" id="bulk-edit-attrs-section">
+          <span class="bulk-field-label">Kenmerken</span>
+          <div class="bulk-list" id="bulk-edit-attrs"></div>
+          <span class="field-note">Vink een kenmerk aan om het te wijzigen; aangevinkt en leeg gelaten wist de waarde. Geen inhoudelijke of gerubriceerde informatie.</span>
+        </div>
+        <p class="element-modal-status" id="bulk-edit-status"></p>
+        <div class="element-modal-actions">
+          <button type="button" class="btn ghost" id="bulk-edit-cancel">Annuleren</button>
+          <button type="submit" class="btn" id="bulk-edit-save">Opslaan</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Bulk-verwijderen (DOEL-82): alleen admin. Bevestigen door het aantal
+       over te typen; er is geen prullenbak (DOEL-83). -->
+  <div class="element-modal-backdrop" id="bulk-delete-modal-backdrop">
+    <div class="element-modal">
+      <h3>Selectie verwijderen</h3>
+      <p class="bulk-delete-summary" id="bulk-delete-summary"></p>
+      <div class="bulk-delete-list" id="bulk-delete-list"></div>
+      <p class="bulk-delete-warning">Dit is definitief: er is geen prullenbak en geen ongedaan maken. Maak zo nodig eerst een export.</p>
+      <label>Typ het aantal elementen (<span id="bulk-delete-count"></span>) om te bevestigen
+        <input type="text" id="bulk-delete-confirm-input" inputmode="numeric" autocomplete="off">
+      </label>
+      <p class="element-modal-status" id="bulk-delete-status"></p>
+      <div class="element-modal-actions">
+        <button type="button" class="btn ghost" id="bulk-delete-cancel">Annuleren</button>
+        <button type="button" class="btn ghost" id="bulk-delete-export">Eerst exporteren</button>
+        <button type="button" class="btn danger" id="bulk-delete-ok" disabled>Definitief verwijderen</button>
+      </div>
     </div>
   </div>
 
@@ -2380,6 +2525,17 @@ function runApp(data) {
   const connectClearBtn = document.getElementById('connect-clear-btn');
   let connectMode = false;
   let connectChain = []; // geordende lijst met element-codes (volgorde = relatierichting)
+  // Selectiemodus (DOEL-80) — zie "---- Selectiemodus ----" verderop.
+  const selectModeBtn = document.getElementById('select-mode-btn');
+  const selectStatusEl = document.getElementById('select-status');
+  const selectStatusTextEl = document.getElementById('select-status-text');
+  const selectAddSearchBtn = document.getElementById('select-add-search-btn');
+  const selectAddFilterBtn = document.getElementById('select-add-filter-btn');
+  const selectClearBtn = document.getElementById('select-clear-btn');
+  const selectEditBtn = document.getElementById('select-edit-btn');
+  const selectDeleteBtn = document.getElementById('select-delete-btn');
+  let selectMode = false;
+  let bulkSelection = new Set(); // element-codes; de bulkacties (DOEL-81/82) lezen deze verzameling
   // Zie de toelichting bij #filter-chips-apply-btn hierboven — gevuld door
   // applyTagFilter() met de elementen die de actieve tag/org/verouderd-chips
   // matchen, zodat je die in één klik naar de echte boomfilter kunt overzetten.
@@ -2453,6 +2609,7 @@ function runApp(data) {
       item.setAttribute('aria-pressed', isHidden ? 'false' : 'true');
     });
     updateExpandLeftBtnState();
+    updateSelectStatusUI();
 
     deselect();
     hideTooltip();
@@ -3012,6 +3169,9 @@ function runApp(data) {
     if (lastChipFilterMatchIds.length > 0) {
       filterChipsApplyBtn.style.display = focusId === null ? '' : 'none';
     }
+    // De Selectiemodus-balk (DOEL-80) toont "+ Boomfilter-selectie" en het
+    // aantal niet-zichtbare elementen; beide hangen af van wat hier wijzigt.
+    updateSelectStatusUI();
   }
 
   function applyElementFilter() {
@@ -3107,6 +3267,7 @@ function runApp(data) {
   }
 
   function setConnectMode(on) {
+    if (on && selectMode) setSelectMode(false); // de twee klik-modi sluiten elkaar uit (DOEL-80)
     connectMode = on;
     connectModeBtn.classList.toggle('active-mode', on);
     connectModeBtn.textContent = on ? 'Stop verbinden' : 'Verbinden';
@@ -3165,6 +3326,106 @@ function runApp(data) {
   });
   updateConnectStatusUI();
 
+  // ---- Selectiemodus (DOEL-80): meerdere elementen aanklikken om ze daarna
+  // in één keer te bewerken (DOEL-81) of te verwijderen (DOEL-82). Eigen
+  // modus naar het patroon van de Verbindmodus hierboven, bewust NIET de
+  // Boomfilter-selectie (Ctrl/Cmd-klik): die is bedoeld om te filteren, en
+  // een "Verwijderen"-knop hoort daar niet naast. De twee klik-modi sluiten
+  // elkaar uit (zie setConnectMode/setSelectMode). Niet beschikbaar in
+  // focusmodus, net als Boomfilter en Verbindmodus. Puur UI: de API blijft
+  // de autorisatiegrens (rbac.ts); knop en balk zijn crud-only.
+  function bulkSelectionHiddenCount() {
+    let hidden = 0;
+    bulkSelection.forEach((id) => {
+      const node = columnsEl.querySelector('.node[data-id="' + CSS.escape(id) + '"]');
+      if (!node || node.classList.contains('filter-hidden') || node.closest('.column.hidden')) hidden++;
+    });
+    return hidden;
+  }
+
+  function renderBulkBadges() {
+    document.querySelectorAll('.node.bulk-picked').forEach((n) => n.classList.remove('bulk-picked'));
+    document.querySelectorAll('.node-bulk-badge').forEach((b) => b.remove());
+    bulkSelection.forEach((id) => {
+      const node = columnsEl.querySelector('.node[data-id="' + CSS.escape(id) + '"]');
+      if (!node) return;
+      node.classList.add('bulk-picked');
+      const badge = document.createElement('span');
+      badge.className = 'node-bulk-badge';
+      badge.textContent = '\u2713';
+      node.appendChild(badge);
+    });
+  }
+
+  function updateSelectStatusUI() {
+    // Starten kan niet in focusmodus; stoppen kan altijd.
+    selectModeBtn.disabled = focusId !== null && !selectMode;
+    selectStatusEl.classList.toggle('visible', selectMode);
+    if (!selectMode) return;
+    // textContent, geen innerHTML: er komt nooit gebruikersinvoer als markup in de balk.
+    selectStatusTextEl.textContent = bulkSelectionStatusText(bulkSelection.size, bulkSelectionHiddenCount());
+    selectClearBtn.disabled = bulkSelection.size === 0;
+    selectEditBtn.disabled = bulkSelection.size === 0;
+    selectDeleteBtn.disabled = bulkSelection.size === 0;
+    selectAddSearchBtn.style.display = lastSearchMatchIds.length > 0 ? '' : 'none';
+    selectAddFilterBtn.style.display = filterSelection.size > 0 ? '' : 'none';
+  }
+
+  function toggleBulkPick(id) {
+    if (focusId !== null) return;
+    bulkSelectionToggle(bulkSelection, id);
+    renderBulkBadges();
+    updateSelectStatusUI();
+  }
+
+  function addToBulkSelection(ids) {
+    bulkSelectionAdd(bulkSelection, ids, DETAILS);
+    renderBulkBadges();
+    updateSelectStatusUI();
+  }
+
+  // Klik op een kolomkop in selectiemodus: alle nu zichtbare elementen van
+  // die kolom erbij, of — als ze er allemaal al in zitten — eruit.
+  function toggleBulkColumn(colEl) {
+    if (!colEl || focusId !== null) return;
+    const ids = Array.from(colEl.querySelectorAll('.node'))
+      .filter((n) => !n.classList.contains('filter-hidden') && !n.classList.contains('node-hidden'))
+      .map((n) => n.dataset.id);
+    if (!ids.length) return;
+    const allPicked = ids.every((id) => bulkSelection.has(id));
+    ids.forEach((id) => { if (allPicked) bulkSelection.delete(id); else bulkSelection.add(id); });
+    renderBulkBadges();
+    updateSelectStatusUI();
+  }
+
+  function setSelectMode(on) {
+    if (on && focusId !== null) return;
+    if (on && connectMode) setConnectMode(false); // de twee klik-modi sluiten elkaar uit
+    selectMode = on;
+    document.body.classList.toggle('select-mode', on);
+    selectModeBtn.classList.toggle('active-mode', on);
+    selectModeBtn.textContent = on ? 'Stop selecteren' : 'Selecteren';
+    bulkSelection.clear();
+    renderBulkBadges();
+    if (on) deselect();
+    updateSelectStatusUI();
+  }
+
+  selectModeBtn.addEventListener('click', () => setSelectMode(!selectMode));
+  selectClearBtn.addEventListener('click', () => { bulkSelection.clear(); renderBulkBadges(); updateSelectStatusUI(); });
+  selectAddSearchBtn.addEventListener('click', () => addToBulkSelection(lastSearchMatchIds));
+  selectAddFilterBtn.addEventListener('click', () => addToBulkSelection(Array.from(filterSelection)));
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Escape' || !selectMode) return;
+    // Escape in een invoerveld (bv. de zoekbalk, die er zelf de zoekopdracht
+    // mee wist) mag de opgebouwde selectie niet weggooien.
+    if (ev.target && ev.target.closest && ev.target.closest('input, textarea, select')) return;
+    // Ook niet terwijl er een dialoog openstaat (bv. bulk-bewerken): die werkt op de selectie.
+    if (document.querySelector('.element-modal-backdrop.visible, .confirm-modal-backdrop.visible')) return;
+    setSelectMode(false);
+  });
+  updateSelectStatusUI();
+
   // Ctrl/Cmd-klik (Boomfilter-pick) op 'mousedown' i.p.v. pas op 'click'
   // (mouseup): geeft meteen visuele feedback (de .filter-picked-rand, zie
   // .node.filter-picked hierboven) zodra de muisknop ingedrukt wordt, i.p.v.
@@ -3174,14 +3435,25 @@ function runApp(data) {
   // Ctrl/Cmd-klik tijdens verbindmodus twee dingen tegelijk doen.
   columnsEl.addEventListener('mousedown', (ev) => {
     const node = ev.target.closest('.node');
-    if (!node || connectMode) return;
+    if (!node || connectMode || selectMode) return;
     if (ev.metaKey || ev.ctrlKey) toggleFilterPick(node.dataset.id);
   });
   columnsEl.addEventListener('click', (ev) => {
     const node = ev.target.closest('.node');
-    if (!node) { if (!connectMode) deselect(); return; }
+    if (!node) {
+      if (selectMode) {
+        // Selectiemodus (DOEL-80): klik op een kolomkop (niet op het ✕-knopje)
+        // selecteert de hele kolom; een klik naast de vakken doet niets.
+        const header = ev.target.closest('.col-header');
+        if (header && !ev.target.closest('.col-hide-btn')) toggleBulkColumn(header.closest('.column'));
+        return;
+      }
+      if (!connectMode) deselect();
+      return;
+    }
     const id = node.dataset.id;
     if (connectMode) { toggleConnectPick(id); return; }
+    if (selectMode) { toggleBulkPick(id); return; }
     if (ev.metaKey || ev.ctrlKey) return; // al afgehandeld op mousedown hierboven
     if (selectedId === id) { deselect(); } else { selectNode(id); }
   });
@@ -3194,7 +3466,7 @@ function runApp(data) {
   let suppressNextClick = false;
   columnsEl.addEventListener('touchstart', (ev) => {
     const node = ev.target.closest('.node');
-    if (!node) return;
+    if (!node || selectMode) return; // in selectiemodus is een gewone tik al "aan/uit"
     clearTimeout(longPressTimer);
     longPressTimer = setTimeout(() => {
       suppressNextClick = true;
@@ -3480,6 +3752,7 @@ function runApp(data) {
   columnsEl.addEventListener('dblclick', (ev) => {
     const header = ev.target.closest('.col-header');
     if (!header) return;
+    if (selectMode) return; // in selectiemodus (DOEL-80) selecteert een klik op de kolomkop de hele kolom
     if (ev.target.closest('.col-hide-btn')) return; // ✕-knop heeft zijn eigen (click-)gedrag, niet openen
     const col = header.closest('.column');
     if (!col) return;
@@ -5126,6 +5399,10 @@ function runApp(data) {
   }
 
   function enterFocus(node, returnTarget) {
+    // Selectiemodus (DOEL-80) bestaat niet in focusmodus; een dubbelklik komt
+    // hier in selectiemodus niet (zie de dblclick-listener), de andere
+    // ingangen (tijdlijnenoverzicht, controleweergave) beëindigen de modus.
+    if (selectMode) setSelectMode(false);
     const id = node.dataset.id;
     if (focusId === null) {
       prevHiddenCols = new Set(hiddenCols);
@@ -5157,7 +5434,7 @@ function runApp(data) {
     expandLeftBtn.disabled = true;
     filterFromSearchBtn.style.display = 'none';
     backBtn.style.display = '';
-    updateFilterStatusUI(); // zet ook filter-apply/-clear op disabled zolang focusId gezet is
+    updateFilterStatusUI(); // zet ook filter-apply/-clear op disabled zolang focusId gezet is (en de Selecteren-knop, DOEL-80)
 
     requestAnimationFrame(() => setTimeout(() => { drawEdges(); drawColumnArrows(); }, 280));
   }
@@ -5271,7 +5548,7 @@ function runApp(data) {
 
   columnsEl.addEventListener('dblclick', (ev) => {
     const node = ev.target.closest('.node');
-    if (!node || connectMode) return; // niet in-/uitzoomen terwijl een keten wordt opgebouwd
+    if (!node || connectMode || selectMode) return; // niet in-/uitzoomen terwijl een keten of selectie wordt opgebouwd
     enterFocus(node);
   });
 
@@ -5366,6 +5643,7 @@ function runApp(data) {
     searchCountEl.classList.remove('has-query');
     lastSearchMatchIds = [];
     filterFromSearchBtn.style.display = 'none';
+    updateSelectStatusUI(); // "+ Zoekresultaten" in de Selectiemodus-balk (DOEL-80)
   }
 
   function runSearch() {
@@ -5392,6 +5670,7 @@ function runApp(data) {
     }
     lastSearchMatchIds = matchIds;
     filterFromSearchBtn.style.display = (focusId === null && matchIds.length > 0) ? '' : 'none';
+    updateSelectStatusUI(); // "+ Zoekresultaten" in de Selectiemodus-balk (DOEL-80)
 
     // Auto-reveal every column that contains at least one match
     if (matchIds.length > 0) {
@@ -5709,7 +5988,7 @@ function runApp(data) {
   // ---- SVG-export van de volledige boom (huidige zichtbare stand) ----
   function nodeTextLines(node) {
     const clone = node.cloneNode(true);
-    clone.querySelectorAll('.node-tag-dot, .node-rag-dot, .node-stale-icon, .node-rule-icon').forEach(el => el.remove());
+    clone.querySelectorAll('.node-tag-dot, .node-rag-dot, .node-stale-icon, .node-rule-icon, .node-connect-badge, .node-bulk-badge').forEach(el => el.remove());
     clone.querySelectorAll('br').forEach(br => br.replaceWith('\n'));
     return clone.textContent.split('\n').map(s => s.trim());
   }
@@ -6477,6 +6756,238 @@ function runApp(data) {
       showToast(err && err.message ? err.message : 'Onbekende fout bij verwijderen.', 'error');
     }
   }
+
+  // ---- Bulkacties op de selectie (DOEL-81 bewerken, DOEL-82 verwijderen) ----
+  // De selectie zelf komt uit de Selectiemodus (DOEL-80, bulkSelection). Eén
+  // API-aanroep per actie: de server voert alles in één transactie uit en
+  // wijst het hele verzoek af als er iets niet klopt (zie
+  // api/src/routes/elements.ts). Na afloop herladen we de boom, net als bij
+  // de andere bewerkacties.
+  const bulkEditBackdrop = document.getElementById('bulk-edit-modal-backdrop');
+  const bulkEditForm = document.getElementById('bulk-edit-form');
+  const bulkEditHint = document.getElementById('bulk-edit-hint');
+  const bulkEditType = document.getElementById('bulk-edit-type');
+  const bulkEditTags = document.getElementById('bulk-edit-tags');
+  const bulkEditOrgs = document.getElementById('bulk-edit-orgs');
+  const bulkEditAttrsSection = document.getElementById('bulk-edit-attrs-section');
+  const bulkEditAttrs = document.getElementById('bulk-edit-attrs');
+  const bulkEditStatus = document.getElementById('bulk-edit-status');
+  const bulkEditSaveBtn = document.getElementById('bulk-edit-save');
+  const bulkEditCancelBtn = document.getElementById('bulk-edit-cancel');
+  const bulkDeleteBackdrop = document.getElementById('bulk-delete-modal-backdrop');
+  const bulkDeleteSummary = document.getElementById('bulk-delete-summary');
+  const bulkDeleteList = document.getElementById('bulk-delete-list');
+  const bulkDeleteCount = document.getElementById('bulk-delete-count');
+  const bulkDeleteInput = document.getElementById('bulk-delete-confirm-input');
+  const bulkDeleteStatus = document.getElementById('bulk-delete-status');
+  const bulkDeleteOkBtn = document.getElementById('bulk-delete-ok');
+  const bulkDeleteCancelBtn = document.getElementById('bulk-delete-cancel');
+  const bulkDeleteExportBtn = document.getElementById('bulk-delete-export');
+  let bulkEditAttrDefs = [];
+
+  function bulkSelectedCodes() {
+    return Array.from(bulkSelection).filter((code) => DETAILS[code]).sort(bulkNaturalCompare);
+  }
+
+  function bulkTypeToBase() {
+    const map = {};
+    Object.keys(TYPE_TO_COLUMN).forEach((type) => { map[type] = TYPE_TO_COLUMN[type].typeName; });
+    return map;
+  }
+
+  function setBulkStatus(el, text, kind) {
+    el.textContent = text || '';
+    el.style.color = kind === 'ok' ? '#2E7D5B' : kind === 'busy' ? '#777' : '#DC3545';
+  }
+
+  async function postBulk(action, payload) {
+    const res = await fetch(apiUrl + '/api/doelenbomen/' + doelenboomId + '/elements/' + action, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + authToken },
+      body: JSON.stringify(payload),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || ('Mislukt (HTTP ' + res.status + ')'));
+    return body;
+  }
+
+  // Melding na het herladen (zelfde mechanisme als DOEL-78).
+  function reloadWithBulkToast(message) {
+    try {
+      sessionStorage.setItem(pendingToastKey(), message);
+    } catch (storageErr) {
+      showToast(message, 'ok');
+      reloadTreeKeepingFocus(1500);
+      return;
+    }
+    reloadTreeKeepingFocus();
+  }
+
+  // Kenmerken die voor ALLE geselecteerde elementen gelden — of, als er in
+  // deze dialoog een nieuw type is gekozen, voor dat type.
+  function renderBulkEditAttributes() {
+    const chosenType = bulkEditType.value;
+    const types = chosenType
+      ? [chosenType]
+      : Array.from(new Set(bulkSelectedCodes().map((code) => DETAILS[code].type)));
+    bulkEditAttrDefs = bulkCommonAttributes(ATTRIBUTES, types, bulkTypeToBase());
+    bulkEditAttrsSection.style.display = ATTRIBUTES.length ? '' : 'none';
+    bulkEditAttrs.innerHTML = bulkEditAttrDefs.length
+      ? bulkAttributeRowsHtml(bulkEditAttrDefs)
+      : '<p class="checkbox-list-empty">Geen kenmerken die voor alle geselecteerde elementen gelden.</p>';
+  }
+
+  function updateBulkModeInputs() {
+    bulkEditForm.querySelectorAll('select[data-bulk-mode-for]').forEach((sel) => {
+      const input = document.getElementById(sel.dataset.bulkModeFor);
+      if (input) input.style.display = sel.value === 'set' ? '' : 'none';
+    });
+  }
+
+  function openBulkEditModal() {
+    const codes = bulkSelectedCodes();
+    if (!codes.length) return;
+    bulkEditForm.reset();
+    bulkEditHint.textContent = 'Je wijzigt ' + codes.length + (codes.length === 1 ? ' element' : ' elementen') +
+      '. Alleen wat je hier kiest verandert; al het andere blijft zoals het is.';
+    bulkEditType.innerHTML = '<option value="">Ongewijzigd</option>' + typeOptionsHtml;
+    const byName = (a, b) => a.name.localeCompare(b.name, 'nl');
+    const tagItems = Object.keys(TAGS).map((code) => ({ code: code, name: TAGS[code].name })).sort(byName);
+    const orgItems = Object.keys(ORGS).map((code) => ({ code: code, name: ORGS[code].name })).sort(byName);
+    const tagCounts = {};
+    const orgCounts = {};
+    codes.forEach((code) => {
+      (ELEMENT_TAGS[code] || []).forEach((t) => { tagCounts[t] = (tagCounts[t] || 0) + 1; });
+      (OB_ORG[code] || []).forEach((r) => { orgCounts[r.org] = (orgCounts[r.org] || 0) + 1; });
+    });
+    bulkEditTags.innerHTML = bulkLinkRowsHtml(tagItems, tagCounts, codes.length);
+    bulkEditOrgs.innerHTML = bulkLinkRowsHtml(orgItems, orgCounts, codes.length);
+    updateBulkModeInputs();
+    renderBulkEditAttributes();
+    setBulkStatus(bulkEditStatus, '');
+    bulkEditSaveBtn.disabled = false;
+    bulkEditBackdrop.classList.add('visible');
+  }
+
+  function closeBulkEditModal() {
+    bulkEditBackdrop.classList.remove('visible');
+  }
+
+  function readBulkLinkChoices(container, names) {
+    const out = [];
+    container.querySelectorAll('.bulk-link-select').forEach((sel) => {
+      if (!sel.value) return;
+      const code = sel.dataset.code;
+      out.push({ code: code, mode: sel.value, name: names[code] ? names[code].name : code });
+    });
+    return out;
+  }
+
+  selectEditBtn.addEventListener('click', openBulkEditModal);
+  bulkEditCancelBtn.addEventListener('click', closeBulkEditModal);
+  bulkEditBackdrop.addEventListener('click', (ev) => { if (ev.target === bulkEditBackdrop) closeBulkEditModal(); });
+  bulkEditType.addEventListener('change', renderBulkEditAttributes);
+  bulkEditForm.addEventListener('change', (ev) => {
+    if (ev.target.matches('select[data-bulk-mode-for]')) {
+      updateBulkModeInputs();
+      const input = document.getElementById(ev.target.dataset.bulkModeFor);
+      if (input && ev.target.value === 'set') input.focus();
+    }
+    if (ev.target.matches('.bulk-attr-check')) {
+      const wrap = ev.target.closest('.bulk-attr-row').querySelector('.bulk-attr-input-wrap');
+      if (wrap) wrap.hidden = !ev.target.checked;
+    }
+  });
+
+  bulkEditForm.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const codes = bulkSelectedCodes();
+    if (!codes.length) { closeBulkEditModal(); return; }
+    const attributes = [];
+    for (let i = 0; i < bulkEditAttrDefs.length; i += 1) {
+      const def = bulkEditAttrDefs[i];
+      const check = bulkEditAttrs.querySelector('.bulk-attr-check[data-attr-id="' + CSS.escape(def.id) + '"]');
+      if (!check || !check.checked) continue;
+      const input = bulkEditAttrs.querySelector('.dp-attr-input[data-attr-id="' + CSS.escape(def.id) + '"]');
+      const parsed = attributeValueFromInput(def, input ? input.value : '');
+      if (parsed.error) { setBulkStatus(bulkEditStatus, parsed.error); if (input) input.focus(); return; }
+      attributes.push({ id: def.id, label: def.label || def.id, value: parsed.value, display: attributeDisplayValue(def, parsed.value) });
+    }
+    const built = bulkEditBuildPayload(codes, {
+      type: bulkEditType.value,
+      taakveldMode: document.getElementById('bulk-edit-taakveld-mode').value,
+      taakveld: document.getElementById('bulk-edit-taakveld').value,
+      subtaakveldMode: document.getElementById('bulk-edit-subtaakveld-mode').value,
+      subtaakveld: document.getElementById('bulk-edit-subtaakveld').value,
+      tags: readBulkLinkChoices(bulkEditTags, TAGS),
+      orgUnits: readBulkLinkChoices(bulkEditOrgs, ORGS),
+      attributes: attributes,
+    });
+    if (built.error) { setBulkStatus(bulkEditStatus, built.error); return; }
+    setBulkStatus(bulkEditStatus, '');
+    // showConfirm zet de tekst met textContent: namen en waarden blijven platte tekst.
+    const ok = await showConfirm(
+      'Deze wijziging doorvoeren op ' + codes.length + (codes.length === 1 ? ' element' : ' elementen') + '? ' +
+      built.summary.join('; ') + '.',
+      'Doorvoeren'
+    );
+    if (!ok) return;
+    bulkEditSaveBtn.disabled = true;
+    setBulkStatus(bulkEditStatus, 'Bezig met opslaan\u2026', 'busy');
+    try {
+      const result = await postBulk('bulk-update', built.payload);
+      const n = typeof result.updated === 'number' ? result.updated : codes.length;
+      setBulkStatus(bulkEditStatus, 'Opgeslagen, boom wordt herladen\u2026', 'ok');
+      reloadWithBulkToast(n + (n === 1 ? ' element' : ' elementen') + ' bijgewerkt.');
+    } catch (err) {
+      bulkEditSaveBtn.disabled = false;
+      setBulkStatus(bulkEditStatus, err && err.message ? err.message : 'Onbekende fout bij opslaan.');
+    }
+  });
+
+  // -- Verwijderen (alleen admin; de API dwingt dat af, dit is alleen de UI) --
+  function openBulkDeleteModal() {
+    if (userRole !== 'admin') return;
+    const codes = bulkSelectedCodes();
+    if (!codes.length) return;
+    bulkDeleteSummary.textContent = bulkDeleteSummaryText(bulkDeleteImpact(codes, EDGES, PRODUCTS, ACTIVITIES, PROJECT_STATUS));
+    bulkDeleteList.innerHTML = bulkDeleteListHtml(codes, DETAILS);
+    bulkDeleteCount.textContent = String(codes.length);
+    bulkDeleteInput.value = '';
+    bulkDeleteOkBtn.disabled = true;
+    setBulkStatus(bulkDeleteStatus, '');
+    bulkDeleteBackdrop.classList.add('visible');
+    bulkDeleteInput.focus();
+  }
+
+  function closeBulkDeleteModal() {
+    bulkDeleteBackdrop.classList.remove('visible');
+  }
+
+  selectDeleteBtn.addEventListener('click', openBulkDeleteModal);
+  bulkDeleteCancelBtn.addEventListener('click', closeBulkDeleteModal);
+  bulkDeleteBackdrop.addEventListener('click', (ev) => { if (ev.target === bulkDeleteBackdrop) closeBulkDeleteModal(); });
+  bulkDeleteInput.addEventListener('input', () => {
+    bulkDeleteOkBtn.disabled = !bulkDeleteConfirmMatches(bulkDeleteInput.value, bulkSelectedCodes().length);
+  });
+  // De selectie blijft staan (exporteren herlaadt de boom niet), zodat je
+  // daarna opnieuw op "Verwijderen…" kunt klikken.
+  bulkDeleteExportBtn.addEventListener('click', () => { closeBulkDeleteModal(); openExportModal(); });
+  bulkDeleteOkBtn.addEventListener('click', async () => {
+    const codes = bulkSelectedCodes();
+    if (!codes.length || !bulkDeleteConfirmMatches(bulkDeleteInput.value, codes.length)) return;
+    bulkDeleteOkBtn.disabled = true;
+    setBulkStatus(bulkDeleteStatus, 'Bezig met verwijderen\u2026', 'busy');
+    try {
+      const result = await postBulk('bulk-delete', { codes: codes });
+      const n = typeof result.deleted === 'number' ? result.deleted : codes.length;
+      setBulkStatus(bulkDeleteStatus, 'Verwijderd, boom wordt herladen\u2026', 'ok');
+      reloadWithBulkToast(n + (n === 1 ? ' element' : ' elementen') + ' verwijderd.');
+    } catch (err) {
+      bulkDeleteOkBtn.disabled = false;
+      setBulkStatus(bulkDeleteStatus, err && err.message ? err.message : 'Onbekende fout bij verwijderen.');
+    }
+  });
 
   // ---- Producten/deliverables ("planning items") CRUD binnen een project ----
   const productModalBackdrop = document.getElementById('product-modal-backdrop');
@@ -9098,6 +9609,160 @@ function escapeHtml(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[c]));
+}
+
+// ---- Selectiemodus (DOEL-80) ----
+// Pure functies op topniveau (net als escapeHtml), zodat
+// web/test/tree-html-bulk-select.test.mjs ze los kan laden en testen. De
+// DOM-kant staat in runApp ("---- Selectiemodus ----").
+function bulkSelectionToggle(selection, id) {
+  if (selection.has(id)) selection.delete(id); else selection.add(id);
+  return selection;
+}
+
+// Voegt alleen codes toe die als element in deze boom bestaan (known =
+// DETAILS); alles anders wordt genegeerd. Geeft het aantal toegevoegde terug.
+function bulkSelectionAdd(selection, ids, known) {
+  let added = 0;
+  (Array.isArray(ids) ? ids : []).forEach((id) => {
+    if (typeof id !== 'string' || !Object.prototype.hasOwnProperty.call(known || {}, id) || selection.has(id)) return;
+    selection.add(id);
+    added++;
+  });
+  return added;
+}
+
+function bulkSelectionStatusText(count, hiddenCount) {
+  if (!count) return 'Selectiemodus actief \u2014 klik elementen aan, of klik op een kolomkop voor de hele kolom.';
+  let text = count + (count === 1 ? ' element' : ' elementen') + ' geselecteerd';
+  if (hiddenCount > 0) text += ' (waarvan ' + hiddenCount + ' nu niet zichtbaar)';
+  return text;
+}
+
+// ---- Bulkacties op de selectie (DOEL-81 bewerken, DOEL-82 verwijderen) ----
+// Pure functies op topniveau, zodat web/test/tree-html-bulk-select.test.mjs
+// ze los kan laden en testen. Alles wat van de gebruiker komt (namen, codes,
+// waarden) gaat via escapeHtml de HTML in.
+function bulkNaturalCompare(a, b) {
+  return String(a).localeCompare(String(b), 'nl', { numeric: true });
+}
+
+// Kenmerken die voor ELK van de gegeven types gelden (een alias volgt zijn
+// basistype, zie attributesForType).
+function bulkCommonAttributes(attributes, types, typeToBase) {
+  if (!types || !types.length) return [];
+  return (attributes || []).filter((a) => types.every((t) => attributesForType([a], t, typeToBase).length === 1));
+}
+
+// Eén rij per tag of organisatieonderdeel met de keuze Ongewijzigd /
+// Toevoegen / Verwijderen. "Toevoegen" ontbreekt als alle geselecteerde
+// elementen de koppeling al hebben, "Verwijderen" als geen enkele hem heeft.
+function bulkLinkRowsHtml(items, countByCode, total) {
+  if (!items || !items.length) {
+    return '<p class="checkbox-list-empty">Nog geen items — voeg ze eerst toe via "Tags &amp; organisatieonderdelen beheren".</p>';
+  }
+  return items.map((it) => {
+    const n = (countByCode && countByCode[it.code]) || 0;
+    return '<div class="bulk-link-row"><span class="bulk-link-name">' + escapeHtml(it.name) +
+      ' <span class="bulk-link-count">' + n + ' van ' + total + '</span></span>' +
+      '<select class="bulk-link-select" data-code="' + escapeHtml(it.code) + '" aria-label="' + escapeHtml(it.name) + '">' +
+      '<option value="">Ongewijzigd</option>' +
+      (n < total ? '<option value="add">Toevoegen</option>' : '') +
+      (n > 0 ? '<option value="remove">Verwijderen</option>' : '') +
+      '</select></div>';
+  }).join('');
+}
+
+// Eén rij per kenmerk: aanvinken = wijzigen; het invoerveld (zelfde als in
+// het detailpaneel, attributeInputHtml) verschijnt pas dan.
+function bulkAttributeRowsHtml(defs) {
+  return (defs || []).map((def) =>
+    '<div class="bulk-attr-row"><label class="bulk-attr-toggle">' +
+    '<input type="checkbox" class="bulk-attr-check" data-attr-id="' + escapeHtml(def.id) + '"> ' + escapeHtml(def.label) + '</label>' +
+    '<span class="bulk-attr-input-wrap" hidden>' + attributeInputHtml(def, undefined) + '</span></div>'
+  ).join('');
+}
+
+// Formulierkeuzes -> body voor POST .../elements/bulk-update, plus een
+// samenvatting in platte tekst voor de bevestiging. Geeft { error } als er
+// niets gekozen is of een "Instellen op"-veld leeg is.
+function bulkEditBuildPayload(codes, input) {
+  const payload = { codes: (codes || []).slice() };
+  const summary = [];
+  const set = {};
+  const inp = input || {};
+  if (inp.type) { set.type = inp.type; summary.push('type wordt ' + inp.type); }
+  const textFields = [['taakveld', 'Taakveld'], ['subtaakveld', 'Sub-taakveld']];
+  for (let i = 0; i < textFields.length; i += 1) {
+    const key = textFields[i][0];
+    const label = textFields[i][1];
+    const mode = inp[key + 'Mode'];
+    if (mode === 'set') {
+      const value = String(inp[key] == null ? '' : inp[key]).trim();
+      if (!value) return { error: label + ': vul een waarde in, of kies "Leegmaken".' };
+      set[key] = value;
+      summary.push(label.toLowerCase() + ' wordt "' + value + '"');
+    } else if (mode === 'clear') {
+      set[key] = '';
+      summary.push(label.toLowerCase() + ' wordt leeggemaakt');
+    }
+  }
+  if (Object.keys(set).length) payload.set = set;
+  const links = [['tags', 'tag'], ['orgUnits', 'organisatieonderdeel']];
+  for (let i = 0; i < links.length; i += 1) {
+    const key = links[i][0];
+    const add = [];
+    const remove = [];
+    (inp[key] || []).forEach((choice) => {
+      if (choice.mode === 'add') { add.push(choice.code); summary.push(links[i][1] + ' "' + choice.name + '" erbij'); }
+      if (choice.mode === 'remove') { remove.push(choice.code); summary.push(links[i][1] + ' "' + choice.name + '" eraf'); }
+    });
+    if (add.length || remove.length) payload[key] = { add: add, remove: remove };
+  }
+  const attributes = {};
+  (inp.attributes || []).forEach((a) => {
+    attributes[a.id] = a.value;
+    summary.push(a.value === null ? 'kenmerk "' + a.label + '" wordt gewist' : 'kenmerk "' + a.label + '" wordt "' + a.display + '"');
+  });
+  if (Object.keys(attributes).length) payload.attributes = attributes;
+  if (!summary.length) return { error: 'Kies minstens één wijziging.' };
+  return { payload: payload, summary: summary };
+}
+
+// Wat er met de selectie meeverdwijnt: relaties waar een geselecteerd
+// element aan vastzit (elke relatie telt één keer) en het aantal elementen
+// met projectgegevens (status, producten of activiteiten).
+function bulkDeleteImpact(codes, edges, products, activities, projectStatus) {
+  const selected = new Set(codes || []);
+  const relations = (edges || []).filter((e) => selected.has(e.source) || selected.has(e.target)).length;
+  let withProjectData = 0;
+  selected.forEach((code) => {
+    if (((products || {})[code] || []).length || ((activities || {})[code] || []).length || (projectStatus || {})[code]) withProjectData += 1;
+  });
+  return { count: selected.size, relations: relations, withProjectData: withProjectData };
+}
+
+function bulkDeleteSummaryText(impact) {
+  let text = 'Je staat op het punt ' + impact.count + (impact.count === 1 ? ' element' : ' elementen') + ' te verwijderen. ' +
+    'Daarmee ' + (impact.relations === 1 ? 'verdwijnt ook 1 relatie' : 'verdwijnen ook ' + impact.relations + ' relaties') +
+    ', plus de tag- en organisatiekoppelingen en kenmerkwaarden van deze elementen.';
+  if (impact.withProjectData > 0) {
+    text += ' Bij ' + impact.withProjectData + ' ervan verdwijnen ook de projectgegevens (status, producten en activiteiten).';
+  }
+  return text + ' Andere elementen blijven staan, maar kunnen hun verbinding met de rest van de boom verliezen.';
+}
+
+function bulkDeleteListHtml(codes, details) {
+  return '<ul>' + (codes || []).map((code) => {
+    const d = (details || {})[code] || {};
+    return '<li><strong>' + escapeHtml(code) + '</strong> ' + escapeHtml(d.name || '') +
+      ' <span class="bulk-delete-type">(' + escapeHtml(d.type || '') + ')</span></li>';
+  }).join('') + '</ul>';
+}
+
+// Bevestigen door het aantal over te typen: alleen exact dat getal telt.
+function bulkDeleteConfirmMatches(input, count) {
+  return count > 0 && String(input == null ? '' : input).trim() === String(count);
 }
 
 // ---- Controleregels (DOEL-63, epic DOEL-61) ----
