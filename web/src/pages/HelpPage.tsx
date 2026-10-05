@@ -203,6 +203,14 @@ const SECTIONS: { id: string; title: string; content: JSX.Element }[] = [
           verderop.
         </p>
         <p style={styles.p}>
+          <strong>… een presentatie van de doelenboom maken?</strong> Kies <strong>Bestand → Exporteer als
+          PowerPoint</strong>. De eerste slide toont de kolommen als snoer, met per kolom de omschrijving. Vink
+          aan welke kolommen je per element wilt uitwerken: elk element krijgt dan een eigen slide met de boom
+          gefilterd op dat element (het hele pad omhoog en omlaag), de beschrijving, de KPI en de verbindingen.
+          Kolommen die je op het scherm verborgen hebt, komen niet in de presentatie; maak ze eerst zichtbaar
+          als je ze wilt meenemen. Het dialoogvenster toont vooraf hoeveel slides het worden (maximaal 300).
+        </p>
+        <p style={styles.p}>
           <strong>… de boom delen met iemand zonder account?</strong> <strong>Bestand → Exporteer als
           HTML-bestand</strong> levert een volledig zelfstandig bestand op dat zonder login of
           internetverbinding werkt.
@@ -364,7 +372,7 @@ const SECTIONS: { id: string; title: string; content: JSX.Element }[] = [
         </p>
         <p style={styles.p}>
           <strong>Tenant-bezoeker</strong> (rol "bezoeker") — alleen lezen binnen de tenant(s) waar hij/zij lid
-          van is: de boom bekijken, zoeken/filteren, en exporteren (Excel/HTML/SVG). Geen enkele schrijfactie.
+          van is: de boom bekijken, zoeken/filteren, en exporteren (Excel/PowerPoint/HTML/SVG). Geen enkele schrijfactie.
         </p>
         <p style={styles.p}>
           Eén account kan lid zijn van meerdere tenants, met eventueel een andere rol per tenant, en een rol
@@ -395,7 +403,7 @@ const SECTIONS: { id: string; title: string; content: JSX.Element }[] = [
           </thead>
           <tbody>
             {roleRow('Boom bekijken, zoeken, filteren', true, true, true)}
-            {roleRow('Exporteren (Excel/HTML/SVG)', true, true, true)}
+            {roleRow('Exporteren (Excel/PowerPoint/HTML/SVG)', true, true, true)}
             {roleRow('Elementen en relaties aanmaken/bewerken/verwijderen', false, true, true)}
             {roleRow('Tags/organisatieonderdelen aan een element koppelen', false, true, true)}
             {roleRow('Projectstatus (RAG) bijwerken', false, true, true)}
