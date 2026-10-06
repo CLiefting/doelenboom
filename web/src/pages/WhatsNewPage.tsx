@@ -16,6 +16,125 @@ type Release = {
 
 const RELEASES: Release[] = [
   {
+    version: '4.0.1',
+    date: '5 oktober 2026',
+    title: 'Helppagina bijgewerkt',
+    items: [
+      'De helppagina is nagelopen en aangevuld: nieuwe secties over kenmerken, controleregels en afwijkingen, account en beveiliging, en licentie en modules.',
+      'De tabel "Mogelijkheden per rol" bevat nu ook de acties die sinds 1.10 zijn toegevoegd.',
+    ],
+  },
+  {
+    version: '4.0.0',
+    date: '5 oktober 2026',
+    title: 'Doelenboom exporteren als PowerPoint',
+    items: [
+      'Bestand → Exporteer als PowerPoint: de eerste slide toont de kolommen als snoer, met 2 tot 6 kolommen per regel.',
+      'Per aangevinkte kolom een slide per element: de boom gefilterd op dat element (het hele pad omhoog en omlaag), met beschrijving, KPI, verbindingen, tags en organisatieonderdelen.',
+      'Kolommen die op het scherm verborgen zijn komen niet in de presentatie; het venster toont vooraf het aantal slides (maximaal 300).',
+    ],
+  },
+  {
+    version: '3.6.0',
+    date: '5 oktober 2026',
+    title: 'Meerdere elementen tegelijk bewerken; volgorde van elementen',
+    items: [
+      'Selecteren: meerdere elementen kiezen en in één keer bewerken (type, taakveld, tags, organisatieonderdelen, kenmerken) of verwijderen (alleen admin).',
+      'Een nieuw element komt op codevolgorde in zijn kolom te staan.',
+      'Een element verplaatsen binnen zijn kolom (omhoog, omlaag of "Plaats na…"); een hele kolom sorteren op code of op bovenliggend element (alleen admin).',
+      'Kenmerken: een verplicht kenmerk is herkenbaar aan een rode *, en na opslaan volgt een melding als het nog leeg is.',
+    ],
+  },
+  {
+    version: '3.5.0',
+    date: '3 oktober 2026',
+    title: 'Kenmerken per elementtype',
+    items: [
+      'Eigen kenmerken per elementtype definiëren: tekst, getal, datum, keuzelijst of ja/nee (module Controleregels).',
+      'Kenmerken invullen in het detailpaneel; zichtbaar in het detailpaneel en in het kaartje bij een vak.',
+      'Controleregels op kenmerken: een verplicht kenmerk, en het regeltype "Kenmerk voldoet aan…" met een eis per soort.',
+    ],
+  },
+  {
+    version: '3.4.0 / 3.4.1',
+    date: '2 oktober 2026',
+    title: 'Softwarecomponenten en beveiligingsonderhoud',
+    items: [
+      'Het overzicht Softwarecomponenten wordt direct na een uitrol bijgewerkt.',
+      'Sysadmins krijgen een e-mail bij nieuw gemelde kwetsbaarheden.',
+      'Dependency-updates; een onnodig onderdeel is uit de image van de excel-service gehaald.',
+    ],
+  },
+  {
+    version: '3.3.0',
+    date: '2 oktober 2026',
+    title: 'Gemotiveerd afwijken van een controleregel',
+    items: [
+      'Per element en controleregel een afwijking motiveren; het element telt dan niet meer als open overtreding en krijgt een grijs signaal.',
+      'De samenvatting telt open en gemotiveerde afwijkingen apart.',
+    ],
+  },
+  {
+    version: '3.2.0 – 3.2.2',
+    date: '1 en 2 oktober 2026',
+    title: 'Controleregels en aliassen',
+    items: [
+      'Nieuwe module Controleregels: per doelenboom regels opstellen die toetsen of de boom sluitend is, met een "!" op elementen die niet voldoen en een samenvatting per regel.',
+      'Het kaartje bij een vak legt uit waarom een element een "!" heeft.',
+      'Aliassen: extra elementtypen binnen één kolom, elk met een optionele eigen kleur.',
+      'Beveiligingsupdates van de e-mailverzending en van dependencies.',
+    ],
+  },
+  {
+    version: '3.1.0 – 3.1.3',
+    date: '19 september 2026',
+    title: 'Beveiligingsronde en project-PowerPoint',
+    items: [
+      'Registratie met e-mailverificatie en een limiet op het aantal pogingen; tijdelijke blokkade na herhaald mislukt inloggen.',
+      'Sessies kunnen worden ingetrokken; beveiligingsgebeurtenissen komen in het auditlogboek.',
+      'Open toegang per tenant: elk account krijgt minstens een ingestelde rol; een doelenboom kan automatisch worden leeggemaakt zodra niemand meer toegang heeft.',
+      'Foutmeldingen tonen geen interne details meer; strengere beveiligingsheaders en afgeschermde containers.',
+      'PowerPoint-rapportage van één project ("PPT" op de projectkaart).',
+      'Overgestapt op Node 24.',
+    ],
+  },
+  {
+    version: '1.10.0',
+    date: '19 september 2026',
+    title: 'Verbindmodus',
+    items: [
+      'Verbinden: elementen in volgorde aanklikken en in één keer een keten van relaties maken.',
+      'E-mail aan sysadmins bij een nieuwe abonnementsaanvraag.',
+      'Het overzicht Softwarecomponenten wordt met de applicatie meegeleverd.',
+      'Opgelost: een relatie die een kolom overslaat viel weg bij een boomfilter.',
+    ],
+  },
+  {
+    version: '1.9.0',
+    date: '16 september 2026',
+    title: 'Aanbiedingen',
+    items: [
+      'Aanbiedingenpaneel in Licentiebeheer, zichtbaar op de aanvraagpagina.',
+      'De footer toont van welke versie van de broncode de applicatie is gebouwd.',
+    ],
+  },
+  {
+    version: '1.8.0 / 1.8.1',
+    date: '7 september 2026',
+    title: 'Nieuwe prijsstrategie en rol editor',
+    items: [
+      'Nieuwe rol editor, tussen bezoeker en admin.',
+      'Licentielimiet op het aantal admins en editors samen; nieuwe tiers en een vaste opslag per module, met maandfacturatie.',
+      'Een abonnementsvorm zonder prijs voor de gekozen periode is niet meer aan te vragen.',
+    ],
+  },
+  {
+    version: '1.7.1',
+    date: '6 september 2026',
+    title: 'Over Doelenboom',
+    items: ['Nieuw menu-item "Over Doelenboom" met deze releasegeschiedenis.'],
+  },
+  {
     version: '1.7.0',
     date: '6 september 2026',
     title: 'Klantbeheer, klantnummer, abonnements-/module-opzegging',
