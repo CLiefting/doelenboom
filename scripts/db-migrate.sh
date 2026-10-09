@@ -145,6 +145,9 @@ EOF
   exit 2
 fi
 
+# LET OP (macOS): /bin/bash is daar versie 3.2. Die meldt bij `set -u` een
+# leeg array als "unbound variable"; PENDING kan leeg zijn, dus altijd als
+# ${PENDING[@]+"${PENDING[@]}"} uitpakken (bewaakt door api/test/dbMigrate.test.ts).
 APPLIED="$(sql "select filename from schema_migrations order by filename")"
 is_applied() { grep -qxF "$1" <<< "$APPLIED"; }
 
@@ -154,7 +157,7 @@ for f in "${FILES[@]}"; do is_applied "$f" || PENDING+=("$f"); done
 if [ "$MODE" = "status" ]; then
   echo "Migraties in $MIGRATIONS_DIR: ${#FILES[@]}; geregistreerd: $(grep -c . <<< "$APPLIED" || true); openstaand: ${#PENDING[@]}"
   sql "select filename || '  (' || method || ', ' || to_char(applied_at, 'YYYY-MM-DD HH24:MI') || ')' from schema_migrations order by filename desc limit 5" | sed 's/^/  laatst: /'
-  for f in "${PENDING[@]}"; do echo "  open:   $f"; done
+  for f in ${PENDING[@]+"${PENDING[@]}"}; do echo "  open:   $f"; done
   # Geregistreerd maar het bestand bestaat (hier) niet: meestal een oudere checkout.
   while IFS= read -r a; do
     [ -z "$a" ] && continue
@@ -170,12 +173,12 @@ fi
 
 if [ "$MODE" = "dry-run" ]; then
   echo "Zou ${#PENDING[@]} migratie(s) toepassen:"
-  for f in "${PENDING[@]}"; do echo "  - $f"; done
+  for f in ${PENDING[@]+"${PENDING[@]}"}; do echo "  - $f"; done
   exit 0
 fi
 
 echo "==> ${#PENDING[@]} nieuwe migratie(s) toepassen"
-for f in "${PENDING[@]}"; do
+for f in ${PENDING[@]+"${PENDING[@]}"}; do
   echo "  - $f"
   # Bestand en registratie in één psql-sessie: door ON_ERROR_STOP wordt de
   # registratie alleen uitgevoerd als het hele bestand geslaagd is.

@@ -50,6 +50,19 @@ describe('DOEL-99: migratiebestanden en init.sql', () => {
   });
 });
 
+describe('DOEL-99: scripts/db-migrate.sh werkt ook met bash 3.2 (macOS)', () => {
+  // Gevonden door Charles op 9 okt 2026: `--status` zonder openstaande migraties
+  // gaf op macOS "PENDING[@]: unbound variable". bash 3.2 ziet een leeg array
+  // onder `set -u` als niet gezet; bash 4.4+ (Linux, CI) niet, dus dat valt hier
+  // niet na te bootsen. Daarom een broncontrole: PENDING (kan leeg zijn) mag
+  // alleen in de veilige vorm worden uitgepakt.
+  const src = readFileSync(script, 'utf8').split('\n').filter((l) => !l.trimStart().startsWith('#')).join('\n');
+  it('PENDING wordt nergens kaal als "${PENDING[@]}" uitgepakt', () => {
+    const bare = src.replace(/\$\{PENDING\[@\]\+"\$\{PENDING\[@\]\}"\}/g, '');
+    assert.doesNotMatch(bare, /"\$\{PENDING\[@\]\}"/);
+  });
+});
+
 function psqlAvailable(): string | null {
   if (spawnSync('sh', ['-c', 'command -v psql']).status !== 0) return 'psql ontbreekt';
   return null;
@@ -210,6 +223,13 @@ describe('DOEL-99: scripts/db-migrate.sh tegen een echte database', { skip }, ()
     assert.match(r.err, /ongeldige bestandsnaam/);
     const ok = await withDb(async (c) => (await c.query(`select to_regclass('doel99_ok') as t`)).rows[0].t);
     assert.equal(ok, null, 'er mag niets uitgevoerd zijn');
+  });
+
+  it('--status zonder openstaande migraties slaagt (bug op macOS, 9 okt 2026)', async () => {
+    await freshDbFromInit();
+    const r = migrate(['--status']);
+    assert.equal(r.status, 0, r.all);
+    assert.match(r.out, /openstaand: 0/);
   });
 
   it('--status toont openstaande migraties', async () => {
