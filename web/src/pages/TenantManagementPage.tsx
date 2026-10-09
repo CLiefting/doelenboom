@@ -1504,8 +1504,12 @@ function TenantSettingsForm({
           value={timeoutMinutes}
           onChange={(e) => setTimeoutMinutes(e.target.value)}
         />
-        minuten inactiviteit (geldt voor de hele tenant)
+        minuten zonder actieve sessie geldt de tenant als verlaten (geldt voor de hele tenant)
       </label>
+      <p style={{ margin: '-4px 0 0 0', fontSize: 12, color: '#9aa0a8' }}>
+        Bepaalt wanneer doelenbomen met "automatisch leegmaken" worden leeggemaakt. Dit logt niemand uit: het
+        automatisch uitloggen na inactiviteit stelt een sysadmin in onder Accountbeheer → Inlogbeveiliging.
+      </p>
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5 }}>
         Open toegang voor alle accounts:
         <select

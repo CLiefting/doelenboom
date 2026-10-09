@@ -61,6 +61,7 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   dependency_vulnerability_alert_sent: 'Melding kwetsbaarheden verstuurd',
   attribute_definitions_updated: 'Kenmerken gewijzigd',
   elements_bulk_deleted: 'Elementen in bulk verwijderd',
+  app_settings_updated: 'App-instellingen gewijzigd',
 };
 
 // Optioneel filteren op tenantId en/of eventType via query-string — voor de

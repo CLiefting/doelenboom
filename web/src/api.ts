@@ -20,6 +20,9 @@ const SESSION_STORAGE_KEY = 'doelenboom.session';
 // (idle_timeout/session_ended) — 'not_logged_in'/'invalid_token' zijn de
 // normale "je bent gewoon niet ingelogd"-gevallen, geen melding nodig.
 const AUTH_NOTICE_KEY = 'doelenboom.authNotice';
+// DOEL-97: bij 'idle_timeout' stuurt de API de geldende inactiviteitstermijn
+// mee (idleTimeoutMinutes), zodat LoginPage het juiste aantal minuten noemt.
+const AUTH_NOTICE_IDLE_MINUTES_KEY = 'doelenboom.authNoticeIdleMinutes';
 
 async function request<T>(path: string, options: RequestInit = {}, token?: string | null): Promise<T> {
   const headers: Record<string, string> = { ...(options.headers as Record<string, string> | undefined) };
@@ -32,19 +35,21 @@ async function request<T>(path: string, options: RequestInit = {}, token?: strin
   if (!res.ok) {
     let message = res.statusText;
     let reason: string | undefined;
+    let idleTimeoutMinutes: number | undefined;
     try {
       const body = await res.json();
       message = body.error ?? body.detail ?? message;
       // DOEL-32: bij een serverfout een korte foutcode meegeven, zodat een melding van een gebruiker in het serverlog terug te vinden is.
       if (typeof body.errorId === 'string') message += ` (foutcode ${body.errorId})`;
       reason = body.reason;
+      if (Number.isInteger(body.idleTimeoutMinutes)) idleTimeoutMinutes = body.idleTimeoutMinutes;
     } catch {
       // response had geen JSON-body
     }
     // Alleen bij een 401 op een call die zelf al een token meestuurde (dus niet
     // /auth/login zelf, waar 401 gewoon "onjuist wachtwoord" betekent): de JWT
-    // is verlopen of ongeldig geworden — bv. door de 15-minuten-inactiviteit-
-    // beveiliging (reason 'idle_timeout', zie api/src/auth.ts requireAuth) of
+    // is verlopen of ongeldig geworden — bv. door de inactiviteitsbeveiliging
+    // (reason 'idle_timeout', zie api/src/auth.ts requireAuth) of
     // een sessie die elders al is beëindigd ('session_ended'). Zonder dit bleef
     // de gebruiker vast hangen op een scherm met alleen deze foutmelding in
     // rode tekst, zonder duidelijk herstelpad terug naar het inlogscherm (zelfs
@@ -55,6 +60,9 @@ async function request<T>(path: string, options: RequestInit = {}, token?: strin
     if (res.status === 401 && token) {
       if (reason === 'idle_timeout' || reason === 'session_ended') {
         sessionStorage.setItem(AUTH_NOTICE_KEY, reason);
+      }
+      if (reason === 'idle_timeout' && idleTimeoutMinutes !== undefined) {
+        sessionStorage.setItem(AUTH_NOTICE_IDLE_MINUTES_KEY, String(idleTimeoutMinutes));
       }
       localStorage.removeItem(SESSION_STORAGE_KEY);
       window.location.reload();
@@ -213,7 +221,7 @@ export const api = {
   heartbeat: (token: string) => request<void>('/api/auth/heartbeat', { method: 'POST' }, token),
 
   // Échte-activiteit-ping (i.t.t. heartbeat hierboven, dat een blinde "tab
-  // staat open"-timer is) — basis van de 15-minuten-inactiviteit-uitlog-
+  // staat open"-timer is) — basis van de inactiviteit-uitlog-
   // beveiliging (api/src/auth.ts requireAuth). Zie useActivityPing.ts.
   recordActivity: (token: string) => request<void>('/api/auth/activity', { method: 'POST' }, token),
 
@@ -313,7 +321,7 @@ export const api = {
 
   updateAppSettings: (
     token: string,
-    patch: { maxFailedLoginAttempts?: number; loginLockoutMinutes?: number }
+    patch: { maxFailedLoginAttempts?: number; loginLockoutMinutes?: number; idleTimeoutMinutes?: number }
   ) =>
     request<import('./types').AppSettings>('/api/app-settings', {
       method: 'PUT',

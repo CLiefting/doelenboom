@@ -11179,7 +11179,8 @@ if (helpBtn) helpBtn.addEventListener('click', () => {
   window.parent.postMessage({ type: 'doelenboom-navigate', target: 'help' }, PARENT_ORIGIN);
 });
 
-// 15-minuten-inactiviteitsbeveiliging (zie api/src/auth.ts IDLE_TIMEOUT_MINUTES,
+// Inactiviteitsbeveiliging (zie requireAuth in api/src/auth.ts; termijn in
+// app_settings.idle_timeout_minutes, standaard 15 minuten, DOEL-97;
 // POST /api/auth/activity, en web/src/useActivityPing.ts voor de React-versie
 // hiervan). Het grootste deel van de daadwerkelijke interactie met de app
 // gebeurt hier ín de tree.html-iframe — muis-/toetsenbord-/scrollevents

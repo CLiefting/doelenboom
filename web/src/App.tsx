@@ -34,6 +34,8 @@ import type { DoelenboomSummary } from './types';
 // iemand terug is op het inlogscherm i.p.v. dat gewoon stilzwijgend te laten
 // gebeuren.
 const AUTH_NOTICE_KEY = 'doelenboom.authNotice';
+// DOEL-97: de geldende inactiviteitstermijn bij een 'idle_timeout' (zie api.ts).
+const AUTH_NOTICE_IDLE_MINUTES_KEY = 'doelenboom.authNoticeIdleMinutes';
 
 // Sessionstorage-sleutel voor "TenantEntryNotice al gezien deze login-sessie,
 // voor deze tenant" (zie TenantEntryNotice.tsx / onSelect hieronder) — het
@@ -125,6 +127,12 @@ export default function App() {
     if (notice) sessionStorage.removeItem(AUTH_NOTICE_KEY);
     return notice;
   });
+  const [authNoticeIdleMinutes] = useState<number | null>(() => {
+    const raw = sessionStorage.getItem(AUTH_NOTICE_IDLE_MINUTES_KEY);
+    if (raw) sessionStorage.removeItem(AUTH_NOTICE_IDLE_MINUTES_KEY);
+    const minutes = raw ? Number(raw) : NaN;
+    return Number.isInteger(minutes) && minutes > 0 ? minutes : null;
+  });
   // Ingelogd, geen enkele doelenboom (bv. een gloednieuwe tenant via de
   // zelfbedieningsaanvraag, of een tenant waarvan alle bomen inmiddels
   // verwijderd zijn) én de gebruiker is ergens admin: dan is de lege
@@ -153,7 +161,7 @@ export default function App() {
       .catch(() => {});
   }, [session]);
 
-  // 15-minuten-inactiviteitsbeveiliging (zie useActivityPing.ts) — dekt de
+  // Inactiviteitsbeveiliging (zie useActivityPing.ts) — dekt de
   // React-schermen zelf; tree.html (iframe) heeft z'n eigen, identieke logica.
   useActivityPing(session?.token ?? null);
 
@@ -194,6 +202,7 @@ export default function App() {
       publicContent = (
         <LoginPage
           notice={authNotice}
+          noticeIdleMinutes={authNoticeIdleMinutes}
           onLoggedIn={(token, user) => setSession({ token, user })}
           onSignupRequest={() => setPublicView({ name: 'signup' })}
           onAboutRequest={() => setPublicView({ name: 'about' })}
