@@ -1555,3 +1555,72 @@ select
     {"sourceCode":"V7","targetCode":"V8","weight":"primair","toelichting":"geeft invulling aan"}
   ]$edg$::jsonb
 where not exists (select 1 from doelenboom_templates where tenant_id is null and name = 'Batenboom');
+
+
+-- ---------------------------------------------------------------------------
+-- Migratieboekhouding (DOEL-99, gespiegeld uit db/migrations/0051_schema_migrations.sql).
+-- Een gloednieuwe database bevat via dit bestand al het schema van álle
+-- migraties hieronder, dus die worden als 'init' geregistreerd en door
+-- scripts/db-migrate.sh niet nog eens uitgevoerd.
+-- LET OP: voeg bij elke nieuwe migratie de bestandsnaam hier toe
+-- (afgedwongen door api/test/dbMigrate.test.ts).
+-- ---------------------------------------------------------------------------
+create table if not exists schema_migrations (
+  filename   text primary key check (filename ~ '^[0-9]{4}_[a-z0-9_]+\.sql$'),
+  applied_at timestamptz not null default now(),
+  method     text not null default 'run' check (method in ('run', 'baseline', 'init'))
+);
+
+insert into schema_migrations (filename, method) values
+  ('0001_column_configs.sql', 'init'),
+  ('0002_licenses.sql', 'init'),
+  ('0003_license_expiry.sql', 'init'),
+  ('0004_bezoeker_role.sql', 'init'),
+  ('0005_session_activity.sql', 'init'),
+  ('0006_system_announcement.sql', 'init'),
+  ('0007_activities.sql', 'init'),
+  ('0008_activities_mpp_uid.sql', 'init'),
+  ('0009_activities_is_milestone.sql', 'init'),
+  ('0010_activities_wbs_and_summary.sql', 'init'),
+  ('0011_activity_dependencies.sql', 'init'),
+  ('0012_product_fields.sql', 'init'),
+  ('0013_tenant_open_access.sql', 'init'),
+  ('0014_doelenboom_templates.sql', 'init'),
+  ('0015_subscription_requests.sql', 'init'),
+  ('0016_price_history.sql', 'init'),
+  ('0017_legal_and_retention.sql', 'init'),
+  ('0018_evaluatie_tier.sql', 'init'),
+  ('0019_applicant_phone.sql', 'init'),
+  ('0020_project_status_review.sql', 'init'),
+  ('0021_project_status_history.sql', 'init'),
+  ('0022_project_history.sql', 'init'),
+  ('0023_product_dependencies_type_lag.sql', 'init'),
+  ('0024_fix_excel_imports_status_check.sql', 'init'),
+  ('0025_nightly_export_toggle.sql', 'init'),
+  ('0026_login_lockout.sql', 'init'),
+  ('0027_tenant_entry_popup.sql', 'init'),
+  ('0028_audit_log.sql', 'init'),
+  ('0029_mfa.sql', 'init'),
+  ('0030_tenant_mfa_required.sql', 'init'),
+  ('0031_dependency_health.sql', 'init'),
+  ('0032_tenant_retention.sql', 'init'),
+  ('0033_customer_management.sql', 'init'),
+  ('0034_tenant_customer_number.sql', 'init'),
+  ('0035_subscription_cancellation.sql', 'init'),
+  ('0036_tenant_module_dates.sql', 'init'),
+  ('0037_editor_role_rename.sql', 'init'),
+  ('0038_prijsstrategie_v3.sql', 'init'),
+  ('0039_projecten_module_naam_fix.sql', 'init'),
+  ('0040_pending_registrations.sql', 'init'),
+  ('0041_audit_doelenboom_wiped.sql', 'init'),
+  ('0042_audit_security_events.sql', 'init'),
+  ('0043_column_type_aliases.sql', 'init'),
+  ('0044_column_config_rules.sql', 'init'),
+  ('0045_control_rule_deviations.sql', 'init'),
+  ('0046_dependency_vulnerability_notifications.sql', 'init'),
+  ('0047_element_attribute_definitions.sql', 'init'),
+  ('0048_element_attribute_values.sql', 'init'),
+  ('0049_audit_elements_bulk_deleted.sql', 'init'),
+  ('0050_app_settings_idle_timeout.sql', 'init'),
+  ('0051_schema_migrations.sql', 'init')
+on conflict do nothing;

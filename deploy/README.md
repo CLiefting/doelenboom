@@ -401,10 +401,16 @@ ssh charles@185.107.90.64
 docker load < ~/doelenboom-images.tar.gz
 rm ~/doelenboom-images.tar.gz
 cd ~/doelenboom
-git pull   # voor eventuele niet-image-wijzigingen (docker-compose*.yml, db/init.sql, README's)
+git pull   # voor niet-image-wijzigingen (docker-compose*.yml, db/migrations, README's)
 ./deploy/check-no-active-users.sh && \
+  scripts/db-migrate.sh --prod && \
   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 ```
+
+`scripts/db-migrate.sh --prod` past eventuele nieuwe databasemigraties toe
+vóór de nieuwe images starten, en doet niets als er geen zijn (zie
+"Databasemigraties" hieronder). De eerste keer na DOEL-99 eerst de eenmalige
+baseline.
 
 **Let op de `&&`**: `check-no-active-users.sh` geeft bij een actieve gebruiker
 wel exit 1 én een duidelijke waarschuwing, maar als je de commando's als losse
@@ -546,36 +552,58 @@ geleden. Twee uitkomsten:
 
 Een schemawijziging (`db/init.sql`) werkt **niet** met een simpele restart —
 die scripts draaien alleen bij de allereerste containerstart op een lege
-`db_data`-volume. Voor een schemawijziging in productie is een echte migratie
-nodig (zie hoofd-README, "Ontwikkelstatus" — dit project heeft nog geen
-migratietool, `init.sql` is bewust "plat"); tot die tijd: schemawijzigingen
-handmatig met `docker compose exec db psql ...` doorvoeren, nooit
+`db_data`-volume. Voor een bestaande database gaat een schemawijziging via een
+migratie en `scripts/db-migrate.sh` (zie "Databasemigraties" hieronder); nooit
 `down -v` op productiedata.
 
-### Een los migratiebestand draaien (bv. `db/migrations/0017_...sql`)
+### Databasemigraties (DOEL-99)
 
-Elk bestand in `db/migrations/` is bewust idempotent (`if not exists`,
-`on conflict ... do nothing`) — veilig om per ongeluk twee keer te draaien,
-en de exacte SQL die ook al in `db/init.sql` is gespiegeld (zie de
-toelichting bovenaan elk migratiebestand), zodat een gloednieuwe installatie
-en een bestaande productiedatabase op hetzelfde schema uitkomen. Zorg eerst
-dat de VPS-checkout het bestand ook daadwerkelijk heeft (`git pull` — een
-migratie die alleen lokaal bestaat, bestaat voor de VPS niet):
+Schemawijzigingen staan als genummerde bestanden in `db/migrations/`
+(`0001_...sql`, `0002_...sql`, ...) en worden toegepast met
+`scripts/db-migrate.sh`. Dat script houdt in de tabel `schema_migrations` bij
+welke migraties al gedraaid zijn en voert alleen de rest uit, op volgorde.
+Een migratie die faalt wordt niet geregistreerd en stopt de rest; los de fout
+op en draai het script opnieuw.
 
-**Op de VPS:**
+Draai migraties dus **niet** meer los met `psql < db/migrations/...`: dan
+weet de boekhouding er niet van. Tot DOEL-99 draaide `-rebuild` telkens álle
+migraties opnieuw, en dat brak zodra een oude migratie (0033) niet meer paste
+bij nieuwere data.
+
+**Eenmalig per bestaande database: baseline.** Een database van vóór DOEL-99
+heeft nog geen `schema_migrations`. Het script weigert dan en voert niets uit.
+Registreer eenmalig tot en met de migratie die daar als laatste is gedraaid,
+zonder iets uit te voeren:
+
 ```bash
-cd ~/doelenboom
-git pull
-docker compose -f docker-compose.yml -f docker-compose.prod.yml exec -T db \
-  psql -U doelenboom -d doelenboom -v ON_ERROR_STOP=1 < db/migrations/0017_legal_and_retention.sql
+scripts/db-migrate.sh --prod --baseline 0049    # VPS: release 4.0.2 eindigt op 0049
+scripts/db-migrate.sh --baseline 0050           # lokaal, als 0050 al met de hand is gedraaid
 ```
 
-Draai dit vóór (of tegelijk met) het uitrollen van de nieuwe `api`/`web`-
-images uit die release — de nieuwe applicatiecode verwacht de nieuwe kolommen
-en tabellen (`legal_documents`, `legal_acceptances`, `account_retention_events`,
-`users.last_login_at`/`inactivity_warning_sent_at`/`scheduled_deletion_at`)
-al te bestaan. Zie ook `docs/juridische-documenten-en-retentie.md` voor wat
-deze specifieke migratie toevoegt en waarom.
+Twijfel je welke migratie de laatste was? Controleer dan de wijziging uit die
+migratie (de toelichting staat bovenaan elk bestand). Bijvoorbeeld 0050: bestaat
+kolom `app_settings.idle_timeout_minutes`? Een gloednieuwe database (opgebouwd
+uit `db/init.sql`) heeft de boekhouding al en heeft geen baseline nodig.
+
+**Op de VPS**, bij een release met nieuwe migraties, **vóór** `up -d` van de
+nieuwe images (zie "Updates uitrollen"):
+
+```bash
+cd ~/doelenboom
+git pull                                  # de migratiebestanden moeten op de VPS staan
+scripts/db-migrate.sh --prod --dry-run    # wat gaat er draaien?
+scripts/db-migrate.sh --prod              # toepassen
+scripts/db-migrate.sh --prod --status     # controle
+```
+
+**Lokaal** doet `doelenboom -local -rebuild -restart` hetzelfde. Los:
+`scripts/db-migrate.sh` (met `--status`, `--dry-run`, `--baseline NNNN`),
+vanuit de repo-map.
+
+**Een nieuwe migratie maken:** volgend vrij nummer, naam alleen `a-z`, `0-9`
+en `_`, idempotent waar dat kan, dezelfde SQL ook in `db/init.sql`, en de
+bestandsnaam toevoegen aan de `schema_migrations`-lijst onderaan
+`db/init.sql`. Dat laatste bewaakt `api/test/dbMigrate.test.ts`.
 
 ## Nachtelijke databaseback-up
 

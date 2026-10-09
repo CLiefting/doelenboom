@@ -10,7 +10,8 @@
 #
 # Gebruik:
 #   doelenboom -local -restart            # lokale stack herbouwen (gewijzigde images) en herstarten
-#   doelenboom -local -rebuild -restart   # idem, én eerst alle (nieuwe) db/migrations/*.sql toepassen
+#   doelenboom -local -rebuild -restart   # idem, én eerst de nieuwe db/migrations/*.sql toepassen
+#                                         # (alleen wat nog niet gedraaid is, zie scripts/db-migrate.sh)
 #   doelenboom -local -stop               # lokale containers stoppen (database-data blijft bewaard)
 #   (bij -restart/-stop: Docker Desktop wordt zo nodig automatisch gestart, zie DOEL-57)
 #   doelenboom -local -open               # browser openen op http://localhost:5173 (app draait al)
@@ -155,12 +156,12 @@ if [ "$ACTION" = "restart" ] || [ "$ACTION" = "stop" ]; then
   ensure_docker_running
 fi
 
-# Alle db/migrations/*.sql tegen de lopende (of net gestarte) db-container
-# toepassen, op volgorde van bestandsnaam (0001_..., 0002_..., ...). Elk
-# bestand is bewust idempotent (if not exists / on conflict do nothing, zie
-# deploy/README.md), dus opnieuw draaien van al toegepaste migraties is
-# veilig — er is geen aparte "welke migraties zijn al gedraaid"-boekhouding
-# nodig, gewoon telkens de hele map opnieuw.
+# Nieuwe db/migrations/*.sql toepassen tegen de lopende (of net gestarte)
+# db-container. DOEL-99: alleen migraties die nog niet in schema_migrations
+# staan, via scripts/db-migrate.sh. Voorheen draaide -rebuild elke keer álle
+# migraties opnieuw; dat brak bij 0033 zodra er nieuwere auditregels waren.
+# Een bestaande database zonder boekhouding geeft hier een duidelijke fout
+# met de eenmalige baseline-instructie; er wordt dan niets uitgevoerd.
 run_migrations() {
   echo "==> Db-container starten (indien nodig) en wachten tot beschikbaar"
   docker compose up -d --build db
@@ -168,12 +169,7 @@ run_migrations() {
     sleep 1
   done
 
-  echo "==> Migraties toepassen (db/migrations/*.sql)"
-  local migration
-  for migration in "$REPO_DIR"/db/migrations/*.sql; do
-    echo "  - $(basename "$migration")"
-    docker compose exec -T db psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 < "$migration"
-  done
+  DOELENBOOM_DIR="$REPO_DIR" "$REPO_DIR/scripts/db-migrate.sh"
 }
 
 case "$ACTION" in
