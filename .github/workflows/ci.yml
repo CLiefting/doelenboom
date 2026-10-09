@@ -61,7 +61,9 @@ jobs:
       # DOEL-53: setfacl/getfacl voor api/test/offsiteAcl.test.ts (de rechten
       # van de back-upscripts voor het offsite-pullaccount). REQUIRE_ACL_TESTS
       # hieronder zorgt dat die test hier faalt i.p.v. stil overslaat.
-      - run: sudo apt-get install -y --no-install-recommends acl
+      # DOEL-99: psql voor api/test/dbMigrate.test.ts (scripts/db-migrate.sh);
+      # REQUIRE_MIGRATE_TESTS hieronder laat die test falen i.p.v. overslaan.
+      - run: sudo apt-get install -y --no-install-recommends acl postgresql-client
       - working-directory: api
         run: npm ci
       - working-directory: api
@@ -78,6 +80,7 @@ jobs:
           TEST_DATABASE_URL: postgres://doelenboom:doelenboom@localhost:5432/doelenboom_test
           JWT_SECRET: ci-test-secret
           EXCEL_SERVICE_URL: http://localhost:8000
+          REQUIRE_MIGRATE_TESTS: '1'
           REQUIRE_ACL_TESTS: '1'
           SBOM_DIR: /tmp/doelenboom-ci-sbom-does-not-exist
 

@@ -46,8 +46,10 @@ heeft er `wipe_on_empty`/`session_timeout_minutes` bij gekregen plus een nieuwe
 (rol `admin`/`gebruiker` per tenant — zie "Gebruikersbeheer & rollen" hieronder).
 Postgres draait `init.sql` alleen bij de éérste start van een lege volume — als je
 hiervoor al een keer `docker compose up` had gedraaid, moet je `docker compose
-down -v` uitvoeren (en dus opnieuw seeden) om deze wijzigingen mee te krijgen. Er is
-nog geen migratietool voor incrementele schema-updates (zie Backlog).
+down -v` uitvoeren (en dus opnieuw seeden) om deze wijzigingen mee te krijgen. Voor een
+bestaande database gaan schemawijzigingen via `db/migrations/` en `scripts/db-migrate.sh`
+(`doelenboom -local -rebuild -restart`); dat draait alleen migraties die nog niet zijn
+toegepast (DOEL-99, zie deploy/README.md, "Databasemigraties").
 
 ### Inloggen
 
