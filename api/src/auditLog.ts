@@ -50,7 +50,10 @@ export type AuditEventType =
   | 'attribute_definitions_updated'
   // DOEL-82: meerdere elementen in één keer verwijderd. detail = { count,
   // codes } — bewust NOOIT namen of andere vrije tekst van de elementen.
-  | 'elements_bulk_deleted';
+  | 'elements_bulk_deleted'
+  // DOEL-97: app-instellingen gewijzigd (inlogblokkade, inactiviteitstermijn).
+  // detail = { changes: { <veld>: { from, to } } } — alleen getallen.
+  | 'app_settings_updated';
 
 export interface LogAuditEventInput {
   eventType: AuditEventType;

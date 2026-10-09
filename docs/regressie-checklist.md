@@ -31,6 +31,12 @@ rol-afhankelijk gedrag te kunnen zien.
       leeggemaakt"-preview/waarschuwing vóór het daadwerkelijk uitloggen.
 - [ ] Na verloop van de sessietijdout (of gesimuleerd door het token te laten
       verlopen) volgt een nette redirect naar de inlogpagina, geen kapotte staat.
+- [ ] Inactiviteit (DOEL-97): zet als sysadmin onder Accountbeheer →
+      Inlogbeveiliging "Automatisch uitloggen na" op 5 minuten en blijf 6 minuten
+      van muis en toetsenbord af. De volgende actie brengt je naar het
+      inlogscherm met "Je bent automatisch uitgelogd na 5 minuten zonder
+      activiteit (beveiliging)." Waarden onder 5 of boven 480 worden geweigerd.
+      Zet de termijn daarna terug (standaard 15).
 - [ ] De versie-footer (rechtsonder, `v<versie>`) is zichtbaar op de login-,
       kiezer- en boomweergave.
 

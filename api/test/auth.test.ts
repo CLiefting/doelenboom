@@ -219,6 +219,39 @@ describe('auth', () => {
     assert.equal(afterRelogin.status, 200);
   });
 
+  // DOEL-97: de inactiviteitstermijn volgt app_settings.idle_timeout_minutes
+  // (instelbaar door een sysadmin), niet langer een vaste 15 minuten.
+  it('de inactiviteitstermijn volgt de app-instelling: binnen de termijn blijft de sessie geldig, daarbuiten niet', async () => {
+    const email = `${PREFIX}-idle-instelbaar@test.local`;
+    await createSysadminUser(email, 'wachtwoord123');
+    const token = await login(email, 'wachtwoord123');
+    try {
+      await pool.query('update app_settings set idle_timeout_minutes = 30 where id = 1');
+
+      // 20 minuten geen activiteit: bij een termijn van 30 minuten nog geldig.
+      await pool.query(
+        `update sessions set last_activity_at = now() - interval '20 minutes'
+         where user_id = (select id from users where email = $1)`,
+        [email]
+      );
+      const binnen = await req('GET', '/api/auth/me', { token });
+      assert.equal(binnen.status, 200);
+
+      // 40 minuten geen activiteit: verlopen, en de melding noemt de termijn.
+      await pool.query(
+        `update sessions set last_activity_at = now() - interval '40 minutes'
+         where user_id = (select id from users where email = $1)`,
+        [email]
+      );
+      const buiten = await req('GET', '/api/auth/me', { token });
+      assert.equal(buiten.status, 401);
+      assert.equal(buiten.body.reason, 'idle_timeout');
+      assert.equal(buiten.body.idleTimeoutMinutes, 30);
+    } finally {
+      await pool.query('update app_settings set idle_timeout_minutes = 15 where id = 1');
+    }
+  });
+
   // Rate limiting / accountblokkade (zie auth.ts POST /login en
   // appSettings.ts) — drempel/duur zijn hier bewust laag gezet via
   // /api/app-settings zelf, zodat de test niet op de standaardwaarden

@@ -45,14 +45,19 @@ create table if not exists users (
 -- precies één rij (id altijd 1 — afgedwongen door de check-constraint, geen
 -- aparte "welke rij is de actieve"-logica nodig). In tegenstelling tot
 -- tenants.session_timeout_minutes/wipe_on_empty (per tenant instelbaar) zijn
--- dit instellingen die voor de HELE applicatie gelden. Voorlopig alleen de
--- twee parameters van de inlog-blokkade hierboven; bewust een losse tabel
+-- dit instellingen die voor de HELE applicatie gelden. De twee parameters
+-- van de inlog-blokkade hierboven en (DOEL-97) de inactiviteitstermijn voor
+-- automatisch uitloggen; bewust een losse tabel
 -- i.p.v. omgevingsvariabelen, zodat een sysadmin dit vanuit de app zelf kan
 -- aanpassen zonder herstart/nieuwe deploy.
 create table if not exists app_settings (
   id integer primary key default 1 check (id = 1),
   max_failed_login_attempts integer not null default 5 check (max_failed_login_attempts > 0),
-  login_lockout_minutes integer not null default 15 check (login_lockout_minutes > 0)
+  login_lockout_minutes integer not null default 15 check (login_lockout_minutes > 0),
+  -- Na hoeveel minuten zonder échte activiteit een sessie verloopt (DOEL-97,
+  -- zie db/migrations/0050 en requireAuth in api/src/auth.ts). Was tot DOEL-97
+  -- een vaste 15 minuten in de code; nu door een sysadmin instelbaar.
+  idle_timeout_minutes integer not null default 15 check (idle_timeout_minutes between 5 and 480)
 );
 insert into app_settings (id) values (1) on conflict (id) do nothing;
 
@@ -69,8 +74,9 @@ insert into app_settings (id) values (1) on conflict (id) do nothing;
 -- wipe-functionaliteit hierboven moet "tab staat open" blijven betekenen.
 -- last_activity_at wordt alleen bijgewerkt door échte gebruikersactiviteit
 -- (muis/toetsenbord/scroll/touch, zie POST /api/auth/activity, gethrottled tot
--- max 1x/minuut vanuit de frontend) en is de basis voor de 15-minuten-
--- inactiviteit-uitlog-beveiliging (requireAuth in api/src/auth.ts).
+-- max 1x/minuut vanuit de frontend) en is de basis voor de
+-- inactiviteit-uitlog-beveiliging (requireAuth in api/src/auth.ts; termijn in
+-- app_settings.idle_timeout_minutes, standaard 15 minuten, DOEL-97).
 create table if not exists sessions (
   id uuid primary key default gen_random_uuid(),
   user_id bigint not null references users(id) on delete cascade,
@@ -805,7 +811,10 @@ create table if not exists audit_log (
     'attribute_definitions_updated',
     -- DOEL-82: meerdere elementen in één keer verwijderd (detail: aantal en
     -- codes — nooit namen of andere vrije tekst).
-    'elements_bulk_deleted'
+    'elements_bulk_deleted',
+    -- DOEL-97: app-instellingen gewijzigd (detail: per gewijzigd veld de oude
+    -- en nieuwe waarde — alleen getallen).
+    'app_settings_updated'
   )),
   user_id bigint references users(id) on delete set null,
   tenant_id bigint references tenants(id) on delete set null,

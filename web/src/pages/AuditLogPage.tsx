@@ -67,6 +67,8 @@ const EVENT_LABELS: Record<AuditLogEntry['eventType'], string> = {
   attribute_definitions_updated: 'Kenmerken gewijzigd',
   // DOEL-82: detail = { count, codes } — loopt via formatGenericDetail.
   elements_bulk_deleted: 'Elementen in bulk verwijderd',
+  // DOEL-97: detail = { changes: { <veld>: { from, to } } } — loopt via formatGenericDetail.
+  app_settings_updated: 'App-instellingen gewijzigd',
 };
 
 // Generieke weergave voor de DOEL-29-gebeurtenissen: "sleutel: waarde" per

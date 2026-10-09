@@ -46,19 +46,23 @@ const FEATURES: { icon: JSX.Element; title: string; description: string }[] = [
 ];
 
 // notice: reden waarom iemand (mogelijk) automatisch teruggezet is op dit
-// scherm — 'idle_timeout' (15-minuten-inactiviteitsbeveiliging, zie
+// scherm — 'idle_timeout' (inactiviteitsbeveiliging, zie
 // useActivityPing.ts/api.ts) of 'session_ended' (elders uitgelogd, of de
 // sessie is serverside beëindigd). null/undefined = gewoon een normale
-// bezoek aan het inlogscherm, geen melding nodig.
+// bezoek aan het inlogscherm, geen melding nodig. noticeIdleMinutes (DOEL-97):
+// de geldende inactiviteitstermijn zoals de API die bij 'idle_timeout' meestuurde;
+// ontbreekt die, dan noemt de melding geen aantal minuten.
 export default function LoginPage({
   onLoggedIn,
   notice,
+  noticeIdleMinutes,
   onSignupRequest,
   onAboutRequest,
   onLegalRequest,
 }: {
   onLoggedIn: (token: string, user: User) => void;
   notice?: string | null;
+  noticeIdleMinutes?: number | null;
   onSignupRequest?: () => void;
   onAboutRequest?: () => void;
   onLegalRequest?: (type: 'terms' | 'privacy') => void;
@@ -116,7 +120,9 @@ export default function LoginPage({
 
   const noticeText =
     notice === 'idle_timeout'
-      ? 'Je bent automatisch uitgelogd wegens 15 minuten inactiviteit (beveiliging).'
+      ? noticeIdleMinutes
+        ? `Je bent automatisch uitgelogd na ${noticeIdleMinutes} minuten zonder activiteit (beveiliging).`
+        : 'Je bent automatisch uitgelogd wegens inactiviteit (beveiliging).'
       : notice === 'session_ended'
       ? 'Je sessie is beëindigd. Log opnieuw in om verder te gaan.'
       : null;

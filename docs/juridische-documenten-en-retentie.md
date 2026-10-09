@@ -154,9 +154,9 @@ export const ACCOUNT_DELETION_WARNING_DAYS = 30;
 **Gekozen definitie van "relevant gebruik"**: `users.last_login_at`, gezet
 bij elke geslaagde `POST /api/auth/login` (`api/src/auth.ts`). Bewust *niet*
 `sessions.last_seen_at` (blinde per-minuut heartbeat, verdwijnt bij
-afmelden) of `sessions.last_activity_at` (de bestaande 15-minuten-
-inactiviteit-uitlogbeveiliging binnen één sessie, `IDLE_TIMEOUT_MINUTES` in
-`auth.ts`) — beide zijn per-sessie en vluchtig, en zeggen niets over of een
+afmelden) of `sessions.last_activity_at` (de inactiviteit-uitlogbeveiliging
+binnen één sessie; termijn in `app_settings.idle_timeout_minutes`, standaard
+15 minuten en sinds DOEL-97 door een sysadmin instelbaar) — beide zijn per-sessie en vluchtig, en zeggen niets over of een
 account nog in gebruik is. `last_login_at` is een duurzaam, per-gebruiker
 veld dat precies aansluit bij Gebruiksvoorwaarden §4.1 ("de laatste
 succesvolle aanmelding van de gebruiker"). Deze technische keuze moet in

@@ -1,8 +1,9 @@
 import { useEffect } from 'react';
 import { api } from './api';
 
-// 15-minuten-inactiviteit-beveiliging (zie api/src/auth.ts IDLE_TIMEOUT_MINUTES
-// en POST /api/auth/activity): dit is bewust ANDERS dan de heartbeat in
+// Inactiviteitsbeveiliging (zie requireAuth in api/src/auth.ts, termijn in
+// app_settings.idle_timeout_minutes, standaard 15 minuten, DOEL-97; en POST
+// /api/auth/activity): dit is bewust ANDERS dan de heartbeat in
 // App.tsx (elke minuut, ongeacht activiteit — "is de tab open", voedt
 // sessions.last_seen_at / tenantWipe.ts). Hier gaat het om écht handelen
 // (muis, toetsenbord, scroll, touch) — anders zou een open-maar-inactieve tab

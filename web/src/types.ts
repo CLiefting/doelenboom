@@ -66,6 +66,8 @@ export type LegalDocument = {
 export type AppSettings = {
   maxFailedLoginAttempts: number;
   loginLockoutMinutes: number;
+  // DOEL-97: na hoeveel minuten zonder activiteit een sessie verloopt (5 t/m 480).
+  idleTimeoutMinutes: number;
 };
 
 export type UserSummary = {
@@ -146,7 +148,8 @@ export type AuditEventType =
   | 'control_rule_deviation_removed'
   | 'dependency_vulnerability_alert_sent'
   | 'attribute_definitions_updated'
-  | 'elements_bulk_deleted';
+  | 'elements_bulk_deleted'
+  | 'app_settings_updated';
 
 export type AuditLogEntry = {
   id: number;

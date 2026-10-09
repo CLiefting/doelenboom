@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 import { pool } from './db.js';
 import { previewOrCommitWipe } from './tenantWipe.js';
 import { needsTermsAcceptance } from './legal.js';
-import { getAppSettings } from './appSettings.js';
+import { DEFAULT_IDLE_TIMEOUT_MINUTES, getAppSettings } from './appSettings.js';
 import { createMfaChallenge, verifyMfaChallenge, resendMfaChallenge } from './mfa.js';
 import { bcryptCost, hashSql } from './passwordHash.js';
 import { logAuditEvent } from './auditLog.js';
@@ -50,12 +50,15 @@ export function assertCurrentJwtSecretIsSafe(): void {
   assertJwtSecretIsSafe(JWT_SECRET, process.env.NODE_ENV);
 }
 
-// 15-minuten-inactiviteit-beveiliging (zie POST /activity hieronder en
+// Inactiviteitsbeveiliging (zie POST /activity hieronder en
 // web/src/useActivityPing.ts / web/public/tree.html's eigen kopie daarvan):
-// een sessie waarvan de écht-activiteit langer dan dit aantal minuten
+// een sessie waarvan de écht-activiteit langer dan de inactiviteitstermijn
 // geleden is, wordt hard geweigerd — geen glijdend venster, zie de
-// toelichting bij de /activity-check verderop.
-const IDLE_TIMEOUT_MINUTES = 15;
+// toelichting bij de /activity-check verderop. De termijn staat sinds DOEL-97
+// in app_settings.idle_timeout_minutes (standaard 15, door een sysadmin
+// instelbaar, zie api/src/appSettings.ts) en wordt in requireAuth in dezelfde
+// query gelezen als de sessie; DEFAULT_IDLE_TIMEOUT_MINUTES is alleen de
+// noodfallback als de app_settings-rij onverhoopt ontbreekt.
 
 export type AuthedRequest = Request & {
   user?: { id: number; email: string; isSysadmin: boolean; sessionId: string; mustChangePassword?: boolean };
@@ -92,7 +95,7 @@ export async function endUserSessions(userId: number | string, exceptSessionId?:
 // Async, want naast de JWT-handtekening wordt ook de sessions-rij zelf
 // gecontroleerd: een geldige JWT alleen is niet genoeg zodra er is uitgelogd
 // (ended_at, zie POST /logout) of de sessie te lang inactief is geweest
-// (last_activity_at, zie IDLE_TIMEOUT_MINUTES hierboven) — anders zou een JWT
+// (last_activity_at, zie de inactiviteitstermijn hierboven) — anders zou een JWT
 // tot z'n 12 uur-vervaldatum blijven werken ondanks een expliciete logout of
 // een dichtgeklapte laptop.
 export async function requireAuth(req: AuthedRequest, res: Response, next: NextFunction) {
@@ -120,20 +123,32 @@ export async function requireAuth(req: AuthedRequest, res: Response, next: NextF
   // elke consument hieronder (requireSysadmin/requireTenantRole in rbac.ts,
   // GET /me, mfaRequiredTenants, enz.) krijgt hierdoor automatisch de actuele
   // waarde — geen losse fixes per call site nodig.
+  //
+  // DOEL-97: de inactiviteitstermijn komt uit app_settings, in dezelfde query
+  // (left join op de ene rij, geen extra database-rondje). Het getal gaat via
+  // make_interval de query in, nooit meer als tekst (OWASP A03).
   const sessionResult = await pool.query(
-    `select s.ended_at, (s.last_activity_at < now() - interval '${IDLE_TIMEOUT_MINUTES} minutes') as idle,
+    `select s.ended_at,
+            coalesce(a.idle_timeout_minutes, $2::int) as idle_timeout_minutes,
+            (s.last_activity_at < now() - make_interval(mins => coalesce(a.idle_timeout_minutes, $2::int))) as idle,
             u.is_sysadmin, u.must_change_password
      from sessions s
      join users u on u.id = s.user_id
+     left join app_settings a on a.id = 1
      where s.id = $1`,
-    [payload.sid]
+    [payload.sid, DEFAULT_IDLE_TIMEOUT_MINUTES]
   );
   const session = sessionResult.rows[0];
   if (!session || session.ended_at !== null) {
     return res.status(401).json({ error: 'Sessie is beëindigd', reason: 'session_ended' });
   }
   if (session.idle) {
-    return res.status(401).json({ error: 'Sessie is verlopen door inactiviteit', reason: 'idle_timeout' });
+    // idleTimeoutMinutes: zodat het inlogscherm de geldende termijn kan noemen.
+    return res.status(401).json({
+      error: 'Sessie is verlopen door inactiviteit',
+      reason: 'idle_timeout',
+      idleTimeoutMinutes: session.idle_timeout_minutes,
+    });
   }
 
   if (session.must_change_password) {
@@ -611,7 +626,7 @@ authRouter.post('/heartbeat', requireAuth, async (req: AuthedRequest, res) => {
 
 // Échte-activiteit-ping (i.t.t. /heartbeat hierboven, dat blind elke minuut
 // gaat ongeacht of er iemand meekijkt) — ververst last_activity_at, de basis
-// van de IDLE_TIMEOUT_MINUTES-check in requireAuth hierboven. Zie
+// van de inactiviteitscheck in requireAuth hierboven (termijn: app_settings.idle_timeout_minutes). Zie
 // web/src/useActivityPing.ts en web/public/tree.html's eigen kopie daarvan
 // (muis/toetsenbord/scroll/touch, gethrottled tot 1x/minuut).
 authRouter.post('/activity', requireAuth, async (req: AuthedRequest, res) => {

@@ -263,8 +263,8 @@ const SECTIONS: { id: string; title: string; content: JSX.Element }[] = [
         </p>
         <p style={styles.p}>
           <strong>… waarom word ik automatisch uitgelogd?</strong> Na een periode zonder activiteit (standaard
-          30 minuten, per tenant instelbaar door een tenant-admin) wordt een sessie automatisch beëindigd —
-          gewoon opnieuw inloggen volstaat.
+          15 minuten, voor de hele applicatie instelbaar door een sysadmin) wordt een sessie automatisch
+          beëindigd — gewoon opnieuw inloggen volstaat. Het inlogscherm noemt dan de geldende termijn.
         </p>
       </>
     ),
@@ -656,8 +656,9 @@ const SECTIONS: { id: string; title: string; content: JSX.Element }[] = [
           doelenbomen en de leden te beheren.
         </p>
         <p style={styles.p}>
-          <strong>Instellingen van de tenant.</strong> Hier stel je in: na hoeveel minuten inactiviteit een
-          sessie eindigt, of tweestapsverificatie verplicht is voor alle leden, of elk account met een login
+          <strong>Instellingen van de tenant.</strong> Hier stel je in: na hoeveel minuten zonder actieve
+          sessie de tenant als verlaten geldt (voor het automatisch leegmaken van doelenbomen; dit logt
+          niemand uit), of tweestapsverificatie verplicht is voor alle leden, of elk account met een login
           automatisch een rol krijgt in deze tenant ("open toegang"), en of er een melding verschijnt zodra
           iemand een doelenboom in deze tenant opent. Daarnaast twee standaardinstellingen voor nieuwe
           doelenbomen: automatisch leegmaken zodra niemand meer toegang heeft, en meenemen in de nachtelijke
@@ -727,9 +728,10 @@ const SECTIONS: { id: string; title: string; content: JSX.Element }[] = [
           contact op met een tenant-admin of sysadmin.
         </p>
         <p style={styles.p}>
-          <strong>Automatisch uitloggen.</strong> Na een periode zonder activiteit (standaard 30 minuten, per
-          tenant instelbaar) eindigt je sessie. Na een aantal mislukte inlogpogingen wordt inloggen tijdelijk
-          geblokkeerd.
+          <strong>Automatisch uitloggen.</strong> Na een periode zonder activiteit eindigt je sessie: standaard
+          15 minuten, door een sysadmin in te stellen van 5 tot en met 480 minuten onder Accountbeheer →
+          Inlogbeveiliging. Daar staat ook na hoeveel mislukte inlogpogingen inloggen tijdelijk wordt
+          geblokkeerd, en voor hoe lang.
         </p>
         <p style={styles.p}>
           <strong>Over Doelenboom.</strong> Dit menu-item toont de versie en de releasegeschiedenis. De

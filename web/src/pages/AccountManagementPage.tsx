@@ -93,6 +93,10 @@ function errMsg(err: unknown): string {
 // inlogpogingen (zie api/src/auth.ts POST /login) — app-breed, sysadmin-
 // instelbaar, geen tenant-scope (vandaar hier in Accountbeheer i.p.v. in
 // TenantManagementPage).
+// DOEL-97: grenzen van de inactiviteitstermijn, gelijk aan de API en de database.
+const IDLE_MIN = 5;
+const IDLE_MAX = 480;
+
 function AppSettingsForm({
   token,
   settings,
@@ -110,18 +114,25 @@ function AppSettingsForm({
 }) {
   const [maxAttempts, setMaxAttempts] = useState(String(settings.maxFailedLoginAttempts));
   const [lockoutMinutes, setLockoutMinutes] = useState(String(settings.loginLockoutMinutes));
+  const [idleMinutes, setIdleMinutes] = useState(String(settings.idleTimeoutMinutes));
   const [saved, setSaved] = useState(false);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     const attempts = parseInt(maxAttempts, 10);
     const minutes = parseInt(lockoutMinutes, 10);
+    const idle = Number(idleMinutes);
     if (!Number.isInteger(attempts) || attempts < 1) {
       setError('Aantal mislukte pogingen moet een geheel getal ≥ 1 zijn.');
       return;
     }
     if (!Number.isInteger(minutes) || minutes < 1) {
       setError('Blokkadeduur moet een geheel getal ≥ 1 minuut zijn.');
+      return;
+    }
+    // DOEL-97: zelfde grenzen als de API (IDLE_TIMEOUT_MIN/MAX_MINUTES in api/src/appSettings.ts).
+    if (!Number.isInteger(idle) || idle < IDLE_MIN || idle > IDLE_MAX) {
+      setError(`Automatisch uitloggen: kies een geheel aantal minuten van ${IDLE_MIN} t/m ${IDLE_MAX}.`);
       return;
     }
     setBusy(true);
@@ -131,6 +142,7 @@ function AppSettingsForm({
       const updated = await api.updateAppSettings(token, {
         maxFailedLoginAttempts: attempts,
         loginLockoutMinutes: minutes,
+        idleTimeoutMinutes: idle,
       });
       onSaved(updated);
       setSaved(true);
@@ -165,6 +177,22 @@ function AppSettingsForm({
         />
         minuten
       </label>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5 }}>
+        Automatisch uitloggen na
+        <input
+          type="number"
+          min={IDLE_MIN}
+          max={IDLE_MAX}
+          value={idleMinutes}
+          onChange={(e) => setIdleMinutes(e.target.value)}
+          style={{ ...styles.input, width: 70 }}
+        />
+        minuten zonder activiteit
+      </label>
+      <p style={{ fontSize: 12.5, color: '#666', margin: 0 }}>
+        Van {IDLE_MIN} t/m {IDLE_MAX} minuten (standaard 15). Een langere termijn houdt een onbeheerd
+        achtergelaten scherm langer bruikbaar. De wijziging geldt direct, ook voor sessies die al open zijn.
+      </p>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <button type="submit" style={btnStyle('primary')} disabled={busy}>
           Opslaan
