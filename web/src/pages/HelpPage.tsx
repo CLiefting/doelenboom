@@ -145,7 +145,10 @@ const SECTIONS: { id: string; title: string; content: JSX.Element }[] = [
         <p style={styles.p}>
           <strong>Boomfilter.</strong> Ctrl-klik (Mac: Cmd-klik, mobiel: lang indrukken) op een of meer vakken
           en klik daarna op "Toon deze bomen": je ziet dan alleen de bomen die de gekozen elementen raken. Met
-          "Wis" hef je het filter op.
+          "Wis" hef je het filter op. Onder Filters kun je ook tags of organisatieonderdelen aanzetten en met
+          "Toon de bomen van deze N" in één keer de bomen van alle gemarkeerde elementen tonen; de markering
+          van de tags verdwijnt dan, de gekozen elementen houden de blauwe rand. "Filter op resultaten" bij
+          de zoekbalk werkt op dezelfde manier.
         </p>
         <p style={styles.p}>
           <strong>Filters.</strong> Via <strong>Filters</strong> in de topbar filter je op tag en/of
