@@ -2859,7 +2859,7 @@ function runApp(data) {
     // verbergt), i.p.v. elk element los te moeten Ctrl/Cmd-klikken.
     lastChipFilterMatchIds = Array.from(idSet);
     filterChipsApplyBtn.style.display = (focusId === null && idSet.size > 0) ? '' : 'none';
-    filterChipsApplyBtn.textContent = 'Toon alleen deze ' + idSet.size + ' in de boom';
+    filterChipsApplyBtn.textContent = 'Toon de bomen van deze ' + idSet.size;
 
     let changed = false;
     idSet.forEach(id => {
@@ -3332,6 +3332,11 @@ function runApp(data) {
       const node = document.querySelector('.node[data-id="' + id + '"]');
       if (node) node.classList.add('filter-picked');
     });
+    // DOEL-98: na het overzetten bepaalt de boomfilter het beeld, net als na
+    // Ctrl/Cmd-klik → "Toon deze bomen". De zoekopdracht wissen, anders blijft
+    // alles buiten de treffers gedimd (search-miss), ook binnen de bomen.
+    searchInput.value = '';
+    runSearch();
     updateFilterStatusUI();
     applyElementFilter();
   });
@@ -3344,6 +3349,14 @@ function runApp(data) {
       const node = document.querySelector('.node[data-id="' + id + '"]');
       if (node) node.classList.add('filter-picked');
     });
+    // DOEL-98: daarna de chipfilter wissen. Anders blijft alles wat geen
+    // chipmatch is gedimd (tag-dimmed), ook de ouders en kinderen die de
+    // boomfilter juist toont, en lijkt het alsof alleen de N zelf getoond
+    // worden. De N blijven herkenbaar aan de blauwe boomfilter-rand
+    // (filter-picked), net als na Ctrl/Cmd-klik → "Toon deze bomen".
+    activeTagFilters.clear();
+    applyTagFilter();
+    document.querySelectorAll('.file-menu-dropdown.open').forEach(el => el.classList.remove('open'));
     updateFilterStatusUI();
     applyElementFilter();
   });
