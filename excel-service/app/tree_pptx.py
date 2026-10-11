@@ -26,6 +26,8 @@ Klikbaar (DOEL-100, DOEL-103): elk blokje en elk vak in de keten of in de
 totale boom is een interne hyperlink naar de slide van dat element, mits dat
 element zelf een slide in deze presentatie heeft. Een kolomkop in de totale
 boom springt naar de tussenslide van die kolom, mits die kolom is uitgewerkt.
+Elke slide behalve de totale boom zelf heeft in de voettekst een "Home"-knop
+terug naar de totale boom (DOEL-106).
 Alleen sprongen binnen de presentatie, nooit een externe link.
 
 Verborgen kolommen (options.visibleColumns) komen nergens in de presentatie
@@ -203,15 +205,33 @@ def _header(slide, kicker: str, title: str):
     _add_rect(slide, MARGIN, Inches(1.35), CONTENT_W, Emu(1), MUTED)
 
 
-def _footer(slide, meta: dict[str, Any], page: int):
+# Sleutel van de totale boom in _Links (doel van de Home-knop, DOEL-106). Een
+# tuple, zodat hij nooit kan botsen met een elementcode (altijd een str).
+HOME_KEY = ('home',)
+HOME_W = Inches(0.62)
+HOME_H = Inches(0.24)
+PAGE_NO_W = Inches(0.6)
+
+
+def _footer(slide, meta: dict[str, Any], page: int, links: '_Links | None' = None):
+    """Voettekst met paginanummer. Met `links` komt er links van het
+    paginanummer een Home-knop terug naar de totale boom; de totale boom zelf
+    roept dit zonder `links` aan."""
     parts = [_clean(meta.get('doelenboom')), _clean(meta.get('tenant'))]
     text = ' — '.join(p for p in parts if p)
     exported = _fmt_date(meta.get('exportedAt'))
     if exported != '-':
         text = f'{text} · {exported}' if text else exported
-    _add_text(slide, MARGIN, SLIDE_H - Inches(0.4), CONTENT_W - Inches(0.6), Inches(0.3), _truncate(text, 150), size=9, color=MUTED)
+    text_w = CONTENT_W - PAGE_NO_W - (HOME_W + Inches(0.2) if links is not None else 0)
+    _add_text(slide, MARGIN, SLIDE_H - Inches(0.4), text_w, Inches(0.3), _truncate(text, 150), size=9, color=MUTED)
+    if links is not None:
+        home = _rounded(slide, SLIDE_W - MARGIN - PAGE_NO_W - HOME_W, SLIDE_H - Inches(0.44), HOME_W, HOME_H,
+                        ACCENT, radius=0.3)
+        home.name = 'home-knop'
+        _shape_text(home, 'Home', size=9, bold=True, color=WHITE, margin=Inches(0.02))
+        links.add(home, HOME_KEY, 'Terug naar de totale boom')
     _add_text(
-        slide, SLIDE_W - MARGIN - Inches(0.6), SLIDE_H - Inches(0.4), Inches(0.6), Inches(0.3),
+        slide, SLIDE_W - MARGIN - PAGE_NO_W, SLIDE_H - Inches(0.4), PAGE_NO_W, Inches(0.3),
         str(page), size=9, color=MUTED, align=PP_ALIGN.RIGHT,
     )
 
@@ -420,7 +440,7 @@ def _element_count_text(n: int) -> str:
     return '1 element' if n == 1 else f'{n} elementen'
 
 
-def _slides_snoer(prs, model: _Model, meta: dict[str, Any], page: int) -> int:
+def _slides_snoer(prs, model: _Model, meta: dict[str, Any], page: int, links: '_Links') -> int:
     per_row = model.per_row
     columns = model.columns
     rows = [columns[i:i + per_row] for i in range(0, len(columns), per_row)]
@@ -525,7 +545,7 @@ def _slides_snoer(prs, model: _Model, meta: dict[str, Any], page: int) -> int:
                             _add_text(slide, ax + arrow_w + Inches(0.08), ay, label_w, arrow_h, _truncate(label, 30),
                                       size=9, color=MUTED, anchor=MSO_ANCHOR.MIDDLE)
         row_offset += n_rows
-        _footer(slide, meta, page)
+        _footer(slide, meta, page, links)
         page += 1
     return page
 
@@ -613,6 +633,7 @@ def _overview_scale(count: int) -> tuple[int, int, float]:
 
 def _slide_overview(prs, model: _Model, meta: dict[str, Any], page: int, links: _Links) -> int:
     slide = _blank_slide(prs)
+    links.slides[HOME_KEY] = slide
     _header(slide, 'Doelenboom — de totale boom', _clean(meta.get('doelenboom')) or 'Doelenboom')
 
     n_cols = len(model.columns)
@@ -795,7 +816,7 @@ def _slide_section(prs, model: _Model, col: dict[str, Any], meta: dict[str, Any]
         chip.name = f'kolomelement {code}'
         _chip_text(chip, code, el['name'], size, chip_w, chip_h)
         links.add(chip, code, _goto_tooltip(code, el['name']))
-    _footer(slide, meta, page)
+    _footer(slide, meta, page, links)
     return page + 1
 
 
@@ -1239,7 +1260,7 @@ def _slides_element(prs, model: _Model, el: dict[str, Any], meta: dict[str, Any]
                               [('h', 'Verbonden met'), ('p', 'Geen verbindingen.')])
         elif has_chips:
             _draw_chips(slide, model, top, chip_pages[index], cols, size, links)
-        _footer(slide, meta, page)
+        _footer(slide, meta, page, links)
         page += 1
     return page
 
@@ -1266,8 +1287,9 @@ def build_tree_pptx(data: dict[str, Any], options: dict[str, Any] | None, meta: 
     prs = _new_presentation()
     linkable: set[Any] = {code for col in model.slide_columns() for code in col['elements']}
     linkable.update(_col_key(i) for i, col in enumerate(model.columns) if col['slides'])
+    linkable.add(HOME_KEY)
     links = _Links(linkable)
-    page = _slides_snoer(prs, model, meta, 1)
+    page = _slides_snoer(prs, model, meta, 1, links)
     page = _slide_overview(prs, model, meta, page, links)
     for col in model.slide_columns():
         page = _slide_section(prs, model, col, meta, page, links)

@@ -643,6 +643,85 @@ class TestTotaleBoom:
         assert self.shape(slide, 'overzicht-kolom 1').click_action.target_slide is not None
 
 
+class TestHomeKnop:
+    """DOEL-106: elke slide behalve de totale boom heeft een Home-knop terug
+    naar de totale boom (slide 2)."""
+    OPTIONS = {'slideColumns': ['Benefit', 'Doel']}
+
+    def home(self, slide):
+        return [s for s in slide.shapes if s.name == 'home-knop']
+
+    def check_all(self, prs, overview_index=1):
+        overview = prs.slides[overview_index]
+        assert 'DE TOTALE BOOM' in all_text(overview)
+        for index, slide in enumerate(prs.slides):
+            buttons = self.home(slide)
+            if index == overview_index:
+                assert buttons == []
+                continue
+            assert len(buttons) == 1, f'slide {index + 1}'
+            action = buttons[0].click_action
+            assert action.action == PP_ACTION.NAMED_SLIDE
+            assert action.target_slide.slide_id == overview.slide_id
+
+    def test_op_elke_slide_behalve_de_totale_boom_en_springt_naar_slide_twee(self):
+        prs = build(self.OPTIONS)
+        assert len(prs.slides) == 2 + (1 + 2) + (1 + 2)
+        self.check_all(prs)
+
+    def test_ook_zonder_uitgewerkte_kolommen_staat_hij_op_het_snoer(self):
+        prs = build({})
+        assert len(self.home(prs.slides[0])) == 1 and self.home(prs.slides[1]) == []
+        self.check_all(prs)
+
+    def test_ook_op_vervolgslides_van_een_element(self):
+        data = make_data()
+        data['elements'][4]['description'] = 'Lange zin met inhoud. ' * 400
+        prs = build({'slideColumns': ['Benefit']}, data)
+        assert any('VERVOLG' in all_text(s) for s in prs.slides)
+        self.check_all(prs)
+
+    def test_bij_meerdere_snoerslides_springt_hij_naar_de_totale_boom_erna(self):
+        data = {'columns': [col(i, f'K{i}') for i in range(11)], 'elements': [el('A1', 'K0')], 'edges': []}
+        prs = build({'perRow': 2, 'slideColumns': ['K0']}, data)  # 2 snoerslides, totale boom is slide 3
+        self.check_all(prs, overview_index=2)
+
+    def test_knop_met_tekst_en_tooltip(self):
+        button = self.home(build(self.OPTIONS).slides[0])[0]
+        assert button.text_frame.text == 'Home'
+        assert button._element.find('.//' + qn('a:hlinkClick')).get('tooltip') == 'Terug naar de totale boom'
+
+    def test_vaste_plek_in_de_voettekst_naast_het_paginanummer(self):
+        prs = build(self.OPTIONS)
+        positions = set()
+        for index, slide in enumerate(prs.slides):
+            if index == 1:
+                continue
+            button = self.home(slide)[0]
+            positions.add((button.left, button.top, button.width, button.height))
+            assert button.top + button.height <= SLIDE_H
+            assert button.top >= SLIDE_H - Inches(0.5)  # onder de inhoud (die stopt op 0,5 inch van de rand)
+            number = [s for s in slide.shapes if s.has_text_frame and s.text_frame.text == str(index + 1)][-1]
+            assert button.left + button.width <= number.left
+            footer = next(s for s in slide.shapes if s.has_text_frame and 'Bewaken en Beveiligen — CLPK' in s.text_frame.text)
+            assert footer.left + footer.width <= button.left
+        assert len(positions) == 1
+
+    def test_paginanummer_blijft_het_laatste_op_de_slide(self):
+        prs = build(self.OPTIONS)
+        for index, slide in enumerate(prs.slides, start=1):
+            assert all_text(slide).rstrip().split('\n')[-1] == str(index)
+
+    def test_owasp_home_knop_is_alleen_een_interne_sprong(self):
+        content = build_tree_pptx(make_data(), self.OPTIONS, META)
+        with zipfile.ZipFile(io.BytesIO(content)) as z:
+            for name in z.namelist():
+                if name.endswith('.rels'):
+                    assert 'TargetMode="External"' not in z.read(name).decode('utf-8')
+            slide1 = z.read('ppt/slides/slide1.xml').decode('utf-8')
+        assert re.search(r'name="home-knop"><a:hlinkClick action="ppaction://hlinksldjump"', slide1)
+
+
 class TestKolomslideBlokjes:
     """DOEL-103: de tussenslide van een kolom toont alle elementen van die
     kolom als klikbare blokjes in de kolomkleur."""
