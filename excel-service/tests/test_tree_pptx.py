@@ -4,22 +4,31 @@ laden met python-pptx, plus het /tree-pptx-eindpunt in main.py."""
 from __future__ import annotations
 
 import io
+import re
+import zipfile
 
 import pytest
 from fastapi.testclient import TestClient
 from pptx import Presentation
+from pptx.enum.action import PP_ACTION
 from pptx.enum.dml import MSO_LINE
+from pptx.oxml.ns import qn
+from pptx.util import Inches
 
 from app.main import app
+from app.project_pptx import CONTENT_W, MARGIN, SLIDE_H
 from app.tree_pptx import (
     CHAIN_MAX_ROWS,
     MAX_SLIDES,
+    MAX_SLIDES_PER_ELEMENT,
+    RIGHT_LEFT,
     TreePptxError,
     _clamp_per_row,
     _Model,
     _paginate_blocks,
     _rgb,
     _text_on,
+    _tint,
     build_tree_pptx,
 )
 
@@ -203,7 +212,8 @@ class TestVerborgenKolommen:
         assert model.children['B1'] == {'P1': True}
         prs = build(self.OPTIONS)
         b1 = next(s for s in prs.slides if 'B1 — Eerste benefit' in all_text(s))
-        assert 'P1 — Nieuw systeem' in all_text(b1)
+        assert 'P1  Nieuw systeem' in all_text(b1)
+        assert 'verbinding P1' in shape_names(b1)
         assert 'relatie P1 > B1' in shape_names(b1)
 
     def test_geen_relatielabel_tussen_kolommen_die_geen_buren_zijn(self):
@@ -268,10 +278,10 @@ class TestElementSlides:
         assert 'Regel een.' in text and 'Regel twee.' in text
         assert 'Reactietijd < 5 min' in text
         assert 'BOVENLIGGEND (2)' in text
-        assert '• D1 — Betrouwbare beveiliging (Doel)' in text
-        assert '• D2 — Informatiegestuurd werken (Doel, ondersteunend)' in text
+        assert 'D1  Betrouwbare beveiliging' in text
+        assert 'D2  Informatiegestuurd werken' in text
         assert 'ONDERLIGGEND (1)' in text
-        assert '• C1 — Meldkamer (Capability)' in text
+        assert 'C1  Meldkamer' in text
         assert 'Digitalisering' in text
         assert 'Brigade Noord (eigenaar)' in text
 
@@ -324,6 +334,133 @@ class TestElementSlides:
             assert all_text(slide).rstrip().split('\n')[-1] == str(index)
 
 
+class TestKlikbareVerbindingen:
+    """DOEL-100: beschrijving links op maximaal 1/3, verbindingen rechts als
+    blokjes in de kleur van hun kolom, klikbaar naar de eigen slide."""
+    OPTIONS = {'slideColumns': ['Benefit', 'Doel']}
+
+    def slide_for(self, prs, title):
+        return next(s for s in prs.slides if title in all_text(s))
+
+    def shape(self, slide, name):
+        return next(s for s in slide.shapes if s.name == name)
+
+    def test_beschrijving_maximaal_een_derde_en_blokjes_rechts(self):
+        slide = self.slide_for(build(self.OPTIONS), 'B1 — Eerste benefit')
+        desc = next(s for s in slide.shapes if s.has_text_frame and s.text_frame.text.startswith('BESCHRIJVING'))
+        assert desc.width <= CONTENT_W / 3 + 1
+        assert desc.left == MARGIN
+        for chip in (s for s in slide.shapes if s.name.startswith('verbinding ')):
+            assert chip.left >= RIGHT_LEFT
+            assert chip.left + chip.width <= MARGIN + CONTENT_W + 1
+        # Tags en organisatieonderdelen staan nu links bij de beschrijving.
+        assert 'Digitalisering' in desc.text_frame.text and 'Brigade Noord' in desc.text_frame.text
+
+    def test_blokje_in_kolomkleur_en_ondersteunend_gestippeld(self):
+        slide = self.slide_for(build(self.OPTIONS), 'B1 — Eerste benefit')
+        d1 = self.shape(slide, 'verbinding D1')
+        d2 = self.shape(slide, 'verbinding D2 (ondersteunend)')
+        c1 = self.shape(slide, 'verbinding C1')
+        assert str(d1.line.color.rgb) == '8FAADC' and d1.line.dash_style is None
+        assert str(d2.line.color.rgb) == '8FAADC' and d2.line.dash_style == MSO_LINE.DASH
+        assert str(c1.line.color.rgb) == '6B4C8A'
+        assert str(c1.fill.fore_color.rgb) == str(_tint(_rgb('#6B4C8A'), 0.8))
+
+    def test_blokje_en_ketenvak_springen_naar_de_slide_van_het_element(self):
+        prs = build(self.OPTIONS)
+        b1 = self.slide_for(prs, 'B1 — Eerste benefit')
+        d1_slide = next(s for s in prs.slides if 'D1 — Betrouwbare beveiliging' in all_text(s))
+        for name in ('verbinding D1', 'element D1'):
+            action = self.shape(b1, name).click_action
+            assert action.action == PP_ACTION.NAMED_SLIDE
+            assert action.target_slide.slide_id == d1_slide.slide_id
+        # En terug: vanaf D1 naar B1 (een eerdere slide).
+        back = self.shape(d1_slide, 'verbinding B1').click_action
+        assert back.target_slide.slide_id == b1.slide_id
+
+    def test_tooltip_noemt_het_doelelement(self):
+        b1 = self.slide_for(build(self.OPTIONS), 'B1 — Eerste benefit')
+        link = self.shape(b1, 'verbinding D2 (ondersteunend)')._element.find('.//' + qn('a:hlinkClick'))
+        assert link.get('tooltip') == 'Ga naar D2 — Informatiegestuurd werken (ondersteunende relatie)'
+
+    def test_geen_link_naar_element_zonder_eigen_slide(self):
+        b1 = self.slide_for(build(self.OPTIONS), 'B1 — Eerste benefit')
+        for name in ('verbinding C1', 'element C1', 'element M1', 'element B1 (geselecteerd)'):
+            assert self.shape(b1, name).click_action.target_slide is None
+
+    def test_legenda_noemt_klikken_alleen_als_er_links_zijn(self):
+        with_links = self.slide_for(build(self.OPTIONS), 'B1 — Eerste benefit')
+        assert 'Klik op een element' in all_text(with_links)
+        without = self.slide_for(build({'slideColumns': ['Benefit']}), 'B1 — Eerste benefit')
+        assert 'Klik op een element' not in all_text(without)
+
+    def many_children(self, n):
+        data = make_data()
+        for i in range(n):
+            data['elements'].append(el(f'X{i}', 'Capability', f'Capability met een redelijk lange naam {i}'))
+            data['edges'].append(edge(f'X{i}', 'B1', 'ondersteunend' if i % 3 == 0 else 'primair'))
+        return data
+
+    def test_twaalf_verbindingen_passen_op_een_slide_zonder_vervolg(self):
+        prs = build({'slideColumns': ['Benefit']}, self.many_children(11))  # + C1 = 12 onderliggend
+        assert len(prs.slides) == 4
+        slide = self.slide_for(prs, 'B1 — Eerste benefit')
+        chips = [s for s in slide.shapes if s.name.startswith('verbinding ')]
+        assert len(chips) == 2 + 12
+        for chip in chips:
+            assert chip.top + chip.height <= SLIDE_H - Inches(0.5)
+
+    def test_heel_veel_verbindingen_lopen_door_en_worden_samengevat(self):
+        n = 500
+        prs = build({'slideColumns': ['Benefit']}, self.many_children(n))
+        b1_slides = [s for s in prs.slides if 'B1 — Eerste benefit' in all_text(s)]
+        assert len(b1_slides) == MAX_SLIDES_PER_ELEMENT
+        assert 'VERVOLG' in all_text(b1_slides[1])
+        shown = sum(1 for s in b1_slides for sh in s.shapes
+                    if sh.name.startswith('verbinding ') and sh.name != 'verbinding + meer')
+        more = next(sh for sh in b1_slides[-1].shapes if sh.name == 'verbinding + meer')
+        hidden = int(re.search(r'\+ (\d+) meer', more.text_frame.text).group(1))
+        assert shown + hidden == 2 + n + 1  # 2 boven, n + C1 onder
+        for slide in b1_slides:
+            for chip in slide.shapes:
+                assert chip.top + chip.height <= SLIDE_H
+
+    def test_vervolgslide_zonder_blokjes_gebruikt_de_hele_breedte(self):
+        data = make_data()
+        data['elements'][4]['description'] = 'Lange zin met inhoud. ' * 100
+        prs = build(self.OPTIONS, data)
+        vervolg = next(s for s in prs.slides if 'VERVOLG' in all_text(s) and 'B1 — Eerste' in all_text(s))
+        body = next(s for s in vervolg.shapes if s.has_text_frame and 'BESCHRIJVING (VERVOLG)' in s.text_frame.text)
+        assert body.width == CONTENT_W
+
+    def test_owasp_a03_namen_in_blokjes_en_tooltips_blijven_letterlijk(self):
+        data = make_data()
+        evil = '"/><a:hlinkClick action="ppaction://program" r:id="x"/> <script>&'
+        data['elements'][1]['name'] = evil  # D1
+        prs = build(self.OPTIONS, data)
+        b1 = self.slide_for(prs, 'B1 — Eerste benefit')
+        chip = self.shape(b1, 'verbinding D1')
+        assert evil[:20] in chip.text_frame.text
+        link = chip._element.find('.//' + qn('a:hlinkClick'))
+        assert link.get('action') == 'ppaction://hlinksldjump'
+        assert evil in link.get('tooltip')
+        # Er komt nergens een extra (geinjecteerde) actie bij.
+        for slide in prs.slides:
+            for h in slide._element.iter(qn('a:hlinkClick')):
+                assert h.get('action') == 'ppaction://hlinksldjump'
+
+    def test_owasp_geen_externe_links_in_het_pakket(self):
+        data = make_data()
+        data['elements'][1]['name'] = 'https://evil.example/phish'
+        content = build_tree_pptx(data, self.OPTIONS, META)
+        with zipfile.ZipFile(io.BytesIO(content)) as z:
+            for name in z.namelist():
+                if name.endswith('.rels'):
+                    rels = z.read(name).decode()
+                    assert 'TargetMode="External"' not in rels
+                    assert 'evil.example' not in rels
+
+
 class TestRobuustheid:
     """Vijandige of kapotte invoer mag de service niet laten crashen en geen
     ongeldig bestand opleveren (OWASP A03/A04)."""
@@ -369,7 +506,10 @@ class TestRobuustheid:
         assert '=HYPERLINK("http://evil","klik")' in full_text(prs)
         for slide in prs.slides:
             for shape in slide.shapes:
-                assert not shape.click_action.hyperlink.address
+                # Alleen interne sprongen naar een slide (DOEL-100), nooit een
+                # (externe) hyperlink-adres uit de invoer.
+                address = shape.click_action.hyperlink.address
+                assert not address or re.fullmatch(r'slide\d+\.xml', address)
                 if shape.has_text_frame:
                     for p in shape.text_frame.paragraphs:
                         for run in p.runs:

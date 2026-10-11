@@ -12,9 +12,15 @@ Slide-structuur:
   n.   Een tussenslide met de kolom.
   n+1. Eén slide per element, in boomvolgorde: bovenaan de boom gefilterd op
        dat ene element (het hele pad omhoog en omlaag, getekend met
-       PowerPoint-vormen), daaronder de beschrijving, KPI, de directe
-       verbindingen, tags en organisatieonderdelen. Lange tekst loopt door op
-       een vervolgslide.
+       PowerPoint-vormen). Daaronder links (maximaal 1/3 van de breedte) de
+       beschrijving, KPI, tags en organisatieonderdelen, en rechts de directe
+       verbindingen als blokjes in de kleur van hun kolom (DOEL-100).
+       Lange tekst of heel veel verbindingen lopen door op een vervolgslide.
+
+Klikbaar (DOEL-100): elk blokje en elk vak in de keten is een interne
+hyperlink naar de slide van dat element, mits dat element zelf een slide in
+deze presentatie heeft. Alleen sprongen binnen de presentatie, nooit een
+externe link.
 
 Verborgen kolommen (options.visibleColumns) komen nergens in de presentatie
 voor: niet in het snoer, niet in de keten en niet onder "Verbonden met".
@@ -40,6 +46,7 @@ from pptx.dml.color import RGBColor
 from pptx.enum.dml import MSO_LINE
 from pptx.enum.shapes import MSO_CONNECTOR, MSO_SHAPE
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
+from pptx.oxml.ns import qn
 from pptx.util import Emu, Inches, Pt
 
 from .project_pptx import (
@@ -547,7 +554,35 @@ TEXT_TOP = Inches(4.55)
 TEXT_BOTTOM = SLIDE_H - Inches(0.55)
 
 
-def _draw_chain(slide, model: _Model, code: str):
+class _Links:
+    """Verzamelt klikbare vormen (blokjes en ketenvakken) en koppelt ze na
+    het bouwen aan de slide van het doelelement -- die slide kan immers pas
+    later in de presentatie komen. Alleen elementen met een eigen slide
+    (linkable) krijgen een link; alleen interne sprongen (hlinksldjump)."""
+
+    def __init__(self, linkable: set[str]):
+        self.linkable = linkable
+        self.pending: list[tuple[Any, str, str]] = []
+        self.slides: dict[str, Any] = {}
+
+    def add(self, shape, code: str, tooltip: str) -> bool:
+        if code not in self.linkable:
+            return False
+        self.pending.append((shape, code, _truncate(_clean(tooltip), 200)))
+        return True
+
+    def resolve(self):
+        for shape, code, tooltip in self.pending:
+            target = self.slides.get(code)
+            if target is None:
+                continue
+            shape.click_action.target_slide = target
+            hlink = shape._element.find('.//' + qn('a:hlinkClick'))
+            if hlink is not None and tooltip:
+                hlink.set('tooltip', tooltip)
+
+
+def _draw_chain(slide, model: _Model, code: str, links: _Links):
     chain = model.chain(code)
     n_cols = len(model.columns)
     gap = Inches(0.14) if n_cols <= 8 else Inches(0.08)
@@ -594,6 +629,7 @@ def _draw_chain(slide, model: _Model, code: str):
 
     # Eerst de lijnen, zodat de vakken er bovenop liggen.
     has_supporting = False
+    any_link = False
     for child in pos:
         for parent, primary in model.parents[child].items():
             if parent not in pos:
@@ -626,29 +662,50 @@ def _draw_chain(slide, model: _Model, code: str):
             node = _rounded(slide, left, top, col_w, node_h, _tint(color, 0.8), line=color, line_width=0.75)
             _shape_text(node, label, size=size, color=DARK, margin=Inches(0.04))
             node.name = f'element {other}'
+            if links.add(node, other, f'Ga naar {other} — {el["name"]}'):
+                any_link = True
     for col, (left, top) in more_pos.items():
         node = _rounded(slide, left, top, col_w, node_h, None, line=LINE_COLOR, line_width=0.75, dashed=True)
         _shape_text(node, f'+ {more[col]} meer', size=size, color=MUTED, margin=Inches(0.04))
 
+    # Directe verbindingen staan ook als blokjes onder de keten; ook daar
+    # kan een ondersteunende relatie (gestippelde rand) of een link zitten.
+    direct = {**model.parents[code], **model.children[code]}
+    has_supporting = has_supporting or not all(direct.values())
+    any_link = any_link or any(other in links.linkable for other in direct)
+
     legend = 'Het gekleurde vak met donkere rand is dit element.'
     if len(pos) > 1:
-        legend += ' Doorgetrokken lijn = primaire relatie'
-        legend += ', stippellijn = ondersteunende relatie.' if has_supporting else '.'
+        legend += ' Doorgetrokken lijn/rand = primaire relatie'
+        legend += ', stippellijn/gestippelde rand = ondersteunende relatie.' if has_supporting else '.'
+        if any_link:
+            legend += ' Klik op een element om naar de eigen slide te gaan.'
     else:
         legend = 'Dit element heeft (nog) geen verbindingen met andere zichtbare elementen.'
     _add_text(slide, MARGIN, CHAIN_NODES_TOP + CHAIN_NODES_H + Inches(0.04), CONTENT_W, Inches(0.2), legend, size=8, color=MUTED)
 
 
-# ---- element-slide: tekst --------------------------------------------------
+# ---- element-slide: tekst links, verbindingen als blokjes rechts ----------
 
-LEFT_W = Inches(6.7)
-RIGHT_LEFT = MARGIN + LEFT_W + Inches(0.5)
-RIGHT_W = CONTENT_W - LEFT_W - Inches(0.5)
-LEFT_CHARS = 88
-RIGHT_CHARS = 60
+TEXT_GAP = Inches(0.3)
+LEFT_W = int(CONTENT_W / 3)            # beschrijving c.s.: maximaal 1/3 (DOEL-100)
+RIGHT_LEFT = MARGIN + LEFT_W + TEXT_GAP
+RIGHT_W = CONTENT_W - LEFT_W - TEXT_GAP
+LEFT_CHARS = 50                        # tekens per regel in de linkerkolom
+FULL_CHARS = 150                       # idem over de hele breedte (vervolgslides)
 BODY_SIZE = 11
 LINE_H = Inches(0.2)
 HEADING_COST = 1.5  # kopje + witruimte ervoor, in regels
+CONT_TOP = Inches(1.6)
+
+# Blokjes: eerst ruim (3 per rij, 10 pt), zo nodig compacter tot het past.
+CHIP_CONFIGS = ((3, 10.0), (3, 9.0), (4, 9.0), (4, 8.0), (5, 8.0), (5, 7.0))
+CHIP_GAP_X = Inches(0.09)
+CHIP_GAP_Y = Inches(0.07)
+CHIP_HEAD_H = Inches(0.24)
+CHIP_SECTION_GAP = Inches(0.15)
+CHIP_MAX_LINES = 3
+CHIP_PAD_X = Inches(0.07)
 
 
 def _lines_for(text: str, chars: int) -> list[str]:
@@ -661,15 +718,22 @@ def _lines_for(text: str, chars: int) -> list[str]:
     return out
 
 
-def _paginate_blocks(blocks: list[tuple[str, list[str]]], chars: int, capacities: list[float]) -> list[list[tuple[str, str]]]:
+def _paginate_blocks(blocks: list[tuple[str, list[str]]], chars: int | list[int],
+                     capacities: list[float]) -> list[list[tuple[str, str]]]:
     """Verdeelt blokken (kopje + alinea's) over pagina's met elk een
-    capaciteit in regels. Geeft per pagina een lijst ('h'|'p', tekst).
-    Wat op de laatste pagina niet meer past wordt ingekort met '…'."""
+    capaciteit in regels. chars = tekens per regel, of een lijst per pagina
+    (de laatste waarde geldt voor de rest). Geeft per pagina een lijst
+    ('h'|'p', tekst). Wat op de laatste pagina niet meer past wordt ingekort
+    met '…'."""
+    widths = chars if isinstance(chars, list) else [chars]
     pages: list[list[tuple[str, str]]] = [[]]
     used = 0.0
 
     def capacity() -> float:
         return capacities[min(len(pages) - 1, len(capacities) - 1)]
+
+    def width() -> int:
+        return widths[min(len(pages) - 1, len(widths) - 1)]
 
     def last_page() -> bool:
         return len(pages) >= len(capacities)
@@ -680,8 +744,10 @@ def _paginate_blocks(blocks: list[tuple[str, list[str]]], chars: int, capacities
             break
         first = True
         for para in paragraphs:
-            lines = _lines_for(para, chars)
-            while lines and not truncated:
+            rest = ' '.join(p.strip() for p in para.split('\n') if p.strip())
+            while rest and not truncated:
+                # Opnieuw afbreken per pagina: de regelbreedte kan verschillen.
+                lines = textwrap.wrap(rest, width()) or ['']
                 need_heading = HEADING_COST if first else 0
                 room = int(capacity() - used - need_heading)
                 if room < 1 or (first and room < min(2, len(lines))):
@@ -699,15 +765,16 @@ def _paginate_blocks(blocks: list[tuple[str, list[str]]], chars: int, capacities
                     used += HEADING_COST
                     first = False
                 take = lines[:room]
-                lines = lines[room:]
+                remaining = lines[room:]
                 text = ' '.join(take)
-                if lines and last_page():
+                if remaining and last_page():
                     text = text.rstrip() + ' …'
-                    lines = []
+                    remaining = []
                     truncated = True
                 pages[-1].append(('p', text))
                 used += len(take)
-                if lines:
+                rest = ' '.join(remaining)
+                if rest:
                     pages.append([])
                     used = 0.0
                     pages[-1].append(('h', f'{heading} (vervolg)'))
@@ -745,19 +812,9 @@ def _draw_text_column(slide, left, top, width, height, items: list[tuple[str, st
         first = False
 
 
-def _relation_lines(model: _Model, related: dict[str, bool]) -> list[str]:
-    lines = []
-    for other in model.sorted_codes(related):
-        el = model.elements[other]
-        line = f'• {other} — {el["name"]}' if el['name'] else f'• {other}'
-        line = _truncate(line, RIGHT_CHARS * 2 - 20)
-        line += f' ({model.columns[el["col"]]["title"]}'
-        line += ')' if related[other] else ', ondersteunend)'
-        lines.append(line)
-    return lines
-
-
 def _element_blocks(model: _Model, el: dict[str, Any], title_truncated: bool):
+    """Tekstblokken voor de linkerkolom: beschrijving, KPI, tags en
+    organisatieonderdelen. De verbindingen staan rechts als blokjes."""
     left: list[tuple[str, list[str]]] = []
     description = el['description']
     if title_truncated and el['name']:
@@ -767,24 +824,151 @@ def _element_blocks(model: _Model, el: dict[str, Any], title_truncated: bool):
     left.append(('Beschrijving', paragraphs or ['Geen beschrijving ingevuld.']))
     if el['kpi']:
         left.append(('KPI / indicator', [p.strip() for p in el['kpi'].split('\n') if p.strip()]))
-
-    right: list[tuple[str, list[str]]] = []
-    parents = model.parents[el['code']]
-    children = model.children[el['code']]
-    if parents:
-        right.append((f'Verbonden met — bovenliggend ({len(parents)})', _relation_lines(model, parents)))
-    if children:
-        right.append((f'Verbonden met — onderliggend ({len(children)})', _relation_lines(model, children)))
-    if not parents and not children:
-        right.append(('Verbonden met', ['Geen verbindingen.']))
     if el['tags']:
-        right.append(('Tags', [', '.join(el['tags'])]))
+        left.append(('Tags', [', '.join(el['tags'])]))
     if el['orgs']:
-        right.append(('Organisatieonderdelen', ['; '.join(el['orgs'])]))
-    return left, right
+        left.append(('Organisatieonderdelen', ['; '.join(el['orgs'])]))
+    return left
 
 
-def _slides_element(prs, model: _Model, el: dict[str, Any], meta: dict[str, Any], page: int) -> int:
+def _relation_sections(model: _Model, code: str) -> list[tuple[str, list[tuple[str, bool]]]]:
+    """[(kopje, [(code, primair)])] voor boven- en onderliggend."""
+    sections = []
+    for label, related in (('bovenliggend', model.parents[code]), ('onderliggend', model.children[code])):
+        if related:
+            items = [(other, related[other]) for other in model.sorted_codes(related)]
+            sections.append((f'Verbonden met — {label} ({len(items)})', items))
+    return sections
+
+
+def _chip_label(model: _Model, code: str) -> str:
+    name = model.elements[code]['name']
+    return f'{code}  {name}' if name else code
+
+
+def _chip_size(model: _Model, codes: list[str], cols: int, size: float) -> tuple[int, int]:
+    """Breedte en hoogte van de blokjes van één sectie: zo hoog als het
+    langste label nodig heeft, met een maximum van CHIP_MAX_LINES regels."""
+    chip_w = int((RIGHT_W - (cols - 1) * CHIP_GAP_X) / cols)
+    per_line = max(4, int(((chip_w - 2 * CHIP_PAD_X) / 914400) * 72 / (size * 0.52)))
+    lines = 1
+    for code in codes:
+        lines = max(lines, min(CHIP_MAX_LINES, len(textwrap.wrap(_chip_label(model, code), per_line)) or 1))
+    return chip_w, int(Pt(size * 1.22 * lines) + Inches(0.1))
+
+
+def _section_height(rows: int, chip_h: int) -> int:
+    return int(CHIP_HEAD_H + rows * chip_h + (rows - 1) * CHIP_GAP_Y)
+
+
+def _chip_pages(model: _Model, sections, capacities: list[int]):
+    """Kiest de ruimste opmaak (kolommen, lettergrootte) waarin alle blokjes
+    op de eerste slide passen. Past het zelfs compact niet, dan lopen de
+    blokjes door op vervolgslides (hooguit len(capacities) pagina's); op de
+    laatste pagina wordt de rest samengevat als '+ n meer'.
+    Geeft (kolommen, lettergrootte, pagina's); een pagina is een lijst van
+    (kopje, items, blokhoogte) en een item is (code, primair) of
+    (None, aantal) voor '+ n meer'."""
+    if not sections:
+        return CHIP_CONFIGS[0][0], CHIP_CONFIGS[0][1], [[]]
+    for cols, size in CHIP_CONFIGS:
+        page = []
+        total = 0
+        for heading, items in sections:
+            chip_h = _chip_size(model, [c for c, _ in items], cols, size)[1]
+            total += (CHIP_SECTION_GAP if page else 0) + _section_height(math.ceil(len(items) / cols), chip_h)
+            page.append((heading, items, chip_h))
+        if total <= capacities[0]:
+            return cols, size, [page]
+
+    cols, size = CHIP_CONFIGS[-1]
+    pages: list[list[tuple[str, list, int]]] = [[]]
+    used = 0
+    for heading, items in sections:
+        chip_h = _chip_size(model, [c for c, _ in items], cols, size)[1]
+        remaining = list(items)
+        cont = False
+        while remaining:
+            last = len(pages) >= len(capacities)
+            cap = capacities[min(len(pages) - 1, len(capacities) - 1)]
+            gap = CHIP_SECTION_GAP if pages[-1] else 0
+            avail = cap - used - gap - CHIP_HEAD_H
+            rows = int((avail + CHIP_GAP_Y) // (chip_h + CHIP_GAP_Y)) if avail > 0 else 0
+            if rows < 1:
+                if last:
+                    break
+                pages.append([])
+                used = 0
+                continue
+            slots = rows * cols
+            if len(remaining) > slots and last:
+                take = remaining[:slots - 1] + [(None, len(remaining) - (slots - 1))]
+                remaining = []
+            else:
+                take, remaining = remaining[:slots], remaining[slots:]
+            pages[-1].append((heading + (' (vervolg)' if cont else ''), take, chip_h))
+            used += gap + _section_height(math.ceil(len(take) / cols), chip_h)
+            cont = True
+            if remaining:
+                if last:
+                    break
+                pages.append([])
+                used = 0
+    return cols, size, [p for p in pages if p] or [[]]
+
+
+def _chip_text(shape, code: str, name: str, size: float, width: int, height: int):
+    """Code vet, naam gewoon; ingekort op wat in het blokje past."""
+    tf = shape.text_frame
+    tf.word_wrap = True
+    tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+    tf.margin_left = tf.margin_right = CHIP_PAD_X
+    tf.margin_top = tf.margin_bottom = Inches(0.03)
+    p = tf.paragraphs[0]
+    p.alignment = PP_ALIGN.LEFT
+    label = _fit(f'{code}  {name}' if name else code, width - 2 * CHIP_PAD_X, height, size)
+    parts = [(label, True)]
+    if label.startswith(code) and len(label) > len(code):
+        parts = [(code, True), (label[len(code):], False)]
+    for text, bold in parts:
+        run = p.add_run()
+        run.text = text
+        run.font.size = Pt(size)
+        run.font.bold = bold
+        run.font.color.rgb = DARK
+        run.font.name = 'Calibri'
+
+
+def _draw_chips(slide, model: _Model, top: int, page, cols: int, size: float, links: _Links):
+    y = top
+    for index, (heading, items, chip_h) in enumerate(page):
+        if index:
+            y += CHIP_SECTION_GAP
+        _add_text(slide, RIGHT_LEFT, y, RIGHT_W, CHIP_HEAD_H, heading.upper(), size=10, bold=True, color=ACCENT)
+        y += CHIP_HEAD_H
+        chip_w = int((RIGHT_W - (cols - 1) * CHIP_GAP_X) / cols)
+        for k, (code, primary) in enumerate(items):
+            row, column = divmod(k, cols)
+            x = int(RIGHT_LEFT + column * (chip_w + CHIP_GAP_X))
+            cy = int(y + row * (chip_h + CHIP_GAP_Y))
+            if code is None:
+                more = _rounded(slide, x, cy, chip_w, chip_h, None, line=LINE_COLOR, line_width=0.75, dashed=True)
+                _shape_text(more, f'+ {primary} meer', size=size, color=MUTED)
+                more.name = 'verbinding + meer'
+                continue
+            el = model.elements[code]
+            color = model.color_of(el)
+            chip = _rounded(slide, x, cy, chip_w, chip_h, _tint(color, 0.8), line=color, line_width=1.0,
+                            dashed=not primary)
+            chip.name = f'verbinding {code}' + ('' if primary else ' (ondersteunend)')
+            _chip_text(chip, code, el['name'], size, chip_w, chip_h)
+            tooltip = f'Ga naar {code} — {el["name"]}' if el['name'] else f'Ga naar {code}'
+            links.add(chip, code, tooltip + ('' if primary else ' (ondersteunende relatie)'))
+        rows = math.ceil(len(items) / cols)
+        y += rows * chip_h + (rows - 1) * CHIP_GAP_Y
+
+
+def _slides_element(prs, model: _Model, el: dict[str, Any], meta: dict[str, Any], page: int, links: _Links) -> int:
     col = model.columns[el['col']]
     kicker = col['title']
     if el['type'] != col['typeName']:
@@ -795,26 +979,39 @@ def _slides_element(prs, model: _Model, el: dict[str, Any], meta: dict[str, Any]
     title = f'{el["code"]} — {el["name"]}' if el['name'] else el['code']
     title_truncated = len(title) > 84
 
-    first_cap = (TEXT_BOTTOM - TEXT_TOP) / LINE_H
-    next_cap = (TEXT_BOTTOM - Inches(1.6)) / LINE_H
-    capacities = [first_cap] + [next_cap] * (MAX_SLIDES_PER_ELEMENT - 1)
-    left_blocks, right_blocks = _element_blocks(model, el, title_truncated)
-    left_pages = _paginate_blocks(left_blocks, LEFT_CHARS, capacities)
-    right_pages = _paginate_blocks(right_blocks, RIGHT_CHARS, capacities)
+    first_h = TEXT_BOTTOM - TEXT_TOP
+    next_h = TEXT_BOTTOM - CONT_TOP
+    heights = [first_h] + [next_h] * (MAX_SLIDES_PER_ELEMENT - 1)
 
-    for index in range(max(len(left_pages), len(right_pages))):
+    sections = _relation_sections(model, el['code'])
+    cols, size, chip_pages = _chip_pages(model, sections, heights)
+
+    # Links maximaal 1/3; op vervolgslides zonder blokjes de hele breedte.
+    widths = [LEFT_CHARS] + [LEFT_CHARS if i < len(chip_pages) else FULL_CHARS
+                             for i in range(1, MAX_SLIDES_PER_ELEMENT)]
+    left_pages = _paginate_blocks(_element_blocks(model, el, title_truncated), widths,
+                                  [h / LINE_H for h in heights])
+
+    for index in range(max(len(left_pages), len(chip_pages))):
         slide = _blank_slide(prs)
+        if index == 0:
+            links.slides.setdefault(el['code'], slide)
         _header(slide, kicker + (' — vervolg' if index else ''), title)
         if index == 0:
-            _draw_chain(slide, model, el['code'])
+            _draw_chain(slide, model, el['code'], links)
             top = TEXT_TOP
         else:
-            top = Inches(1.6)
+            top = CONT_TOP
         height = TEXT_BOTTOM - top
+        has_chips = index < len(chip_pages) and chip_pages[index]
         if index < len(left_pages):
-            _draw_text_column(slide, MARGIN, top, LEFT_W, height, left_pages[index])
-        if index < len(right_pages):
-            _draw_text_column(slide, RIGHT_LEFT, top, RIGHT_W, height, right_pages[index])
+            width = LEFT_W if (has_chips or index == 0) else CONTENT_W
+            _draw_text_column(slide, MARGIN, top, width, height, left_pages[index])
+        if index == 0 and not sections:
+            _draw_text_column(slide, RIGHT_LEFT, top, RIGHT_W, height,
+                              [('h', 'Verbonden met'), ('p', 'Geen verbindingen.')])
+        elif has_chips:
+            _draw_chips(slide, model, top, chip_pages[index], cols, size, links)
         _footer(slide, meta, page)
         page += 1
     return page
@@ -840,11 +1037,13 @@ def build_tree_pptx(data: dict[str, Any], options: dict[str, Any] | None, meta: 
         )
 
     prs = _new_presentation()
+    links = _Links({code for col in model.slide_columns() for code in col['elements']})
     page = _slides_snoer(prs, model, meta, 1)
     for col in model.slide_columns():
         page = _slide_section(prs, model, col, meta, page)
         for code in col['elements']:
-            page = _slides_element(prs, model, model.elements[code], meta, page)
+            page = _slides_element(prs, model, model.elements[code], meta, page, links)
+    links.resolve()
 
     buf = io.BytesIO()
     prs.save(buf)
