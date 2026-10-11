@@ -16,6 +16,17 @@ type Release = {
 
 const RELEASES: Release[] = [
   {
+    version: '4.2.0',
+    date: '11 oktober 2026',
+    title: 'PowerPoint-export: de totale boom op één slide',
+    items: [
+      'PowerPoint van de doelenboom: de tweede slide toont de totale boom, met alle zichtbare kolommen naast elkaar, al hun elementen en de relaties ertussen. De vakken schalen mee, zodat de boom ook bij tientallen elementen per kolom op één slide past.',
+      'Klik in de totale boom op een kolomkop met donkere rand om naar de tussenslide van die kolom te springen, of op een element om naar de eigen slide te gaan.',
+      'De tussenslide van een kolom toont alle elementen van die kolom als klikbare blokjes in de kolomkleur.',
+      'Het exportvenster telt de extra slide mee (maximaal 300 slides).',
+    ],
+  },
+  {
     version: '4.1.0',
     date: '11 oktober 2026',
     title: 'Klikbare PowerPoint-export, instelbaar automatisch uitloggen',

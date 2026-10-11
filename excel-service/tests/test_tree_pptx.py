@@ -21,7 +21,12 @@ from app.tree_pptx import (
     CHAIN_MAX_ROWS,
     MAX_SLIDES,
     MAX_SLIDES_PER_ELEMENT,
+    OVERVIEW_MAX_LINES,
+    OVERVIEW_MAX_ROWS,
+    OVERVIEW_NODES_BOTTOM,
+    OVERVIEW_NODES_TOP,
     RIGHT_LEFT,
+    SECTION_MAX_CHIPS,
     TreePptxError,
     _clamp_per_row,
     _Model,
@@ -152,10 +157,11 @@ class TestSnoerSlide:
         assert '2 elementen' in text and '1 element' in text
         assert 'Bewaken en Beveiligen' in text
 
-    def test_zonder_gekozen_kolommen_alleen_de_snoer_slide(self):
+    def test_zonder_gekozen_kolommen_alleen_het_snoer_en_de_totale_boom(self):
         prs = build({})
-        assert len(prs.slides) == 1
+        assert len(prs.slides) == 2
         assert 'uitgewerkt' not in all_text(prs.slides[0])
+        assert 'DE TOTALE BOOM' in all_text(prs.slides[1])
 
     def test_gekozen_kolom_is_gemarkeerd(self):
         text = all_text(build({'slideColumns': ['Benefit']}).slides[0])
@@ -184,8 +190,9 @@ class TestSnoerSlide:
 
     def test_veel_kolommen_lopen_door_op_een_vervolgslide(self):
         data = {'columns': [col(i, f'K{i}') for i in range(11)], 'elements': [], 'edges': []}
-        prs = build({'perRow': 2}, data)  # 6 regels -> 2 slides
-        assert len(prs.slides) == 2
+        prs = build({'perRow': 2}, data)  # 6 regels -> 2 slides, daarna de totale boom
+        assert len(prs.slides) == 3
+        assert 'DE TOTALE BOOM' in all_text(prs.slides[2])
         assert '8. K7' in all_text(prs.slides[0]) and '9. K8' not in all_text(prs.slides[0])
         assert '9. K8' in all_text(prs.slides[1])
         assert 'VERVOLG' in all_text(prs.slides[1])
@@ -203,8 +210,8 @@ class TestVerborgenKolommen:
 
     def test_verborgen_kolom_krijgt_geen_element_slides_ook_al_is_hij_gekozen(self):
         prs = build(self.OPTIONS)
-        # snoer + tussenslide Benefit + B2 + B1
-        assert len(prs.slides) == 4
+        # snoer + totale boom + tussenslide Benefit + B2 + B1
+        assert len(prs.slides) == 5
 
     def test_relatie_wordt_doorgetrokken_over_de_verborgen_kolom(self):
         model = _Model(make_data(), self.OPTIONS)
@@ -242,18 +249,18 @@ class TestElementSlides:
 
     def test_tussenslide_en_slide_per_element_in_boomvolgorde(self):
         prs = build(self.OPTIONS)
-        assert len(prs.slides) == 4
-        assert 'KOLOM' in all_text(prs.slides[1]) and 'Benefit' in all_text(prs.slides[1])
+        assert len(prs.slides) == 5
+        assert 'KOLOM' in all_text(prs.slides[2]) and 'Benefit' in all_text(prs.slides[2])
         # Boomvolgorde = volgorde van aanleveren: B2 voor B1.
-        assert 'B2 — Tweede benefit' in all_text(prs.slides[2])
-        assert 'B1 — Eerste benefit' in all_text(prs.slides[3])
+        assert 'B2 — Tweede benefit' in all_text(prs.slides[3])
+        assert 'B1 — Eerste benefit' in all_text(prs.slides[4])
 
     def test_meerdere_kolommen_in_kolomvolgorde(self):
         prs = build({'slideColumns': ['Missie', 'Project']})
-        assert 'KOLOM' in all_text(prs.slides[1]) and 'Project' in all_text(prs.slides[1])
-        assert 'P1 — Nieuw systeem' in all_text(prs.slides[2])
+        assert 'KOLOM' in all_text(prs.slides[2]) and 'Project' in all_text(prs.slides[2])
+        assert 'P1 — Nieuw systeem' in all_text(prs.slides[3])
         assert 'M1 — Veilig land' in all_text(prs.slides[-1])
-        assert len(prs.slides) == 1 + (1 + 2) + (1 + 1)
+        assert len(prs.slides) == 2 + (1 + 2) + (1 + 1)
 
     def test_hele_pad_omhoog_en_omlaag_maar_geen_zijtakken(self):
         slide = self.slide_for(build(self.OPTIONS), 'B1 — Eerste benefit')
@@ -308,15 +315,15 @@ class TestElementSlides:
         data = make_data()
         data['elements'][4]['description'] = 'Lange zin met inhoud. ' * 100
         prs = build(self.OPTIONS, data)
-        assert len(prs.slides) == 5
-        assert 'VERVOLG' in all_text(prs.slides[4])
-        assert 'B1 — Eerste benefit' in all_text(prs.slides[4])
+        assert len(prs.slides) == 6
+        assert 'VERVOLG' in all_text(prs.slides[5])
+        assert 'B1 — Eerste benefit' in all_text(prs.slides[5])
 
     def test_extreem_lange_tekst_geeft_hooguit_drie_slides_per_element(self):
         data = make_data()
         data['elements'][4]['description'] = 'x' * 200_000
         prs = build(self.OPTIONS, data)
-        assert len(prs.slides) == 3 + 3
+        assert len(prs.slides) == 4 + 3
 
     def test_alias_type_hoort_bij_de_kolom_en_krijgt_eigen_kleur(self):
         data = make_data()
@@ -403,7 +410,7 @@ class TestKlikbareVerbindingen:
 
     def test_twaalf_verbindingen_passen_op_een_slide_zonder_vervolg(self):
         prs = build({'slideColumns': ['Benefit']}, self.many_children(11))  # + C1 = 12 onderliggend
-        assert len(prs.slides) == 4
+        assert len(prs.slides) == 5
         slide = self.slide_for(prs, 'B1 — Eerste benefit')
         chips = [s for s in slide.shapes if s.name.startswith('verbinding ')]
         assert len(chips) == 2 + 12
@@ -459,6 +466,276 @@ class TestKlikbareVerbindingen:
                     rels = z.read(name).decode()
                     assert 'TargetMode="External"' not in rels
                     assert 'evil.example' not in rels
+
+
+class TestTotaleBoom:
+    """DOEL-103: slide 2 is de totale boom -- alle zichtbare kolommen met al
+    hun elementen en relaties, op één slide, met klikbare kolomkoppen en
+    vakjes."""
+    OPTIONS = {'slideColumns': ['Benefit', 'Doel']}
+
+    def overview(self, prs):
+        return prs.slides[1]
+
+    def shape(self, slide, name):
+        return next(s for s in slide.shapes if s.name == name)
+
+    def big(self, n, type_name='Project', prefix='Q'):
+        data = make_data()
+        for i in range(n):
+            data['elements'].append(el(f'{prefix}{i}', type_name, f'Element met een redelijk lange naam {i}'))
+            data['edges'].append(edge(f'{prefix}{i}', 'C1' if type_name == 'Project' else 'B1'))
+        return data
+
+    def test_slide_twee_is_de_totale_boom_met_alle_kolommen_en_elementen(self):
+        prs = build(self.OPTIONS)
+        slide = self.overview(prs)
+        assert 'DE TOTALE BOOM' in all_text(slide) and 'Bewaken en Beveiligen' in all_text(slide)
+        names = shape_names(slide)
+        for code in ('M1', 'D1', 'D2', 'B1', 'B2', 'C1', 'C2', 'P1', 'P2'):
+            assert f'overzicht-element {code}' in names
+        assert len([n for n in names if n.startswith('overzicht-kolom ')]) == 5
+        text = all_text(slide)
+        for head in ('Project (2)', 'Capability (2)', 'Benefit (2)', 'Doel (2)', 'Missie (1)'):
+            assert head in text
+        assert 'B1 Eerste benefit' in text
+
+    def test_alle_relaties_staan_erin_ook_de_ondersteunende(self):
+        slide = self.overview(build(self.OPTIONS))
+        lines = [n for n in shape_names(slide) if n.startswith('overzicht-relatie ')]
+        assert len(lines) == len(make_data()['edges'])
+        dashed = self.shape(slide, 'overzicht-relatie B1 > D2 (ondersteunend)')
+        assert dashed.line.dash_style == MSO_LINE.DASH
+        assert self.shape(slide, 'overzicht-relatie B1 > D1').line.dash_style is None
+        assert 'stippellijn' in all_text(slide)
+
+    def test_element_zonder_relaties_staat_er_ook_in(self):
+        slide = self.overview(build(self.OPTIONS))
+        assert 'overzicht-element P2' in shape_names(slide)
+        assert not any('P2' in n for n in shape_names(slide) if n.startswith('overzicht-relatie '))
+
+    def test_vak_in_kolomkleur_en_alias_in_eigen_kleur(self):
+        data = make_data()
+        data['columns'][2]['aliases'] = [{'typeName': 'Randvoorwaarde', 'color': '#111111'}]
+        data['elements'].append(el('R1', 'Randvoorwaarde'))
+        slide = self.overview(build(self.OPTIONS, data))
+        assert str(self.shape(slide, 'overzicht-element B1').line.color.rgb) == 'C05A2C'
+        assert str(self.shape(slide, 'overzicht-element R1').line.color.rgb) == '111111'
+        assert str(self.shape(slide, 'overzicht-kolom 3').fill.fore_color.rgb) == 'C05A2C'
+
+    def test_kolomkop_springt_naar_de_tussenslide_van_de_kolom(self):
+        prs = build(self.OPTIONS)
+        slide = self.overview(prs)
+        sections = {  # kolomnummer -> tussenslide
+            3: next(s for s in prs.slides if 'KOLOM' in all_text(s) and 'Benefit' in all_text(s)),
+            4: next(s for s in prs.slides if 'KOLOM' in all_text(s) and 'Doel' in all_text(s)),
+        }
+        for number, target in sections.items():
+            head = self.shape(slide, f'overzicht-kolom {number}')
+            assert head.click_action.action == PP_ACTION.NAMED_SLIDE
+            assert head.click_action.target_slide.slide_id == target.slide_id
+        link = self.shape(slide, 'overzicht-kolom 3')._element.find('.//' + qn('a:hlinkClick'))
+        assert link.get('tooltip') == 'Ga naar de kolom Benefit'
+
+    def test_geen_link_bij_een_kolom_buiten_de_export(self):
+        slide = self.overview(build(self.OPTIONS))
+        for number in (1, 2, 5):  # Project, Capability, Missie zijn niet uitgewerkt
+            assert self.shape(slide, f'overzicht-kolom {number}').click_action.target_slide is None
+        for code in ('P1', 'C1', 'M1'):
+            assert self.shape(slide, f'overzicht-element {code}').click_action.target_slide is None
+
+    def test_vakje_springt_naar_de_slide_van_het_element(self):
+        prs = build(self.OPTIONS)
+        slide = self.overview(prs)
+        for code, title in (('B1', 'B1 — Eerste benefit'), ('D2', 'D2 — Informatiegestuurd werken')):
+            target = next(s for s in prs.slides if title in all_text(s))
+            action = self.shape(slide, f'overzicht-element {code}').click_action
+            assert action.action == PP_ACTION.NAMED_SLIDE
+            assert action.target_slide.slide_id == target.slide_id
+        link = self.shape(slide, 'overzicht-element B1')._element.find('.//' + qn('a:hlinkClick'))
+        assert link.get('tooltip') == 'Ga naar B1 — Eerste benefit'
+
+    def test_legenda_noemt_klikken_alleen_als_er_links_zijn(self):
+        assert 'Klik op een kolomkop' in all_text(self.overview(build(self.OPTIONS)))
+        assert 'Klik' not in all_text(self.overview(build({})))
+
+    def test_verborgen_kolom_staat_niet_in_de_totale_boom_en_relatie_loopt_door(self):
+        slide = self.overview(build({'visibleColumns': ['Project', 'Benefit', 'Doel', 'Missie']}))
+        names = shape_names(slide)
+        assert not any('C1' in n or 'C2' in n for n in names)
+        assert len([n for n in names if n.startswith('overzicht-kolom ')]) == 4
+        assert 'overzicht-relatie P1 > B1' in names
+
+    @pytest.mark.parametrize('n', [34, 58, 200])
+    def test_schaalt_bij_veel_elementen_en_blijft_binnen_de_slide(self, n):
+        slide = self.overview(build({'slideColumns': ['Benefit']}, self.big(n)))
+        nodes = [s for s in slide.shapes if s.name.startswith('overzicht-element ') or s.name.startswith('overzicht-meer ')]
+        for node in nodes:
+            assert node.top >= OVERVIEW_NODES_TOP - 1
+            assert node.top + node.height <= OVERVIEW_NODES_BOTTOM + 1
+            assert MARGIN <= node.left and node.left + node.width <= MARGIN + CONTENT_W + 1
+        # Vakken in één kolom overlappen elkaar niet.
+        projects = sorted((s for s in nodes if s.left == MARGIN), key=lambda s: s.top)
+        for a, b in zip(projects, projects[1:]):
+            assert a.top + a.height <= b.top
+
+    def test_vierendertig_elementen_staan_er_allemaal_in(self):
+        slide = self.overview(build({}, self.big(34)))
+        projects = [n for n in shape_names(slide) if n.startswith('overzicht-element Q')]
+        assert len(projects) == 34
+        assert not any(n.startswith('overzicht-meer') for n in shape_names(slide))
+        # Kleiner lettertype dan een kolom met weinig elementen.
+        size = lambda name: self.shape(slide, name).text_frame.paragraphs[0].runs[0].font.size  # noqa: E731
+        assert size('overzicht-element Q0') < size('overzicht-element M1')
+
+    def test_owasp_a04_heel_grote_kolom_wordt_begrensd_met_plus_n_meer(self):
+        slide = self.overview(build({}, self.big(500)))
+        names = shape_names(slide)
+        in_column = [n for n in names if n.startswith('overzicht-element Q') or n.startswith('overzicht-element P')]
+        assert len(in_column) == OVERVIEW_MAX_ROWS - 1
+        assert f'+ {502 - (OVERVIEW_MAX_ROWS - 1)} meer' in all_text(slide)
+        assert 'Project (502)' in all_text(slide)
+
+    def test_owasp_a04_aantal_lijnen_is_begrensd(self):
+        data = {'columns': [col(0, 'A'), col(1, 'B')],
+                'elements': [el(f'A{i}', 'A') for i in range(59)] + [el(f'B{i}', 'B') for i in range(59)],
+                'edges': [edge(f'A{i}', f'B{j}', 'ondersteunend' if (i + j) % 2 else 'primair')
+                          for i in range(59) for j in range(59)]}
+        slide = self.overview(build({}, data))
+        lines = [n for n in shape_names(slide) if n.startswith('overzicht-relatie ')]
+        assert len(lines) == OVERVIEW_MAX_LINES
+        assert f'Niet alle relaties zijn getekend ({OVERVIEW_MAX_LINES} van {59 * 59})' in all_text(slide)
+        # Primaire relaties gaan voor.
+        assert sum(1 for n in lines if not n.endswith('(ondersteunend)')) == (59 * 59 + 1) // 2
+
+    def test_owasp_a03_namen_blijven_letterlijke_tekst(self):
+        data = make_data()
+        evil = '<a:hlinkClick r:id="rId9"/>"&\'><script>alert(1)</script>'
+        data['elements'][4]['name'] = evil
+        data['columns'][2]['title'] = 'Benefit "&<x>'
+        content = build_tree_pptx(data, self.OPTIONS, META)
+        slide = self.overview(load(content))
+        assert '<script>' in self.shape(slide, 'overzicht-element B1').text_frame.text
+        assert 'Benefit "&<x> (2)' in all_text(slide)
+        link = self.shape(slide, 'overzicht-element B1')._element.find('.//' + qn('a:hlinkClick'))
+        assert link.get('tooltip').startswith('Ga naar B1 — <a:hlinkClick')
+        with zipfile.ZipFile(io.BytesIO(content)) as z:
+            xml = z.read('ppt/slides/slide2.xml').decode('utf-8')
+        assert '<script>' not in xml and '&lt;script&gt;' in xml
+
+    def test_owasp_alleen_interne_sprongen_in_het_pakket(self):
+        content = build_tree_pptx(self.big(40), {'slideColumns': ['Project', 'Benefit', 'Doel', 'Missie', 'Capability']}, META)
+        with zipfile.ZipFile(io.BytesIO(content)) as z:
+            for name in z.namelist():
+                if not name.endswith('.rels'):
+                    continue
+                rels = z.read(name).decode('utf-8')
+                assert 'TargetMode="External"' not in rels
+                assert 'http://' not in re.sub(r'xmlns="[^"]+"|Type="[^"]+"', '', rels)
+            slide2 = z.read('ppt/slides/slide2.xml').decode('utf-8')
+        assert 'ppaction://hlinksldjump' in slide2
+        assert not re.search(r'action="(?!ppaction://hlinksldjump)', slide2)
+
+    def test_lege_boom_geeft_een_totale_boom_zonder_elementen(self):
+        data = {'columns': [col(0, 'A'), col(1, 'B')], 'elements': [], 'edges': []}
+        slide = self.overview(build({'slideColumns': ['A']}, data))
+        assert 'A (0)' in all_text(slide) and 'B (0)' in all_text(slide)
+        assert self.shape(slide, 'overzicht-kolom 1').click_action.target_slide is not None
+
+
+class TestKolomslideBlokjes:
+    """DOEL-103: de tussenslide van een kolom toont alle elementen van die
+    kolom als klikbare blokjes in de kolomkleur."""
+    OPTIONS = {'slideColumns': ['Benefit', 'Doel']}
+
+    def section(self, prs, title):
+        return next(s for s in prs.slides if 'KOLOM' in all_text(s) and title in all_text(s))
+
+    def chips(self, slide):
+        return [s for s in slide.shapes if s.name.startswith('kolomelement ')]
+
+    def many(self, n):
+        data = make_data()
+        data['elements'] += [el(f'X{i}', 'Benefit', f'Benefit met een redelijk lange naam {i}') for i in range(n)]
+        return data
+
+    def test_alle_elementen_van_de_kolom_als_blokje_in_kolomkleur(self):
+        slide = self.section(build(self.OPTIONS), 'Benefit')
+        chips = self.chips(slide)
+        assert [c.name for c in chips] == ['kolomelement B2', 'kolomelement B1']  # boomvolgorde
+        for chip in chips:
+            assert str(chip.line.color.rgb) == 'C05A2C'
+            assert str(chip.fill.fore_color.rgb) == str(_tint(_rgb('#C05A2C'), 0.8))
+        assert 'B1  Eerste benefit' in all_text(slide)
+        assert '2 elementen' in all_text(slide)
+
+    def test_blokjes_staan_rechtsonder_onder_het_gekleurde_blok(self):
+        slide = self.section(build(self.OPTIONS), 'Benefit')
+        count = next(s for s in slide.shapes if s.has_text_frame and s.text_frame.text == '2 elementen')
+        for chip in self.chips(slide):
+            assert chip.left >= count.left + count.width
+            assert chip.top >= count.top
+            assert chip.left + chip.width <= MARGIN + CONTENT_W + 1
+
+    def test_blokje_springt_naar_de_slide_van_het_element(self):
+        prs = build(self.OPTIONS)
+        slide = self.section(prs, 'Benefit')
+        target = next(s for s in prs.slides if 'B1 — Eerste benefit' in all_text(s))
+        chip = next(c for c in self.chips(slide) if c.name == 'kolomelement B1')
+        assert chip.click_action.action == PP_ACTION.NAMED_SLIDE
+        assert chip.click_action.target_slide.slide_id == target.slide_id
+        assert chip._element.find('.//' + qn('a:hlinkClick')).get('tooltip') == 'Ga naar B1 — Eerste benefit'
+
+    def test_alias_element_krijgt_de_aliaskleur(self):
+        data = make_data()
+        data['columns'][2]['aliases'] = [{'typeName': 'Randvoorwaarde', 'color': '#111111'}]
+        data['elements'].append(el('R1', 'Randvoorwaarde'))
+        slide = self.section(build(self.OPTIONS, data), 'Benefit')
+        chip = next(c for c in self.chips(slide) if c.name == 'kolomelement R1')
+        assert str(chip.line.color.rgb) == '111111'
+
+    @pytest.mark.parametrize('n', [1, 6, 32, 80, 130])
+    def test_blokjes_schalen_mee_en_blijven_binnen_de_slide(self, n):
+        prs = build({'slideColumns': ['Benefit']}, self.many(n))
+        slide = self.section(prs, 'Benefit')
+        chips = self.chips(slide)
+        assert len(chips) == n + 2
+        assert 'kolomelement + meer' not in shape_names(slide)
+        band = max((s for s in slide.shapes if s.width > CONTENT_W and s.height < SLIDE_H), key=lambda s: s.height)
+        for chip in chips:
+            assert chip.top >= band.top + band.height
+            assert chip.top + chip.height <= SLIDE_H - Inches(0.5)
+            assert chip.left + chip.width <= MARGIN + CONTENT_W + 1
+            assert chip.click_action.target_slide is not None
+
+    def test_veel_elementen_geeft_kleinere_blokjes(self):
+        few = self.chips(self.section(build({'slideColumns': ['Benefit']}, self.many(2)), 'Benefit'))
+        lots = self.chips(self.section(build({'slideColumns': ['Benefit']}, self.many(120)), 'Benefit'))
+        assert lots[0].width < few[0].width and lots[0].height < few[0].height
+
+    def test_past_het_echt_niet_dan_plus_n_meer(self):
+        slide = self.section(build({'slideColumns': ['Benefit']}, self.many(250)), 'Benefit')
+        chips = [c for c in self.chips(slide) if c.name != 'kolomelement + meer']
+        assert len(chips) == SECTION_MAX_CHIPS - 1
+        more = next(s for s in slide.shapes if s.name == 'kolomelement + meer')
+        assert more.text_frame.text == f'+ {252 - (SECTION_MAX_CHIPS - 1)} meer'
+        assert more.click_action.target_slide is None
+        assert more.top + more.height <= SLIDE_H - Inches(0.5)
+        assert '252 elementen' in all_text(slide)
+
+    def test_lege_kolom_heeft_geen_blokjes_en_geen_klikhint(self):
+        data = make_data()
+        data['columns'].append(col(5, 'Leeg'))
+        slide = self.section(build({'slideColumns': ['Leeg']}, data), 'Leeg')
+        assert self.chips(slide) == []
+        assert '0 elementen' in all_text(slide) and 'Klik op een element' not in all_text(slide)
+
+    def test_owasp_a03_naam_in_blokje_blijft_letterlijke_tekst(self):
+        data = make_data()
+        data['elements'][4]['name'] = '<script>alert(1)</script>'
+        slide = self.section(build(self.OPTIONS, data), 'Benefit')
+        chip = next(c for c in self.chips(slide) if c.name == 'kolomelement B1')
+        assert '<script>' in chip.text_frame.text
 
 
 class TestRobuustheid:
@@ -523,7 +800,7 @@ class TestRobuustheid:
             'tags': 'geen lijst', 'elementTags': ['geen dict'], 'orgUnits': None, 'obOrg': {'A1': 'geen lijst'},
         }
         prs = load(build_tree_pptx(data, {'slideColumns': ['A', 5, None], 'visibleColumns': 'alles', 'perRow': []}, 'geen meta'))
-        assert len(prs.slides) == 3
+        assert len(prs.slides) == 4
 
     def test_lege_of_ontbrekende_invoer(self):
         for data in (None, {}, [], 'tekst', {'columns': []}):
@@ -536,11 +813,18 @@ class TestRobuustheid:
             build_tree_pptx(data, {'slideColumns': ['A']}, META)
         assert str(MAX_SLIDES) in str(exc.value)
         # Zonder element-slides mag dezelfde grote boom wel.
-        assert len(build({}, data).slides) == 1
+        assert len(build({}, data).slides) == 2
 
     def test_precies_op_de_grens_mag(self):
-        data = {'columns': [col(0, 'A')], 'elements': [el(f'A{i}', 'A') for i in range(MAX_SLIDES - 2)], 'edges': []}
+        # snoer + totale boom + tussenslide + een slide per element.
+        data = {'columns': [col(0, 'A')], 'elements': [el(f'A{i}', 'A') for i in range(MAX_SLIDES - 3)], 'edges': []}
         assert len(build({'slideColumns': ['A']}, data).slides) == MAX_SLIDES
+
+    def test_een_element_boven_de_grens_wordt_geweigerd(self):
+        # DOEL-103: de totale boom telt mee, dus MAX_SLIDES - 2 elementen is er nu een te veel.
+        data = {'columns': [col(0, 'A')], 'elements': [el(f'A{i}', 'A') for i in range(MAX_SLIDES - 2)], 'edges': []}
+        with pytest.raises(TreePptxError):
+            build_tree_pptx(data, {'slideColumns': ['A']}, META)
 
 
 class TestEndpoint:
@@ -550,7 +834,7 @@ class TestEndpoint:
         assert res.headers['content-type'] == (
             'application/vnd.openxmlformats-officedocument.presentationml.presentation')
         assert res.content[:2] == b'PK'
-        assert len(load(res.content).slides) == 4
+        assert len(load(res.content).slides) == 5
 
     def test_ongeldige_keuze_geeft_422_met_melding(self):
         res = client.post('/tree-pptx', json={'data': make_data(), 'options': {'visibleColumns': []}, 'meta': META})

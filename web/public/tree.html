@@ -1707,7 +1707,7 @@
   <div class="element-modal-backdrop" id="pptx-export-modal-backdrop">
     <div class="element-modal pptx-export-modal">
       <h3>Exporteer als PowerPoint</h3>
-      <p class="element-modal-hint">De eerste slide toont de kolommen als snoer. Voor elke kolom die je hieronder aanvinkt volgt een slide per element, met de keten van dat element, de beschrijving en de verbindingen.</p>
+      <p class="element-modal-hint">De eerste slide toont de kolommen als snoer, de tweede de totale boom. Voor elke kolom die je hieronder aanvinkt volgt een slide per element, met de keten van dat element, de beschrijving en de verbindingen.</p>
       <form id="pptx-export-form">
         <div class="pptx-export-label">
           <span>Per element uitwerken</span>
@@ -10065,7 +10065,8 @@ function pptxExportSlideCount(rows, checkedNames, perRow) {
   const checked = new Set(checkedNames || []);
   const visible = (rows || []).filter((r) => !r.hidden);
   const snoerRows = Math.ceil(visible.length / pptxExportClampPerRow(perRow));
-  let total = Math.max(1, Math.ceil(snoerRows / PPTX_EXPORT_SNOER_MAX_ROWS));
+  // + 1: de slide met de totale boom (DOEL-103).
+  let total = Math.max(1, Math.ceil(snoerRows / PPTX_EXPORT_SNOER_MAX_ROWS)) + 1;
   visible.forEach((r) => { if (checked.has(r.typeName)) total += 1 + r.count; });
   return total;
 }
@@ -10075,7 +10076,7 @@ function pptxExportSummaryText(count, max) {
   if (count > max) {
     return 'Dit worden ' + slides + '; het maximum is ' + max + '. Vink minder kolommen aan.';
   }
-  return 'Dit worden ' + slides + (count === 1 ? ' (alleen het overzicht van de kolommen).' : '.');
+  return 'Dit worden ' + slides + (count <= 2 ? ' (alleen de kolommen en de totale boom).' : '.');
 }
 
 function pptxExportColumnsHtml(rows, checkedNames) {

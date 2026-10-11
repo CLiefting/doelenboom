@@ -510,9 +510,12 @@ const SECTIONS: { id: string; title: string; content: JSX.Element }[] = [
         <p style={styles.p}>
           <strong>PowerPoint van de doelenboom.</strong> Via <strong>Bestand → Exporteer als PowerPoint</strong>{' '}
           maak je een presentatie. De eerste slide toont de kolommen als snoer, met per kolom de omschrijving;
-          je kiest zelf hoeveel kolommen er op een regel staan (2 tot 6). Vink aan welke kolommen je per
+          je kiest zelf hoeveel kolommen er op een regel staan (2 tot 6). De tweede slide toont de totale
+          boom: alle zichtbare kolommen naast elkaar met al hun elementen en de relaties ertussen, zo
+          geschaald dat het op één slide past. Vink aan welke kolommen je per
           element wilt uitwerken: elk element krijgt dan een eigen slide met de boom gefilterd op dat element
-          (het hele pad omhoog en omlaag). Daaronder staan links de beschrijving, de KPI, tags en
+          (het hele pad omhoog en omlaag). Vóór die slides komt per kolom een tussenslide met alle elementen
+          van die kolom als blokjes. Daaronder staan links de beschrijving, de KPI, tags en
           organisatieonderdelen, en rechts de verbonden elementen (boven- en onderliggend) als blokjes in de
           kleur van hun kolom; een gestippelde rand betekent een ondersteunende relatie. Het venster toont
           vooraf hoeveel slides het worden (maximaal 300).
@@ -520,7 +523,9 @@ const SECTIONS: { id: string; title: string; content: JSX.Element }[] = [
         <p style={styles.p}>
           <strong>Klikken in de presentatie.</strong> Een blokje of een vak in de boom is een link naar de
           slide van dat element, zolang dat element zelf een slide in de presentatie heeft (de kolom is
-          aangevinkt). Dat werkt in de diavoorstelling; tijdens het bewerken in PowerPoint klik je met Ctrl
+          aangevinkt). Dat geldt ook voor de vakken in de totale boom en de blokjes op de tussenslide van een
+          kolom. Een kolomkop met donkere rand in de totale boom springt naar de tussenslide van die kolom.
+          Dat werkt in de diavoorstelling; tijdens het bewerken in PowerPoint klik je met Ctrl
           (Windows) of Cmd (Mac) ingedrukt.
         </p>
         <p style={styles.note}>

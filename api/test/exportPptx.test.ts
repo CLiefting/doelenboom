@@ -206,15 +206,21 @@ describe('PowerPoint-export van een doelenboom (DOEL-88)', () => {
     assert.match(res.headers.get('content-disposition') ?? '', /^attachment; filename="Doelenboom_[A-Za-z0-9_]+_Testboom_\d{6}\.pptx"$/);
     assert.match(res.headers.get('access-control-expose-headers') ?? '', /Content-Disposition/i);
     const slides = readSlides(Buffer.from(await res.arrayBuffer()));
-    // snoer + tussenslide + B1 + B2
-    assert.equal(slides.length, 4);
+    // snoer + totale boom (DOEL-103) + tussenslide + B1 + B2
+    assert.equal(slides.length, 5);
     assert.match(slides[0], /1\. Project/);
     assert.match(slides[0], /per element uitgewerkt/);
-    const b1 = slides.find((s) => s.includes('B1 — Voorbeeldbenefit'));
+    assert.match(slides[1], /de totale boom/i);
+    assert.match(slides[1], /overzicht-element B1/);
+    assert.match(slides[1], /overzicht-element P1/);
+    assert.match(slides[2], /kolomelement B1/); // tussenslide: elementen als blokjes
+    const b1 = slides.find((s) => s.includes('<a:t>B1 — Voorbeeldbenefit</a:t>')); // de titel, niet een tooltip op een andere slide
     assert.ok(b1, 'slide voor B1');
     assert.match(b1, /Omschrijving van B1/);
     assert.match(b1, /KPI van B1/);
-    assert.match(b1, /C1 — Voorbeeldcapability/);
+    // Sinds DOEL-100 staan verbindingen als blokjes (code en naam in losse runs).
+    assert.match(b1, /name="verbinding C1"/);
+    assert.match(b1, /Voorbeeldcapability/);
     assert.match(b1, /element P1/); // hele pad: ook het project onder de capability
   });
 
@@ -237,8 +243,8 @@ describe('PowerPoint-export van een doelenboom (DOEL-88)', () => {
     const slides = readSlides(Buffer.from(await res.arrayBuffer()));
     const all = slides.join('\n');
     assert.ok(!all.includes('Capability') && !all.includes('Voorbeeldcapability'));
-    const b1 = slides.find((s) => s.includes('B1 — Voorbeeldbenefit'));
-    assert.ok(b1 && b1.includes('P1 — Voorbeeldproject'), 'project hangt nu direct onder de benefit');
+    const b1 = slides.find((s) => s.includes('<a:t>B1 — Voorbeeldbenefit</a:t>')); // de titel, niet een tooltip op een andere slide
+    assert.ok(b1 && b1.includes('name="verbinding P1"') && b1.includes('Voorbeeldproject'), 'project hangt nu direct onder de benefit');
   });
 
   // ---- A09: auditlog ----
@@ -249,7 +255,7 @@ describe('PowerPoint-export van een doelenboom (DOEL-88)', () => {
     assert.equal((await exportPptx({ slideColumns: ['Project'] }, editorToken)).status, 200);
     const rows = await exportAudit();
     assert.equal(rows.length, 1);
-    assert.deepEqual(rows[0].detail, { kind: 'doelenboom-pptx', format: 'pptx', slideColumns: ['Project'], slides: 3 });
+    assert.deepEqual(rows[0].detail, { kind: 'doelenboom-pptx', format: 'pptx', slideColumns: ['Project'], slides: 4 });
     assert.ok(rows[0].user_id && rows[0].tenant_id);
     assert.ok(!JSON.stringify(rows[0].detail).includes('Voorbeeld'));
   });
@@ -274,6 +280,6 @@ describe('PowerPoint-export van een doelenboom (DOEL-88)', () => {
     if (!excelServiceReachable) return t.skip('excel-service niet bereikbaar — zie EXCEL_SERVICE_URL');
     const res = await exportPptx({ slideColumns: ['Project'] }, adminToken);
     assert.equal(res.status, 200);
-    assert.equal(readSlides(Buffer.from(await res.arrayBuffer())).length, 3);
+    assert.equal(readSlides(Buffer.from(await res.arrayBuffer())).length, 4); // snoer + totale boom + tussenslide + P1
   });
 });

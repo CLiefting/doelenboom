@@ -85,23 +85,23 @@ describe('DOEL-88 kolommen in het dialoogvenster', () => {
 });
 
 describe('DOEL-88 aantal slides (zelfde telling als de server)', () => {
-  it('zonder aangevinkte kolommen alleen het overzicht', () => {
-    assert.equal(F.pptxExportSlideCount(rows(), [], 4), 1);
+  it('zonder aangevinkte kolommen alleen het snoer en de totale boom (DOEL-103)', () => {
+    assert.equal(F.pptxExportSlideCount(rows(), [], 4), 2);
   });
 
   it('per aangevinkte kolom een tussenslide plus een slide per element', () => {
-    assert.equal(F.pptxExportSlideCount(rows(), ['Project'], 4), 1 + 1 + 11);
-    assert.equal(F.pptxExportSlideCount(rows(), ['Project', 'Benefit', 'Missie'], 4), 1 + 12 + 2 + 1);
+    assert.equal(F.pptxExportSlideCount(rows(), ['Project'], 4), 2 + 1 + 11);
+    assert.equal(F.pptxExportSlideCount(rows(), ['Project', 'Benefit', 'Missie'], 4), 2 + 12 + 2 + 1);
   });
 
   it('een verborgen kolom telt niet mee, ook niet als hij toch in de lijst staat', () => {
-    assert.equal(F.pptxExportSlideCount(rows(), ['Capability'], 4), 1);
+    assert.equal(F.pptxExportSlideCount(rows(), ['Capability'], 4), 2);
   });
 
   it('het overzicht loopt door op een vervolgslide bij meer dan vier regels', () => {
     const many = F.pptxExportColumnRows(Array.from({ length: 11 }, (_, i) => ({ typeName: 'K' + i })), [], {});
-    assert.equal(F.pptxExportSlideCount(many, [], 2), 2); // 6 regels
-    assert.equal(F.pptxExportSlideCount(many, [], 3), 1); // 4 regels
+    assert.equal(F.pptxExportSlideCount(many, [], 2), 3); // 6 regels: 2 snoerslides + de totale boom
+    assert.equal(F.pptxExportSlideCount(many, [], 3), 2); // 4 regels
   });
 
   it('kolommen per regel wordt begrensd op 2 tot en met 6', () => {
@@ -113,7 +113,8 @@ describe('DOEL-88 aantal slides (zelfde telling als de server)', () => {
   });
 
   it('samenvatting noemt het aantal en waarschuwt boven het maximum', () => {
-    assert.equal(F.pptxExportSummaryText(1, 300), 'Dit worden 1 slide (alleen het overzicht van de kolommen).');
+    assert.equal(F.pptxExportSummaryText(2, 300), 'Dit worden 2 slides (alleen de kolommen en de totale boom).');
+    assert.equal(F.pptxExportSummaryText(3, 300), 'Dit worden 3 slides.');
     assert.equal(F.pptxExportSummaryText(14, 300), 'Dit worden 14 slides.');
     assert.equal(F.pptxExportSummaryText(300, 300), 'Dit worden 300 slides.');
     assert.match(F.pptxExportSummaryText(301, 300), /maximum is 300/);

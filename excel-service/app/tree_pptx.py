@@ -8,8 +8,13 @@ Slide-structuur:
        volgende regel(s). Kolommen waarvoor element-slides volgen zijn
        gemarkeerd. Meer dan SNOER_MAX_ROWS regels loopt door op een
        vervolgslide.
+  2.   De totale boom (DOEL-103): alle zichtbare kolommen naast elkaar met
+       al hun elementen en de relaties ertussen, als PowerPoint-vormen.
+       Vakhoogte, tussenruimte en lettergrootte schalen per kolom mee, zodat
+       de boom altijd op één slide past.
   Per gekozen kolom:
-  n.   Een tussenslide met de kolom.
+  n.   Een tussenslide met de kolom, met alle elementen van die kolom als
+       blokjes in de kolomkleur (DOEL-103).
   n+1. Eén slide per element, in boomvolgorde: bovenaan de boom gefilterd op
        dat ene element (het hele pad omhoog en omlaag, getekend met
        PowerPoint-vormen). Daaronder links (maximaal 1/3 van de breedte) de
@@ -17,10 +22,11 @@ Slide-structuur:
        verbindingen als blokjes in de kleur van hun kolom (DOEL-100).
        Lange tekst of heel veel verbindingen lopen door op een vervolgslide.
 
-Klikbaar (DOEL-100): elk blokje en elk vak in de keten is een interne
-hyperlink naar de slide van dat element, mits dat element zelf een slide in
-deze presentatie heeft. Alleen sprongen binnen de presentatie, nooit een
-externe link.
+Klikbaar (DOEL-100, DOEL-103): elk blokje en elk vak in de keten of in de
+totale boom is een interne hyperlink naar de slide van dat element, mits dat
+element zelf een slide in deze presentatie heeft. Een kolomkop in de totale
+boom springt naar de tussenslide van die kolom, mits die kolom is uitgewerkt.
+Alleen sprongen binnen de presentatie, nooit een externe link.
 
 Verborgen kolommen (options.visibleColumns) komen nergens in de presentatie
 voor: niet in het snoer, niet in de keten en niet onder "Verbonden met".
@@ -67,8 +73,8 @@ from .project_pptx import (
     _truncate,
 )
 
-# Bovengrens op het aantal slides (snoer + tussenslides + element-slides,
-# vóór eventuele vervolgslides). Dezelfde grens staat in de API
+# Bovengrens op het aantal slides (snoer + totale boom + tussenslides +
+# element-slides, vóór eventuele vervolgslides). Dezelfde grens staat in de API
 # (routes/exports.ts) en in het dialoogvenster (tree.html).
 MAX_SLIDES = 300
 PER_ROW_MIN = 2
@@ -81,6 +87,13 @@ CHAIN_MAX_ROWS = 6
 # Een element krijgt hooguit zoveel slides (1 + vervolg); daarna wordt de
 # tekst ingekort.
 MAX_SLIDES_PER_ELEMENT = 3
+# Totale boom (DOEL-103): hooguit zoveel vakken per kolom en zoveel lijnen op
+# de slide; de rest wordt samengevat ("+ n meer") resp. weggelaten met een
+# melding in de legenda. Begrenst het aantal vormen bij hele grote bomen.
+OVERVIEW_MAX_ROWS = 60
+OVERVIEW_MAX_LINES = 3000
+# Tussenslide (DOEL-103): hooguit zoveel blokjes; de rest wordt "+ n meer".
+SECTION_MAX_CHIPS = 140
 
 LINE_COLOR = RGBColor(0x8A, 0x8F, 0x98)
 FALLBACK_COLOR = RGBColor(0x6C, 0x6F, 0x76)
@@ -391,10 +404,11 @@ class _Model:
         return [c for c in self.columns if c['slides']]
 
     def planned_slides(self) -> int:
-        """Snoer + per gekozen kolom een tussenslide en een slide per element
-        (zonder vervolgslides) -- dezelfde telling als in het dialoogvenster."""
+        """Snoer + de totale boom + per gekozen kolom een tussenslide en een
+        slide per element (zonder vervolgslides) -- dezelfde telling als in
+        het dialoogvenster."""
         snoer_rows = math.ceil(len(self.columns) / self.per_row)
-        total = max(1, math.ceil(snoer_rows / SNOER_MAX_ROWS))
+        total = max(1, math.ceil(snoer_rows / SNOER_MAX_ROWS)) + 1
         for c in self.slide_columns():
             total += 1 + len(c['elements'])
         return total
@@ -523,23 +537,264 @@ def _style_arrow(arrow):
     arrow.line.fill.background()
 
 
+# ---- interne sprongen ------------------------------------------------------
+
+def _col_key(index: int) -> tuple[str, int]:
+    """Sleutel van de tussenslide van een kolom in _Links. Een tuple, zodat
+    hij nooit kan botsen met een elementcode (altijd een str)."""
+    return ('kolom', index)
+
+
+class _Links:
+    """Verzamelt klikbare vormen (blokjes, vakken en kolomkoppen) en koppelt
+    ze na het bouwen aan hun doelslide -- die slide kan immers pas later in
+    de presentatie komen. Een doel is een elementcode of _col_key(kolom).
+    Alleen doelen met een eigen slide (linkable) krijgen een link; alleen
+    interne sprongen (hlinksldjump)."""
+
+    def __init__(self, linkable: set[Any]):
+        self.linkable = linkable
+        self.pending: list[tuple[Any, Any, str]] = []
+        self.slides: dict[Any, Any] = {}
+
+    def add(self, shape, key: Any, tooltip: str) -> bool:
+        if key not in self.linkable:
+            return False
+        self.pending.append((shape, key, _truncate(_clean(tooltip), 200)))
+        return True
+
+    def resolve(self):
+        for shape, key, tooltip in self.pending:
+            target = self.slides.get(key)
+            if target is None:
+                continue
+            shape.click_action.target_slide = target
+            hlink = shape._element.find('.//' + qn('a:hlinkClick'))
+            if hlink is not None and tooltip:
+                hlink.set('tooltip', tooltip)
+
+
+def _goto_tooltip(code: str, name: str) -> str:
+    return f'Ga naar {code} — {name}' if name else f'Ga naar {code}'
+
+
+# ---- slide 2: de totale boom (DOEL-103) -----------------------------------
+
+OVERVIEW_TOP = Inches(1.5)
+OVERVIEW_HEAD_H = Inches(0.34)
+OVERVIEW_NODES_TOP = Inches(1.93)
+OVERVIEW_NODES_BOTTOM = SLIDE_H - Inches(0.82)
+OVERVIEW_MAX_SLOT = Inches(0.5)
+OVERVIEW_MAX_FONT = 9.0
+
+
+def _overview_gap(n_cols: int) -> int:
+    """Ruimte tussen de kolommen: genoeg om de lijnen te kunnen volgen, maar
+    smaller naarmate er meer kolommen naast elkaar moeten."""
+    if n_cols <= 4:
+        return Inches(0.5)
+    if n_cols <= 6:
+        return Inches(0.36)
+    if n_cols <= 9:
+        return Inches(0.24)
+    return Inches(0.14)
+
+
+def _overview_scale(count: int) -> tuple[int, int, float]:
+    """(slothoogte, vakhoogte, lettergrootte) voor een kolom met `count`
+    vakken: zo groot als past, zodat ook een kolom met tientallen elementen
+    binnen de slide blijft."""
+    area = OVERVIEW_NODES_BOTTOM - OVERVIEW_NODES_TOP
+    slot_h = int(min(OVERVIEW_MAX_SLOT, area / max(1, count)))
+    node_h = int(slot_h * 0.86)
+    size = round(min(OVERVIEW_MAX_FONT, (node_h / 12700) / 1.25), 1)
+    return slot_h, node_h, size
+
+
+def _slide_overview(prs, model: _Model, meta: dict[str, Any], page: int, links: _Links) -> int:
+    slide = _blank_slide(prs)
+    _header(slide, 'Doelenboom — de totale boom', _clean(meta.get('doelenboom')) or 'Doelenboom')
+
+    n_cols = len(model.columns)
+    gap = _overview_gap(n_cols)
+    col_w = int((CONTENT_W - (n_cols - 1) * gap) / n_cols)
+    area_h = OVERVIEW_NODES_BOTTOM - OVERVIEW_NODES_TOP
+
+    # Posities: per kolom de elementen in boomvolgorde, verticaal gecentreerd.
+    pos: dict[str, tuple[int, int, int, float]] = {}
+    more: dict[int, tuple[int, int, int, float, int]] = {}
+    for index, col in enumerate(model.columns):
+        codes = col['elements']
+        hidden = 0
+        if len(codes) > OVERVIEW_MAX_ROWS:
+            hidden = len(codes) - (OVERVIEW_MAX_ROWS - 1)
+            codes = codes[:OVERVIEW_MAX_ROWS - 1]
+        count = len(codes) + (1 if hidden else 0)
+        slot_h, node_h, size = _overview_scale(count)
+        left = int(MARGIN + index * (col_w + gap))
+        start = int(OVERVIEW_NODES_TOP + (area_h - count * slot_h) / 2)
+        for i, code in enumerate(codes):
+            pos[code] = (left, start + i * slot_h, node_h, size)
+        if hidden:
+            more[index] = (left, start + len(codes) * slot_h, node_h, size, hidden)
+
+    # Eerst de lijnen, zodat de vakken er bovenop liggen. Primaire relaties
+    # eerst: die blijven staan als de bovengrens wordt bereikt.
+    relations = []
+    for child in pos:
+        for parent, primary in model.parents[child].items():
+            if parent in pos and pos[parent][0] != pos[child][0]:
+                relations.append((not primary, model.order.get(child, 0), model.order.get(parent, 0), child, parent))
+    relations.sort()
+    skipped = max(0, len(relations) - OVERVIEW_MAX_LINES)
+    has_supporting = False
+    line_width = 1.0 if len(relations) <= 60 else (0.75 if len(relations) <= 250 else 0.5)
+    for supporting, _, _, child, parent in relations[:OVERVIEW_MAX_LINES]:
+        (cl, ct, ch, _), (pl, pt, ph, _) = pos[child], pos[parent]
+        x1, x2 = (cl + col_w, pl) if cl < pl else (cl, pl + col_w)
+        line = slide.shapes.add_connector(MSO_CONNECTOR.STRAIGHT, x1, ct + ch // 2, x2, pt + ph // 2)
+        line.line.color.rgb = LINE_COLOR
+        line.line.width = Pt(line_width)
+        line.name = f'overzicht-relatie {child} > {parent}' + (' (ondersteunend)' if supporting else '')
+        if supporting:
+            line.line.dash_style = MSO_LINE.DASH
+            has_supporting = True
+
+    # Kolomkoppen: klikbaar naar de tussenslide als de kolom is uitgewerkt.
+    any_col_link = False
+    for index, col in enumerate(model.columns):
+        left = int(MARGIN + index * (col_w + gap))
+        head = _add_rect(slide, left, OVERVIEW_TOP, col_w, OVERVIEW_HEAD_H, col['color'])
+        head.name = f'overzicht-kolom {index + 1}'
+        head_size = 10 if col_w >= Inches(1.6) else 8
+        label = f'{col["title"]} ({len(col["elements"])})'
+        _shape_text(head, _fit(label, col_w - Inches(0.1), OVERVIEW_HEAD_H, head_size), size=head_size, bold=True,
+                    color=_text_on(col['color']), margin=Inches(0.04))
+        if links.add(head, _col_key(index), f'Ga naar de kolom {col["title"]}'):
+            head.line.color.rgb = DARK
+            head.line.width = Pt(2.0)
+            any_col_link = True
+
+    any_el_link = False
+    for code, (left, top, node_h, size) in pos.items():
+        el = model.elements[code]
+        color = model.color_of(el)
+        node = _rounded(slide, left, top, col_w, node_h, _tint(color, 0.8), line=color,
+                        line_width=0.75 if size >= 7 else 0.5)
+        node.name = f'overzicht-element {code}'
+        label = _fit(f'{code} {el["name"]}'.strip(), col_w - Inches(0.08), node_h, size)
+        _shape_text(node, label, size=size, color=DARK, margin=Inches(0.04))
+        node.text_frame.margin_top = node.text_frame.margin_bottom = 0
+        if links.add(node, code, _goto_tooltip(code, el['name'])):
+            any_el_link = True
+    for index, (left, top, node_h, size, hidden) in more.items():
+        node = _rounded(slide, left, top, col_w, node_h, None, line=LINE_COLOR, line_width=0.5, dashed=True)
+        node.name = f'overzicht-meer {index + 1}'
+        _shape_text(node, f'+ {hidden} meer', size=size, color=MUTED, margin=Inches(0.04))
+        node.text_frame.margin_top = node.text_frame.margin_bottom = 0
+
+    legend = 'Alle zichtbare kolommen en elementen.'
+    if relations:
+        legend += ' Doorgetrokken lijn = primaire relatie'
+        legend += ', stippellijn = ondersteunende relatie.' if has_supporting else '.'
+    # Een klikbaar element staat altijd in een uitgewerkte kolom, dus dan is
+    # er ook een klikbare kolomkop.
+    if any_el_link:
+        legend += ' Klik op een kolomkop met donkere rand of op een element om naar de eigen slide te gaan.'
+    elif any_col_link:
+        legend += ' Klik op een kolomkop met donkere rand om naar die kolom te gaan.'
+    if skipped:
+        legend += f' Niet alle relaties zijn getekend ({OVERVIEW_MAX_LINES} van {len(relations)}).'
+    _add_text(slide, MARGIN, OVERVIEW_NODES_BOTTOM + Inches(0.06), CONTENT_W, Inches(0.2), legend, size=8, color=MUTED)
+    _footer(slide, meta, page)
+    return page + 1
+
+
 # ---- tussenslide per gekozen kolom ---------------------------------------
 
-def _slide_section(prs, model: _Model, col: dict[str, Any], meta: dict[str, Any], page: int) -> int:
+SECTION_COUNT_W = Inches(2.3)
+SECTION_CHIP_LEFT = MARGIN + SECTION_COUNT_W
+SECTION_CHIP_W = CONTENT_W - SECTION_COUNT_W
+SECTION_CHIP_GAP_X = Inches(0.08)
+SECTION_CHIP_GAP_Y = Inches(0.06)
+SECTION_BOTTOM = SLIDE_H - Inches(0.6)
+# (kolommen, lettergrootte): eerst ruim, zo nodig compacter tot het past.
+SECTION_CHIP_CONFIGS = ((4, 10.0), (5, 9.0), (6, 8.0), (8, 7.0), (10, 6.0))
+# (bovenkant, hoogte, titelgrootte) van het gekleurde blok: gewoon, of
+# compact bovenaan als er veel blokjes onder moeten passen.
+SECTION_BLOCKS = ((Inches(2.1), Inches(2.9), 40), (Inches(0.85), Inches(2.3), 32))
+
+
+def _section_chip_h(size: float) -> int:
+    return int(Pt(size * 1.22) + Inches(0.09))
+
+
+def _section_layout(n: int) -> tuple[tuple[int, int, int], int, float, int]:
+    """Kiest voor n blokjes de ruimste opmaak die past: (blok, kolommen,
+    lettergrootte, aantal getoonde blokjes). Past het zelfs compact niet,
+    dan worden de laatste samengevat als '+ n meer'."""
+    # Onder het gewone blok alleen de twee ruimste opmaken: liever het blok
+    # compact bovenaan dan blokjes waarin de naam nauwelijks nog past.
+    for block, configs in ((SECTION_BLOCKS[0], SECTION_CHIP_CONFIGS[:2]), (SECTION_BLOCKS[1], SECTION_CHIP_CONFIGS)):
+        area_h = SECTION_BOTTOM - (block[0] + block[1] + Inches(0.25))
+        for cols, size in configs:
+            rows = math.ceil(n / cols)
+            if rows * _section_chip_h(size) + (rows - 1) * SECTION_CHIP_GAP_Y <= area_h:
+                return block, cols, size, n
+    block = SECTION_BLOCKS[-1]
+    cols, size = SECTION_CHIP_CONFIGS[-1]
+    area_h = SECTION_BOTTOM - (block[0] + block[1] + Inches(0.25))
+    rows = int((area_h + SECTION_CHIP_GAP_Y) // (_section_chip_h(size) + SECTION_CHIP_GAP_Y))
+    return block, cols, size, min(n, rows * cols, SECTION_MAX_CHIPS) - 1
+
+
+def _slide_section(prs, model: _Model, col: dict[str, Any], meta: dict[str, Any], page: int, links: _Links) -> int:
     slide = _blank_slide(prs)
+    links.slides.setdefault(_col_key(model.columns.index(col)), slide)
     color = col['color']
     on = _text_on(color)
+    codes = col['elements']
+    (block_top, block_h, title_size), cols, size, shown = _section_layout(len(codes))
+    compact = block_h < Inches(2.9)
+
     _add_rect(slide, 0, 0, SLIDE_W, SLIDE_H, LIGHT_BG)
-    block_top, block_h = Inches(2.1), Inches(2.9)
     _add_rect(slide, 0, block_top, SLIDE_W, block_h, color)
-    _add_text(slide, MARGIN, block_top + Inches(0.35), CONTENT_W, Inches(0.35), 'KOLOM', size=13, bold=True, color=on)
-    _add_text(slide, MARGIN, block_top + Inches(0.75), CONTENT_W, Inches(0.9), _truncate(col['title'], 60),
-              size=40, bold=True, color=on)
+    _add_text(slide, MARGIN, block_top + Inches(0.25 if compact else 0.35), CONTENT_W, Inches(0.35), 'KOLOM',
+              size=13, bold=True, color=on)
+    _add_text(slide, MARGIN, block_top + Inches(0.6 if compact else 0.75), CONTENT_W, Inches(0.9),
+              _truncate(col['title'], 60), size=title_size, bold=True, color=on)
     if col['subtitle']:
-        _add_text(slide, MARGIN, block_top + Inches(1.7), CONTENT_W, Inches(0.8), _truncate(col['subtitle'], 220),
-                  size=16, color=on)
-    _add_text(slide, MARGIN, block_top + block_h + Inches(0.25), CONTENT_W, Inches(0.4),
-              _element_count_text(len(col['elements'])), size=16, bold=True, color=DARK)
+        _add_text(slide, MARGIN, block_top + Inches(1.35 if compact else 1.7), CONTENT_W, Inches(0.8),
+                  _truncate(col['subtitle'], 220), size=14 if compact else 16, color=on)
+
+    area_top = int(block_top + block_h + Inches(0.25))
+    _add_text(slide, MARGIN, area_top, SECTION_COUNT_W - Inches(0.2), Inches(0.4),
+              _element_count_text(len(codes)), size=16, bold=True, color=DARK)
+    if codes:
+        _add_text(slide, MARGIN, area_top + Inches(0.42), SECTION_COUNT_W - Inches(0.3), Inches(0.5),
+                  'Klik op een element om naar de eigen slide te gaan.', size=9, color=MUTED)
+
+    # Alle elementen van de kolom als klikbare blokjes, rechts onder het blok.
+    chip_w = int((SECTION_CHIP_W - (cols - 1) * SECTION_CHIP_GAP_X) / cols)
+    chip_h = _section_chip_h(size)
+    items: list[str | None] = list(codes[:shown])
+    if shown < len(codes):
+        items.append(None)
+    for k, code in enumerate(items):
+        row, column = divmod(k, cols)
+        x = int(SECTION_CHIP_LEFT + column * (chip_w + SECTION_CHIP_GAP_X))
+        y = int(area_top + row * (chip_h + SECTION_CHIP_GAP_Y))
+        if code is None:
+            chip = _rounded(slide, x, y, chip_w, chip_h, None, line=LINE_COLOR, line_width=0.75, dashed=True)
+            chip.name = 'kolomelement + meer'
+            _shape_text(chip, f'+ {len(codes) - shown} meer', size=size, color=MUTED)
+            continue
+        el = model.elements[code]
+        el_color = model.color_of(el)
+        chip = _rounded(slide, x, y, chip_w, chip_h, _tint(el_color, 0.8), line=el_color, line_width=1.0)
+        chip.name = f'kolomelement {code}'
+        _chip_text(chip, code, el['name'], size, chip_w, chip_h)
+        links.add(chip, code, _goto_tooltip(code, el['name']))
     _footer(slide, meta, page)
     return page + 1
 
@@ -552,34 +807,6 @@ CHAIN_NODES_TOP = Inches(1.84)
 CHAIN_NODES_H = Inches(2.36)
 TEXT_TOP = Inches(4.55)
 TEXT_BOTTOM = SLIDE_H - Inches(0.55)
-
-
-class _Links:
-    """Verzamelt klikbare vormen (blokjes en ketenvakken) en koppelt ze na
-    het bouwen aan de slide van het doelelement -- die slide kan immers pas
-    later in de presentatie komen. Alleen elementen met een eigen slide
-    (linkable) krijgen een link; alleen interne sprongen (hlinksldjump)."""
-
-    def __init__(self, linkable: set[str]):
-        self.linkable = linkable
-        self.pending: list[tuple[Any, str, str]] = []
-        self.slides: dict[str, Any] = {}
-
-    def add(self, shape, code: str, tooltip: str) -> bool:
-        if code not in self.linkable:
-            return False
-        self.pending.append((shape, code, _truncate(_clean(tooltip), 200)))
-        return True
-
-    def resolve(self):
-        for shape, code, tooltip in self.pending:
-            target = self.slides.get(code)
-            if target is None:
-                continue
-            shape.click_action.target_slide = target
-            hlink = shape._element.find('.//' + qn('a:hlinkClick'))
-            if hlink is not None and tooltip:
-                hlink.set('tooltip', tooltip)
 
 
 def _draw_chain(slide, model: _Model, code: str, links: _Links):
@@ -1037,10 +1264,13 @@ def build_tree_pptx(data: dict[str, Any], options: dict[str, Any] | None, meta: 
         )
 
     prs = _new_presentation()
-    links = _Links({code for col in model.slide_columns() for code in col['elements']})
+    linkable: set[Any] = {code for col in model.slide_columns() for code in col['elements']}
+    linkable.update(_col_key(i) for i, col in enumerate(model.columns) if col['slides'])
+    links = _Links(linkable)
     page = _slides_snoer(prs, model, meta, 1)
+    page = _slide_overview(prs, model, meta, page, links)
     for col in model.slide_columns():
-        page = _slide_section(prs, model, col, meta, page)
+        page = _slide_section(prs, model, col, meta, page, links)
         for code in col['elements']:
             page = _slides_element(prs, model, model.elements[code], meta, page, links)
     links.resolve()
