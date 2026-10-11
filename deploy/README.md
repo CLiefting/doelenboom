@@ -620,6 +620,57 @@ en `_`, idempotent waar dat kan, dezelfde SQL ook in `db/init.sql`, en de
 bestandsnaam toevoegen aan de `schema_migrations`-lijst onderaan
 `db/init.sql`. Dat laatste bewaakt `api/test/dbMigrate.test.ts`.
 
+## Een doelenboom van lokaal naar de VPS kopiëren (DOEL-104)
+
+`scripts/doelenboom-kopieer.sh` (op je Mac) kopieert één doelenboom uit de lokale
+database naar de database op de VPS. Alle parameters: `scripts/doelenboom-kopieer.sh --help`.
+
+```bash
+# Zelfde namen op de VPS als lokaal:
+scripts/doelenboom-kopieer.sh --tenant Demo --boom "Gezond ouder"
+
+# Lokaal tenant "OVpay" / boom "OVpay @ NS" -> VPS tenant "NS" / boom "OVpay":
+scripts/doelenboom-kopieer.sh --tenant OVpay --boom "OVpay @ NS" --naar-tenant NS --naar-boom OVpay
+```
+
+Eenmalig in je shell-profiel (beide staan bewust niet in de publieke repo):
+`export VPS=gebruiker@host` (zelfde als voor `release.sh`) en
+`export DOELENBOOM_ADMIN_EMAIL=...` (het account dat admin wordt van de tenant).
+
+Wat het script doet:
+
+1. Lokaal exporteren naar een tijdelijke bundel (`api/src/scripts/doelenboomExport.ts`;
+   alleen lezen, één momentopname).
+2. De bundel naar de VPS kopiëren (alleen leesbaar voor de eigenaar).
+3. **Proefrun** op de VPS (`doelenboomImport --dry-run`): de import wordt volledig
+   uitgevoerd en teruggedraaid. Je ziet wat er wordt aangemaakt of vervangen.
+4. Na `ja`: de echte import, in één transactie. Bij `--overschrijven` eerst
+   `deploy/backup-database.sh`.
+5. Aantallen per tabel en de controlesom van bron en doel worden vergeleken; de
+   bundel wordt aan beide kanten verwijderd.
+
+Regels:
+
+- Bestaat de tenant of de doelenboom niet op de VPS, dan wordt hij aangemaakt. Een
+  nieuwe tenant krijgt de modules van de lokale tenant en een licentie-einddatum van
+  12 maanden; het admin-account wordt admin van de tenant. Is dat account al lid, dan
+  blijft de bestaande rol staan. Het account moet op de VPS al bestaan.
+- Bestaat de doelenboom al, dan weigert het script, tenzij `--overschrijven` is
+  opgegeven. Dan wordt de inhoud van die ene boom vervangen; naam, slug, alleen-lezen
+  en archiefstatus van de boom op de VPS blijven zoals ze zijn.
+- Niet mee: gebruikers en rollen, importhistorie, projecthistorie en het auditlog.
+  "Bijgewerkt door" wordt leeg, want de lokale accounts bestaan op de VPS niet.
+- Lokaal en de VPS moeten dezelfde migraties hebben (`schema_migrations`); anders
+  weigert de import. Breng dan eerst beide op dezelfde versie.
+- Een nieuwe tabel die aan een doelenboom of element hangt moet in
+  `TRANSFER_TABLES` of `TRANSFER_EXCLUDED_TABLES` (`api/src/doelenboomTransfer.ts`)
+  komen; `api/test/doelenboomTransfer.test.ts` faalt anders.
+- In het auditlog op de VPS staat de kopie als "import gepubliceerd" met in de details
+  `kind: omgeving-kopie`, de bron en de aantallen.
+
+Meldt het script geen `IMPORT-OK`, dan is er op de VPS niets gewijzigd. Terugzetten na
+een onbedoelde `--overschrijven`: de back-up van stap 4 staat in `backups/database/`.
+
 ## Nachtelijke databaseback-up
 
 Elke nacht om 02:00 maakt `deploy/backup-database.sh` een volledige

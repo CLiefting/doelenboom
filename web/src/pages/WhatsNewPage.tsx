@@ -16,6 +16,16 @@ type Release = {
 
 const RELEASES: Release[] = [
   {
+    version: '4.3.0',
+    date: '11 oktober 2026',
+    title: 'Beheer: een doelenboom van de ene omgeving naar de andere kopiëren',
+    items: [
+      'Voor beheerders: een doelenboom die lokaal is opgebouwd kan met één commando naar productie worden gekopieerd, met alle inhoud: kolommen, controleregels, kenmerken, elementen, relaties, tags, organisatieonderdelen, projectstatus, producten en activiteiten.',
+      'De tenant en de doelenboom mogen op productie anders heten dan lokaal. Bestaan ze nog niet, dan worden ze aangemaakt; een bestaande doelenboom wordt alleen vervangen als daar uitdrukkelijk om is gevraagd, na een back-up.',
+      'Eerst een proefrun die laat zien wat er gaat gebeuren. De kopie zelf gebeurt in één keer: lukt er iets niet, dan verandert er niets. Gebruikers, rollen en historie gaan niet mee.',
+    ],
+  },
+  {
     // 4.2.0 is wel getagd maar nooit in productie gekomen (DOEL-108: het
     // uitrolscript stopte halverwege); 4.2.1 is dezelfde inhoud, nu wel live.
     version: '4.2.1',
