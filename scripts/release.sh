@@ -7,6 +7,11 @@
 #   bash "scripts/release.sh" v3.1.1 "beschrijving van de release" --deploy    # ook uitrollen (vraagt bevestiging)
 #   bash "scripts/release.sh" v3.1.1 "beschrijving" --hervat --deploy          # tag bestaat al: alleen images opnieuw bouwen/kopiëren/uitrollen
 #
+# Stopt de uitrol halverwege (bv. omdat er nog iemand ingelogd is), draai dan
+# gewoon hetzelfde commando opnieuw: staat de tag al op deze commit, dan gaat
+# het script vanzelf verder bij de images (DOEL-109). --hervat is alleen nog
+# nodig als je niet op main staat (bv. na `git checkout <tag>`).
+#
 # Vereist: gh (brew install gh; gh auth login), docker, ssh-toegang tot de VPS.
 # Omgevingsvariabelen (optioneel):
 #   VPS=gebruiker@host     NOTES_FILE=pad/naar/release-notes.md
@@ -44,6 +49,16 @@ gh auth status >/dev/null 2>&1 || die "gh is niet ingelogd:  gh auth login"
 command -v docker >/dev/null || die "docker ontbreekt"
 docker info >/dev/null 2>&1  || die "Docker draait niet"
 [ -z "$(git status --porcelain)" ] || { git status --short >&2; die "Werkmap is niet schoon (dan wordt de versie 'dirty')."; }
+# DOEL-109: staat de tag al op HEAD (een eerdere poging kwam tot na het taggen),
+# dan is dit een hervatting, ook zonder --hervat. Een tag op een ANDERE commit
+# blijft hieronder een fout.
+if [ "$RESUME" != "yes" ]; then
+  git fetch --tags -q || true
+  if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null && [ "$(git rev-parse "$TAG^{commit}")" = "$(git rev-parse HEAD)" ]; then
+    RESUME="yes"
+    echo "Tag $TAG staat al op deze commit: de release wordt hervat (alsof --hervat is opgegeven)."
+  fi
+fi
 if [ "$RESUME" = "yes" ]; then
   git fetch --tags -q || true
   git rev-parse -q --verify "refs/tags/$TAG" >/dev/null || die "Tag $TAG bestaat niet; --hervat is alleen voor een bestaande release."
@@ -55,11 +70,20 @@ else
   [ "$(git rev-parse --abbrev-ref HEAD)" = "main" ] || die "Je staat niet op main."
   git pull --ff-only
   git fetch --tags -q
-  git rev-parse -q --verify "refs/tags/$TAG" >/dev/null && die "Tag $TAG bestaat al (gebruik --hervat om alleen de images opnieuw te leveren)."
+  git rev-parse -q --verify "refs/tags/$TAG" >/dev/null && die "Tag $TAG bestaat al, maar op een andere commit ($(git rev-parse --short "$TAG^{commit}")) dan main. Kies een nieuw versienummer, of ga naar die commit (git checkout $TAG) en gebruik --hervat."
   SHA="$(git rev-parse HEAD)"; SHORT="$(git rev-parse --short HEAD)"
   [ "$(git rev-parse origin/main)" = "$SHA" ] || die "main loopt achter of voor op origin/main; eerst pushen/pullen."
   PREV="$(git describe --tags --abbrev=0 2>/dev/null || true)"
   echo "Release $TAG op commit $SHORT (vorige tag: ${PREV:-geen})"
+fi
+
+# DOEL-109: met --deploy nu al kijken of er iemand ingelogd is, vóórdat er een
+# tag wordt gezet en images worden gebouwd. De controle vlak voor de herstart
+# (stap 6, op de VPS) blijft: tijdens het bouwen kan iemand inloggen.
+if [ "$DEPLOY" = "yes" ]; then
+  echo "Controle op de VPS: is er iemand ingelogd?"
+  ssh "$VPS" 'cd ~/doelenboom && ./deploy/check-no-active-users.sh' < /dev/null \
+    || die "er is nog iemand ingelogd op productie (of de VPS is niet bereikbaar); zie hierboven. Er is niets gewijzigd: geen tag, geen images. Draai hetzelfde commando opnieuw als iedereen is uitgelogd."
 fi
 
 if [ "$RESUME" != "yes" ]; then
@@ -170,7 +194,7 @@ main() {
 }
 main "$@" < /dev/null
 REMOTE
-grep -qx "REMOTE-KLAAR $TAG" "$REMOTE_LOG" || die "het uitrolscript op de VPS is niet helemaal uitgevoerd (geen REMOTE-KLAAR $TAG). Productie is mogelijk niet bijgewerkt; controleer https://doelenboom.code072.nl/api/version en hervat met: release.sh $TAG \"...\" --hervat --deploy"
+grep -qx "REMOTE-KLAAR $TAG" "$REMOTE_LOG" || die "het uitrolscript op de VPS is niet helemaal uitgevoerd (geen REMOTE-KLAAR $TAG). Productie is mogelijk niet bijgewerkt; controleer https://doelenboom.code072.nl/api/version. Staat hierboven dat er nog iemand ingelogd is, wacht dan tot diegene is uitgelogd. Daarna hetzelfde commando opnieuw draaien: het script ziet dat $TAG al bestaat en gaat verder bij de images."
 
 echo
 echo "Uitgerold. Controleer nog: inloggen, tree.html, een Excel-export, en:"

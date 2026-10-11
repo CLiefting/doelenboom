@@ -592,8 +592,18 @@ release v4.2.0 (11-10-2026) stopte dat script ongemerkt na de migratie-dry-run,
 omdat `db-migrate.sh` de standaardinvoer leeglas waarlangs het script werd
 aangeleverd; productie bleef toen op 4.1.0 staan terwijl er "Uitgerold" stond.
 Zie je de foutmelding "het uitrolscript op de VPS is niet helemaal uitgevoerd",
-controleer dan `https://doelenboom.code072.nl/api/version` en hervat met
-`release.sh <tag> "..." --hervat --deploy`.
+controleer dan `https://doelenboom.code072.nl/api/version` en draai hetzelfde
+commando opnieuw.
+
+**Opnieuw draaien na een afgebroken uitrol (DOEL-109).** Staat de tag al op de
+commit van `main`, dan hervat `release.sh` vanzelf: CI, taggen en de GitHub Release
+worden overgeslagen, de images worden opnieuw gebouwd, gekopieerd en uitgerold.
+`--hervat` is alleen nog nodig als je niet op `main` staat. Met `--deploy`
+controleert het script bovendien al in stap 1 of er iemand ingelogd is, vóór er een
+tag wordt gezet. Bij release v4.3.0 (11-10-2026) gebeurde dat pas op het eind: de tag
+en de images waren er al, de uitrol werd geweigerd, en hetzelfde commando gaf daarna
+"Tag bestaat al". De controle vlak voor de herstart blijft bestaan, want tijdens het
+bouwen kan iemand inloggen; draai in dat geval hetzelfde commando opnieuw.
 
 Twijfel je welke migratie de laatste was? Controleer dan de wijziging uit die
 migratie (de toelichting staat bovenaan elk bestand). Bijvoorbeeld 0050: bestaat
