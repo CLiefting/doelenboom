@@ -16,7 +16,9 @@ type Release = {
 
 const RELEASES: Release[] = [
   {
-    version: '4.2.0',
+    // 4.2.0 is wel getagd maar nooit in productie gekomen (DOEL-108: het
+    // uitrolscript stopte halverwege); 4.2.1 is dezelfde inhoud, nu wel live.
+    version: '4.2.1',
     date: '11 oktober 2026',
     title: 'PowerPoint-export: de totale boom op één slide, ook gefilterd',
     items: [

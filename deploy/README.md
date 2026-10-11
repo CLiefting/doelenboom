@@ -585,6 +585,16 @@ Productie heeft deze baseline al: op 11-10-2026 is daar `--prod --baseline 0051`
 gezet (release v4.1.0 had 0050 en 0051 nog los met `psql` gedraaid; sindsdien
 gebruikt `release.sh` zelf `db-migrate.sh`, zie DOEL-102).
 
+**Controle dat de uitrol echt is uitgevoerd (DOEL-108).** `release.sh --deploy`
+eindigt alleen met "Uitgerold" als het uitrolscript op de VPS zijn laatste regel
+(`REMOTE-KLAAR <tag>`) heeft bereikt en de API de versie van de tag meldt. Bij
+release v4.2.0 (11-10-2026) stopte dat script ongemerkt na de migratie-dry-run,
+omdat `db-migrate.sh` de standaardinvoer leeglas waarlangs het script werd
+aangeleverd; productie bleef toen op 4.1.0 staan terwijl er "Uitgerold" stond.
+Zie je de foutmelding "het uitrolscript op de VPS is niet helemaal uitgevoerd",
+controleer dan `https://doelenboom.code072.nl/api/version` en hervat met
+`release.sh <tag> "..." --hervat --deploy`.
+
 Twijfel je welke migratie de laatste was? Controleer dan de wijziging uit die
 migratie (de toelichting staat bovenaan elk bestand). Bijvoorbeeld 0050: bestaat
 kolom `app_settings.idle_timeout_minutes`? Een gloednieuwe database (opgebouwd
