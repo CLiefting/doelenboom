@@ -78,7 +78,10 @@ fi
 # -X: geen ~/.psqlrc; ON_ERROR_STOP: stop bij de eerste fout.
 PSQL+=(-X -q -v ON_ERROR_STOP=1)
 
-sql() { "${PSQL[@]}" -At -c "$1"; }
+# < /dev/null (DOEL-108): `docker compose exec -T` leest anders de standaardinvoer
+# van de aanroeper leeg; draait dit script binnen een script dat zelf via de
+# standaardinvoer wordt aangeleverd (release.sh via ssh), dan verdween de rest.
+sql() { "${PSQL[@]}" -At -c "$1" < /dev/null; }
 
 # --- migratiebestanden ----------------------------------------------------
 FILES=()

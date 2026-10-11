@@ -112,39 +112,65 @@ echo "Migraties: scripts/db-migrate.sh --prod op de VPS (eerst een dry-run)."
 read -r -p "Nu uitrollen naar productie? Typ 'ja' om door te gaan: " ANS < /dev/tty
 [ "$ANS" = "ja" ] || die "Afgebroken; de images staan klaar op de VPS."
 
-ssh "$VPS" bash -s -- "$TAG" <<'REMOTE'
+# DOEL-108: dit deel gaat via de standaardinvoer naar bash op de VPS. Een
+# commando dat zelf de standaardinvoer leest (docker compose exec -T in
+# db-migrate.sh) las zo de rest van het script weg: bash stopte dan zonder fout
+# vóór docker load en up -d, en release.sh meldde toch "Uitgerold". Daarom:
+#  - alles staat in main(): bash leest een functie eerst helemaal in;
+#  - main draait met afgesloten standaardinvoer (< /dev/null);
+#  - de laatste regel is REMOTE-KLAAR, en daar controleren we hieronder op.
+REMOTE_LOG="$(mktemp)"
+trap 'rm -f "$REMOTE_LOG"' EXIT
+ssh "$VPS" bash -s -- "$TAG" <<'REMOTE' | tee "$REMOTE_LOG"
 set -euo pipefail
-TAG="$1"
-cd ~/doelenboom
-dbprod() { docker compose -f docker-compose.yml -f docker-compose.prod.yml "$@"; }
-git pull --ff-only
-# Migraties (DOEL-102): eerst tonen wat er gaat draaien. Ontbreekt de
-# boekhouding of is die leeg, dan stopt db-migrate.sh hier (exit 2) en is er
-# nog niets veranderd: zet dan eerst eenmalig een baseline (deploy/README.md).
-scripts/db-migrate.sh --prod --dry-run
-# Eerst controleren: liever niets veranderen dan gebruikers onderbreken.
-./deploy/check-no-active-users.sh
-# Back-up-tag alleen zetten als die nog niet bestaat (bij hervatten wijst hij al naar de vorige stand).
-for i in api web excel-service; do
-  docker image inspect "doelenboom-$i:pre-$TAG" >/dev/null 2>&1 || docker tag "doelenboom-$i:latest" "doelenboom-$i:pre-$TAG" 2>/dev/null || true
-done
-docker load < ~/doelenboom-images.tar.gz
-# Alleen wat nog niet in schema_migrations staat; elke migratie wordt pas
-# geregistreerd als hij helemaal geslaagd is.
-scripts/db-migrate.sh --prod
-dbprod up -d
-sleep 25
-dbprod ps
-if dbprod ps | grep -qiE 'restarting|unhealthy|exited'; then
-  echo "PROBLEEM: een container is niet gezond. Terugrollen:"
-  echo "  for i in api web excel-service; do docker tag doelenboom-\$i:pre-$TAG doelenboom-\$i:latest; done; dbprod up -d"
-  exit 1
-fi
-echo -n "API-versie: "
-docker exec doelenboom-api-1 sh -c 'wget -qO- http://localhost:4000/api/version'
-echo
-rm -f ~/doelenboom-images.tar.gz   # pas na een gezonde uitrol opruimen
+main() {
+  TAG="$1"
+  cd ~/doelenboom
+  dbprod() { docker compose -f docker-compose.yml -f docker-compose.prod.yml "$@"; }
+  git pull --ff-only
+  # Migraties (DOEL-102): eerst tonen wat er gaat draaien. Ontbreekt de
+  # boekhouding of is die leeg, dan stopt db-migrate.sh hier (exit 2) en is er
+  # nog niets veranderd: zet dan eerst eenmalig een baseline (deploy/README.md).
+  scripts/db-migrate.sh --prod --dry-run
+  # Eerst controleren: liever niets veranderen dan gebruikers onderbreken.
+  ./deploy/check-no-active-users.sh
+  # Back-up-tag alleen zetten als die nog niet bestaat (bij hervatten wijst hij al naar de vorige stand).
+  for i in api web excel-service; do
+    docker image inspect "doelenboom-$i:pre-$TAG" >/dev/null 2>&1 || docker tag "doelenboom-$i:latest" "doelenboom-$i:pre-$TAG" 2>/dev/null || true
+  done
+  docker load < ~/doelenboom-images.tar.gz
+  # Alleen wat nog niet in schema_migrations staat; elke migratie wordt pas
+  # geregistreerd als hij helemaal geslaagd is.
+  scripts/db-migrate.sh --prod
+  dbprod up -d
+  sleep 25
+  dbprod ps
+  if dbprod ps | grep -qiE 'restarting|unhealthy|exited'; then
+    echo "PROBLEEM: een container is niet gezond. Terugrollen:"
+    echo "  for i in api web excel-service; do docker tag doelenboom-\$i:pre-$TAG doelenboom-\$i:latest; done; dbprod up -d"
+    exit 1
+  fi
+  # DOEL-108: niet alleen tonen maar ook controleren dat de API nu deze release
+  # draait; "containers gezond" zegt niet dat de nieuwe images zijn gestart.
+  # De API kan net na de herstart nog even niet antwoorden: maximaal 6 pogingen.
+  VERSION_JSON=""
+  for _ in 1 2 3 4 5 6; do
+    VERSION_JSON="$(docker exec doelenboom-api-1 sh -c 'wget -qO- http://localhost:4000/api/version' 2>/dev/null || true)"
+    [ -n "$VERSION_JSON" ] && break
+    sleep 5
+  done
+  echo "API-versie: $VERSION_JSON"
+  case "$VERSION_JSON" in
+    *"\"version\":\"${TAG#v} ("*) ;;
+    *) echo "PROBLEEM: de API draait niet versie ${TAG#v}. De uitrol is niet gelukt."; exit 1 ;;
+  esac
+  rm -f ~/doelenboom-images.tar.gz   # pas na een gezonde uitrol opruimen
+  # Laatste regel: release.sh controleert hierop dat dit deel helemaal is uitgevoerd.
+  echo "REMOTE-KLAAR $TAG"
+}
+main "$@" < /dev/null
 REMOTE
+grep -qx "REMOTE-KLAAR $TAG" "$REMOTE_LOG" || die "het uitrolscript op de VPS is niet helemaal uitgevoerd (geen REMOTE-KLAAR $TAG). Productie is mogelijk niet bijgewerkt; controleer https://doelenboom.code072.nl/api/version en hervat met: release.sh $TAG \"...\" --hervat --deploy"
 
 echo
 echo "Uitgerold. Controleer nog: inloggen, tree.html, een Excel-export, en:"
