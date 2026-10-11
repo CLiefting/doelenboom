@@ -16,6 +16,17 @@ type Release = {
 
 const RELEASES: Release[] = [
   {
+    version: '4.1.0',
+    date: '11 oktober 2026',
+    title: 'Klikbare PowerPoint-export, instelbaar automatisch uitloggen',
+    items: [
+      'PowerPoint van de doelenboom: de beschrijving, KPI, tags en organisatieonderdelen staan links op maximaal een derde van de breedte; de verbonden elementen staan rechts als blokjes in de kleur van hun kolom (gestippelde rand = ondersteunende relatie).',
+      'Klik in de presentatie op een blokje of op een vak in de boom om naar de slide van dat element te springen. Ook elementen die in de boom onder "+ meer" vallen staan als blokje op de slide; vervolgslides voor alleen verbindingen zijn daardoor meestal niet meer nodig.',
+      'Sysadmin: de termijn voor automatisch uitloggen bij inactiviteit is instelbaar (5 tot 480 minuten, standaard 15) onder Accountbeheer → Inlogbeveiliging.',
+      'Filters: "Toon de bomen van deze N" en "Filter op resultaten" wissen daarna de chipfilter of zoekopdracht, zodat het gevonden pad niet meer gedimd blijft.',
+    ],
+  },
+  {
     version: '4.0.1',
     date: '5 oktober 2026',
     title: 'Helppagina bijgewerkt',

@@ -512,8 +512,16 @@ const SECTIONS: { id: string; title: string; content: JSX.Element }[] = [
           maak je een presentatie. De eerste slide toont de kolommen als snoer, met per kolom de omschrijving;
           je kiest zelf hoeveel kolommen er op een regel staan (2 tot 6). Vink aan welke kolommen je per
           element wilt uitwerken: elk element krijgt dan een eigen slide met de boom gefilterd op dat element
-          (het hele pad omhoog en omlaag), de beschrijving, de KPI, de verbindingen, tags en
-          organisatieonderdelen. Het venster toont vooraf hoeveel slides het worden (maximaal 300).
+          (het hele pad omhoog en omlaag). Daaronder staan links de beschrijving, de KPI, tags en
+          organisatieonderdelen, en rechts de verbonden elementen (boven- en onderliggend) als blokjes in de
+          kleur van hun kolom; een gestippelde rand betekent een ondersteunende relatie. Het venster toont
+          vooraf hoeveel slides het worden (maximaal 300).
+        </p>
+        <p style={styles.p}>
+          <strong>Klikken in de presentatie.</strong> Een blokje of een vak in de boom is een link naar de
+          slide van dat element, zolang dat element zelf een slide in de presentatie heeft (de kolom is
+          aangevinkt). Dat werkt in de diavoorstelling; tijdens het bewerken in PowerPoint klik je met Ctrl
+          (Windows) of Cmd (Mac) ingedrukt.
         </p>
         <p style={styles.note}>
           Kolommen die op het scherm verborgen zijn, komen niet in de presentatie. Een boom opent standaard met
