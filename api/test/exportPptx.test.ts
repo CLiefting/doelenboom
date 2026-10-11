@@ -129,6 +129,85 @@ describe('PowerPoint-export van een doelenboom (DOEL-88)', () => {
     }
   });
 
+  // ---- Boomfilter (DOEL-107): keuzes valideren ----
+
+  it('parsePptxOptions: Boomfilter in boomvolgorde en ontdubbeld; zonder filter geen extra velden', () => {
+    const cols = ['A'];
+    const codes = ['E1', 'E2', 'E3', 'E4'];
+    assert.deepEqual(parsePptxOptions({}, cols, codes), { options: { visibleColumns: cols, slideColumns: [], perRow: 4 } });
+    assert.deepEqual(
+      parsePptxOptions({ visibleElements: ['E3', 'E1', 'E3'], filterPicks: ['E3'] }, cols, codes),
+      { options: { visibleColumns: cols, slideColumns: [], perRow: 4, visibleElements: ['E1', 'E3'], filterPicks: ['E3'] } }
+    );
+    assert.deepEqual(
+      parsePptxOptions({ visibleElements: ['E2'] }, cols, codes),
+      { options: { visibleColumns: cols, slideColumns: [], perRow: 4, visibleElements: ['E2'], filterPicks: [] } }
+    );
+  });
+
+  it('parsePptxOptions: weigert onbekende elementen, verkeerde types, een leeg filter en picks buiten het filter', () => {
+    const codes = ['E1', 'E2'];
+    const bad: unknown[] = [
+      { visibleElements: 'E1' }, { visibleElements: [] }, { visibleElements: ['Z9'] }, { visibleElements: [1] },
+      { visibleElements: [['E1']] }, { visibleElements: [null] }, { visibleElements: { E1: true } },
+      { visibleElements: ['E1', 'E2', 'E1'] }, // meer codes dan er elementen zijn
+      { filterPicks: ['E1'] }, // picks zonder filter
+      { visibleElements: ['E1'], filterPicks: ['E2'] }, // pick buiten het filter
+      { visibleElements: ['E1'], filterPicks: 'E1' }, { visibleElements: ['E1'], filterPicks: [7] },
+      { visibleElements: ['E1'], filterPicks: ['Z9'] },
+    ];
+    for (const body of bad) {
+      const result = parsePptxOptions(body, ['A'], codes);
+      assert.ok('error' in result, `had geweigerd moeten worden: ${JSON.stringify(body)}`);
+    }
+    // Zonder elementen in de boom kan er ook niets gefilterd worden.
+    assert.ok('error' in parsePptxOptions({ visibleElements: ['E1'] }, ['A']));
+  });
+
+  it('A01/A03: Boomfilter met een element van een andere boom, injectie of verkeerde types geeft 400, geen 500', async () => {
+    const bodies: unknown[] = [
+      { visibleElements: ['X1'] }, // bestaat alleen in de andere boom
+      { visibleElements: ['P1', 'X1'] },
+      { visibleElements: ["P1'; drop table elements; --"] }, { visibleElements: ['<script>alert(1)</script>'] },
+      { visibleElements: ['p1'] }, { visibleElements: [' P1'] }, { visibleElements: ['P1\u0000'] },
+      { visibleElements: 'P1' }, { visibleElements: [] }, { visibleElements: [{ $ne: null }] },
+      { visibleElements: Array.from({ length: 5000 }, () => 'P1') },
+      { filterPicks: ['P1'] }, { visibleElements: ['P1'], filterPicks: ['B1'] },
+      { visibleElements: ['P1'], filterPicks: [{ $gt: '' }] },
+    ];
+    for (const body of bodies) {
+      const res = await exportPptx(body, adminToken);
+      assert.equal(res.status, 400, `body ${JSON.stringify(body).slice(0, 80)}`);
+      const text = await res.text();
+      assert.ok(!text.includes('drop table') && !text.includes('<script>') && !text.includes('X1'), 'foutmelding herhaalt de invoer niet');
+    }
+    assert.deepEqual(await exportAudit(), []);
+    assert.equal((await pool.query('select count(*)::int as n from elements where doelenboom_id = $1', [doelenboomId])).rows[0].n, 4);
+  });
+
+  it('Boomfilter: de presentatie bevat alleen de gefilterde elementen en de slidetelling volgt mee', async (t) => {
+    if (!excelServiceReachable) return t.skip('excel-service niet bereikbaar — zie EXCEL_SERVICE_URL');
+    await pool.query(`delete from audit_log where doelenboom_id = $1 and event_type = 'doelenboom_exported'`, [doelenboomId]);
+    const res = await exportPptx({
+      visibleElements: ['P1', 'C1', 'B1'], filterPicks: ['B1'], slideColumns: ['Operationele benefit'],
+    });
+    assert.equal(res.status, 200);
+    const slides = readSlides(Buffer.from(await res.arrayBuffer()));
+    // snoer + gefilterde boom + tussenslide + B1 (B2 valt buiten het filter)
+    assert.equal(slides.length, 4);
+    const all = slides.join('\n');
+    assert.ok(!all.includes('Tweede benefit') && !all.includes('overzicht-element B2'));
+    assert.match(slides[1], /DE GEFILTERDE BOOM/);
+    assert.match(slides[1], /Gefilterde boom: 3 van 4 elementen\./);
+    assert.match(slides[1], /overzicht-element B1/);
+    const rows = await exportAudit();
+    assert.equal(rows.length, 1);
+    assert.deepEqual(rows[0].detail, {
+      kind: 'doelenboom-pptx', format: 'pptx', slideColumns: ['Operationele benefit'], slides: 4, filtered: true, elements: 3,
+    });
+    await pool.query(`delete from audit_log where doelenboom_id = $1 and event_type = 'doelenboom_exported'`, [doelenboomId]);
+  });
+
   // ---- A01: toegang ----
 
   it('A01: zonder token 401', async () => {
@@ -274,6 +353,15 @@ describe('PowerPoint-export van een doelenboom (DOEL-88)', () => {
     const body = await res.json() as { error: string };
     assert.match(body.error, new RegExp(`maximum is ${PPTX_MAX_SLIDES}`));
     assert.deepEqual(await exportAudit(), []);
+  });
+
+  it('A04 (DOEL-107): met een Boomfilter telt alleen de gefilterde set voor het maximum', async (t) => {
+    if (!excelServiceReachable) return t.skip('excel-service niet bereikbaar — zie EXCEL_SERVICE_URL');
+    const res = await exportPptx({ slideColumns: ['Capability'], visibleElements: ['C1', 'Q1', 'Q2'] }, adminToken);
+    assert.equal(res.status, 200);
+    // snoer + gefilterde boom + tussenslide + C1, Q1, Q2
+    assert.equal(readSlides(Buffer.from(await res.arrayBuffer())).length, 6);
+    await pool.query(`delete from audit_log where doelenboom_id = $1 and event_type = 'doelenboom_exported'`, [doelenboomId]);
   });
 
   it('A04: dezelfde grote boom mag wel zonder die kolom uit te werken', async (t) => {
