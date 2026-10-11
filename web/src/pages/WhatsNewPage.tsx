@@ -23,6 +23,7 @@ const RELEASES: Release[] = [
       'PowerPoint van de doelenboom: de tweede slide toont de totale boom, met alle zichtbare kolommen naast elkaar, al hun elementen en de relaties ertussen. De vakken schalen mee, zodat de boom ook bij tientallen elementen per kolom op één slide past.',
       'Klik in de totale boom op een kolomkop met donkere rand om naar de tussenslide van die kolom te springen, of op een element om naar de eigen slide te gaan.',
       'De tussenslide van een kolom toont alle elementen van die kolom als klikbare blokjes in de kolomkleur.',
+      'Elke slide heeft rechtsonder een "Home"-knop waarmee je terugspringt naar de totale boom.',
       'Het exportvenster telt de extra slide mee (maximaal 300 slides).',
     ],
   },

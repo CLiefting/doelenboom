@@ -524,7 +524,8 @@ const SECTIONS: { id: string; title: string; content: JSX.Element }[] = [
           <strong>Klikken in de presentatie.</strong> Een blokje of een vak in de boom is een link naar de
           slide van dat element, zolang dat element zelf een slide in de presentatie heeft (de kolom is
           aangevinkt). Dat geldt ook voor de vakken in de totale boom en de blokjes op de tussenslide van een
-          kolom. Een kolomkop met donkere rand in de totale boom springt naar de tussenslide van die kolom.
+          kolom. Een kolomkop met donkere rand in de totale boom springt naar de tussenslide van die kolom. Met de
+          "Home"-knop rechtsonder op elke slide ga je terug naar de totale boom.
           Dat werkt in de diavoorstelling; tijdens het bewerken in PowerPoint klik je met Ctrl
           (Windows) of Cmd (Mac) ingedrukt.
         </p>
