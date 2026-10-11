@@ -188,8 +188,8 @@ exportsRouter.post('/doelenbomen/:id/export-pptx', requireTenantRoleForDoelenboo
   const { options } = parsed;
 
   // Aantal slides vooraf begrenzen (zelfde telling als in tree_pptx.py en het
-  // dialoogvenster): snoer + per gekozen kolom een tussenslide en een slide
-  // per element. Voorkomt dat één verzoek de excel-service lang bezighoudt.
+  // dialoogvenster): snoer + de totale boom (DOEL-103) + per gekozen kolom een
+  // tussenslide en een slide per element. Voorkomt dat één verzoek de excel-service lang bezighoudt.
   const elements = tree.elements as Array<Record<string, unknown>>;
   const perColumn = new Map<string, number>();
   for (const el of elements) {
@@ -197,7 +197,7 @@ exportsRouter.post('/doelenbomen/:id/export-pptx', requireTenantRoleForDoelenboo
     if (column) perColumn.set(column.typeName, (perColumn.get(column.typeName) ?? 0) + 1);
   }
   const snoerSlides = Math.max(1, Math.ceil(Math.ceil(options.visibleColumns.length / options.perRow) / PPTX_SNOER_MAX_ROWS));
-  const slideCount = options.slideColumns.reduce((sum, name) => sum + 1 + (perColumn.get(name) ?? 0), snoerSlides);
+  const slideCount = options.slideColumns.reduce((sum, name) => sum + 1 + (perColumn.get(name) ?? 0), snoerSlides + 1);
   if (slideCount > PPTX_MAX_SLIDES) {
     return res.status(422).json({
       error:
