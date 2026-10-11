@@ -529,6 +529,13 @@ const SECTIONS: { id: string; title: string; content: JSX.Element }[] = [
           Dat werkt in de diavoorstelling; tijdens het bewerken in PowerPoint klik je met Ctrl
           (Windows) of Cmd (Mac) ingedrukt.
         </p>
+        <p style={styles.p}>
+          <strong>Gefilterde boom exporteren.</strong> Staat er een Boomfilter aan ("Toon deze bomen"), dan toont
+          het exportvenster het vinkje "Alleen de gefilterde boom", dat standaard aan staat. De hele presentatie
+          bevat dan alleen de gefilterde elementen, met dezelfde lijnen als op het scherm; de eerste twee slides
+          vermelden hoeveel elementen van het totaal erin staan. Vink het uit om toch de hele boom te exporteren.
+          Zoeken, de focusweergave en filters die elementen alleen dimmen veranderen de export niet.
+        </p>
         <p style={styles.note}>
           Kolommen die op het scherm verborgen zijn, komen niet in de presentatie. Een boom opent standaard met
           alleen de laatste kolom zichtbaar: klik dus eerst op "Toon alle kolommen" als je de hele boom wilt

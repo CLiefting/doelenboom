@@ -35,6 +35,12 @@ voor: niet in het snoer, niet in de keten en niet onder "Verbonden met".
 Relaties die via een verborgen kolom lopen worden doorgetrokken naar de
 eerstvolgende zichtbare kolom (zie _visible_edges).
 
+Boomfilter (DOEL-107): met options.visibleElements bevat de presentatie
+alleen die elementen (de boom zoals hij gefilterd op het scherm staat); met
+options.filterPicks blijven daarbinnen alleen de relaties over die op het pad
+van de gekozen elementen liggen, net als op het scherm. Slide 1 en 2 melden
+dat het een gefilterde boom is.
+
 Puur een export, geen import. Bewust NIET in de presentatie: kenmerken,
 motivaties van afwijkingen en projectgegevens (status, producten,
 activiteiten) -- de API (routes/exports.ts) stuurt die ook niet mee.
@@ -292,6 +298,14 @@ class _Model:
                 'elements': [],
             })
 
+        # Boomfilter (DOEL-107): alleen deze elementen horen in de presentatie.
+        keep_opt = options.get('visibleElements')
+        self.filtered = isinstance(keep_opt, list)
+        keep = {c for c in (_clean(v) for v in keep_opt if isinstance(v, str)) if c} if self.filtered else set()
+        # Aantal elementen in zichtbare kolommen dat door het filter wegvalt.
+        self.filtered_out = 0
+        skipped: set[str] = set()
+
         # Elementen in boomvolgorde (zoals aangeleverd: sort_order, code).
         self.elements: dict[str, dict[str, Any]] = {}
         self.order: dict[str, int] = {}
@@ -300,10 +314,17 @@ class _Model:
             if not isinstance(raw, dict):
                 continue
             code = _clean(raw.get('code'))
-            if not code or code in self.elements or code in hidden_codes:
+            if not code or code in self.elements or code in hidden_codes or code in skipped:
                 continue
             el_type = _clean(raw.get('type'))
             col = type_to_col.get(el_type)
+            if self.filtered and code not in keep:
+                # Weggefilterd: niet tonen en er ook geen relaties doorheen
+                # trekken (anders dan bij een verborgen kolom).
+                skipped.add(code)
+                if col is not None:
+                    self.filtered_out += 1
+                continue
             if col is None:
                 # Verborgen kolom (of onbekend type): niet tonen, maar wel
                 # onthouden om relaties erdoorheen te kunnen doortrekken.
@@ -323,6 +344,9 @@ class _Model:
             self.columns[col]['elements'].append(code)
 
         self._visible_edges(data.get('edges') or [], hidden_codes)
+        picks_opt = options.get('filterPicks')
+        if self.filtered and isinstance(picks_opt, list):
+            self._prune_to_picks([_clean(v) for v in picks_opt if isinstance(v, str)])
 
         tag_names = {
             _clean(t.get('code')): _clean(t.get('name')) or _clean(t.get('code'))
@@ -403,6 +427,32 @@ class _Model:
             frontier = nxt
         return dist
 
+    def _prune_to_picks(self, picks: list[str]):
+        """Boomfilter: houdt alleen de relaties over die op het pad van een
+        gekozen element liggen -- omhoog vanaf het element of een voorouder,
+        of omlaag vanaf het element of een nakomeling. Zelfde regel als het
+        scherm (computeEffectiveEdges in tree.html). Zonder geldige keuze
+        blijft alles staan."""
+        picks = [p for p in picks if p in self.elements]
+        if not picks:
+            return
+        up, down = set(picks), set(picks)
+        for pick in picks:
+            up.update(self._closure(pick, self.parents))
+            down.update(self._closure(pick, self.children))
+        for child in self.elements:
+            for parent in list(self.parents[child]):
+                if child not in up and parent not in down:
+                    del self.parents[child][parent]
+                    del self.children[parent][child]
+
+    def filter_note(self) -> str:
+        """'Gefilterde boom: 32 van 180 elementen.' of '' zonder filter."""
+        if not self.filtered:
+            return ''
+        shown = len(self.elements)
+        return f'Gefilterde boom: {shown} van {shown + self.filtered_out} elementen.'
+
     def chain(self, code: str) -> dict[str, int]:
         """Het hele pad van één element: alles erboven en alles eronder,
         met de afstand tot het element (het element zelf = 0)."""
@@ -461,6 +511,8 @@ def _slides_snoer(prs, model: _Model, meta: dict[str, Any], page: int, links: '_
         intro = 'De kolommen van deze doelenboom, in volgorde.'
         if any_slides:
             intro += ' De gemarkeerde kolommen zijn hierna per element uitgewerkt.'
+        if model.filtered:
+            intro += ' ' + model.filter_note()
         _add_text(slide, MARGIN, Inches(1.47), CONTENT_W, Inches(0.3), intro, size=12, color=MUTED)
 
         n_rows = len(page_rows)
@@ -634,7 +686,8 @@ def _overview_scale(count: int) -> tuple[int, int, float]:
 def _slide_overview(prs, model: _Model, meta: dict[str, Any], page: int, links: _Links) -> int:
     slide = _blank_slide(prs)
     links.slides[HOME_KEY] = slide
-    _header(slide, 'Doelenboom — de totale boom', _clean(meta.get('doelenboom')) or 'Doelenboom')
+    _header(slide, 'Doelenboom — de gefilterde boom' if model.filtered else 'Doelenboom — de totale boom',
+            _clean(meta.get('doelenboom')) or 'Doelenboom')
 
     n_cols = len(model.columns)
     gap = _overview_gap(n_cols)
@@ -714,7 +767,7 @@ def _slide_overview(prs, model: _Model, meta: dict[str, Any], page: int, links: 
         _shape_text(node, f'+ {hidden} meer', size=size, color=MUTED, margin=Inches(0.04))
         node.text_frame.margin_top = node.text_frame.margin_bottom = 0
 
-    legend = 'Alle zichtbare kolommen en elementen.'
+    legend = model.filter_note() or 'Alle zichtbare kolommen en elementen.'
     if relations:
         legend += ' Doorgetrokken lijn = primaire relatie'
         legend += ', stippellijn = ondersteunende relatie.' if has_supporting else '.'

@@ -643,6 +643,142 @@ class TestTotaleBoom:
         assert self.shape(slide, 'overzicht-kolom 1').click_action.target_slide is not None
 
 
+class TestBoomfilter:
+    """DOEL-107: met visibleElements bevat de hele presentatie alleen de
+    gefilterde elementen; met filterPicks alleen de lijnen op het pad van de
+    gekozen elementen, zoals op het scherm."""
+    # Boomfilter op B1: B1 met alles erboven (D1, D2, M1) en eronder (C1, P1).
+    KEEP = ['B1', 'D1', 'D2', 'M1', 'C1', 'P1']
+    OPTIONS = {'visibleElements': KEEP, 'filterPicks': ['B1'], 'slideColumns': ['Benefit', 'Capability']}
+
+    def shape(self, slide, name):
+        return next(s for s in slide.shapes if s.name == name)
+
+    def test_totale_boom_toont_alleen_de_gefilterde_elementen(self):
+        slide = build(self.OPTIONS).slides[1]
+        shown = sorted(n.removeprefix('overzicht-element ') for n in shape_names(slide) if n.startswith('overzicht-element '))
+        assert shown == sorted(self.KEEP)
+        text = all_text(slide)
+        assert 'DE GEFILTERDE BOOM' in text and 'DE TOTALE BOOM' not in text
+        assert 'Gefilterde boom: 6 van 9 elementen.' in text
+        for head in ('Project (1)', 'Capability (1)', 'Benefit (1)', 'Doel (2)', 'Missie (1)'):
+            assert head in text
+
+    def test_weggefilterde_elementen_komen_nergens_in_de_presentatie_voor(self):
+        prs = build(self.OPTIONS)
+        text = full_text(prs)
+        for gone in ('Tweede benefit', 'Sensoren', 'Los project'):
+            assert gone not in text
+        names = [n for s in prs.slides for n in shape_names(s)]
+        assert not any(n.endswith(' B2') or n.endswith(' C2') or n.endswith(' P2') for n in names)
+
+    def test_snoer_telt_de_gefilterde_aantallen_en_meldt_het_filter(self):
+        text = all_text(build(self.OPTIONS).slides[0])
+        assert 'Gefilterde boom: 6 van 9 elementen.' in text
+        assert '2 elementen' in text and '1 element' in text  # Doel 2, de rest 1
+
+    def test_kolomslides_en_elementslides_alleen_voor_gefilterde_elementen(self):
+        prs = build(self.OPTIONS)
+        # snoer + boom + (Capability: tussenslide + C1) + (Benefit: tussenslide + B1)
+        assert len(prs.slides) == 2 + 2 + 2
+        benefit = next(s for s in prs.slides if 'KOLOM' in all_text(s) and 'Benefit' in all_text(s))
+        assert [n for n in shape_names(benefit) if n.startswith('kolomelement ')] == ['kolomelement B1']
+        assert '1 element' in all_text(benefit)
+        assert not any('B2 — Tweede benefit' in all_text(s) for s in prs.slides)
+
+    def test_keten_en_verbindingen_op_de_elementslide_volgen_het_filter(self):
+        data = make_data()
+        data['edges'].append(edge('C2', 'B1'))  # C2 hangt ook onder B1, maar valt buiten het filter
+        prs = build(self.OPTIONS, data)
+        b1 = next(s for s in prs.slides if 'B1 — Eerste benefit' in all_text(s))
+        names = shape_names(b1)
+        assert 'verbinding C1' in names and 'verbinding C2' not in names
+        assert 'element C2' not in names
+        assert 'ONDERLIGGEND (1)' in all_text(b1)
+
+    def test_zonder_picks_blijven_alle_relaties_tussen_zichtbare_elementen_staan(self):
+        data = make_data()
+        data['edges'].append(edge('P1', 'D1'))  # slaat B1 over
+        slide = build({'visibleElements': self.KEEP}, data).slides[1]
+        assert 'overzicht-relatie P1 > D1' in shape_names(slide)
+
+    def test_met_picks_alleen_de_lijnen_op_het_pad_zoals_op_het_scherm(self):
+        data = make_data()
+        data['edges'].append(edge('P1', 'D1'))  # nakomeling rechtstreeks naar voorouder, om B1 heen
+        slide = build(self.OPTIONS, data).slides[1]
+        names = shape_names(slide)
+        assert 'overzicht-relatie P1 > D1' not in names
+        for kept in ('overzicht-relatie P1 > C1', 'overzicht-relatie C1 > B1', 'overzicht-relatie B1 > D1',
+                     'overzicht-relatie B1 > D2 (ondersteunend)', 'overzicht-relatie D1 > M1', 'overzicht-relatie D2 > M1'):
+            assert kept in names
+
+    def test_gesnoeide_relatie_staat_ook_niet_bij_verbonden_met(self):
+        data = make_data()
+        data['edges'].append(edge('P1', 'D1'))
+        prs = build({**self.OPTIONS, 'slideColumns': ['Project']}, data)
+        p1 = next(s for s in prs.slides if 'P1 — Nieuw systeem' in all_text(s))
+        assert 'verbinding C1' in shape_names(p1) and 'verbinding D1' not in shape_names(p1)
+
+    def test_meerdere_picks_houden_de_paden_van_elk_van_hen(self):
+        keep = ['B1', 'B2', 'D1', 'D2', 'M1', 'C1', 'C2', 'P1']
+        slide = build({'visibleElements': keep, 'filterPicks': ['C1', 'C2']}).slides[1]
+        names = shape_names(slide)
+        for kept in ('overzicht-relatie C1 > B1', 'overzicht-relatie C2 > B2', 'overzicht-relatie P1 > C1',
+                     'overzicht-relatie B2 > D2', 'overzicht-relatie D1 > M1'):
+            assert kept in names
+
+    def test_weggefilterd_element_wordt_niet_doorgetrokken_zoals_een_verborgen_kolom(self):
+        # C1 valt buiten het filter: P1 mag dan niet "via C1" aan B1 hangen.
+        slide = build({'visibleElements': ['P1', 'B1', 'D1', 'M1']}).slides[1]
+        assert not any(n.startswith('overzicht-relatie P1') for n in shape_names(slide))
+
+    def test_verborgen_kolom_binnen_het_filter_wordt_nog_wel_doorgetrokken(self):
+        options = {'visibleElements': self.KEEP, 'filterPicks': ['B1'],
+                   'visibleColumns': ['Project', 'Benefit', 'Doel', 'Missie']}
+        slide = build(options).slides[1]
+        assert 'overzicht-relatie P1 > B1' in shape_names(slide)
+        assert 'Gefilterde boom: 5 van 7 elementen.' in all_text(slide)  # Capability telt niet mee
+
+    def test_links_en_home_knop_werken_ook_in_de_gefilterde_presentatie(self):
+        prs = build(self.OPTIONS)
+        b1 = next(s for s in prs.slides if 'B1 — Eerste benefit' in all_text(s))
+        assert self.shape(prs.slides[1], 'overzicht-element B1').click_action.target_slide.slide_id == b1.slide_id
+        assert self.shape(prs.slides[1], 'overzicht-element D1').click_action.target_slide is None
+        assert self.shape(b1, 'home-knop').click_action.target_slide.slide_id == prs.slides[1].slide_id
+
+    def test_slidetelling_en_maximum_gelden_voor_de_gefilterde_set(self):
+        data = {'columns': [col(0, 'A')], 'elements': [el(f'A{i}', 'A') for i in range(MAX_SLIDES + 50)], 'edges': []}
+        with pytest.raises(TreePptxError):
+            build_tree_pptx(data, {'slideColumns': ['A']}, META)
+        prs = build({'slideColumns': ['A'], 'visibleElements': ['A1', 'A2', 'A3']}, data)
+        assert len(prs.slides) == 2 + 1 + 3
+
+    def test_zonder_filter_geen_melding_en_alle_elementen(self):
+        prs = build({'slideColumns': ['Benefit']})
+        assert 'Gefilterde boom' not in full_text(prs)
+        assert 'DE TOTALE BOOM' in all_text(prs.slides[1])
+
+    def test_leeg_filter_geeft_een_lege_boom_en_geen_fout(self):
+        prs = build({'visibleElements': []})
+        assert 'Gefilterde boom: 0 van 9 elementen.' in all_text(prs.slides[1])
+        assert not any(n.startswith('overzicht-element ') for n in shape_names(prs.slides[1]))
+
+    def test_onbekende_codes_en_verkeerde_types_worden_genegeerd(self):
+        options = {'visibleElements': ['B1', 'BESTAAT-NIET', 5, None, {'x': 1}, 'B1'],
+                   'filterPicks': ['BESTAAT-NIET', 7, 'B2']}
+        slide = build(options).slides[1]
+        assert [n for n in shape_names(slide) if n.startswith('overzicht-element ')] == ['overzicht-element B1']
+        assert 'BESTAAT-NIET' not in all_text(slide)
+        # Geen lijst = geen filter.
+        assert 'Gefilterde boom' not in full_text(build({'visibleElements': 'B1', 'filterPicks': 'B1'}))
+
+    def test_owasp_a04_cyclus_binnen_het_filter_loopt_niet_vast(self):
+        data = make_data()
+        data['edges'] += [edge('M1', 'P1'), edge('D1', 'B1')]
+        prs = build(self.OPTIONS, data)
+        assert len(prs.slides) == 6
+
+
 class TestHomeKnop:
     """DOEL-106: elke slide behalve de totale boom heeft een Home-knop terug
     naar de totale boom (slide 2)."""

@@ -395,6 +395,8 @@
   .pptx-export-columns .checkbox-list-item.is-hidden { color: #999; cursor: default; }
   .pptx-export-columns .pptx-col-swatch { width: 10px; height: 10px; border-radius: 2px; flex: none; }
   .pptx-export-columns .pptx-col-count { margin-left: auto; color: #888; font-size: 12px; white-space: nowrap; }
+  .pptx-export-filter { display: flex; align-items: center; gap: 8px; font-size: 13px; margin: 0 0 12px; cursor: pointer; }
+  .pptx-export-filter input { display: inline-block; width: auto; margin: 0; cursor: pointer; }
   .pptx-export-summary { font-size: 13px; color: #333; margin: 4px 0 8px; }
   .pptx-export-summary.too-many { color: #DC3545; font-weight: 600; }
   .value-picker-empty { padding: 8px; font-size: 12px; color: #999; font-style: italic; }
@@ -1707,7 +1709,7 @@
   <div class="element-modal-backdrop" id="pptx-export-modal-backdrop">
     <div class="element-modal pptx-export-modal">
       <h3>Exporteer als PowerPoint</h3>
-      <p class="element-modal-hint">De eerste slide toont de kolommen als snoer, de tweede de totale boom. Voor elke kolom die je hieronder aanvinkt volgt een slide per element, met de keten van dat element, de beschrijving en de verbindingen.</p>
+      <p class="element-modal-hint">De eerste slide toont de kolommen als snoer, de tweede de totale boom (bij een Boomfilter: de gefilterde boom). Voor elke kolom die je hieronder aanvinkt volgt een slide per element, met de keten van dat element, de beschrijving en de verbindingen.</p>
       <form id="pptx-export-form">
         <div class="pptx-export-label">
           <span>Per element uitwerken</span>
@@ -1718,6 +1720,10 @@
         </div>
         <div class="checkbox-list pptx-export-columns" id="pptx-export-columns"></div>
         <p class="element-modal-hint" id="pptx-export-hidden-hint" style="display:none;">Verborgen kolommen komen niet in de presentatie. Maak een kolom eerst zichtbaar in de boom om hem mee te nemen.</p>
+        <label class="pptx-export-filter" id="pptx-export-filter-row" style="display:none;">
+          <input type="checkbox" id="pptx-export-filter" checked>
+          <span id="pptx-export-filter-text"></span>
+        </label>
         <label>Kolommen per regel op de eerste slide
           <select id="pptx-export-per-row">
             <option value="2">2</option>
@@ -6536,8 +6542,33 @@ function runApp(data) {
   const pptxExportStatusEl = document.getElementById('pptx-export-status');
   const pptxExportSaveBtn = document.getElementById('pptx-export-save');
   const pptxExportHiddenHint = document.getElementById('pptx-export-hidden-hint');
+  const pptxExportFilterRow = document.getElementById('pptx-export-filter-row');
+  const pptxExportFilterEl = document.getElementById('pptx-export-filter');
+  const pptxExportFilterTextEl = document.getElementById('pptx-export-filter-text');
   let pptxExportRows = [];
   let pptxExportBusy = false;
+  // Boomfilter (DOEL-107): de stand op het moment dat het venster opengaat.
+  // null = er staat geen Boomfilter aan.
+  let pptxExportFilter = null;
+
+  // Het filter dat meegaat naar de server: alleen als er een Boomfilter aan
+  // staat EN het vinkje aan staat.
+  function pptxExportActiveFilter() {
+    return pptxExportFilter && pptxExportFilterEl.checked ? pptxExportFilter : null;
+  }
+
+  // Bouwt de kolomlijst (met aantallen voor de hele of de gefilterde boom);
+  // wat al aangevinkt was blijft aangevinkt.
+  function renderPptxExportColumns(checkedNames) {
+    const types = {};
+    Object.keys(DETAILS).forEach((code) => { types[code] = DETAILS[code].type; });
+    const typeToColumn = {};
+    Object.keys(TYPE_TO_COLUMN).forEach((type) => { typeToColumn[type] = TYPE_TO_COLUMN[type].typeName; });
+    const active = pptxExportActiveFilter();
+    const counts = pptxExportCounts(types, typeToColumn, active ? active.visibleElements : null);
+    pptxExportRows = pptxExportColumnRows(COLUMNS, Array.from(hiddenCols), counts);
+    pptxExportColumnsEl.innerHTML = pptxExportColumnsHtml(pptxExportRows, checkedNames);
+  }
 
   function pptxExportChecked() {
     return Array.from(pptxExportColumnsEl.querySelectorAll('input[type="checkbox"]:checked')).map((i) => i.value);
@@ -6552,13 +6583,15 @@ function runApp(data) {
   }
 
   function openPptxExportModal() {
-    const counts = {};
-    Object.keys(DETAILS).forEach((code) => {
-      const col = TYPE_TO_COLUMN[DETAILS[code].type];
-      if (col) counts[col.typeName] = (counts[col.typeName] || 0) + 1;
-    });
-    pptxExportRows = pptxExportColumnRows(COLUMNS, Array.from(hiddenCols), counts);
-    pptxExportColumnsEl.innerHTML = pptxExportColumnsHtml(pptxExportRows, []);
+    // Alleen het Boomfilter ("Toon deze bomen") telt; focusmodus en gedimde
+    // elementen veranderen de export niet.
+    pptxExportFilter = elementFilterActive && filterKeepIds
+      ? { visibleElements: Array.from(filterKeepIds), picks: Array.from(filterSelection) }
+      : null;
+    pptxExportFilterEl.checked = true;
+    pptxExportFilterRow.style.display = pptxExportFilter ? '' : 'none';
+    pptxExportFilterTextEl.textContent = pptxExportFilter ? pptxExportFilterText(pptxExportFilter.visibleElements.length) : '';
+    renderPptxExportColumns([]);
     pptxExportHiddenHint.style.display = pptxExportRows.some((r) => r.hidden) ? '' : 'none';
     pptxExportBusy = false;
     setBulkStatus(pptxExportStatusEl, '');
@@ -6583,11 +6616,15 @@ function runApp(data) {
     document.getElementById('pptx-export-none').addEventListener('click', () => setAllPptxExportColumns(false));
     pptxExportBackdrop.addEventListener('click', (ev) => { if (ev.target === pptxExportBackdrop) closePptxExportModal(); });
     pptxExportColumnsEl.addEventListener('change', updatePptxExportSummary);
+    pptxExportFilterEl.addEventListener('change', () => {
+      renderPptxExportColumns(pptxExportChecked());
+      updatePptxExportSummary();
+    });
     pptxExportPerRowEl.addEventListener('change', updatePptxExportSummary);
     pptxExportForm.addEventListener('submit', async (ev) => {
       ev.preventDefault();
       if (pptxExportBusy) return;
-      const payload = pptxExportPayload(pptxExportRows, pptxExportChecked(), pptxExportPerRowEl.value);
+      const payload = pptxExportPayload(pptxExportRows, pptxExportChecked(), pptxExportPerRowEl.value, pptxExportActiveFilter());
       pptxExportBusy = true;
       pptxExportSaveBtn.disabled = true;
       setBulkStatus(pptxExportStatusEl, 'Bezig met genereren\u2026', 'busy');
@@ -10094,14 +10131,42 @@ function pptxExportColumnsHtml(rows, checkedNames) {
   }).join('');
 }
 
-function pptxExportPayload(rows, checkedNames, perRow) {
+// filter = { visibleElements: [codes], picks: [codes] } bij een Boomfilter
+// (DOEL-107), anders null/undefined: dan gaat de hele boom mee.
+function pptxExportPayload(rows, checkedNames, perRow, filter) {
   const checked = new Set(checkedNames || []);
   const visible = (rows || []).filter((r) => !r.hidden).map((r) => r.typeName);
-  return {
+  const payload = {
     visibleColumns: visible,
     slideColumns: visible.filter((name) => checked.has(name)),
     perRow: pptxExportClampPerRow(perRow),
   };
+  if (filter && Array.isArray(filter.visibleElements)) {
+    const keep = Array.from(new Set(filter.visibleElements.filter((c) => typeof c === 'string' && c)));
+    const kept = new Set(keep);
+    payload.visibleElements = keep;
+    // Alleen keuzes die zelf in het filter zitten; de server weigert de rest.
+    payload.filterPicks = Array.from(new Set((filter.picks || []).filter((c) => kept.has(c))));
+  }
+  return payload;
+}
+
+// Aantal elementen per kolom. typesByCode = { code: type }, typeToColumn =
+// { type (ook alias): kolomnaam }; keepCodes = de codes van het Boomfilter, of
+// null voor de hele boom.
+function pptxExportCounts(typesByCode, typeToColumn, keepCodes) {
+  const keep = Array.isArray(keepCodes) ? new Set(keepCodes) : null;
+  const counts = {};
+  Object.keys(typesByCode || {}).forEach((code) => {
+    if (keep && !keep.has(code)) return;
+    const column = (typeToColumn || {})[typesByCode[code]];
+    if (typeof column === 'string') counts[column] = (counts[column] || 0) + 1;
+  });
+  return counts;
+}
+
+function pptxExportFilterText(count) {
+  return 'Alleen de gefilterde boom (' + (count === 1 ? '1 element' : count + ' elementen') + ')';
 }
 
 // ---- Bulkacties op de selectie (DOEL-81 bewerken, DOEL-82 verwijderen) ----
