@@ -145,6 +145,30 @@ EOF
   exit 2
 fi
 
+# DOEL-102: de tabel bestaat wel, maar is leeg terwijl de database al gevuld
+# is. Zo stond productie na release v4.1.0 (release.sh draaide 0051 los met
+# psql). Zonder deze controle zou het script álle migraties als "open" zien en
+# opnieuw uitvoeren, ook 0033: precies wat DOEL-99 moest voorkomen. Een verse
+# database uit init.sql heeft de boekhouding al gevuld en komt hier niet.
+if [ "$(sql "select count(*) from schema_migrations")" = "0" ] \
+  && [ "$(sql "select count(*) from pg_tables where schemaname = 'public' and tablename <> 'schema_migrations'")" != "0" ]; then
+  LAST="${FILES[${#FILES[@]}-1]}"
+  cat >&2 <<EOF
+FOUT: de migratieboekhouding is leeg (tabel schema_migrations bestaat, maar zonder
+regels), terwijl deze database al een schema heeft. Er is niets uitgevoerd.
+
+Zonder baseline zou dit script alle migraties opnieuw draaien. Stel vast welke
+migratie hier als laatste is gedraaid (de toelichting bovenaan elk bestand
+zegt wat die verandert) en registreer t/m die migratie, bijvoorbeeld:
+
+  scripts/db-migrate.sh ${PROD:+--prod }--baseline ${LAST:0:4}
+
+(${LAST:0:4} is de nieuwste migratie in deze checkout; kies een lager nummer als
+die hier nog niet is gedraaid.)
+EOF
+  exit 2
+fi
+
 # LET OP (macOS): /bin/bash is daar versie 3.2. Die meldt bij `set -u` een
 # leeg array als "unbound variable"; PENDING kan leeg zijn, dus altijd als
 # ${PENDING[@]+"${PENDING[@]}"} uitpakken (bewaakt door api/test/dbMigrate.test.ts).

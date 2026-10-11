@@ -106,6 +106,15 @@ async function legacyDbWithNewerAuditRows() {
   });
 }
 
+// De situatie op productie na release v4.1.0 (DOEL-102): release.sh draaide
+// 0051 los met psql, dus de tabel schema_migrations bestaat wél, maar is leeg.
+async function legacyDbWithEmptyBookkeeping() {
+  await legacyDbWithNewerAuditRows();
+  await withDb((c) => c.query(`create table schema_migrations (
+    filename text primary key, applied_at timestamptz not null default now(),
+    method text not null default 'run' check (method in ('run', 'baseline', 'init')))`));
+}
+
 const registered = () => withDb(async (c) => (await c.query('select filename, method from schema_migrations order by filename')).rows as { filename: string; method: string }[]);
 
 describe('DOEL-99: scripts/db-migrate.sh tegen een echte database', { skip }, () => {
@@ -241,5 +250,33 @@ describe('DOEL-99: scripts/db-migrate.sh tegen een echte database', { skip }, ()
     assert.equal(r.status, 0, r.all);
     assert.match(r.out, /openstaand: 1/);
     assert.match(r.out, /open: +9001_test_ok\.sql/);
+  });
+  it('DOEL-102: lege boekhouding op een gevulde database: toepassen weigert en voert niets uit (geen 0033 opnieuw)', async () => {
+    await legacyDbWithEmptyBookkeeping();
+    const r = migrate([]);
+    assert.equal(r.status, 2, r.all);
+    assert.match(r.err, /--baseline/);
+    assert.doesNotMatch(r.all, /0033_customer_management\.sql/);
+    assert.equal((await registered()).length, 0, 'er mag niets geregistreerd zijn');
+  });
+
+  it('DOEL-102: lege boekhouding: --dry-run en --status weigeren ook, in plaats van alles als "open" te tonen', async () => {
+    await legacyDbWithEmptyBookkeeping();
+    for (const mode of ['--dry-run', '--status']) {
+      const r = migrate([mode]);
+      assert.equal(r.status, 2, `${mode}: ${r.all}`);
+      assert.match(r.err, /boekhouding is leeg/, mode);
+      assert.doesNotMatch(r.out, /open: +0001_/, mode);
+    }
+  });
+
+  it('DOEL-102: lege boekhouding: baseline mag wel, daarna is er niets meer te doen', async () => {
+    await legacyDbWithEmptyBookkeeping();
+    const last = migrationFiles[migrationFiles.length - 1].slice(0, 4);
+    const b = migrate(['--baseline', last]);
+    assert.equal(b.status, 0, b.all);
+    const r = migrate([]);
+    assert.equal(r.status, 0, r.all);
+    assert.match(r.out, /geen nieuwe migraties/);
   });
 });

@@ -215,14 +215,14 @@ tenant + account aan: de aanvraag wordt eerst bewaard in de tabel
 na het bevestigen ontstaan tenant + account. Zo kan niemand nog met andermans
 e-mailadres accounts aanmaken.
 
-**Vóór het uitrollen van de nieuwe `api`-image** eenmalig de migratie draaien
-(zie ook "Een los migratiebestand draaien" verderop):
+**Vóór het uitrollen van de nieuwe `api`-image** de migratie (0040) draaien.
+Sinds DOEL-99/DOEL-102 gaat dat via `scripts/db-migrate.sh` (zie
+"Databasemigraties" verderop), niet meer los met `psql`:
 
 ```bash
 cd ~/doelenboom
 git pull
-docker compose -f docker-compose.yml -f docker-compose.prod.yml exec -T db \
-  psql -U doelenboom -d doelenboom -v ON_ERROR_STOP=1 < db/migrations/0040_pending_registrations.sql
+scripts/db-migrate.sh --prod
 ```
 
 Vereisten in productie:
@@ -571,14 +571,19 @@ migraties opnieuw, en dat brak zodra een oude migratie (0033) niet meer paste
 bij nieuwere data.
 
 **Eenmalig per bestaande database: baseline.** Een database van vóór DOEL-99
-heeft nog geen `schema_migrations`. Het script weigert dan en voert niets uit.
-Registreer eenmalig tot en met de migratie die daar als laatste is gedraaid,
-zonder iets uit te voeren:
+heeft nog geen `schema_migrations`, of (DOEL-102) wel de tabel maar zonder
+regels. In beide gevallen weigert het script (exit 2), ook bij `--status` en
+`--dry-run`, en voert het niets uit: anders zou het alle migraties opnieuw
+draaien. Registreer eenmalig tot en met de migratie die daar als laatste is
+gedraaid, zonder iets uit te voeren:
 
 ```bash
-scripts/db-migrate.sh --prod --baseline 0049    # VPS: release 4.0.2 eindigt op 0049
 scripts/db-migrate.sh --baseline 0050           # lokaal, als 0050 al met de hand is gedraaid
 ```
+
+Productie heeft deze baseline al: op 11-10-2026 is daar `--prod --baseline 0051`
+gezet (release v4.1.0 had 0050 en 0051 nog los met `psql` gedraaid; sindsdien
+gebruikt `release.sh` zelf `db-migrate.sh`, zie DOEL-102).
 
 Twijfel je welke migratie de laatste was? Controleer dan de wijziging uit die
 migratie (de toelichting staat bovenaan elk bestand). Bijvoorbeeld 0050: bestaat

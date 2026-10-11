@@ -99,27 +99,29 @@ rm -f doelenboom-images.tar.gz
 if [ "$DEPLOY" != "yes" ]; then
   echo
   echo "Tag, GitHub Release en images staan klaar; de images staan op de VPS (~/doelenboom-images.tar.gz)."
-  echo "Uitrollen: handmatig op de VPS (git pull, docker load, migraties, ./deploy/check-no-active-users.sh && up -d),"
+  echo "Uitrollen: handmatig op de VPS (git pull, docker load, ./deploy/check-no-active-users.sh && scripts/db-migrate.sh --prod && up -d),"
   echo "of een volgende keer in één keer met --deploy."
   exit 0
 fi
 
 step "6/6 Uitrollen op $VPS"
-# Nieuwe migratiebestanden sinds de vorige tag (allemaal idempotent, zie deploy/README.md).
-MIGS=""
-if [ -n "$PREV" ]; then
-  MIGS="$(git diff --name-only --diff-filter=A "$PREV" "$TAG" -- db/migrations | sort | tr '\n' ' ')"
-fi
-echo "Nieuwe migraties: ${MIGS:-geen}"
+# Migraties gaan via scripts/db-migrate.sh op de VPS (DOEL-102): dat script
+# weet uit schema_migrations wat daar al gedraaid is. De dry-run op de VPS
+# hieronder toont wat er gaat draaien, vóórdat er iets verandert.
+echo "Migraties: scripts/db-migrate.sh --prod op de VPS (eerst een dry-run)."
 read -r -p "Nu uitrollen naar productie? Typ 'ja' om door te gaan: " ANS < /dev/tty
 [ "$ANS" = "ja" ] || die "Afgebroken; de images staan klaar op de VPS."
 
-ssh "$VPS" bash -s -- "$TAG" $MIGS <<'REMOTE'
+ssh "$VPS" bash -s -- "$TAG" <<'REMOTE'
 set -euo pipefail
-TAG="$1"; shift
+TAG="$1"
 cd ~/doelenboom
 dbprod() { docker compose -f docker-compose.yml -f docker-compose.prod.yml "$@"; }
 git pull --ff-only
+# Migraties (DOEL-102): eerst tonen wat er gaat draaien. Ontbreekt de
+# boekhouding of is die leeg, dan stopt db-migrate.sh hier (exit 2) en is er
+# nog niets veranderd: zet dan eerst eenmalig een baseline (deploy/README.md).
+scripts/db-migrate.sh --prod --dry-run
 # Eerst controleren: liever niets veranderen dan gebruikers onderbreken.
 ./deploy/check-no-active-users.sh
 # Back-up-tag alleen zetten als die nog niet bestaat (bij hervatten wijst hij al naar de vorige stand).
@@ -127,10 +129,9 @@ for i in api web excel-service; do
   docker image inspect "doelenboom-$i:pre-$TAG" >/dev/null 2>&1 || docker tag "doelenboom-$i:latest" "doelenboom-$i:pre-$TAG" 2>/dev/null || true
 done
 docker load < ~/doelenboom-images.tar.gz
-for f in "$@"; do
-  echo "migratie: $f"
-  dbprod exec -T db psql -U doelenboom -d doelenboom -v ON_ERROR_STOP=1 < "$f"
-done
+# Alleen wat nog niet in schema_migrations staat; elke migratie wordt pas
+# geregistreerd als hij helemaal geslaagd is.
+scripts/db-migrate.sh --prod
 dbprod up -d
 sleep 25
 dbprod ps
