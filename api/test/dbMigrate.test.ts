@@ -161,15 +161,18 @@ describe('DOEL-99: scripts/db-migrate.sh tegen een echte database', { skip }, ()
     assert.match(dry.out, /0051_schema_migrations\.sql/);
     assert.doesNotMatch(dry.out, /0033_/);
 
+    // Alles na de baseline (0051 en later, bv. 0052 uit DOEL-112) draait nu.
+    const afterBaseline = migrationFiles.filter((f) => f > '0050_~');
     const a = migrate([]);
     assert.equal(a.status, 0, a.all);
-    assert.match(a.out, /1 nieuwe migratie\(s\) toepassen/);
+    assert.match(a.out, new RegExp(`${afterBaseline.length} nieuwe migratie\\(s\\) toepassen`));
     assert.doesNotMatch(a.out, /0033_/);
 
     const rows = await registered();
     assert.equal(rows.length, migrationFiles.length);
     assert.equal(rows.filter((x) => x.method === 'baseline').length, 50);
-    assert.deepEqual(rows.filter((x) => x.method === 'run').map((x) => x.filename), ['0051_schema_migrations.sql']);
+    assert.deepEqual(rows.filter((x) => x.method === 'run').map((x) => x.filename), afterBaseline);
+    assert.equal(afterBaseline[0], '0051_schema_migrations.sql');
 
     const again = migrate([]);
     assert.equal(again.status, 0, again.all);
