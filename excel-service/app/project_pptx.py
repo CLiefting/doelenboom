@@ -93,6 +93,11 @@ def _today_iso(meta: dict[str, Any]) -> str:
     # genereren) is hier leidend i.p.v. de servertijd zelf, zodat een
     # handmatig later gedraaide her-export met een meegegeven exportedAt
     # reproduceerbaar blijft.
+    # DOEL-112: de programma-PowerPoint geeft een eigen peildatum mee
+    # (referenceDate); die gaat dan voor op het exportmoment.
+    reference = meta.get('referenceDate')
+    if isinstance(reference, str) and _parse_iso_date(reference) is not None:
+        return reference[:10]
     exported_at = meta.get('exportedAt')
     if isinstance(exported_at, str) and exported_at:
         return exported_at[:10]
@@ -412,7 +417,9 @@ def _add_project_timeline(
 
 # ---- Slide 1: Overzicht (status/RAG + projecttijdlijn + aandachtspunten) --
 
-def _slide_overview(prs: Presentation, project: dict[str, Any], products: list[dict[str, Any]], meta: dict[str, Any]):
+def _slide_overview(
+    prs: Presentation, project: dict[str, Any], products: list[dict[str, Any]], meta: dict[str, Any], page: int = 1,
+):
     slide = _blank_slide(prs)
     _add_rect(slide, 0, 0, SLIDE_W, SLIDE_H, LIGHT_BG)
     _add_rect(slide, 0, 0, SLIDE_W, Inches(0.18), ACCENT)
@@ -495,7 +502,10 @@ def _slide_overview(prs: Presentation, project: dict[str, Any], products: list[d
         slide, MARGIN, SLIDE_H - Inches(0.72), CONTENT_W, Inches(0.25),
         f'Automatisch gegenereerd op {generated_at} door {generated_by} vanuit Doelenboom.', size=9, color=MUTED,
     )
-    _footer(slide, project, meta, 1)
+    # page: 1 in de project-PowerPoint zelf; de programma-PowerPoint (DOEL-112,
+    # program_pptx.py) hergebruikt deze slide als voortgangsslide per project
+    # en geeft het eigen paginanummer mee.
+    _footer(slide, project, meta, page)
     return slide
 
 

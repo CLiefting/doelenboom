@@ -322,3 +322,14 @@ class TestBuildProjectPptx:
         text = full_text(prs)
         assert 'Nog geen deliverables vastgelegd voor dit project.' in text
         assert 'Nog geen activiteiten of deliverables met een doorlooptijd vastgelegd voor dit project.' in text
+
+
+class TestPeildatum:
+    """DOEL-112: de programma-PowerPoint geeft een eigen peildatum mee
+    (meta.referenceDate) die voorgaat op het exportmoment."""
+
+    def test_reference_date_gaat_voor(self):
+        from app.project_pptx import _today_iso
+        assert _today_iso({'exportedAt': '2026-10-13T10:00:00Z'}) == '2026-10-13'
+        assert _today_iso({'exportedAt': '2026-10-13T10:00:00Z', 'referenceDate': '2026-12-01'}) == '2026-12-01'
+        assert _today_iso({'exportedAt': '2026-10-13T10:00:00Z', 'referenceDate': 'onzin'}) == '2026-10-13'
