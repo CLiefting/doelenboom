@@ -1557,6 +1557,22 @@ select
 where not exists (select 1 from doelenboom_templates where tenant_id is null and name = 'Batenboom');
 
 
+-- Opgeslagen projectselecties voor de programma-PowerPoint (DOEL-112,
+-- gespiegeld uit db/migrations/0052_program_selections.sql).
+create table if not exists program_selections (
+  id             bigserial primary key,
+  doelenboom_id  bigint not null references doelenbomen(id) on delete cascade,
+  user_id        bigint not null references users(id) on delete cascade,
+  name           text not null check (char_length(name) between 1 and 80),
+  project_codes  text[] not null check (cardinality(project_codes) between 1 and 50),
+  window_months  integer not null default 3 check (window_months between 1 and 12),
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now(),
+  unique (doelenboom_id, user_id, name)
+);
+create index if not exists program_selections_owner_idx on program_selections (doelenboom_id, user_id);
+
+
 -- ---------------------------------------------------------------------------
 -- Migratieboekhouding (DOEL-99, gespiegeld uit db/migrations/0051_schema_migrations.sql).
 -- Een gloednieuwe database bevat via dit bestand al het schema van álle
@@ -1622,5 +1638,6 @@ insert into schema_migrations (filename, method) values
   ('0048_element_attribute_values.sql', 'init'),
   ('0049_audit_elements_bulk_deleted.sql', 'init'),
   ('0050_app_settings_idle_timeout.sql', 'init'),
-  ('0051_schema_migrations.sql', 'init')
+  ('0051_schema_migrations.sql', 'init'),
+  ('0052_program_selections.sql', 'init')
 on conflict do nothing;

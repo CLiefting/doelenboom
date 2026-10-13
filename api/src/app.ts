@@ -9,6 +9,7 @@ import { treeRouter } from './routes/tree.js';
 import { importsRouter } from './routes/imports.js';
 import { exportsRouter } from './routes/exports.js';
 import { projectExcelRouter } from './routes/projectExcel.js';
+import { programPptxRouter } from './routes/programPptx.js';
 import { elementsRouter } from './routes/elements.js';
 import { tagsRouter } from './routes/tags.js';
 import { orgUnitsRouter } from './routes/orgUnits.js';
@@ -189,6 +190,7 @@ export function createApp() {
   app.use('/api', importsRouter);
   app.use('/api', exportsRouter);
   app.use('/api', projectExcelRouter);
+  app.use('/api', programPptxRouter);
   app.use('/api', elementsRouter);
   app.use('/api', tagsRouter);
   app.use('/api', orgUnitsRouter);
