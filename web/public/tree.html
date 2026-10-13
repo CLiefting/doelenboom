@@ -399,6 +399,14 @@
   .pptx-export-filter input { display: inline-block; width: auto; margin: 0; cursor: pointer; }
   .pptx-export-summary { font-size: 13px; color: #333; margin: 4px 0 8px; }
   .pptx-export-summary.too-many { color: #DC3545; font-weight: 600; }
+  /* Programma-PowerPoint (DOEL-112) */
+  .program-pptx-row { display: flex; gap: 12px; flex-wrap: wrap; }
+  .program-pptx-row > label { flex: 1 1 160px; }
+  .program-pptx-selection-row { display: flex; gap: 8px; align-items: center; }
+  .program-pptx-selection-row select { flex: 1; }
+  .program-pptx-save-row { display: flex; gap: 8px; align-items: center; margin: 4px 0 8px; }
+  .program-pptx-save-row input { flex: 1; }
+  .program-pptx-rag { width: 8px; height: 8px; border-radius: 50%; flex: none; }
   .value-picker-empty { padding: 8px; font-size: 12px; color: #999; font-style: italic; }
 
   .dp-crud-actions { display: flex; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 1px solid #eee; }
@@ -1576,6 +1584,8 @@
             <div class="file-menu-separator admin-only"></div>
             <button type="button" class="file-menu-item" id="export-xlsx-btn">Exporteer als Excel</button>
             <button type="button" class="file-menu-item" id="export-pptx-btn">Exporteer als PowerPoint</button>
+            <!-- Programma-PowerPoint (DOEL-112): meerdere projecten in één presentatie. Alleen met module Projecten (zie runApp). -->
+            <button type="button" class="file-menu-item" id="export-program-pptx-btn" style="display:none;">Programma als PowerPoint (meerdere projecten)</button>
             <button type="button" class="file-menu-item" id="export-html-btn">Exporteer als HTML-bestand</button>
             <!-- Alleen zichtbaar met een geselecteerd project (zie .project-
                  selected-only-CSS-regel + renderProjectPanel die de body-klasse
@@ -1738,6 +1748,49 @@
         <div class="element-modal-actions">
           <button type="button" class="btn ghost" id="pptx-export-cancel">Annuleren</button>
           <button type="submit" class="btn" id="pptx-export-save">Downloaden</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Programma-PowerPoint (DOEL-112): meerdere projecten in één presentatie,
+       met een persoonlijke, op te slaan selectie. -->
+  <div class="element-modal-backdrop" id="program-pptx-modal-backdrop">
+    <div class="element-modal pptx-export-modal">
+      <h3>Programma als PowerPoint</h3>
+      <p class="element-modal-hint">Eerst de tijdlijnen van de gekozen projecten, dan de openstaande deliverables (te laat bovenaan, dan de komende maanden, later en zonder datum), de bijdrage aan doelen en tot slot een voortgangsslide per project.</p>
+      <form id="program-pptx-form">
+        <label>Opgeslagen selectie
+          <span class="program-pptx-selection-row">
+            <select id="program-pptx-selection"></select>
+            <button type="button" class="link-btn" id="program-pptx-delete-selection">Verwijderen</button>
+          </span>
+        </label>
+        <div class="pptx-export-label">
+          <span>Projecten</span>
+          <span class="pptx-export-links">
+            <button type="button" class="link-btn" id="program-pptx-all">Alles</button>
+            <button type="button" class="link-btn" id="program-pptx-none">Niets</button>
+          </span>
+        </div>
+        <div class="checkbox-list pptx-export-columns" id="program-pptx-projects"></div>
+        <div class="program-pptx-row">
+          <label>Peildatum
+            <input type="date" id="program-pptx-ref" min="2000-01-01" max="2100-12-31">
+          </label>
+          <label>Aankomende deliverables
+            <select id="program-pptx-window"></select>
+          </label>
+        </div>
+        <div class="program-pptx-save-row">
+          <input type="text" id="program-pptx-selection-name" maxlength="80" placeholder="Naam om deze selectie te bewaren" autocomplete="off">
+          <button type="button" class="btn ghost btn-sm" id="program-pptx-save-selection">Selectie opslaan</button>
+        </div>
+        <p class="pptx-export-summary" id="program-pptx-summary"></p>
+        <p class="element-modal-status" id="program-pptx-status"></p>
+        <div class="element-modal-actions">
+          <button type="button" class="btn ghost" id="program-pptx-cancel">Annuleren</button>
+          <button type="submit" class="btn" id="program-pptx-save">Downloaden</button>
         </div>
       </form>
     </div>
@@ -6753,6 +6806,174 @@ function runApp(data) {
     if (ev.target === exportModalBackdrop) closeExportModal();
   });
 
+  // ---- Programma-PowerPoint (DOEL-112) ----
+  // Meerdere projecten in één presentatie (POST .../program-pptx), met
+  // persoonlijke opgeslagen selecties (.../program-selections). Alleen met
+  // de module Projecten; de server controleert rechten en projectcodes.
+  const programPptxBtn = document.getElementById('export-program-pptx-btn');
+  const programPptxBackdrop = document.getElementById('program-pptx-modal-backdrop');
+  if (programPptxBtn && programPptxBackdrop && projectenActive && !document.body.classList.contains('standalone')) {
+    programPptxBtn.style.display = '';
+    const programForm = document.getElementById('program-pptx-form');
+    const programProjectsEl = document.getElementById('program-pptx-projects');
+    const programRefEl = document.getElementById('program-pptx-ref');
+    const programWindowEl = document.getElementById('program-pptx-window');
+    const programSelectionEl = document.getElementById('program-pptx-selection');
+    const programNameEl = document.getElementById('program-pptx-selection-name');
+    const programSummaryEl = document.getElementById('program-pptx-summary');
+    const programStatusEl = document.getElementById('program-pptx-status');
+    const programSaveBtn = document.getElementById('program-pptx-save');
+    const programDeleteSelBtn = document.getElementById('program-pptx-delete-selection');
+    let programRows = [];
+    let programSelections = [];
+    let programBusy = false;
+    const selectionsUrl = () => apiUrl + '/api/doelenbomen/' + doelenboomId + '/program-selections';
+    const authHeaders = (json) => Object.assign(
+      { Authorization: 'Bearer ' + authToken }, json ? { 'Content-Type': 'application/json' } : {}
+    );
+
+    function programChecked() {
+      return Array.from(programProjectsEl.querySelectorAll('input[type="checkbox"]:checked')).map((i) => i.value);
+    }
+    function updateProgramSummary() {
+      const n = programChecked().length;
+      programSummaryEl.textContent = programPptxSummaryText(n);
+      programSummaryEl.classList.toggle('too-many', n === 0 || n > PROGRAM_PPTX_MAX_PROJECTS);
+      programSaveBtn.disabled = programBusy || n === 0 || n > PROGRAM_PPTX_MAX_PROJECTS;
+      programDeleteSelBtn.style.display = programSelectionEl.value ? '' : 'none';
+    }
+    function renderProgramSelections(selectedId) {
+      programSelectionEl.innerHTML = programPptxSelectionOptionsHtml(programSelections, selectedId);
+    }
+    async function loadProgramSelections(selectedId) {
+      try {
+        const res = await fetch(selectionsUrl(), { headers: authHeaders(false) });
+        programSelections = res.ok ? await res.json() : [];
+      } catch (e) {
+        programSelections = [];
+      }
+      renderProgramSelections(selectedId);
+      updateProgramSummary();
+    }
+    function applyProgramSelection() {
+      const sel = programSelections.find((x) => String(x.id) === programSelectionEl.value);
+      if (!sel) {
+        programNameEl.value = '';
+        updateProgramSummary();
+        return;
+      }
+      const applied = programPptxApplySelection(sel, programRows);
+      programProjectsEl.innerHTML = programPptxProjectsHtml(programRows, applied.codes);
+      programWindowEl.value = String(programPptxClampWindow(sel.windowMonths));
+      programNameEl.value = sel.name;
+      setBulkStatus(programStatusEl, applied.missing
+        ? (applied.missing === 1 ? '1 project uit deze selectie bestaat niet meer en is weggelaten.'
+          : applied.missing + ' projecten uit deze selectie bestaan niet meer en zijn weggelaten.')
+        : '');
+      updateProgramSummary();
+    }
+    function openProgramPptxModal() {
+      programRows = programPptxProjectRows(Object.keys(DETAILS)
+        .filter((code) => isProjectType(DETAILS[code].type))
+        .map((code) => ({ code, name: DETAILS[code].name, rag: (PROJECT_STATUS[code] || {}).rag })));
+      programProjectsEl.innerHTML = programPptxProjectsHtml(programRows, []);
+      programWindowEl.innerHTML = programPptxWindowOptionsHtml(PROGRAM_PPTX_WINDOW_DEFAULT);
+      programRefEl.value = programPptxLocalIsoDate(new Date());
+      programNameEl.value = '';
+      programBusy = false;
+      setBulkStatus(programStatusEl, '');
+      renderProgramSelections('');
+      updateProgramSummary();
+      programPptxBackdrop.classList.add('visible');
+      loadProgramSelections('');
+    }
+    function closeProgramPptxModal() {
+      if (programBusy) return;
+      programPptxBackdrop.classList.remove('visible');
+    }
+    async function saveProgramSelection() {
+      const selectedId = programSelectionEl.value;
+      const body = { name: programNameEl.value, projects: programChecked(), windowMonths: programPptxClampWindow(programWindowEl.value) };
+      try {
+        const res = await fetch(selectedId ? selectionsUrl() + '/' + encodeURIComponent(selectedId) : selectionsUrl(), {
+          method: selectedId ? 'PUT' : 'POST', headers: authHeaders(true), body: JSON.stringify(body),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json.error || ('Opslaan mislukt (HTTP ' + res.status + ')'));
+        await loadProgramSelections(String(json.id));
+        setBulkStatus(programStatusEl, 'Selectie opgeslagen.', 'ok');
+      } catch (err) {
+        setBulkStatus(programStatusEl, err && err.message ? err.message : 'Opslaan mislukt.');
+      }
+    }
+    async function deleteProgramSelection() {
+      const selectedId = programSelectionEl.value;
+      if (!selectedId) return;
+      const sel = programSelections.find((x) => String(x.id) === selectedId);
+      if (!window.confirm('Selectie "' + (sel ? sel.name : '') + '" verwijderen?')) return;
+      try {
+        const res = await fetch(selectionsUrl() + '/' + encodeURIComponent(selectedId), { method: 'DELETE', headers: authHeaders(false) });
+        if (!res.ok && res.status !== 404) throw new Error('Verwijderen mislukt (HTTP ' + res.status + ')');
+        programNameEl.value = '';
+        await loadProgramSelections('');
+        setBulkStatus(programStatusEl, 'Selectie verwijderd.', 'ok');
+      } catch (err) {
+        setBulkStatus(programStatusEl, err && err.message ? err.message : 'Verwijderen mislukt.');
+      }
+    }
+
+    programPptxBtn.addEventListener('click', openProgramPptxModal);
+    document.getElementById('program-pptx-cancel').addEventListener('click', closeProgramPptxModal);
+    document.getElementById('program-pptx-all').addEventListener('click', () => {
+      programProjectsEl.querySelectorAll('input[type="checkbox"]').forEach((i) => { i.checked = true; });
+      updateProgramSummary();
+    });
+    document.getElementById('program-pptx-none').addEventListener('click', () => {
+      programProjectsEl.querySelectorAll('input[type="checkbox"]').forEach((i) => { i.checked = false; });
+      updateProgramSummary();
+    });
+    document.getElementById('program-pptx-save-selection').addEventListener('click', saveProgramSelection);
+    programDeleteSelBtn.addEventListener('click', deleteProgramSelection);
+    programSelectionEl.addEventListener('change', applyProgramSelection);
+    programProjectsEl.addEventListener('change', updateProgramSummary);
+    programPptxBackdrop.addEventListener('click', (ev) => { if (ev.target === programPptxBackdrop) closeProgramPptxModal(); });
+    programForm.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      if (programBusy) return;
+      const payload = programPptxPayload(programRows, programChecked(), programRefEl.value, programWindowEl.value);
+      programBusy = true;
+      programSaveBtn.disabled = true;
+      setBulkStatus(programStatusEl, 'Bezig met genereren…', 'busy');
+      try {
+        const res = await fetch(apiUrl + '/api/doelenbomen/' + doelenboomId + '/program-pptx', {
+          method: 'POST', headers: authHeaders(true), body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error || ('Export mislukt (HTTP ' + res.status + ')'));
+        }
+        const blob = await res.blob();
+        const disposition = res.headers.get('Content-Disposition') || '';
+        const match = disposition.match(/filename="([^"]+)"/);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = match ? match[1] : 'Programma.pptx';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+        programBusy = false;
+        closeProgramPptxModal();
+        showToast('De programma-PowerPoint is gedownload.', 'ok');
+      } catch (err) {
+        programBusy = false;
+        setBulkStatus(programStatusEl, err && err.message ? err.message : 'Onbekende fout bij exporteren.');
+        updateProgramSummary();
+      }
+    });
+  }
+
   // ---- Element-CRUD: "+ Nieuw element", en Bewerken/Verwijderen vanuit het
   // detail-paneel (fase 1 — tags/organisatieonderdelen en relaties volgen later).
   // Na een geslaagde create/update/delete herladen we het iframe: dat triggert de
@@ -10167,6 +10388,91 @@ function pptxExportCounts(typesByCode, typeToColumn, keepCodes) {
 
 function pptxExportFilterText(count) {
   return 'Alleen de gefilterde boom (' + (count === 1 ? '1 element' : count + ' elementen') + ')';
+}
+
+// ---- Programma-PowerPoint (DOEL-112) ----
+// Pure functies op topniveau, getest in web/test/tree-html-program-pptx.test.mjs.
+// Alles wat van de gebruiker komt (projectnamen, selectienamen) gaat via
+// escapeHtml de HTML in.
+const PROGRAM_PPTX_MAX_PROJECTS = 50;
+const PROGRAM_PPTX_WINDOW_DEFAULT = 3;
+
+// projects = [{ code, name, rag }] -> alfabetisch op naam, dan code.
+function programPptxProjectRows(projects) {
+  return (projects || [])
+    .filter((p) => p && typeof p.code === 'string' && p.code)
+    .map((p) => ({ code: p.code, name: String(p.name || p.code), rag: String(p.rag || '').toLowerCase() }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'nl', { sensitivity: 'base' }) || (a.code < b.code ? -1 : a.code > b.code ? 1 : 0));
+}
+
+function programPptxRagColor(rag) {
+  return { groen: '#28A745', oranje: '#FD7E14', rood: '#DC3545' }[rag] || '#B5BAC2';
+}
+
+function programPptxProjectsHtml(rows, checkedCodes) {
+  const checked = new Set(checkedCodes || []);
+  if (!rows || !rows.length) return '<p class="checkbox-list-empty">Deze doelenboom heeft geen projecten.</p>';
+  return rows.map((r) =>
+    '<label class="checkbox-list-item">' +
+      '<input type="checkbox" value="' + escapeHtml(r.code) + '"' + (checked.has(r.code) ? ' checked' : '') + '>' +
+      '<span class="program-pptx-rag" style="background:' + programPptxRagColor(r.rag) + '"></span>' +
+      '<span>' + escapeHtml(r.name) + '</span>' +
+      '<span class="pptx-col-count">' + escapeHtml(r.code) + '</span>' +
+    '</label>'
+  ).join('');
+}
+
+function programPptxSummaryText(count) {
+  if (count === 0) return 'Kies minstens één project.';
+  if (count > PROGRAM_PPTX_MAX_PROJECTS) return count + ' projecten gekozen; het maximum is ' + PROGRAM_PPTX_MAX_PROJECTS + '.';
+  return (count === 1 ? '1 project' : count + ' projecten') + ' gekozen.';
+}
+
+function programPptxWindowOptionsHtml(selected) {
+  let html = '';
+  for (let m = 1; m <= 12; m++) {
+    html += '<option value="' + m + '"' + (m === selected ? ' selected' : '') + '>Komende ' + m + (m === 1 ? ' maand' : ' maanden') + '</option>';
+  }
+  return html;
+}
+
+function programPptxClampWindow(value) {
+  const n = parseInt(value, 10);
+  if (!Number.isFinite(n)) return PROGRAM_PPTX_WINDOW_DEFAULT;
+  return Math.max(1, Math.min(12, n));
+}
+
+// Alleen bekende codes, ontdubbeld, in de volgorde van de rijen.
+function programPptxPayload(rows, checkedCodes, referenceDate, windowMonths) {
+  const checked = new Set(checkedCodes || []);
+  const payload = {
+    projects: (rows || []).map((r) => r.code).filter((c) => checked.has(c)),
+    windowMonths: programPptxClampWindow(windowMonths),
+  };
+  if (typeof referenceDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(referenceDate)) payload.referenceDate = referenceDate;
+  return payload;
+}
+
+// Een opgeslagen selectie toepassen: codes die (inmiddels) geen project meer
+// zijn vallen weg en worden geteld, zodat de gebruiker dat te zien krijgt.
+function programPptxApplySelection(selection, rows) {
+  const known = new Set((rows || []).map((r) => r.code));
+  const codes = Array.isArray(selection && selection.projectCodes) ? selection.projectCodes : [];
+  const kept = codes.filter((c) => known.has(c));
+  return { codes: kept, missing: codes.length - kept.length };
+}
+
+function programPptxSelectionOptionsHtml(selections, selectedId) {
+  let html = '<option value="">— Geen (nieuwe selectie) —</option>';
+  (selections || []).forEach((sel) => {
+    const id = String(sel.id);
+    html += '<option value="' + escapeHtml(id) + '"' + (id === String(selectedId) ? ' selected' : '') + '>' + escapeHtml(sel.name) + '</option>';
+  });
+  return html;
+}
+
+function programPptxLocalIsoDate(d) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 
 // ---- Bulkacties op de selectie (DOEL-81 bewerken, DOEL-82 verwijderen) ----

@@ -16,6 +16,18 @@ type Release = {
 
 const RELEASES: Release[] = [
   {
+    version: '4.4.0',
+    date: '13 oktober 2026',
+    title: 'Programma-PowerPoint: meerdere projecten in één presentatie',
+    items: [
+      'Nieuw onder Bestand: "Programma als PowerPoint". Vink de projecten aan die je wilt meenemen; de presentatie begint met de tijdlijnen van alle gekozen projecten op één tijdas, met fasen, mijlpalen, een peildatum-lijn en de RAG-status als kleur.',
+      'Daarna de openstaande deliverables van alle gekozen projecten: bovenaan in rood wat te laat is, dan de komende maanden (standaard 3, instelbaar tot 12) en later, op datum, en tot slot wat nog geen datum heeft. Past het niet op één slide, dan loopt het door op vervolgslides.',
+      'Een slide "Bijdrage aan doelen" laat per project zien aan welke elementen het direct bijdraagt en welke doelen het uiteindelijk dient. Daarna volgt per project, alfabetisch, de voortgangsslide uit de project-PowerPoint.',
+      'Klik op een project of deliverable om naar de voortgangsslide van dat project te springen; de "Home"-knop brengt je terug naar de tijdlijnen.',
+      'Bewaar een selectie onder een eigen naam (bijvoorbeeld "Stuurgroep") en exporteer later met één klik dezelfde set. Een selectie is persoonlijk en alleen voor jou zichtbaar.',
+    ],
+  },
+  {
     version: '4.3.0',
     date: '11 oktober 2026',
     title: 'Beheer: een doelenboom van de ene omgeving naar de andere kopiëren',

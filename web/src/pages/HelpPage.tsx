@@ -521,6 +521,18 @@ const SECTIONS: { id: string; title: string; content: JSX.Element }[] = [
           vooraf hoeveel slides het worden (maximaal 300).
         </p>
         <p style={styles.p}>
+          <strong>Programma als PowerPoint.</strong> Met de module Projecten staat onder{' '}
+          <strong>Bestand → Programma als PowerPoint</strong> een export voor meerdere projecten tegelijk. Vink
+          de projecten aan, kies een peildatum (standaard vandaag) en hoeveel maanden vooruit je de deliverables
+          wilt zien (standaard 3). De presentatie bevat: de tijdlijnen van alle gekozen projecten op één tijdas
+          (fasen, mijlpalen en de RAG-status), de openstaande deliverables (eerst wat te laat is, dan de komende
+          maanden, later en zonder datum), de bijdrage van elk project aan de doelen, en per project de
+          voortgangsslide uit de project-PowerPoint, alfabetisch. Een project of deliverable is een link naar de
+          voortgangsslide van dat project; de "Home"-knop gaat terug naar de tijdlijnen. Een selectie kun je onder
+          een naam bewaren om hem later opnieuw te gebruiken; die is alleen voor jou zichtbaar. Maximaal 50
+          projecten per presentatie.
+        </p>
+        <p style={styles.p}>
           <strong>Klikken in de presentatie.</strong> Een blokje of een vak in de boom is een link naar de
           slide van dat element, zolang dat element zelf een slide in de presentatie heeft (de kolom is
           aangevinkt). Dat geldt ook voor de vakken in de totale boom en de blokjes op de tussenslide van een
