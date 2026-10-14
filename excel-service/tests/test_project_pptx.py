@@ -354,3 +354,19 @@ class TestTijdlijnOptie3:
     def test_toggle_uit_verbergt_geplande_datum(self):
         prs = Presentation(io.BytesIO(build_project_pptx(self.data(), {'exportedAt': '2026-10-14', 'showPlannedForDelivered': False})))
         assert 'Geplande datum (opgeleverd)' not in all_text(prs.slides[0])
+
+    def test_aandachtspunten_rechts_naast_projectstatus(self):
+        """De aandachtspunten staan bovenin naast de projectstatus; onder de
+        lijst met deliverables blijft de ruimte vrij (voor risico's)."""
+        data = self.data()
+        data['project']['status'] = {'projectstatus': 'Actief', 'toelichting': 'PID op planning'}
+        data['project']['tags'] = ['IGO']
+        prs = Presentation(io.BytesIO(build_project_pptx(data, {'exportedAt': '2026-10-14'})))
+        shapes = {sh.text_frame.text: sh for sh in prs.slides[0].shapes if sh.has_text_frame and sh.text_frame.text.strip()}
+        kop, status = shapes['AANDACHTSPUNTEN'], shapes['PROJECTSTATUS']
+        assert kop.top == status.top and kop.left > status.left
+        assert shapes['PID op planning'].top < shapes['Aug 2026'].top
+        assert shapes['Tags: IGO'].top < shapes['Aug 2026'].top
+        lijst = shapes['1  12 aug  PID  ✓']
+        tekst_eronder = [t for t, sh in shapes.items() if sh.top > lijst.top + Inches(0.3)]
+        assert all(t.startswith('Automatisch gegenereerd') or t.startswith('Project (P1)') or t == '1' for t in tekst_eronder), tekst_eronder

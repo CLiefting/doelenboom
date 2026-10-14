@@ -621,52 +621,46 @@ def _slide_overview(
     _add_text(slide, MARGIN, badge_top + Inches(0.52), badge_w, Inches(0.28), 'RAG-status', size=10, color=WHITE, align=PP_ALIGN.CENTER)
 
     info_left = MARGIN + badge_w + Inches(0.4)
-    info_w = CONTENT_W - badge_w - Inches(0.4)
+    # DOEL-112: de aandachtspunten staan rechts naast de projectstatus
+    # (zelfde hoogte als de RAG-status), zodat onder de tijdlijn en de lijst
+    # met deliverables ruimte overblijft (bestemd voor risico's).
+    notes_left = MARGIN + Inches(5.2)
+    info_w = notes_left - info_left - Inches(0.15)
+    notes_w = MARGIN + CONTENT_W - notes_left
     _add_text(slide, info_left, badge_top, info_w, Inches(0.28), 'PROJECTSTATUS', size=10, bold=True, color=MUTED)
-    _add_text(slide, info_left, badge_top + Inches(0.26), info_w, Inches(0.36), projectstatus, size=18, bold=True, color=DARK)
+    _add_text(slide, info_left, badge_top + Inches(0.26), info_w, Inches(0.36), _truncate(projectstatus, 22),
+              size=18, bold=True, color=DARK)
     _add_text(
         slide, info_left, badge_top + Inches(0.64), info_w, Inches(0.28),
         'Gerapporteerd op ' + _fmt_date(status.get('gerapporteerdOp')), size=11, color=MUTED,
     )
 
+    _add_text(slide, notes_left, badge_top, notes_w, Inches(0.28), 'AANDACHTSPUNTEN', size=10, bold=True, color=MUTED)
+    toelichting = (status.get('toelichting') or '').strip() or 'Geen toelichting vastgelegd bij de huidige status.'
+    parts = []
+    tags = project.get('tags') or []
+    if tags:
+        parts.append('Tags: ' + ', '.join(tags))
+    orgs = project.get('orgs') or []
+    if orgs:
+        parts.append('Organisaties: ' + ', '.join(f"{o.get('name', '')} ({o.get('relatietype', '')})" for o in orgs))
+    if status.get('clusterPpt'):
+        parts.append('Cluster PPT: ' + status['clusterPpt'])
+    # Hooguit 3 regels toelichting (of 2 als er ook tags/organisaties zijn),
+    # zodat het blok niet onder de RAG-status uitloopt.
+    per_line = int((int(notes_w) / 12700) / (11 * 0.5))
+    _add_text(slide, notes_left, badge_top + Inches(0.26), notes_w, Inches(0.5),
+              _truncate(toelichting, per_line * (2 if parts else 3)), size=11, color=DARK)
+    if parts:
+        _add_text(slide, notes_left, badge_top + Inches(0.66), notes_w, Inches(0.22),
+                  _truncate('   ·   '.join(parts), int(per_line * 1.15)), size=9, color=MUTED)
+
     y = badge_top + badge_h + Inches(0.2)
 
-    # Projecttijdlijn (verwachte/werkelijke opleverdatum + deadline per
-    # product) -- geeft None terug als geen enkel product een datum heeft;
-    # de aandachtspunten hieronder schuiven dan gewoon een stuk omhoog i.p.v.
-    # een lege ruimte over te laten (graceful degradation).
+    # Projecttijdlijn met genummerde deliverables en de lijst eronder (optie 3).
+    # Wat eronder overblijft tot de voettekst is gereserveerd voor risico's.
     show_planned_for_delivered = bool(meta.get('showPlannedForDelivered', True))
-    timeline_bottom = _add_project_timeline(slide, y, products, _today_iso(meta), show_planned_for_delivered)
-    y = (timeline_bottom + Inches(0.12)) if timeline_bottom else (y + Inches(0.1))
-
-    # Aandachtspunten (toelichting/tags/organisatieonderdelen/cluster) --
-    # wat resteert aan verticale ruimte tot de voettekst bepaalt hoeveel
-    # tekst er getoond wordt; de toelichting zelf vervalt nooit, alleen de
-    # lengte ervan en de losse chips-regel eronder passen zich aan.
-    footer_y = SLIDE_H - Inches(0.72)
-    available = int(footer_y) - int(y)
-    if available > int(Inches(0.3)):
-        _add_text(slide, MARGIN, y, CONTENT_W, Inches(0.25), 'AANDACHTSPUNTEN', size=10, bold=True, color=MUTED)
-        y += Inches(0.28)
-
-        toelichting = (status.get('toelichting') or '').strip() or 'Geen toelichting vastgelegd bij de huidige status.'
-        max_chars = 320 if available > int(Inches(1.3)) else 170
-        _add_text(slide, MARGIN, y, CONTENT_W, Inches(0.75), _truncate(toelichting, max_chars), size=12, color=DARK)
-        y += Inches(0.7) if available > int(Inches(1.0)) else Inches(0.5)
-
-        remaining = int(footer_y) - int(y)
-        if remaining > int(Inches(0.22)):
-            parts = []
-            tags = project.get('tags') or []
-            if tags:
-                parts.append('Tags: ' + ', '.join(tags))
-            orgs = project.get('orgs') or []
-            if orgs:
-                parts.append('Organisaties: ' + ', '.join(f"{o.get('name', '')} ({o.get('relatietype', '')})" for o in orgs))
-            if status.get('clusterPpt'):
-                parts.append('Cluster PPT: ' + status['clusterPpt'])
-            if parts:
-                _add_text(slide, MARGIN, y, CONTENT_W, Inches(0.5), '   ·   '.join(parts), size=10, color=MUTED)
+    _add_project_timeline(slide, y, products, _today_iso(meta), show_planned_for_delivered)
 
     generated_by = meta.get('exportedBy') or 'onbekend'
     generated_at = _fmt_date(meta.get('exportedAt'))
