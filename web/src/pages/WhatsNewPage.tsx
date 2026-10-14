@@ -21,7 +21,8 @@ const RELEASES: Release[] = [
     title: 'Programma-PowerPoint: meerdere projecten in één presentatie',
     items: [
       'Nieuw onder Bestand: "Programma als PowerPoint". Vink de projecten aan die je wilt meenemen; de eerste slide toont de tijdlijnen van de projecten met een planning op één tijdas, met fasen, mijlpalen, een peildatum-lijn en de RAG-status als kleur. Altijd op één slide, ook bij veel projecten.',
-      'De tweede slide toont alle gekozen projecten in één oogopslag, ook die nog zonder planning: per project de RAG-kleur, het aantal open en te late deliverables en de eerstvolgende datum.',
+      'De tweede slide toont de tijdlijnen van álle gekozen projecten, ook die nog zonder planning, op één slide. De derde slide toont alle projecten in één oogopslag: per project de RAG-kleur, het aantal open en te late deliverables en de eerstvolgende datum.',
+      'Project-PowerPoint en voortgangsslides: de tijdlijn laat nu zien wát er gepland staat. Mijlpalen hebben hun naam erbij; deliverables hebben een nummer en staan met datum, naam en stand (opgeleverd, percentage of te laat) in een lijst onder de tijdlijn. Te late items zijn rood, deadlines staan als rood driehoekje op de as. In de programma-PowerPoint wordt de geplande datum van een al opgeleverd item weggelaten.',
       'Daarna de openstaande deliverables van alle gekozen projecten: bovenaan in rood wat te laat is, dan de komende maanden (standaard 3, instelbaar tot 12) en later, op datum, en tot slot wat nog geen datum heeft. Past het niet op één slide, dan loopt het door op vervolgslides.',
       'Een slide "Bijdrage aan doelen" laat per project zien aan welke elementen het direct bijdraagt en welke doelen het uiteindelijk dient. Daarna volgt per project, alfabetisch, de voortgangsslide uit de project-PowerPoint.',
       'Klik op een project of deliverable om naar de voortgangsslide van dat project te springen; de "Home"-knop brengt je terug naar de tijdlijnen.',

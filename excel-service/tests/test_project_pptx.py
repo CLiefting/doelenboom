@@ -333,3 +333,24 @@ class TestPeildatum:
         assert _today_iso({'exportedAt': '2026-10-13T10:00:00Z'}) == '2026-10-13'
         assert _today_iso({'exportedAt': '2026-10-13T10:00:00Z', 'referenceDate': '2026-12-01'}) == '2026-12-01'
         assert _today_iso({'exportedAt': '2026-10-13T10:00:00Z', 'referenceDate': 'onzin'}) == '2026-10-13'
+
+
+class TestTijdlijnOptie3:
+    """DOEL-112: de losse project-PowerPoint gebruikt dezelfde tijdlijn; de
+    geplande datum bij een opgeleverd item volgt daar de schermtoggle."""
+
+    def data(self):
+        return {'project': {'code': 'P1', 'name': 'Project'}, 'products': [
+            {'id': 1, 'name': 'PID', 'type': 'deliverable', 'verwachteDatum': '2026-08-10', 'werkelijkeDatum': '2026-08-12'},
+            {'id': 2, 'name': 'Besluit', 'type': 'mijlpaal', 'verwachteDatum': '2026-12-22'},
+        ], 'activities': []}
+
+    def test_toggle_aan_toont_geplande_datum(self):
+        prs = Presentation(io.BytesIO(build_project_pptx(self.data(), {'exportedAt': '2026-10-14', 'showPlannedForDelivered': True})))
+        t = all_text(prs.slides[0])
+        assert 'Geplande datum (opgeleverd)' in t
+        assert 'Besluit' in t and '1  12 aug  PID' in t
+
+    def test_toggle_uit_verbergt_geplande_datum(self):
+        prs = Presentation(io.BytesIO(build_project_pptx(self.data(), {'exportedAt': '2026-10-14', 'showPlannedForDelivered': False})))
+        assert 'Geplande datum (opgeleverd)' not in all_text(prs.slides[0])

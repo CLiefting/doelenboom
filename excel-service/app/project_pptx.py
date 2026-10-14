@@ -308,35 +308,158 @@ def _axis_bounds(dates: list[date], today: date) -> tuple[bool, list[date]]:
     return quarterly, bounds
 
 
+# Optie 3 (DOEL-112): mijlpalen krijgen hun naam erbij in een eigen baan
+# bovenaan; deliverables krijgen een nummer (chronologisch) en staan met
+# datum, naam en stand in een lijst onder de tijdlijn. Zo is zichtbaar WAT
+# er op de tijdlijn staat, ook als items dicht op elkaar liggen.
+TIMELINE_LATE_COLOR = RAG_COLORS['rood']
+TIMELINE_LIST_COLS = 3
+TIMELINE_LIST_MAX_ROWS = 6
+NUM_SIZE = Inches(0.21)
+MS_LABEL_W = Inches(1.9)
+
+
+def build_timeline_items(
+    products: list[dict[str, Any]], today: date, show_planned_for_delivered: bool = True,
+) -> dict[str, list[dict[str, Any]]]:
+    """Deelt de producten met een datum op in mijlpalen en (genummerde)
+    deliverables. Per item: de hoofddatum (opgeleverd: werkelijke datum,
+    anders de verwachte, anders de deadline), of het opgeleverd of te laat
+    is, de deadline, en -- alleen als show_planned_for_delivered -- de
+    geplande datum van een al opgeleverd item als extra, ongenummerd punt."""
+    milestones: list[dict[str, Any]] = []
+    deliverables: list[dict[str, Any]] = []
+    for p in products:
+        verwacht = _parse_iso_date(p.get('verwachteDatum'))
+        werkelijk = _parse_iso_date(p.get('werkelijkeDatum'))
+        deadline = _parse_iso_date(p.get('deadline'))
+        main = werkelijk or verwacht or deadline
+        if main is None:
+            continue
+        item = {
+            'name': str(p.get('name') or ''),
+            't': main,
+            'done': werkelijk is not None,
+            'late': werkelijk is None and verwacht is not None and verwacht < today,
+            'deadline': deadline,
+            'only_deadline': werkelijk is None and verwacht is None,
+            'planned': verwacht if (werkelijk and verwacht and show_planned_for_delivered and verwacht != werkelijk) else None,
+            'pct': _pct(p.get('pctGereed')),
+        }
+        (milestones if p.get('type') == 'mijlpaal' else deliverables).append(item)
+    milestones.sort(key=lambda m: (m['t'], m['name']))
+    deliverables.sort(key=lambda d: (d['t'], d['name']))
+    for i, d in enumerate(deliverables, start=1):
+        d['n'] = i
+    return {'milestones': milestones, 'deliverables': deliverables}
+
+
+def _timeline_dates(items: dict[str, list[dict[str, Any]]]) -> list[date]:
+    dates = []
+    for it in items['milestones'] + items['deliverables']:
+        dates.append(it['t'])
+        if it['deadline']:
+            dates.append(it['deadline'])
+        if it['planned']:
+            dates.append(it['planned'])
+    return dates
+
+
+def _assign_levels(xs: list[int], width: int, max_levels: int) -> list[int]:
+    """Kleinste rij waar het item niet over het vorige item in die rij valt
+    (xs oplopend). Past het nergens, dan de rij met de meeste ruimte."""
+    ends = [-(10 ** 12)] * max_levels
+    levels = []
+    for x in xs:
+        free = [lvl for lvl in range(max_levels) if ends[lvl] <= x - width]
+        lvl = free[0] if free else min(range(max_levels), key=lambda k: ends[k])
+        ends[lvl] = x
+        levels.append(lvl)
+    return levels
+
+
+def _number_marker(slide, cx: int, cy: int, item: dict[str, Any]):
+    color = TIMELINE_LATE_COLOR if item['late'] else TIMELINE_MARKER_COLOR
+    half = int(NUM_SIZE) // 2
+    shape = slide.shapes.add_shape(MSO_SHAPE.OVAL, cx - half, cy - half, NUM_SIZE, NUM_SIZE)
+    shape.shadow.inherit = False
+    shape.line.color.rgb = color
+    shape.line.width = Pt(1.25)
+    shape.fill.solid()
+    shape.fill.fore_color.rgb = color if item['done'] else WHITE
+    tf = shape.text_frame
+    tf.margin_left = tf.margin_right = tf.margin_top = tf.margin_bottom = 0
+    tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+    tf.word_wrap = False
+    para = tf.paragraphs[0]
+    para.alignment = PP_ALIGN.CENTER
+    run = para.add_run()
+    run.text = str(item['n'])
+    run.font.size = Pt(7 if item['n'] < 100 else 6)
+    run.font.bold = True
+    run.font.color.rgb = WHITE if item['done'] else color
+    run.font.name = 'Calibri'
+    return shape
+
+
+def _deadline_marker(slide, cx: int, cy: int, size: int):
+    half = size // 2
+    shape = slide.shapes.add_shape(MSO_SHAPE.ISOSCELES_TRIANGLE, cx - half, cy - half, size, size)
+    shape.rotation = 180
+    shape.shadow.inherit = False
+    shape.fill.solid()
+    shape.fill.fore_color.rgb = TIMELINE_DEADLINE_COLOR
+    shape.line.color.rgb = TIMELINE_DEADLINE_COLOR
+    return shape
+
+
+def _short_date(d: date) -> str:
+    return f'{d.day} {MAANDEN_KORT[d.month - 1]}'
+
+
 def _add_project_timeline(
     slide, top, products: list[dict[str, Any]], today_iso: str, show_planned_for_delivered: bool = True
 ):
-    """Tekent de projecttijdlijn en geeft de Y-positie net onder de tijdlijn
-    terug, zodat de aanroeper de inhoud eronder kan plaatsen -- of None als
-    geen enkel product een verwachte/werkelijke datum of deadline heeft (dan
-    is er niets te plotten, zelfde als productTimelineHtml() '' in tree.html)."""
-    markers = _build_timeline_markers(products, show_planned_for_delivered)
-    if not markers:
+    """Tekent de projecttijdlijn (optie 3) en geeft de Y-positie onder de
+    lijst met deliverables terug, of None als geen enkel product een datum
+    heeft (dan is er niets te plotten)."""
+    today = _parse_iso_date(today_iso) or date.today()
+    items = build_timeline_items(products, today, show_planned_for_delivered)
+    dates = _timeline_dates(items)
+    if not dates:
         return None
 
-    today = _parse_iso_date(today_iso) or date.today()
-    quarterly, bounds = _axis_bounds([m['t'] for m in markers], today)
+    quarterly, bounds = _axis_bounds(dates, today)
     axis_start, axis_end = bounds[0], bounds[-1]
     span_days = (axis_end - axis_start).days or 1
-
-    # Kleine marge aan weerszijden zodat een marker precies op het begin/eind
-    # van het bereik (bv. een mijlpaal exact op de laatste maandgrens) niet
-    # half buiten de tijdlijn/slide valt.
-    pad = Inches(0.1)
-    inner_left = MARGIN + pad
-    inner_w = CONTENT_W - 2 * pad
+    pad = Inches(0.15)
+    inner_left = int(MARGIN + pad)
+    inner_w = int(CONTENT_W - 2 * pad)
 
     def x_for(d: date) -> int:
-        frac = (d - axis_start).days / span_days
+        frac = min(max((d - axis_start).days / span_days, 0.0), 1.0)
         return int(inner_left + inner_w * frac)
 
-    axis_y = top + Inches(0.68)
+    # Baan 1: mijlpalen met naam (hooguit 2 rijen labels).
+    ms = items['milestones']
+    ms_xs = [x_for(m['t']) for m in ms]
+    ms_levels = _assign_levels(ms_xs, int(MS_LABEL_W) + int(Inches(0.15)), 2) if ms else []
+    ms_rows = (max(ms_levels) + 1) if ms else 0
+    ms_row_h = int(Inches(0.22))
+    y = int(top) + int(Inches(0.2))  # ruimte voor 'vandaag'
+    ms_top = y
+    y += ms_rows * ms_row_h
 
+    # Baan 2: genummerde deliverables, gestapeld als ze elkaar raken.
+    dl = items['deliverables']
+    dl_xs = [x_for(d['t']) for d in dl]
+    dl_levels = _assign_levels(dl_xs, int(NUM_SIZE) + int(Pt(2)), 4) if dl else []
+    dl_rows = (max(dl_levels) + 1) if dl else 0
+    level_h = int(NUM_SIZE) + int(Pt(3))
+    dl_top = y + int(Inches(0.04))
+    axis_y = dl_top + max(dl_rows, 1) * level_h + int(Inches(0.04))
+
+    # As, maand-/kwartaallabels en 'vandaag'.
     for i in range(len(bounds) - 1):
         left = x_for(bounds[i])
         width = x_for(bounds[i + 1]) - left
@@ -345,74 +468,123 @@ def _add_project_timeline(
                 f'K{(bounds[i].month - 1) // 3 + 1} {bounds[i].year}' if quarterly
                 else f'{MAANDEN_KORT[bounds[i].month - 1].capitalize()} {bounds[i].year}'
             )
-            _add_text(slide, left, axis_y + Inches(0.08), width, Inches(0.25), label, size=9, color=MUTED, align=PP_ALIGN.CENTER)
-
+            _add_text(slide, left, axis_y + Inches(0.06), width, Inches(0.22), label, size=9, color=MUTED, align=PP_ALIGN.CENTER)
     _add_rect(slide, MARGIN, axis_y, CONTENT_W, Pt(1.25), TIMELINE_AXIS_COLOR)
-
     if axis_start <= today <= axis_end:
-        today_x = x_for(today)
-        _add_rect(slide, today_x, top, Pt(1.25), Inches(0.62), ACCENT)
-        _add_text(slide, today_x - Inches(0.35), top - Inches(0.02), Inches(0.7), Inches(0.2), 'vandaag', size=8, bold=True, color=ACCENT, align=PP_ALIGN.CENTER)
+        tx = x_for(today)
+        _add_rect(slide, tx, int(top) + Inches(0.18), Pt(1.25), axis_y - int(top) - Inches(0.18), ACCENT)
+        _add_text(slide, tx - Inches(0.35), int(top), Inches(0.7), Inches(0.18), 'vandaag', size=8, bold=True, color=ACCENT, align=PP_ALIGN.CENTER)
 
-    # Eenvoudige verticale stapeling om markers die (bijna) op dezelfde datum
-    # vallen niet exact over elkaar te laten landen -- zelfde bucket-aanpak
-    # als productTimelineHtml in tree.html (geen echte collision-detectie,
-    # maar volstaat voor de doorgaans kleine aantallen items per project).
-    marker_size = Inches(0.14)
-    half = Inches(0.07)
-    bucket_counts: dict[int, int] = {}
-    for m in markers:
-        cx = x_for(m['t'])
-        bucket = round((cx - MARGIN) / CONTENT_W * 60)
-        stack = bucket_counts.get(bucket, 0)
-        bucket_counts[bucket] = stack + 1
-        level = stack % 3
-        cy = axis_y - Inches(0.14) - int(Inches(0.16) * level)
-        if m['is_deadline']:
-            shape = slide.shapes.add_shape(MSO_SHAPE.ISOSCELES_TRIANGLE, cx - half, cy - half, marker_size, marker_size)
-            shape.rotation = 180
-            shape.fill.solid()
-            shape.fill.fore_color.rgb = TIMELINE_DEADLINE_COLOR
-            shape.line.color.rgb = TIMELINE_DEADLINE_COLOR
-        else:
-            mso = MSO_SHAPE.DIAMOND if m['type'] == 'mijlpaal' else MSO_SHAPE.OVAL
-            shape = slide.shapes.add_shape(mso, cx - half, cy - half, marker_size, marker_size)
-            shape.line.color.rgb = TIMELINE_MARKER_COLOR
-            shape.line.width = Pt(1.25)
-            shape.fill.solid()
-            shape.fill.fore_color.rgb = TIMELINE_MARKER_COLOR if m['filled'] else WHITE
+    # Mijlpalen: ruitje op de as-hoogte van zijn labelrij, naam ernaast.
+    dsize = int(Inches(0.15))
+    for m, x, lvl in zip(ms, ms_xs, ms_levels):
+        cy = ms_top + lvl * ms_row_h + ms_row_h // 2
+        color = TIMELINE_LATE_COLOR if m['late'] else TIMELINE_MARKER_COLOR
+        shape = slide.shapes.add_shape(MSO_SHAPE.DIAMOND, x - dsize // 2, cy - dsize // 2, dsize, dsize)
         shape.shadow.inherit = False
-
-    legend_y = axis_y + Inches(0.38)
-    legend_items = [
-        ('deliverable', False, False, 'Deliverable · verwacht'),
-        ('deliverable', True, False, 'Deliverable · opgeleverd'),
-        ('mijlpaal', False, False, 'Mijlpaal · verwacht'),
-        ('mijlpaal', True, False, 'Mijlpaal · gehaald'),
-        (None, False, True, 'Deadline'),
-    ]
-    dot_size = Inches(0.11)
-    legend_col_w = Inches(2.1)
-    legend_x = MARGIN
-    for marker_type, filled, is_deadline, label in legend_items:
-        if is_deadline:
-            shape = slide.shapes.add_shape(MSO_SHAPE.ISOSCELES_TRIANGLE, legend_x, legend_y, dot_size, dot_size)
-            shape.rotation = 180
-            shape.fill.solid()
-            shape.fill.fore_color.rgb = TIMELINE_DEADLINE_COLOR
-            shape.line.color.rgb = TIMELINE_DEADLINE_COLOR
+        shape.line.color.rgb = color
+        shape.line.width = Pt(1.25)
+        shape.fill.solid()
+        shape.fill.fore_color.rgb = color if m['done'] else WHITE
+        # dunne hulplijn naar de as, zodat de datum afleesbaar is
+        _add_rect(slide, x, cy + dsize // 2, Pt(0.5), axis_y - cy - dsize // 2, TIMELINE_AXIS_COLOR)
+        text = _truncate(m['name'], 30) + (' ✓' if m['done'] else '')
+        right_edge = int(MARGIN + CONTENT_W)
+        if x + int(Inches(0.12)) + int(MS_LABEL_W) <= right_edge:
+            _add_text(slide, x + Inches(0.12), cy - Inches(0.1), MS_LABEL_W, Inches(0.2), text, size=8, bold=True,
+                      color=color, anchor=MSO_ANCHOR.MIDDLE)
         else:
-            mso = MSO_SHAPE.DIAMOND if marker_type == 'mijlpaal' else MSO_SHAPE.OVAL
-            shape = slide.shapes.add_shape(mso, legend_x, legend_y, dot_size, dot_size)
-            shape.line.color.rgb = TIMELINE_MARKER_COLOR
-            shape.line.width = Pt(1)
-            shape.fill.solid()
-            shape.fill.fore_color.rgb = TIMELINE_MARKER_COLOR if filled else WHITE
-        shape.shadow.inherit = False
-        _add_text(slide, legend_x + dot_size + Inches(0.08), legend_y - Inches(0.02), legend_col_w - dot_size - Inches(0.08), Inches(0.25), label, size=9, color=MUTED)
-        legend_x += legend_col_w
+            _add_text(slide, x - Inches(0.12) - MS_LABEL_W, cy - Inches(0.1), MS_LABEL_W, Inches(0.2), text, size=8,
+                      bold=True, color=color, anchor=MSO_ANCHOR.MIDDLE, align=PP_ALIGN.RIGHT)
+        if m['deadline']:
+            _deadline_marker(slide, x_for(m['deadline']), axis_y - int(Inches(0.06)), int(Inches(0.12)))
 
-    return legend_y + Inches(0.35)
+    # Deliverables: genummerde rondjes; deadline als driehoekje op dezelfde rij.
+    for d, x, lvl in zip(dl, dl_xs, dl_levels):
+        cy = axis_y - int(Inches(0.04)) - lvl * level_h - level_h // 2
+        if d['planned']:
+            _add_point_marker(slide, x_for(d['planned']), cy, int(Inches(0.1)), MSO_SHAPE.OVAL, filled=False, color=MUTED)
+        _number_marker(slide, x, cy, d)
+    # Deadlines als laatste en op de as zelf, zodat geen rondje ze afdekt.
+    tri = int(Inches(0.12))
+    for d in dl:
+        if d['deadline']:
+            _deadline_marker(slide, x_for(d['deadline']), axis_y - tri // 2, tri)
+
+    # Legenda.
+    legend_y = axis_y + Inches(0.34)
+    lx = int(MARGIN)
+
+    def legend(draw, label: str, w: float):
+        nonlocal lx
+        draw(lx + int(Inches(0.08)), int(legend_y) + int(Inches(0.08)))
+        _add_text(slide, lx + Inches(0.22), legend_y - Inches(0.02), Inches(w), Inches(0.22), label, size=9, color=MUTED)
+        lx += int(Inches(w + 0.35))
+
+    def num(done: bool, late: bool):
+        return lambda cx, cy: _number_marker(slide, cx, cy, {'n': 1, 'done': done, 'late': late})
+
+    def diamond(filled: bool):
+        def draw(cx, cy):
+            sh = slide.shapes.add_shape(MSO_SHAPE.DIAMOND, cx - int(Inches(0.06)), cy - int(Inches(0.06)), Inches(0.12), Inches(0.12))
+            sh.shadow.inherit = False
+            sh.line.color.rgb = TIMELINE_MARKER_COLOR
+            sh.fill.solid()
+            sh.fill.fore_color.rgb = TIMELINE_MARKER_COLOR if filled else WHITE
+        return draw
+
+    legend(num(False, False), 'Deliverable · verwacht', 1.45)
+    legend(num(True, False), 'Deliverable · opgeleverd', 1.55)
+    legend(num(False, True), 'Te laat', 0.55)
+    legend(diamond(False), 'Mijlpaal · gepland', 1.2)
+    legend(diamond(True), 'Mijlpaal · gehaald', 1.2)
+    legend(lambda cx, cy: _deadline_marker(slide, cx, cy, int(Inches(0.11))), 'Deadline', 0.6)
+    if any(d['planned'] for d in dl):
+        legend(lambda cx, cy: _add_point_marker(slide, cx, cy, int(Inches(0.1)), MSO_SHAPE.OVAL, filled=False, color=MUTED),
+               'Geplande datum (opgeleverd)', 1.8)
+
+    # Lijst met de genummerde deliverables (3 kolommen, kolomsgewijs).
+    y = int(legend_y) + int(Inches(0.3))
+    if dl:
+        max_items = TIMELINE_LIST_COLS * TIMELINE_LIST_MAX_ROWS
+        shown = dl if len(dl) <= max_items else dl[: max_items - 1]
+        rows = -(-len(shown) // TIMELINE_LIST_COLS) if len(dl) <= max_items else TIMELINE_LIST_MAX_ROWS
+        col_w = int(CONTENT_W) // TIMELINE_LIST_COLS
+        row_h = int(Inches(0.2))
+        for i, d in enumerate(shown):
+            c, r = divmod(i, rows)
+            box = _add_text(slide, int(MARGIN) + c * col_w, y + r * row_h, col_w - int(Inches(0.1)), row_h, '',
+                            size=9, color=DARK, anchor=MSO_ANCHOR.MIDDLE)
+            para = box.text_frame.paragraphs[0]
+            if d['done']:
+                status, status_color = '✓', TIMELINE_MARKER_COLOR
+            elif d['late']:
+                status, status_color = 'te laat', TIMELINE_LATE_COLOR
+            else:
+                status, status_color = f"{d['pct']}%", MUTED
+            parts = [
+                (f"{d['n']}  ", True, TIMELINE_LATE_COLOR if d['late'] else TIMELINE_MARKER_COLOR),
+                (f"{_short_date(d['t'])}  ", False, MUTED),
+                (_truncate(d['name'], 34) + '  ', False, DARK),
+                (status, d['late'], status_color),
+            ]
+            if d['deadline'] and not d['done']:
+                parts.append((f"  · deadline {_short_date(d['deadline'])}", False, TIMELINE_DEADLINE_COLOR))
+            first = True
+            for text, bold, color in parts:
+                run = para.runs[0] if first else para.add_run()
+                first = False
+                run.text = text
+                run.font.size = Pt(9)
+                run.font.bold = bold
+                run.font.color.rgb = color
+                run.font.name = 'Calibri'
+        if len(dl) > max_items:
+            c, r = divmod(len(shown), rows)
+            _add_text(slide, int(MARGIN) + c * col_w, y + r * row_h, col_w, row_h,
+                      f'+ {len(dl) - len(shown)} meer deliverables', size=9, color=MUTED, anchor=MSO_ANCHOR.MIDDLE)
+        y += rows * row_h + int(Inches(0.06))
+    return y
 
 
 # ---- Slide 1: Overzicht (status/RAG + projecttijdlijn + aandachtspunten) --

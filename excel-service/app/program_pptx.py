@@ -10,7 +10,9 @@ Opbouw:
       Altijd precies één slide: de rijen schalen mee met het aantal
       projecten (snel overzicht; de detailplanning staat op de
       voortgangsslide per project). Dit is de "Home"-slide.
-  1b. Alle projecten -- ALLE gekozen projecten (ook die nog zonder planning)
+  2.  Tijdlijnen -- alle projecten: dezelfde tijdlijn, maar met ALLE
+      gekozen projecten (ook zonder planning: lege rij), op één slide.
+  3.  Alle projecten -- ALLE gekozen projecten (ook die nog zonder planning)
       als compact raster op één slide: RAG-kleur, naam, code en de stand
       (open, te laat, eerstvolgende datum) of "Nog geen planning".
   2.  Deliverables -- alle nog niet opgeleverde deliverables/mijlpalen van de
@@ -417,11 +419,13 @@ def _fit_chars(width_emu: int, size_pt: float) -> int:
 
 
 def _slide_timeline(prs, projects_with_dates, all_dates: list[date], ref: date, subtitle: str,
-                    links: _Links, ref_label: str):
-    """Alle projecten met datums op één slide; de rijhoogte, letters, balken
-    en mijlpalen schalen mee met het aantal projecten."""
+                    links: _Links, ref_label: str, title: str = 'Tijdlijnen'):
+    """Projecten op één slide; de rijhoogte, letters, balken en mijlpalen
+    schalen mee met het aantal projecten. Een project zonder datums (alleen
+    op de slide met alle projecten) krijgt een lege rij met "Nog geen
+    planning"."""
     slide = _blank_slide(prs)
-    _slide_header(slide, 'Programma', 'Tijdlijnen')
+    _slide_header(slide, 'Programma', title)
     _add_text(slide, MARGIN, Inches(1.48), CONTENT_W, Inches(0.3), subtitle, size=12, color=MUTED)
 
     if not projects_with_dates:
@@ -496,6 +500,10 @@ def _slide_timeline(prs, projects_with_dates, all_dates: list[date], ref: date, 
         links.add(label, _project_key(code), f'Naar de voortgang van {name}')
 
         dates = project_dates(p)
+        if not dates:
+            _add_text(slide, inner_left + Inches(0.05), top, inner_w, row_h, 'Nog geen planning',
+                      size=max(6.0, label_size - 1), color=MUTED, anchor=MSO_ANCHOR.MIDDLE)
+            continue
         phases = _phases(p['activities'])
         span_x0, span_x1 = x_for(min(dates)), x_for(max(dates))
         span_hh = thin_h if phases else bar_h
@@ -840,7 +848,7 @@ def _chunks(items: list[Any], size: int) -> list[list[Any]]:
 
 def planned_slide_count(projects: list[dict[str, Any]], ref: date, window_months: int) -> int:
     deliv_pages = paginate_deliverables(classify_deliverables(projects, ref, window_months))
-    return (2 + max(1, len(deliv_pages))
+    return (3 + max(1, len(deliv_pages))
             + len(_chunks(projects, GOAL_ROWS_PER_SLIDE)) + len(projects))
 
 
@@ -876,7 +884,16 @@ def build_program_pptx(data: Any, options: Any, meta: Any) -> bytes:
     links.slides[HOME_KEY] = slide
     page += 1
 
-    # 1b. Alle projecten in één oogopslag (ook zonder planning)
+    # 2. Tijdlijnen van ALLE projecten (ook zonder planning), één slide
+    n_empty = sum(1 for p in projects if not project_dates(p))
+    subtitle = (f'{len(projects)} project(en)' + (f' · {n_empty} nog zonder planning' if n_empty else '')
+                + f' · {ref_label} {_fmt_date(ref.isoformat())}')
+    slide = _slide_timeline(prs, projects, all_dates, ref, subtitle, links, ref_label,
+                            title='Tijdlijnen — alle projecten')
+    _footer(slide, meta, page, links)
+    page += 1
+
+    # 3. Alle projecten in één oogopslag (ook zonder planning)
     n_empty = sum(1 for p in projects if not p['products'] and not project_dates(p))
     subtitle = f'{len(projects)} project(en)' + (f' · {n_empty} nog zonder planning' if n_empty else '') + \
         ' · klik op een project voor de voortgang'
@@ -911,7 +928,9 @@ def build_program_pptx(data: Any, options: Any, meta: Any) -> bytes:
     # 4. Voortgang per project (alfabetisch). 'Vandaag' op de projecttijdlijn
     # is de peildatum (meta.referenceDate, zie _today_iso in project_pptx.py),
     # zodat de hele presentatie dezelfde datum gebruikt.
-    project_meta = {**meta, 'referenceDate': ref.isoformat()}
+    # Geplande datum van een al opgeleverd item weglaten: overzicht boven
+    # volledigheid (de werkelijke datum staat er wel).
+    project_meta = {**meta, 'referenceDate': ref.isoformat(), 'showPlannedForDelivered': False}
     for p in projects:
         proj = p['project']
         slide = _slide_overview(prs, proj, p['products'], project_meta, page)
