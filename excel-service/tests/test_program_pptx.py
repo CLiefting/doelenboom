@@ -20,10 +20,13 @@ from app.program_pptx import (
     add_months_same_day,
     build_program_pptx,
     classify_deliverables,
+    overview_grid,
     paginate_deliverables,
     parse_options,
+    project_summary,
     section_titles,
     sort_projects,
+    summary_text,
 )
 
 REF = date(2026, 10, 13)
@@ -158,17 +161,18 @@ class TestPresentatie:
     def test_opbouw_en_volgorde(self):
         prs = build()
         texts = [slide_text(s) for s in prs.slides]
-        assert len(texts) == 6  # tijdlijn, deliverables, doelen, 3x voortgang
+        assert len(texts) == 7  # tijdlijn, alle projecten, deliverables, doelen, 3x voortgang
         assert 'Tijdlijnen' in texts[0]
-        assert 'Deliverables' in texts[1]
-        assert 'Bijdrage aan doelen' in texts[2]
+        assert 'Alle projecten' in texts[1]
+        assert 'Deliverables' in texts[2]
+        assert 'Bijdrage aan doelen' in texts[3]
         # Voortgangsslides alfabetisch: de projectnaam is de grote titel.
         def title(slide):
             return next(sh.text_frame.text for sh in slide.shapes
                         if sh.has_text_frame and sh.text_frame.paragraphs[0].runs
                         and sh.text_frame.paragraphs[0].runs[0].font.size == Pt(28))
         slides = list(prs.slides)
-        assert [title(s) for s in slides[3:]] == ['Aanpassing back-office', 'Check-in check-out', 'Sweepen']
+        assert [title(s) for s in slides[4:]] == ['Aanpassing back-office', 'Check-in check-out', 'Sweepen']
 
     def test_tijdlijn_toont_fasen_van_bovenste_niveau_en_peildatum(self):
         t = slide_text(build().slides[0])
@@ -179,45 +183,88 @@ class TestPresentatie:
         assert 'peildatum' in t2
 
     def test_deliverables_slide_te_laat_bovenaan(self):
-        t = slide_text(build().slides[1])
+        t = slide_text(build().slides[2])
         assert t.index('Te laat') < t.index('Komende 3 maanden') < t.index('Later') < t.index('Nog geen datum')
         assert '2 te laat' in t
 
     def test_doelen(self):
-        t = slide_text(build().slides[2])
+        t = slide_text(build().slides[3])
         assert 'Capability' in t and 'Strategisch doel' in t
         assert 'Automatisch sweepen' in t and 'Eenvoudig betalen' in t
 
     def test_doelen_zonder_bovenste_kolom(self):
-        t = slide_text(build(goal_columns={'direct': 'Capability'}).slides[2])
+        t = slide_text(build(goal_columns={'direct': 'Capability'}).slides[3])
         assert 'Strategisch doel' not in t
 
     def test_links_naar_voortgang_en_home(self):
         prs = build()
         slides = list(prs.slides)
-        # Tijdlijn: projectnamen/balken springen naar slide 4-6, geen Home.
-        assert set(jump_targets(prs, slides[0])) == {4, 5, 6}
+        # Tijdlijn: projectnamen/balken springen naar de voortgang (slide 5-7), geen Home.
+        assert set(jump_targets(prs, slides[0])) == {5, 6, 7}
         # Elke andere slide heeft een Home-knop naar slide 1.
         for s in slides[1:]:
             assert any(sh.name == 'home-knop' for sh in s.shapes)
             assert 1 in jump_targets(prs, s)
         assert not any(sh.name == 'home-knop' for sh in slides[0].shapes)
-        # Deliverables springen naar de voortgang van hun project.
-        assert {4, 5, 6} <= set(jump_targets(prs, slides[1]))
+        # Alle projecten en de deliverables springen naar de voortgang van hun project.
+        assert {5, 6, 7} <= set(jump_targets(prs, slides[1]))
+        assert {5, 6, 7} <= set(jump_targets(prs, slides[2]))
 
-    def test_veel_projecten_pagineert_tijdlijn(self):
-        projects = [proj(f'P{i:02d}', f'Project {i:02d}', [prod(i, 'd', '2026-11-01')]) for i in range(20)]
+    def test_tijdlijn_is_altijd_een_slide_met_alleen_projecten_met_datums(self):
+        projects = [proj(f'P{i:02d}', f'Project {i:02d}', [prod(i, 'd', '2026-11-01')]) for i in range(MAX_PROJECTS - 5)]
+        projects += [proj(f'L{i}', f'Leeg {i}') for i in range(5)]
         prs = build(projects=projects)
         texts = [slide_text(s) for s in prs.slides]
-        assert sum(1 for t in texts if 'Tijdlijnen' in t) == 3
-        assert 'pagina 1/3' in texts[0]
+        assert sum(1 for t in texts if 'Tijdlijnen' in t) == 1
+        assert 'Project 00' in texts[0] and 'Project 44' in texts[0]
+        assert 'Leeg 0' not in texts[0]
+        assert '45 van 50 project(en) met een planning' in texts[0]
+        assert 'alle projecten op de volgende slide' in texts[0]
+        # Alle projecten staan op één overzichtsslide, ook de lege.
+        assert sum(1 for t in texts if 'Alle projecten' in t) == 1
+        assert 'Leeg 4' in texts[1] and 'Project 44' in texts[1]
+        assert '5 nog zonder planning' in texts[1]
+        # Geen vorm buiten de slide.
+        for s in list(prs.slides)[:2]:
+            for sh in s.shapes:
+                assert sh.top + sh.height <= prs.slide_height, sh.name
+
+    def test_geen_project_met_datums(self):
+        prs = build(projects=[proj('A', 'A'), proj('B', 'B')])
+        t0 = slide_text(prs.slides[0])
+        assert 'Geen van de gekozen projecten heeft al een planning' in t0
+        assert 'Nog geen planning' in slide_text(prs.slides[1])
+
+    def test_overzicht_stand_per_project(self):
+        t = slide_text(build().slides[1])
+        # NP05: één open deliverable, te laat; Sweepen: 2 open, eerstvolgende 10 nov.
+        assert 'NP05 · 1 open · 1 te laat' in t
+        assert 'NP37 · 3 open · volgende 10 nov 2026' in t
 
     def test_geen_openstaande_deliverables(self):
-        t = slide_text(build(projects=[proj('A', 'A', [prod(1, 'klaar', '2026-01-01', '2026-01-01')])]).slides[1])
-        assert 'geen openstaande deliverables' in t
+        prs = build(projects=[proj('A', 'A', [prod(1, 'klaar', '2026-01-01', '2026-01-01')])])
+        assert 'geen openstaande deliverables' in slide_text(prs.slides[2])
+        assert 'Alles opgeleverd' in slide_text(prs.slides[1])
 
-    def test_project_zonder_datums(self):
-        assert 'Nog geen datums vastgelegd' in slide_text(build(projects=[proj('A', 'A')]).slides[0])
+
+class TestOverzicht:
+    def test_raster(self):
+        assert overview_grid(1) == (1, 1)
+        assert overview_grid(5) == (1, 5)
+        assert overview_grid(12) == (2, 6)
+        assert overview_grid(27) == (3, 9)
+        assert overview_grid(50) == (4, 13)
+
+    def test_samenvatting(self):
+        empty = {'products': [], 'activities': []}
+        assert summary_text(project_summary(empty, REF)) == 'Nog geen planning'
+        p = {'products': [prod(1, 'a', '2026-09-01'), prod(2, 'b', '2026-12-01'), prod(3, 'c', None),
+                          prod(4, 'd', '2026-01-01', '2026-01-02')], 'activities': []}
+        s = project_summary(p, REF)
+        assert s == {'products': 4, 'open': 3, 'late': 1, 'next': date(2026, 12, 1), 'planned': True}
+        assert summary_text(s) == '3 open · 1 te laat · volgende 1 dec 2026'
+        only_undated = {'products': [prod(1, 'a')], 'activities': []}
+        assert summary_text(project_summary(only_undated, REF)) == '1 open · nog geen datums'
 
 
 class TestVeiligheid:
@@ -254,7 +301,7 @@ class TestEndpoint:
         })
         assert res.status_code == 200
         assert res.headers['content-type'].startswith('application/vnd.openxmlformats-officedocument.presentationml')
-        assert len(Presentation(io.BytesIO(res.content)).slides) == 6
+        assert len(Presentation(io.BytesIO(res.content)).slides) == 7
 
     def test_ongeldige_keuze_geeft_422(self):
         res = self.client.post('/program-pptx', json={

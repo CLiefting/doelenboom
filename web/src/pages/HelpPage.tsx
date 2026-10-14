@@ -524,8 +524,10 @@ const SECTIONS: { id: string; title: string; content: JSX.Element }[] = [
           <strong>Programma als PowerPoint.</strong> Met de module Projecten staat onder{' '}
           <strong>Bestand → Programma als PowerPoint</strong> een export voor meerdere projecten tegelijk. Vink
           de projecten aan, kies een peildatum (standaard vandaag) en hoeveel maanden vooruit je de deliverables
-          wilt zien (standaard 3). De presentatie bevat: de tijdlijnen van alle gekozen projecten op één tijdas
-          (fasen, mijlpalen en de RAG-status), de openstaande deliverables (eerst wat te laat is, dan de komende
+          wilt zien (standaard 3). De presentatie bevat: op de eerste slide de tijdlijnen van de projecten met een planning op
+          één tijdas (fasen, mijlpalen en de RAG-status), op de tweede slide alle gekozen projecten in één
+          oogopslag (ook die nog zonder planning, met het aantal open en te late deliverables en de
+          eerstvolgende datum), de openstaande deliverables (eerst wat te laat is, dan de komende
           maanden, later en zonder datum), de bijdrage van elk project aan de doelen, en per project de
           voortgangsslide uit de project-PowerPoint, alfabetisch. Een project of deliverable is een link naar de
           voortgangsslide van dat project; de "Home"-knop gaat terug naar de tijdlijnen. Een selectie kun je onder

@@ -4,10 +4,15 @@ tegelijk, bedoeld voor een programmamanager / stuurgroep. Hergebruikt de
 huisstijl en de voortgangsslide van de project-PowerPoint (project_pptx.py).
 
 Opbouw:
-  1.  Tijdlijnen -- alle gekozen projecten op één gezamenlijke tijdas, per
-      project de looptijd, de fasen (samenvattende activiteiten) en de
-      mijlpalen, met een peildatum-lijn en de RAG-status als kleur. Pagineert
-      bij veel projecten. Dit is de "Home"-slide.
+  1.  Tijdlijnen -- de gekozen projecten MET datums op één gezamenlijke
+      tijdas, per project de looptijd, de fasen (samenvattende activiteiten)
+      en de mijlpalen, met een peildatum-lijn en de RAG-status als kleur.
+      Altijd precies één slide: de rijen schalen mee met het aantal
+      projecten (snel overzicht; de detailplanning staat op de
+      voortgangsslide per project). Dit is de "Home"-slide.
+  1b. Alle projecten -- ALLE gekozen projecten (ook die nog zonder planning)
+      als compact raster op één slide: RAG-kleur, naam, code en de stand
+      (open, te laat, eerstvolgende datum) of "Nog geen planning".
   2.  Deliverables -- alle nog niet opgeleverde deliverables/mijlpalen van de
       gekozen projecten, in vier blokken: "Te laat" (verwachte datum vóór de
       peildatum), "Komende N maanden" (op datum), "Later" (op datum) en
@@ -76,7 +81,9 @@ WINDOW_MIN = 1
 WINDOW_MAX = 12
 WINDOW_DEFAULT = 3
 
-TIMELINE_ROWS_PER_SLIDE = 8
+# Tijdlijn: hooguit deze rijhoogte; bij meer projecten krimpen de rijen zodat
+# alles op één slide past (MAX_PROJECTS = 50 past nog leesbaar).
+TIMELINE_MAX_ROW_H = Inches(0.53)
 DELIVERABLE_ROWS_PER_SLIDE = 14
 GOAL_ROWS_PER_SLIDE = 7
 
@@ -404,11 +411,24 @@ def project_dates(p: dict[str, Any]) -> list[date]:
 LABEL_W = Inches(3.0)
 
 
-def _slide_timeline(prs, projects_page, all_dates: list[date], ref: date, meta, page: int, subtitle: str,
+def _fit_chars(width_emu: int, size_pt: float) -> int:
+    """Grove schatting van het aantal tekens dat op één regel past."""
+    return max(4, int((width_emu / 12700) / (size_pt * 0.5)))
+
+
+def _slide_timeline(prs, projects_with_dates, all_dates: list[date], ref: date, subtitle: str,
                     links: _Links, ref_label: str):
+    """Alle projecten met datums op één slide; de rijhoogte, letters, balken
+    en mijlpalen schalen mee met het aantal projecten."""
     slide = _blank_slide(prs)
     _slide_header(slide, 'Programma', 'Tijdlijnen')
     _add_text(slide, MARGIN, Inches(1.48), CONTENT_W, Inches(0.3), subtitle, size=12, color=MUTED)
+
+    if not projects_with_dates:
+        _add_text(slide, MARGIN, Inches(2.2), CONTENT_W, Inches(0.5),
+                  'Geen van de gekozen projecten heeft al een planning met datums. '
+                  'Zie het overzicht van alle projecten op de volgende slide.', size=14, color=MUTED)
+        return slide
 
     quarterly, bounds = _axis_bounds(all_dates, ref)
     axis_start, axis_end = bounds[0], bounds[-1]
@@ -420,11 +440,17 @@ def _slide_timeline(prs, projects_page, all_dates: list[date], ref: date, meta, 
         frac = min(max((d - axis_start).days / span_days, 0.0), 1.0)
         return int(inner_left + inner_w * frac)
 
+    n = len(projects_with_dates)
     axis_top = int(Inches(2.1))
-    rows_top = axis_top + int(Inches(0.08))
+    rows_top = axis_top + int(Inches(0.06))
     legend_top = int(SLIDE_H - Inches(0.8))
-    row_h = (legend_top - int(Inches(0.1)) - rows_top) // TIMELINE_ROWS_PER_SLIDE
-    rows_bottom = rows_top + row_h * len(projects_page)
+    area = legend_top - int(Inches(0.08)) - rows_top
+    row_h = min(int(TIMELINE_MAX_ROW_H), area // n)
+    rows_bottom = rows_top + row_h * n
+    scale = row_h / int(TIMELINE_MAX_ROW_H)
+    row_pt = row_h / 12700
+    label_size = max(6.0, min(11.0, round(row_pt * 0.55, 1)))
+    two_lines = scale >= 0.8
 
     # Maandkoppen/kwartaalkoppen en verticale rasterlijnen.
     for i in range(len(bounds) - 1):
@@ -438,7 +464,13 @@ def _slide_timeline(prs, projects_page, all_dates: list[date], ref: date, meta, 
             _add_text(slide, gx, axis_top - Inches(0.25), nx - gx, Inches(0.22), label, size=9, color=MUTED, align=PP_ALIGN.CENTER)
     _add_rect(slide, inner_left, axis_top, inner_w, Pt(1), TIMELINE_AXIS_COLOR)
 
-    for i, p in enumerate(projects_page):
+    bar_h = max(int(Pt(3)), min(int(Inches(0.24)), int(row_h * 0.45)))
+    thin_h = max(int(Pt(2)), bar_h // 3)
+    ms_size = max(int(Pt(5)), min(int(Inches(0.17)), int(row_h * 0.6)))
+    inset = min(int(Inches(0.08)), int(row_h * 0.15))
+    label_w = int(LABEL_W - Inches(0.25))
+
+    for i, p in enumerate(projects_with_dates):
         proj = p['project']
         code = str(proj.get('code') or '')
         name = str(proj.get('name') or code)
@@ -448,39 +480,34 @@ def _slide_timeline(prs, projects_page, all_dates: list[date], ref: date, meta, 
             _add_rect(slide, MARGIN, top, CONTENT_W, row_h, LIGHT_BG)
 
         rag = ((proj.get('status') or {}) if isinstance(proj.get('status'), dict) else {}).get('rag')
-        _add_rect(slide, MARGIN, top + Inches(0.08), Inches(0.08), row_h - Inches(0.16), _rag_color(rag))
+        _add_rect(slide, MARGIN, top + inset, Inches(0.08), max(row_h - 2 * inset, int(Pt(2))), _rag_color(rag))
+        max_chars = _fit_chars(label_w, label_size) * (2 if two_lines else 1) - (len(code) + 2 if code else 0)
         label = _add_text(
-            slide, MARGIN + Inches(0.18), top, LABEL_W - Inches(0.25), row_h,
-            _truncate(name, 44), size=11, bold=True, color=DARK, anchor=MSO_ANCHOR.MIDDLE,
+            slide, MARGIN + Inches(0.18), top, label_w, row_h,
+            _truncate(name, max(6, max_chars)), size=label_size, bold=True, color=DARK,
+            anchor=MSO_ANCHOR.MIDDLE,
         )
         if code:
-            p0 = label.text_frame.paragraphs[0]
-            run = p0.add_run()
+            run = label.text_frame.paragraphs[0].add_run()
             run.text = f'  {code}'
-            run.font.size = Pt(8)
+            run.font.size = Pt(max(5.5, label_size - 3))
             run.font.color.rgb = MUTED
             run.font.name = 'Calibri'
         links.add(label, _project_key(code), f'Naar de voortgang van {name}')
 
         dates = project_dates(p)
-        if not dates:
-            _add_text(slide, inner_left, top, inner_w, row_h, 'Nog geen datums vastgelegd',
-                      size=10, color=MUTED, anchor=MSO_ANCHOR.MIDDLE)
-            continue
-
         phases = _phases(p['activities'])
-        bar_h = int(Inches(0.24))
         span_x0, span_x1 = x_for(min(dates)), x_for(max(dates))
-        span = _add_rect(slide, span_x0, mid - (bar_h if not phases else int(Inches(0.08))) // 2,
-                         max(span_x1 - span_x0, int(Pt(3))), bar_h if not phases else int(Inches(0.08)), SPAN_COLOR)
+        span_hh = thin_h if phases else bar_h
+        span = _add_rect(slide, span_x0, mid - span_hh // 2, max(span_x1 - span_x0, int(Pt(3))), span_hh, SPAN_COLOR)
         links.add(span, _project_key(code), f'Naar de voortgang van {name}')
 
         for j, ph in enumerate(phases):
             x0, x1 = x_for(ph['start']), x_for(ph['end'])
             w = max(x1 - x0, int(Pt(3)))
-            color = PHASE_COLORS[j % len(PHASE_COLORS)]
-            bar = _add_rect(slide, x0, mid - bar_h // 2, w, bar_h, color)
-            if w >= int(Inches(0.6)):
+            bar = _add_rect(slide, x0, mid - bar_h // 2, w, bar_h, PHASE_COLORS[j % len(PHASE_COLORS)])
+            phase_size = min(8.0, label_size - 1)
+            if w >= int(Inches(0.6)) and bar_h >= int(Pt(phase_size + 2)):
                 tf = bar.text_frame
                 tf.margin_left = tf.margin_right = Inches(0.04)
                 tf.margin_top = tf.margin_bottom = 0
@@ -489,21 +516,22 @@ def _slide_timeline(prs, projects_page, all_dates: list[date], ref: date, meta, 
                 para = tf.paragraphs[0]
                 para.alignment = PP_ALIGN.LEFT
                 run = para.add_run()
-                run.text = _truncate(ph['name'], max(3, int(w / Inches(0.075))))
-                run.font.size = Pt(8)
+                run.text = _truncate(ph['name'], _fit_chars(w - int(Inches(0.08)), phase_size))
+                run.font.size = Pt(phase_size)
                 run.font.color.rgb = WHITE
                 run.font.name = 'Calibri'
             links.add(bar, _project_key(code), f'{ph["name"]} ({_fmt_date(ph["start"].isoformat())} – {_fmt_date(ph["end"].isoformat())})')
 
-        size = int(Inches(0.17))
+        # Ruim genoeg: mijlpaal boven de balk; compact: op de balk zelf.
+        lift = int(Inches(0.2) * scale) if scale >= 0.75 else 0
         for m in _milestones(p, ref):
             cx = x_for(m['t'])
-            shape = slide.shapes.add_shape(MSO_SHAPE.DIAMOND, cx - size // 2, mid - size // 2 - int(Inches(0.2)), size, size)
+            shape = slide.shapes.add_shape(MSO_SHAPE.DIAMOND, cx - ms_size // 2, mid - ms_size // 2 - lift, ms_size, ms_size)
             shape.shadow.inherit = False
             shape.fill.solid()
             shape.fill.fore_color.rgb = MILESTONE_COLOR if m['done'] else WHITE
             shape.line.color.rgb = MILESTONE_COLOR
-            shape.line.width = Pt(1.25)
+            shape.line.width = Pt(1.25 if scale >= 0.5 else 0.75)
             links.add(shape, _project_key(code), f'Mijlpaal: {m["name"]} ({_fmt_date(m["t"].isoformat())})')
 
     if axis_start <= ref <= axis_end:
@@ -512,31 +540,166 @@ def _slide_timeline(prs, projects_page, all_dates: list[date], ref: date, meta, 
         _add_text(slide, rx - Inches(0.5), axis_top - Inches(0.47), Inches(1.0), Inches(0.2), ref_label,
                   size=8, bold=True, color=TIMELINE_DEADLINE_COLOR, align=PP_ALIGN.CENTER)
 
-    # Legenda
+    _rag_legend(slide, legend_top, ref_label, timeline=True)
+    return slide
+
+
+def _rag_legend(slide, y: int, ref_label: str = '', timeline: bool = False):
     x = int(MARGIN)
-    y = legend_top
+
     def legend(shape_fn, text: str, width: float):
         nonlocal x
         shape_fn(x, y)
         _add_text(slide, x + Inches(0.26), y - Inches(0.03), Inches(width), Inches(0.25), text, size=9, color=MUTED)
         x += int(Inches(width + 0.4))
-    legend(lambda lx, ly: _add_rect(slide, lx, ly, Inches(0.2), Inches(0.13), PHASE_COLORS[0]), 'Fase', 0.5)
-    legend(lambda lx, ly: _add_rect(slide, lx, ly, Inches(0.2), Inches(0.13), SPAN_COLOR), 'Looptijd', 0.7)
 
-    def diamond(filled: bool):
-        def draw(lx, ly):
-            s = slide.shapes.add_shape(MSO_SHAPE.DIAMOND, lx + Inches(0.02), ly - Inches(0.01), Inches(0.15), Inches(0.15))
-            s.shadow.inherit = False
-            s.fill.solid()
-            s.fill.fore_color.rgb = MILESTONE_COLOR if filled else WHITE
-            s.line.color.rgb = MILESTONE_COLOR
-        return draw
-    legend(diamond(False), 'Mijlpaal gepland', 1.2)
-    legend(diamond(True), 'Mijlpaal gehaald', 1.2)
-    legend(lambda lx, ly: _add_rect(slide, lx + Inches(0.09), ly - Inches(0.03), Pt(1.5), Inches(0.2), TIMELINE_DEADLINE_COLOR), ref_label.capitalize(), 0.8)
-    for rag_name in ('groen', 'oranje', 'rood'):
-        legend(lambda lx, ly, c=RAG_COLORS[rag_name]: _add_rect(slide, lx + Inches(0.06), ly - Inches(0.02), Inches(0.08), Inches(0.18), c),
-               {'groen': 'Op koers', 'oranje': 'Risico', 'rood': 'Achter'}[rag_name], 0.75)
+    if timeline:
+        legend(lambda lx, ly: _add_rect(slide, lx, ly, Inches(0.2), Inches(0.13), PHASE_COLORS[0]), 'Fase', 0.5)
+        legend(lambda lx, ly: _add_rect(slide, lx, ly, Inches(0.2), Inches(0.13), SPAN_COLOR), 'Looptijd', 0.7)
+
+        def diamond(filled: bool):
+            def draw(lx, ly):
+                s = slide.shapes.add_shape(MSO_SHAPE.DIAMOND, lx + Inches(0.02), ly - Inches(0.01), Inches(0.15), Inches(0.15))
+                s.shadow.inherit = False
+                s.fill.solid()
+                s.fill.fore_color.rgb = MILESTONE_COLOR if filled else WHITE
+                s.line.color.rgb = MILESTONE_COLOR
+            return draw
+        legend(diamond(False), 'Mijlpaal gepland', 1.2)
+        legend(diamond(True), 'Mijlpaal gehaald', 1.2)
+        legend(lambda lx, ly: _add_rect(slide, lx + Inches(0.09), ly - Inches(0.03), Pt(1.5), Inches(0.2), TIMELINE_DEADLINE_COLOR),
+               ref_label.capitalize(), 0.8)
+    for rag_name, text in (('groen', 'Op koers'), ('oranje', 'Risico'), ('rood', 'Achter'), (None, 'Geen status')):
+        color = RAG_COLORS[rag_name] if rag_name else _rag_color(None)
+        legend(lambda lx, ly, c=color: _add_rect(slide, lx + Inches(0.06), ly - Inches(0.02), Inches(0.08), Inches(0.18), c),
+               text, 0.85)
+
+
+# ---- slide 1b: alle projecten in één oogopslag --------------------------------
+
+def project_summary(p: dict[str, Any], ref: date) -> dict[str, Any]:
+    """Stand van één project voor het overzicht: aantal open en te late
+    deliverables, de eerstvolgende verwachte datum (op/na de peildatum) en
+    of er überhaupt een planning (een datum) is."""
+    open_items = [prod for prod in p['products'] if not prod.get('werkelijkeDatum')]
+    open_dates = [d for d in (_parse_iso_date(prod.get('verwachteDatum')) for prod in open_items) if d]
+    upcoming = [d for d in open_dates if d >= ref]
+    return {
+        'products': len(p['products']),
+        'open': len(open_items),
+        'late': sum(1 for d in open_dates if d < ref),
+        'next': min(upcoming) if upcoming else None,
+        'planned': bool(project_dates(p)),
+    }
+
+
+def summary_text(summary: dict[str, Any]) -> str:
+    if not summary['products'] and not summary['planned']:
+        return 'Nog geen planning'
+    if summary['products'] and not summary['open']:
+        return 'Alles opgeleverd'
+    bits = []
+    if summary['products']:
+        bits.append(f"{summary['open']} open")
+    if summary['late']:
+        bits.append(f"{summary['late']} te laat")
+    if summary['next']:
+        bits.append(f"volgende {_fmt_date(summary['next'].isoformat())}")
+    elif not summary['planned']:
+        bits.append('nog geen datums')
+    return ' · '.join(bits)
+
+
+def overview_grid(n: int) -> tuple[int, int]:
+    """(kolommen, rijen) voor het raster van 'Alle projecten'."""
+    cols = 1 if n <= 5 else 2 if n <= 12 else 3 if n <= 27 else 4
+    return cols, max(1, -(-n // cols))
+
+
+def _slide_all_projects(prs, projects, ref: date, subtitle: str, links: _Links):
+    slide = _blank_slide(prs)
+    _slide_header(slide, 'Programma', 'Alle projecten')
+    _add_text(slide, MARGIN, Inches(1.48), CONTENT_W, Inches(0.3), subtitle, size=12, color=MUTED)
+
+    n = len(projects)
+    cols, rows = overview_grid(n)
+    top = int(Inches(1.9))
+    bottom = int(SLIDE_H - Inches(0.9))
+    gap = int(Inches(0.1 if rows <= 8 else 0.06))
+    tile_w = (int(CONTENT_W) - gap * (cols - 1)) // cols
+    tile_h = min(int(Inches(0.9)), (bottom - top - gap * (rows - 1)) // rows)
+    tile_pt = tile_h / 12700
+    name_size = max(7.0, min(13.0, round(tile_pt * 0.3, 1)))
+    info_size = max(6.5, name_size - 2)
+    two_lines = tile_pt >= (name_size + info_size) * 1.3 + 4
+    strip_w = int(Inches(0.07))
+    text_w = tile_w - strip_w - int(Inches(0.16))
+
+    for i, p in enumerate(projects):
+        proj = p['project']
+        code = str(proj.get('code') or '')
+        name = str(proj.get('name') or code)
+        # Kolomsgewijs vullen, zodat het alfabet van boven naar beneden loopt.
+        c, r = divmod(i, rows)
+        left = int(MARGIN) + c * (tile_w + gap)
+        y = top + r * (tile_h + gap)
+        summary = project_summary(p, ref)
+        info = (f'{code} · ' if code else '') + summary_text(summary)
+        empty = not summary['products'] and not summary['planned']
+
+        tile = _add_rect(slide, left, y, tile_w, tile_h, LIGHT_BG if empty else WHITE, line=True)
+        rag = ((proj.get('status') or {}) if isinstance(proj.get('status'), dict) else {}).get('rag')
+        strip = _add_rect(slide, left, y, strip_w, tile_h, _rag_color(rag))
+        tf = tile.text_frame
+        # Altijd afbreken aan: de tekst is al op maat ingekort, en zonder
+        # afbreken centreert PowerPoint/LibreOffice de regel.
+        tf.word_wrap = True
+        tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+        tf.margin_left = strip_w + int(Inches(0.1))
+        tf.margin_right = int(Inches(0.06))
+        tf.margin_top = tf.margin_bottom = 0
+        para = tf.paragraphs[0]
+        para.alignment = PP_ALIGN.LEFT
+        name_chars = _fit_chars(text_w, name_size)
+        info_chars = _fit_chars(text_w, info_size)
+        run = para.add_run()
+        run.font.name = 'Calibri'
+        run.font.bold = True
+        run.font.size = Pt(name_size)
+        run.font.color.rgb = MUTED if empty else DARK
+        if two_lines:
+            run.text = _truncate(name, name_chars)
+            p2 = tf.add_paragraph()
+            p2.alignment = PP_ALIGN.LEFT
+            parts = [(info, None)]
+            if summary['late']:
+                # 'n te laat' in rood
+                before, _, after = info.partition(f"{summary['late']} te laat")
+                parts = [(before, None), (f"{summary['late']} te laat", LATE_COLOR), (after, None)]
+            used = 0
+            for text, color in parts:
+                if not text or used >= info_chars:
+                    continue
+                text = _truncate(text, info_chars - used) if used + len(text) > info_chars else text
+                used += len(text)
+                r2 = p2.add_run()
+                r2.text = text
+                r2.font.name = 'Calibri'
+                r2.font.size = Pt(info_size)
+                r2.font.bold = color is not None
+                r2.font.color.rgb = color or MUTED
+        else:
+            name_part = _truncate(name, max(6, name_chars // 2))
+            run.text = name_part
+            r2 = para.add_run()
+            r2.text = '  ' + _truncate(info, max(4, info_chars - len(name_part) - 2))
+            r2.font.name = 'Calibri'
+            r2.font.size = Pt(info_size)
+            r2.font.color.rgb = LATE_COLOR if summary['late'] else MUTED
+        links.add(tile, _project_key(code), f'Naar de voortgang van {name}')
+        links.add(strip, _project_key(code), f'Naar de voortgang van {name}')
+
+    _rag_legend(slide, int(SLIDE_H - Inches(0.75)))
     return slide
 
 
@@ -677,7 +840,7 @@ def _chunks(items: list[Any], size: int) -> list[list[Any]]:
 
 def planned_slide_count(projects: list[dict[str, Any]], ref: date, window_months: int) -> int:
     deliv_pages = paginate_deliverables(classify_deliverables(projects, ref, window_months))
-    return (len(_chunks(projects, TIMELINE_ROWS_PER_SLIDE)) + max(1, len(deliv_pages))
+    return (2 + max(1, len(deliv_pages))
             + len(_chunks(projects, GOAL_ROWS_PER_SLIDE)) + len(projects))
 
 
@@ -702,17 +865,24 @@ def build_program_pptx(data: Any, options: Any, meta: Any) -> bytes:
     links = _Links()
     page = 1
 
-    # 1. Tijdlijnen
-    all_dates = [d for p in projects for d in project_dates(p)]
-    tl_pages = _chunks(projects, TIMELINE_ROWS_PER_SLIDE)
-    for i, chunk in enumerate(tl_pages):
-        subtitle = (f'{len(projects)} project(en) · {ref_label} {_fmt_date(ref.isoformat())}'
-                    + _page_suffix(i, len(tl_pages)))
-        slide = _slide_timeline(prs, chunk, all_dates, ref, meta, page, subtitle, links, ref_label)
-        _footer(slide, meta, page, links if i > 0 else None)
-        if i == 0:
-            links.slides[HOME_KEY] = slide
-        page += 1
+    # 1. Tijdlijnen (alleen projecten met datums, altijd één slide) -- Home
+    with_dates = [p for p in projects if project_dates(p)]
+    all_dates = [d for p in with_dates for d in project_dates(p)]
+    subtitle = f'{len(with_dates)} van {len(projects)} project(en) met een planning · {ref_label} {_fmt_date(ref.isoformat())}'
+    if len(with_dates) < len(projects):
+        subtitle += ' · alle projecten op de volgende slide'
+    slide = _slide_timeline(prs, with_dates, all_dates, ref, subtitle, links, ref_label)
+    _footer(slide, meta, page, None)
+    links.slides[HOME_KEY] = slide
+    page += 1
+
+    # 1b. Alle projecten in één oogopslag (ook zonder planning)
+    n_empty = sum(1 for p in projects if not p['products'] and not project_dates(p))
+    subtitle = f'{len(projects)} project(en)' + (f' · {n_empty} nog zonder planning' if n_empty else '') + \
+        ' · klik op een project voor de voortgang'
+    slide = _slide_all_projects(prs, projects, ref, subtitle, links)
+    _footer(slide, meta, page, links)
+    page += 1
 
     # 2. Deliverables
     titles = section_titles(ref, window_months)

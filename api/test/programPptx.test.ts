@@ -235,13 +235,15 @@ describe('Programma-PowerPoint (DOEL-112) — routes', () => {
     assert.equal(res.headers.get('content-type'), PPTX_MEDIA_TYPE);
     assert.match(res.headers.get('content-disposition') ?? '', /attachment; filename="Programma_.*\.pptx"/);
     const slides = readSlides(Buffer.from(await res.arrayBuffer()));
-    assert.equal(slides.length, 5); // tijdlijn, deliverables, doelen, 2x voortgang
+    assert.equal(slides.length, 6); // tijdlijn, alle projecten, deliverables, doelen, 2x voortgang
     assert.match(slides[0], /Tijdlijnen/);
     assert.match(slides[0], /FASE-REALISATIE/);
-    assert.ok(slides[1].indexOf('TE-LAAT-DELIVERABLE') < slides[1].indexOf('BINNEN-VENSTER'));
-    assert.match(slides[2], /Voorbeeldcapability/);
-    assert.match(slides[2], /Voorbeelddoel/);
-    assert.ok(slides[3].includes('Alfa-project') && slides[4].includes('Zeta-project'));
+    assert.match(slides[1], /Alle projecten/);
+    assert.ok(slides[1].includes('Alfa-project') && slides[1].includes('Zeta-project'));
+    assert.ok(slides[2].indexOf('TE-LAAT-DELIVERABLE') < slides[2].indexOf('BINNEN-VENSTER'));
+    assert.match(slides[3], /Voorbeeldcapability/);
+    assert.match(slides[3], /Voorbeelddoel/);
+    assert.ok(slides[4].includes('Alfa-project') && slides[5].includes('Zeta-project'));
     const all = slides.join('\n');
     assert.ok(!all.includes('Midden-project'), 'niet gekozen project staat er niet in');
     assert.ok(!all.includes('ANDERE-BOOM-GEHEIM'));
