@@ -66,6 +66,8 @@ jobs:
       - run: sudo apt-get install -y --no-install-recommends acl postgresql-client
       - working-directory: api
         run: npm ci
+      - name: Install-scripts alleen na goedkeuring (DOEL-118, OWASP A08)
+        run: bash scripts/check-install-scripts.sh api
       - working-directory: api
         run: npm run build
       - working-directory: api
@@ -96,6 +98,8 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - working-directory: web
         run: npm ci
+      - name: Install-scripts alleen na goedkeuring (DOEL-118, OWASP A08)
+        run: bash scripts/check-install-scripts.sh web
       - working-directory: web
         run: npm run build
       - name: SEC-001 regressietest (stored XSS in tree.html)
