@@ -528,6 +528,8 @@ const SECTIONS: { id: string; title: string; content: JSX.Element }[] = [
           "Home"-knop rechtsonder op elke slide ga je terug naar de totale boom. Met "◄ Vorige" en
           "Volgende ►" ernaast spring je op een element-slide naar het vorige of volgende element onder
           dezelfde ouder (zelfde kolom, in de volgorde van de boom); zonder zo'n broertje is de knop grijs.
+          In de boom bovenaan de slide staan die broertjes ook als klikbare kaartjes boven (▲) en onder (▼)
+          het element; de legenda eronder noemt de positie, zoals "2 van 7".
           Dat werkt in de diavoorstelling; tijdens het bewerken in PowerPoint klik je met Ctrl
           (Windows) of Cmd (Mac) ingedrukt.
         </p>

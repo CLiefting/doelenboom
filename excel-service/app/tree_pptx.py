@@ -31,7 +31,9 @@ terug naar de totale boom (DOEL-106). Elke element-slide (ook een vervolgslide)
 heeft daarnaast "Vorige" en "Volgende": een sprong naar het vorige of volgende
 broertje, dat wil zeggen het element in dezelfde kolom met dezelfde primaire
 ouder, in boomvolgorde (DOEL-117). Zonder zo'n broertje is de knop grijs en
-niet klikbaar.
+niet klikbaar. In de keten staan boven en onder het geselecteerde element
+bovendien "schaduwkaartjes" van het vorige (▲) en volgende (▼) broertje; ook
+die zijn klikbaar. De legenda onder de keten noemt de positie ("2 van 7").
 Alleen sprongen binnen de presentatie, nooit een externe link.
 
 Verborgen kolommen (options.visibleColumns) komen nergens in de presentatie
@@ -232,10 +234,11 @@ NAV_OFF_TEXT = RGBColor(0x9A, 0x9F, 0xA8)
 class _SiblingNav:
     """Vorige en volgende broertje van een element (DOEL-117): codes of None,
     plus de primaire ouder voor de tooltip."""
-    __slots__ = ('prev', 'next', 'parent')
+    __slots__ = ('prev', 'next', 'parent', 'index', 'count')
 
-    def __init__(self, prev: str | None, nxt: str | None, parent: str | None):
+    def __init__(self, prev: str | None, nxt: str | None, parent: str | None, index: int = 1, count: int = 1):
         self.prev, self.next, self.parent = prev, nxt, parent
+        self.index, self.count = index, count  # positie (1-based) en aantal broertjes incl. zichzelf
 
 
 def _nav_button(slide, left: int, width: int, label: str, name: str, target: str | None,
@@ -531,7 +534,7 @@ class _Model:
         siblings = [c for c in column if c == code or self.main_parent(c) == parent]
         i = siblings.index(code)
         return _SiblingNav(siblings[i - 1] if i > 0 else None,
-                           siblings[i + 1] if i + 1 < len(siblings) else None, parent)
+                           siblings[i + 1] if i + 1 < len(siblings) else None, parent, i + 1, len(siblings))
 
     def sorted_codes(self, codes) -> list[str]:
         return sorted(codes, key=lambda c: self.order.get(c, 0))
@@ -950,6 +953,10 @@ CHAIN_HEAD_H = Inches(0.26)
 CHAIN_NODES_TOP = Inches(1.84)
 CHAIN_NODES_H = Inches(2.36)
 TEXT_TOP = Inches(4.55)
+# Schaduwkaartjes van de broertjes boven/onder het geselecteerde element (DOEL-117).
+SIB_CARD_H = Inches(0.3)
+SIB_CARD_GAP = Inches(0.13)
+SIB_CARD_INSET = 0.08          # kaartje is aan elke kant 8% van de kolombreedte smaller
 TEXT_BOTTOM = SLIDE_H - Inches(0.55)
 
 
@@ -1039,6 +1046,8 @@ def _draw_chain(slide, model: _Model, code: str, links: _Links):
         node = _rounded(slide, left, top, col_w, node_h, None, line=LINE_COLOR, line_width=0.75, dashed=True)
         _shape_text(node, f'+ {more[col]} meer', size=size, color=MUTED, margin=Inches(0.04))
 
+    siblings_nav = _draw_sibling_cards(slide, model, code, pos, shown, col_w, node_h, links)
+
     # Directe verbindingen staan ook als blokjes onder de keten; ook daar
     # kan een ondersteunende relatie (gestippelde rand) of een link zitten.
     direct = {**model.parents[code], **model.children[code]}
@@ -1053,7 +1062,47 @@ def _draw_chain(slide, model: _Model, code: str, links: _Links):
             legend += ' Klik op een element om naar de eigen slide te gaan.'
     else:
         legend = 'Dit element heeft (nog) geen verbindingen met andere zichtbare elementen.'
+    if siblings_nav is not None:
+        legend += (f' ▲/▼ = vorig/volgend element onder {siblings_nav.parent}'
+                   f' ({siblings_nav.index} van {siblings_nav.count}).')
     _add_text(slide, MARGIN, CHAIN_NODES_TOP + CHAIN_NODES_H + Inches(0.04), CONTENT_W, Inches(0.2), legend, size=8, color=MUTED)
+
+
+def _draw_sibling_cards(slide, model: _Model, code: str, pos: dict[str, tuple[int, int]],
+                        shown: dict[int, list[str]], col_w: int, node_h: int, links: _Links) -> '_SiblingNav | None':
+    """Schaduwkaartjes (DOEL-117): boven het geselecteerde element een vaag,
+    gestippeld kaartje van het vorige broertje (▲), eronder van het volgende
+    (▼), allebei klikbaar. Alleen als het element de enige in zijn kolom is
+    (anders is er geen vrije ruimte) en er een broertje met een eigen slide
+    is. Geeft de navigatie terug als er een kaartje is getekend (voor de
+    positie in de legenda), anders None."""
+    nav = model.sibling_nav(code)
+    col = model.elements[code]['col']
+    if nav.count < 2 or code not in pos or len(shown.get(col, [])) != 1:
+        return None
+    left, top = pos[code]
+    inset = int(col_w * SIB_CARD_INSET)
+    card_w = col_w - 2 * inset
+    color = model.color_of(model.elements[code])
+    drawn = False
+    for target, arrow, card_top, direction in (
+        (nav.prev, '▲', top - SIB_CARD_GAP - SIB_CARD_H, 'Vorige'),
+        (nav.next, '▼', top + node_h + SIB_CARD_GAP, 'Volgende'),
+    ):
+        if target is None or target not in links.linkable:
+            continue
+        if card_top < CHAIN_NODES_TOP - Inches(0.05) or card_top + SIB_CARD_H > CHAIN_NODES_TOP + CHAIN_NODES_H:
+            continue  # past niet in het ketenvlak
+        el = model.elements[target]
+        card = _rounded(slide, left + inset, card_top, card_w, SIB_CARD_H, _tint(color, 0.9),
+                        line=_tint(color, 0.35), line_width=0.75, dashed=True)
+        label = _fit(f'{arrow} {target} {el["name"]}'.strip(), card_w - Inches(0.08), SIB_CARD_H, 7)
+        _shape_text(card, label, size=7, color=MUTED, margin=Inches(0.04))
+        card.name = f'broertje {direction.lower()} {target}'
+        links.add(card, target, f'{direction} onder {nav.parent}: {target} — {el["name"]}' if el['name']
+                  else f'{direction} onder {nav.parent}: {target}')
+        drawn = True
+    return nav if drawn else None
 
 
 # ---- element-slide: tekst links, verbindingen als blokjes rechts ----------
