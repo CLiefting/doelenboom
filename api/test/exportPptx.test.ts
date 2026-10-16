@@ -129,6 +129,85 @@ describe('PowerPoint-export van een doelenboom (DOEL-88)', () => {
     }
   });
 
+  // ---- Boomfilter (DOEL-107): keuzes valideren ----
+
+  it('parsePptxOptions: Boomfilter in boomvolgorde en ontdubbeld; zonder filter geen extra velden', () => {
+    const cols = ['A'];
+    const codes = ['E1', 'E2', 'E3', 'E4'];
+    assert.deepEqual(parsePptxOptions({}, cols, codes), { options: { visibleColumns: cols, slideColumns: [], perRow: 4 } });
+    assert.deepEqual(
+      parsePptxOptions({ visibleElements: ['E3', 'E1', 'E3'], filterPicks: ['E3'] }, cols, codes),
+      { options: { visibleColumns: cols, slideColumns: [], perRow: 4, visibleElements: ['E1', 'E3'], filterPicks: ['E3'] } }
+    );
+    assert.deepEqual(
+      parsePptxOptions({ visibleElements: ['E2'] }, cols, codes),
+      { options: { visibleColumns: cols, slideColumns: [], perRow: 4, visibleElements: ['E2'], filterPicks: [] } }
+    );
+  });
+
+  it('parsePptxOptions: weigert onbekende elementen, verkeerde types, een leeg filter en picks buiten het filter', () => {
+    const codes = ['E1', 'E2'];
+    const bad: unknown[] = [
+      { visibleElements: 'E1' }, { visibleElements: [] }, { visibleElements: ['Z9'] }, { visibleElements: [1] },
+      { visibleElements: [['E1']] }, { visibleElements: [null] }, { visibleElements: { E1: true } },
+      { visibleElements: ['E1', 'E2', 'E1'] }, // meer codes dan er elementen zijn
+      { filterPicks: ['E1'] }, // picks zonder filter
+      { visibleElements: ['E1'], filterPicks: ['E2'] }, // pick buiten het filter
+      { visibleElements: ['E1'], filterPicks: 'E1' }, { visibleElements: ['E1'], filterPicks: [7] },
+      { visibleElements: ['E1'], filterPicks: ['Z9'] },
+    ];
+    for (const body of bad) {
+      const result = parsePptxOptions(body, ['A'], codes);
+      assert.ok('error' in result, `had geweigerd moeten worden: ${JSON.stringify(body)}`);
+    }
+    // Zonder elementen in de boom kan er ook niets gefilterd worden.
+    assert.ok('error' in parsePptxOptions({ visibleElements: ['E1'] }, ['A']));
+  });
+
+  it('A01/A03: Boomfilter met een element van een andere boom, injectie of verkeerde types geeft 400, geen 500', async () => {
+    const bodies: unknown[] = [
+      { visibleElements: ['X1'] }, // bestaat alleen in de andere boom
+      { visibleElements: ['P1', 'X1'] },
+      { visibleElements: ["P1'; drop table elements; --"] }, { visibleElements: ['<script>alert(1)</script>'] },
+      { visibleElements: ['p1'] }, { visibleElements: [' P1'] }, { visibleElements: ['P1\u0000'] },
+      { visibleElements: 'P1' }, { visibleElements: [] }, { visibleElements: [{ $ne: null }] },
+      { visibleElements: Array.from({ length: 5000 }, () => 'P1') },
+      { filterPicks: ['P1'] }, { visibleElements: ['P1'], filterPicks: ['B1'] },
+      { visibleElements: ['P1'], filterPicks: [{ $gt: '' }] },
+    ];
+    for (const body of bodies) {
+      const res = await exportPptx(body, adminToken);
+      assert.equal(res.status, 400, `body ${JSON.stringify(body).slice(0, 80)}`);
+      const text = await res.text();
+      assert.ok(!text.includes('drop table') && !text.includes('<script>') && !text.includes('X1'), 'foutmelding herhaalt de invoer niet');
+    }
+    assert.deepEqual(await exportAudit(), []);
+    assert.equal((await pool.query('select count(*)::int as n from elements where doelenboom_id = $1', [doelenboomId])).rows[0].n, 4);
+  });
+
+  it('Boomfilter: de presentatie bevat alleen de gefilterde elementen en de slidetelling volgt mee', async (t) => {
+    if (!excelServiceReachable) return t.skip('excel-service niet bereikbaar — zie EXCEL_SERVICE_URL');
+    await pool.query(`delete from audit_log where doelenboom_id = $1 and event_type = 'doelenboom_exported'`, [doelenboomId]);
+    const res = await exportPptx({
+      visibleElements: ['P1', 'C1', 'B1'], filterPicks: ['B1'], slideColumns: ['Operationele benefit'],
+    });
+    assert.equal(res.status, 200);
+    const slides = readSlides(Buffer.from(await res.arrayBuffer()));
+    // snoer + gefilterde boom + tussenslide + B1 (B2 valt buiten het filter)
+    assert.equal(slides.length, 4);
+    const all = slides.join('\n');
+    assert.ok(!all.includes('Tweede benefit') && !all.includes('overzicht-element B2'));
+    assert.match(slides[1], /DE GEFILTERDE BOOM/);
+    assert.match(slides[1], /Gefilterde boom: 3 van 4 elementen\./);
+    assert.match(slides[1], /overzicht-element B1/);
+    const rows = await exportAudit();
+    assert.equal(rows.length, 1);
+    assert.deepEqual(rows[0].detail, {
+      kind: 'doelenboom-pptx', format: 'pptx', slideColumns: ['Operationele benefit'], slides: 4, filtered: true, elements: 3,
+    });
+    await pool.query(`delete from audit_log where doelenboom_id = $1 and event_type = 'doelenboom_exported'`, [doelenboomId]);
+  });
+
   // ---- A01: toegang ----
 
   it('A01: zonder token 401', async () => {
@@ -206,15 +285,21 @@ describe('PowerPoint-export van een doelenboom (DOEL-88)', () => {
     assert.match(res.headers.get('content-disposition') ?? '', /^attachment; filename="Doelenboom_[A-Za-z0-9_]+_Testboom_\d{6}\.pptx"$/);
     assert.match(res.headers.get('access-control-expose-headers') ?? '', /Content-Disposition/i);
     const slides = readSlides(Buffer.from(await res.arrayBuffer()));
-    // snoer + tussenslide + B1 + B2
-    assert.equal(slides.length, 4);
+    // snoer + totale boom (DOEL-103) + tussenslide + B1 + B2
+    assert.equal(slides.length, 5);
     assert.match(slides[0], /1\. Project/);
     assert.match(slides[0], /per element uitgewerkt/);
-    const b1 = slides.find((s) => s.includes('B1 — Voorbeeldbenefit'));
+    assert.match(slides[1], /de totale boom/i);
+    assert.match(slides[1], /overzicht-element B1/);
+    assert.match(slides[1], /overzicht-element P1/);
+    assert.match(slides[2], /kolomelement B1/); // tussenslide: elementen als blokjes
+    const b1 = slides.find((s) => s.includes('<a:t>B1 — Voorbeeldbenefit</a:t>')); // de titel, niet een tooltip op een andere slide
     assert.ok(b1, 'slide voor B1');
     assert.match(b1, /Omschrijving van B1/);
     assert.match(b1, /KPI van B1/);
-    assert.match(b1, /C1 — Voorbeeldcapability/);
+    // Sinds DOEL-100 staan verbindingen als blokjes (code en naam in losse runs).
+    assert.match(b1, /name="verbinding C1"/);
+    assert.match(b1, /Voorbeeldcapability/);
     assert.match(b1, /element P1/); // hele pad: ook het project onder de capability
   });
 
@@ -237,8 +322,8 @@ describe('PowerPoint-export van een doelenboom (DOEL-88)', () => {
     const slides = readSlides(Buffer.from(await res.arrayBuffer()));
     const all = slides.join('\n');
     assert.ok(!all.includes('Capability') && !all.includes('Voorbeeldcapability'));
-    const b1 = slides.find((s) => s.includes('B1 — Voorbeeldbenefit'));
-    assert.ok(b1 && b1.includes('P1 — Voorbeeldproject'), 'project hangt nu direct onder de benefit');
+    const b1 = slides.find((s) => s.includes('<a:t>B1 — Voorbeeldbenefit</a:t>')); // de titel, niet een tooltip op een andere slide
+    assert.ok(b1 && b1.includes('name="verbinding P1"') && b1.includes('Voorbeeldproject'), 'project hangt nu direct onder de benefit');
   });
 
   // ---- A09: auditlog ----
@@ -249,7 +334,7 @@ describe('PowerPoint-export van een doelenboom (DOEL-88)', () => {
     assert.equal((await exportPptx({ slideColumns: ['Project'] }, editorToken)).status, 200);
     const rows = await exportAudit();
     assert.equal(rows.length, 1);
-    assert.deepEqual(rows[0].detail, { kind: 'doelenboom-pptx', format: 'pptx', slideColumns: ['Project'], slides: 3 });
+    assert.deepEqual(rows[0].detail, { kind: 'doelenboom-pptx', format: 'pptx', slideColumns: ['Project'], slides: 4 });
     assert.ok(rows[0].user_id && rows[0].tenant_id);
     assert.ok(!JSON.stringify(rows[0].detail).includes('Voorbeeld'));
   });
@@ -270,10 +355,19 @@ describe('PowerPoint-export van een doelenboom (DOEL-88)', () => {
     assert.deepEqual(await exportAudit(), []);
   });
 
+  it('A04 (DOEL-107): met een Boomfilter telt alleen de gefilterde set voor het maximum', async (t) => {
+    if (!excelServiceReachable) return t.skip('excel-service niet bereikbaar — zie EXCEL_SERVICE_URL');
+    const res = await exportPptx({ slideColumns: ['Capability'], visibleElements: ['C1', 'Q1', 'Q2'] }, adminToken);
+    assert.equal(res.status, 200);
+    // snoer + gefilterde boom + tussenslide + C1, Q1, Q2
+    assert.equal(readSlides(Buffer.from(await res.arrayBuffer())).length, 6);
+    await pool.query(`delete from audit_log where doelenboom_id = $1 and event_type = 'doelenboom_exported'`, [doelenboomId]);
+  });
+
   it('A04: dezelfde grote boom mag wel zonder die kolom uit te werken', async (t) => {
     if (!excelServiceReachable) return t.skip('excel-service niet bereikbaar — zie EXCEL_SERVICE_URL');
     const res = await exportPptx({ slideColumns: ['Project'] }, adminToken);
     assert.equal(res.status, 200);
-    assert.equal(readSlides(Buffer.from(await res.arrayBuffer())).length, 3);
+    assert.equal(readSlides(Buffer.from(await res.arrayBuffer())).length, 4); // snoer + totale boom + tussenslide + P1
   });
 });

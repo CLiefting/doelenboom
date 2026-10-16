@@ -118,14 +118,28 @@ const PPTX_PER_ROW_MAX = 6;
 const PPTX_PER_ROW_DEFAULT = 4;
 const PPTX_SNOER_MAX_ROWS = 4;
 
-type PptxOptions = { visibleColumns: string[]; slideColumns: string[]; perRow: number };
+type PptxOptions = {
+  visibleColumns: string[];
+  slideColumns: string[];
+  perRow: number;
+  // Boomfilter (DOEL-107): alleen aanwezig als het venster een gefilterde boom
+  // meestuurt. visibleElements = de elementen die in de presentatie komen,
+  // filterPicks = de gekozen elementen waarvan de paden de lijnen bepalen.
+  visibleElements?: string[];
+  filterPicks?: string[];
+};
 
 // Valideert de keuzes uit het dialoogvenster tegen de kolommen van DEZE
 // doelenboom: alleen bestaande kolomnamen (geen aliassen, geen vrije tekst)
 // komen erdoor. Onbekende namen worden geweigerd in plaats van stil genegeerd,
 // zodat een verouderd scherm (kolommen intussen gewijzigd) een duidelijke
-// melding krijgt.
-export function parsePptxOptions(body: unknown, columnNames: string[]): { error: string } | { options: PptxOptions } {
+// melding krijgt. Hetzelfde geldt voor het Boomfilter (DOEL-107): alleen
+// codes van elementen uit DEZE doelenboom (elementCodes) komen erdoor.
+export function parsePptxOptions(
+  body: unknown,
+  columnNames: string[],
+  elementCodes: string[] = []
+): { error: string } | { options: PptxOptions } {
   const input = body && typeof body === 'object' && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
   const known = new Set(columnNames);
 
@@ -161,13 +175,37 @@ export function parsePptxOptions(body: unknown, columnNames: string[]): { error:
   }
 
   // In kolomvolgorde, zodat de volgorde in de body er niet toe doet.
-  return {
-    options: {
-      visibleColumns: columnNames.filter((n) => visible.includes(n)),
-      slideColumns: columnNames.filter((n) => slides.includes(n)),
-      perRow,
-    },
+  const options: PptxOptions = {
+    visibleColumns: columnNames.filter((n) => visible.includes(n)),
+    slideColumns: columnNames.filter((n) => slides.includes(n)),
+    perRow,
   };
+
+  // Boomfilter: weglaten = geen filter (de hele boom).
+  if (input.visibleElements === undefined) {
+    if (input.filterPicks !== undefined) return { error: 'filterPicks kan alleen samen met visibleElements.' };
+    return { options };
+  }
+  const knownCodes = new Set(elementCodes);
+  const readCodes = (value: unknown, field: string, allowed: Set<string>): { error: string } | Set<string> => {
+    if (!Array.isArray(value)) return { error: `${field} moet een lijst van elementcodes zijn.` };
+    if (value.length > elementCodes.length) return { error: `${field} bevat meer codes dan er elementen zijn.` };
+    const out = new Set<string>();
+    for (const v of value) {
+      if (typeof v !== 'string' || !allowed.has(v)) return { error: `${field} bevat een onbekend element.` };
+      out.add(v);
+    }
+    return out;
+  };
+  const keep = readCodes(input.visibleElements, 'visibleElements', knownCodes);
+  if (!(keep instanceof Set)) return keep;
+  if (keep.size === 0) return { error: 'Het filter bevat geen elementen om te exporteren.' };
+  const picks = input.filterPicks === undefined ? new Set<string>() : readCodes(input.filterPicks, 'filterPicks', keep);
+  if (!(picks instanceof Set)) return picks;
+  // In boomvolgorde, zodat de volgorde in de body er niet toe doet.
+  options.visibleElements = elementCodes.filter((c) => keep.has(c));
+  options.filterPicks = elementCodes.filter((c) => picks.has(c));
+  return { options };
 }
 
 // POST /api/doelenbomen/:id/export-pptx  { visibleColumns?, slideColumns?, perRow? }
@@ -183,21 +221,25 @@ exportsRouter.post('/doelenbomen/:id/export-pptx', requireTenantRoleForDoelenboo
   if (!tree) return res.status(404).json({ error: 'Doelenboom niet gevonden' });
 
   const columnNames = tree.columns.map((c) => c.typeName);
-  const parsed = parsePptxOptions(req.body, columnNames);
+  const elements = tree.elements as Array<Record<string, unknown>>;
+  const elementCodes = [...new Set(elements.map((el) => String(el.code ?? '')))];
+  const parsed = parsePptxOptions(req.body, columnNames, elementCodes);
   if ('error' in parsed) return res.status(400).json({ error: parsed.error });
   const { options } = parsed;
 
   // Aantal slides vooraf begrenzen (zelfde telling als in tree_pptx.py en het
-  // dialoogvenster): snoer + per gekozen kolom een tussenslide en een slide
-  // per element. Voorkomt dat één verzoek de excel-service lang bezighoudt.
-  const elements = tree.elements as Array<Record<string, unknown>>;
+  // dialoogvenster): snoer + de totale boom (DOEL-103) + per gekozen kolom een
+  // tussenslide en een slide per element. Voorkomt dat één verzoek de excel-service lang bezighoudt.
+  // Met een Boomfilter (DOEL-107) tellen alleen de gefilterde elementen.
+  const kept = options.visibleElements ? new Set(options.visibleElements) : null;
   const perColumn = new Map<string, number>();
   for (const el of elements) {
+    if (kept && !kept.has(String(el.code ?? ''))) continue;
     const column = columnForTypeName(tree.columns, String(el.type ?? ''));
     if (column) perColumn.set(column.typeName, (perColumn.get(column.typeName) ?? 0) + 1);
   }
   const snoerSlides = Math.max(1, Math.ceil(Math.ceil(options.visibleColumns.length / options.perRow) / PPTX_SNOER_MAX_ROWS));
-  const slideCount = options.slideColumns.reduce((sum, name) => sum + 1 + (perColumn.get(name) ?? 0), snoerSlides);
+  const slideCount = options.slideColumns.reduce((sum, name) => sum + 1 + (perColumn.get(name) ?? 0), snoerSlides + 1);
   if (slideCount > PPTX_MAX_SLIDES) {
     return res.status(422).json({
       error:
@@ -270,7 +312,11 @@ exportsRouter.post('/doelenbomen/:id/export-pptx', requireTenantRoleForDoelenboo
     userId: req.user!.id,
     tenantId: await tenantIdForDoelenboom(req.params.id),
     doelenboomId: req.params.id,
-    detail: { kind: 'doelenboom-pptx', format: 'pptx', slideColumns: options.slideColumns, slides: slideCount },
+    detail: {
+      kind: 'doelenboom-pptx', format: 'pptx', slideColumns: options.slideColumns, slides: slideCount,
+      // Alleen bij een Boomfilter: het aantal elementen, niet welke.
+      ...(options.visibleElements ? { filtered: true, elements: options.visibleElements.length } : {}),
+    },
   });
 
   // Zelfde naamgeving als de Excel-export: Doelenboom_<Tenant>_<Naam>_<JJMMDD>.

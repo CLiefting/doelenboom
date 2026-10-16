@@ -8,18 +8,44 @@ Slide-structuur:
        volgende regel(s). Kolommen waarvoor element-slides volgen zijn
        gemarkeerd. Meer dan SNOER_MAX_ROWS regels loopt door op een
        vervolgslide.
+  2.   De totale boom (DOEL-103): alle zichtbare kolommen naast elkaar met
+       al hun elementen en de relaties ertussen, als PowerPoint-vormen.
+       Vakhoogte, tussenruimte en lettergrootte schalen per kolom mee, zodat
+       de boom altijd op één slide past.
   Per gekozen kolom:
-  n.   Een tussenslide met de kolom.
+  n.   Een tussenslide met de kolom, met alle elementen van die kolom als
+       blokjes in de kolomkleur (DOEL-103).
   n+1. Eén slide per element, in boomvolgorde: bovenaan de boom gefilterd op
        dat ene element (het hele pad omhoog en omlaag, getekend met
-       PowerPoint-vormen), daaronder de beschrijving, KPI, de directe
-       verbindingen, tags en organisatieonderdelen. Lange tekst loopt door op
-       een vervolgslide.
+       PowerPoint-vormen). Daaronder links (maximaal 1/3 van de breedte) de
+       beschrijving, KPI, tags en organisatieonderdelen, en rechts de directe
+       verbindingen als blokjes in de kleur van hun kolom (DOEL-100).
+       Lange tekst of heel veel verbindingen lopen door op een vervolgslide.
+
+Klikbaar (DOEL-100, DOEL-103): elk blokje en elk vak in de keten of in de
+totale boom is een interne hyperlink naar de slide van dat element, mits dat
+element zelf een slide in deze presentatie heeft. Een kolomkop in de totale
+boom springt naar de tussenslide van die kolom, mits die kolom is uitgewerkt.
+Elke slide behalve de totale boom zelf heeft in de voettekst een "Home"-knop
+terug naar de totale boom (DOEL-106). Elke element-slide (ook een vervolgslide)
+heeft daarnaast "Vorige" en "Volgende": een sprong naar het vorige of volgende
+broertje, dat wil zeggen het element in dezelfde kolom met dezelfde primaire
+ouder, in boomvolgorde (DOEL-117). Zonder zo'n broertje is de knop grijs en
+niet klikbaar. In de keten staan boven en onder het geselecteerde element
+bovendien "schaduwkaartjes" van het vorige (▲) en volgende (▼) broertje; ook
+die zijn klikbaar. De legenda onder de keten noemt de positie ("2 van 7").
+Alleen sprongen binnen de presentatie, nooit een externe link.
 
 Verborgen kolommen (options.visibleColumns) komen nergens in de presentatie
 voor: niet in het snoer, niet in de keten en niet onder "Verbonden met".
 Relaties die via een verborgen kolom lopen worden doorgetrokken naar de
 eerstvolgende zichtbare kolom (zie _visible_edges).
+
+Boomfilter (DOEL-107): met options.visibleElements bevat de presentatie
+alleen die elementen (de boom zoals hij gefilterd op het scherm staat); met
+options.filterPicks blijven daarbinnen alleen de relaties over die op het pad
+van de gekozen elementen liggen, net als op het scherm. Slide 1 en 2 melden
+dat het een gefilterde boom is.
 
 Puur een export, geen import. Bewust NIET in de presentatie: kenmerken,
 motivaties van afwijkingen en projectgegevens (status, producten,
@@ -40,6 +66,7 @@ from pptx.dml.color import RGBColor
 from pptx.enum.dml import MSO_LINE
 from pptx.enum.shapes import MSO_CONNECTOR, MSO_SHAPE
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
+from pptx.oxml.ns import qn
 from pptx.util import Emu, Inches, Pt
 
 from .project_pptx import (
@@ -60,8 +87,8 @@ from .project_pptx import (
     _truncate,
 )
 
-# Bovengrens op het aantal slides (snoer + tussenslides + element-slides,
-# vóór eventuele vervolgslides). Dezelfde grens staat in de API
+# Bovengrens op het aantal slides (snoer + totale boom + tussenslides +
+# element-slides, vóór eventuele vervolgslides). Dezelfde grens staat in de API
 # (routes/exports.ts) en in het dialoogvenster (tree.html).
 MAX_SLIDES = 300
 PER_ROW_MIN = 2
@@ -74,6 +101,13 @@ CHAIN_MAX_ROWS = 6
 # Een element krijgt hooguit zoveel slides (1 + vervolg); daarna wordt de
 # tekst ingekort.
 MAX_SLIDES_PER_ELEMENT = 3
+# Totale boom (DOEL-103): hooguit zoveel vakken per kolom en zoveel lijnen op
+# de slide; de rest wordt samengevat ("+ n meer") resp. weggelaten met een
+# melding in de legenda. Begrenst het aantal vormen bij hele grote bomen.
+OVERVIEW_MAX_ROWS = 60
+OVERVIEW_MAX_LINES = 3000
+# Tussenslide (DOEL-103): hooguit zoveel blokjes; de rest wordt "+ n meer".
+SECTION_MAX_CHIPS = 140
 
 LINE_COLOR = RGBColor(0x8A, 0x8F, 0x98)
 FALLBACK_COLOR = RGBColor(0x6C, 0x6F, 0x76)
@@ -183,15 +217,77 @@ def _header(slide, kicker: str, title: str):
     _add_rect(slide, MARGIN, Inches(1.35), CONTENT_W, Emu(1), MUTED)
 
 
-def _footer(slide, meta: dict[str, Any], page: int):
+# Sleutel van de totale boom in _Links (doel van de Home-knop, DOEL-106). Een
+# tuple, zodat hij nooit kan botsen met een elementcode (altijd een str).
+HOME_KEY = ('home',)
+HOME_W = Inches(0.62)
+HOME_H = Inches(0.24)
+PAGE_NO_W = Inches(0.6)
+# Vorige/Volgende tussen broertjes (DOEL-117), links van de Home-knop.
+NAV_PREV_W = Inches(0.78)
+NAV_NEXT_W = Inches(0.88)
+NAV_GAP = Inches(0.08)
+NAV_OFF_FILL = RGBColor(0xE1, 0xE4, 0xE9)
+NAV_OFF_TEXT = RGBColor(0x9A, 0x9F, 0xA8)
+
+
+class _SiblingNav:
+    """Vorige en volgende broertje van een element (DOEL-117): codes of None,
+    plus de primaire ouder voor de tooltip."""
+    __slots__ = ('prev', 'next', 'parent', 'index', 'count')
+
+    def __init__(self, prev: str | None, nxt: str | None, parent: str | None, index: int = 1, count: int = 1):
+        self.prev, self.next, self.parent = prev, nxt, parent
+        self.index, self.count = index, count  # positie (1-based) en aantal broertjes incl. zichzelf
+
+
+def _nav_button(slide, left: int, width: int, label: str, name: str, target: str | None,
+                model: '_Model | None', nav: _SiblingNav, links: '_Links', direction: str):
+    """Eén Vorige/Volgende-knop. Zonder doel met een eigen slide: grijs en
+    zonder link."""
+    active = target is not None and target in links.linkable
+    button = _rounded(slide, left, SLIDE_H - Inches(0.44), width, HOME_H,
+                      ACCENT if active else NAV_OFF_FILL, radius=0.3)
+    button.name = name
+    _shape_text(button, label, size=9, bold=True, color=WHITE if active else NAV_OFF_TEXT, margin=Inches(0.02))
+    if active:
+        target_name = model.elements[target]['name'] if model is not None else ''
+        links.add(button, target, f'{direction} onder {nav.parent}: {target} — {target_name}' if target_name
+                  else f'{direction} onder {nav.parent}: {target}')
+
+
+def _footer(slide, meta: dict[str, Any], page: int, links: '_Links | None' = None,
+            nav: _SiblingNav | None = None, model: '_Model | None' = None):
+    """Voettekst met paginanummer. Met `links` komt er links van het
+    paginanummer een Home-knop terug naar de totale boom; de totale boom zelf
+    roept dit zonder `links` aan. Met `nav` (element-slides, DOEL-117) komen
+    links van Home de knoppen Vorige en Volgende."""
     parts = [_clean(meta.get('doelenboom')), _clean(meta.get('tenant'))]
     text = ' — '.join(p for p in parts if p)
     exported = _fmt_date(meta.get('exportedAt'))
     if exported != '-':
         text = f'{text} · {exported}' if text else exported
-    _add_text(slide, MARGIN, SLIDE_H - Inches(0.4), CONTENT_W - Inches(0.6), Inches(0.3), _truncate(text, 150), size=9, color=MUTED)
+    with_nav = links is not None and nav is not None
+    home_left = SLIDE_W - MARGIN - PAGE_NO_W - HOME_W
+    next_left = home_left - NAV_GAP - NAV_NEXT_W
+    prev_left = next_left - NAV_GAP - NAV_PREV_W
+    if with_nav:
+        text_w = prev_left - Inches(0.2) - MARGIN
+    else:
+        text_w = CONTENT_W - PAGE_NO_W - (HOME_W + Inches(0.2) if links is not None else 0)
+    _add_text(slide, MARGIN, SLIDE_H - Inches(0.4), text_w, Inches(0.3),
+              _truncate(text, 120 if with_nav else 150), size=9, color=MUTED)
+    if with_nav:
+        _nav_button(slide, prev_left, NAV_PREV_W, '◄ Vorige', 'vorige-knop', nav.prev, model, nav, links, 'Vorige')
+        _nav_button(slide, next_left, NAV_NEXT_W, 'Volgende ►', 'volgende-knop', nav.next, model, nav, links, 'Volgende')
+    if links is not None:
+        home = _rounded(slide, home_left, SLIDE_H - Inches(0.44), HOME_W, HOME_H,
+                        ACCENT, radius=0.3)
+        home.name = 'home-knop'
+        _shape_text(home, 'Home', size=9, bold=True, color=WHITE, margin=Inches(0.02))
+        links.add(home, HOME_KEY, 'Terug naar de totale boom')
     _add_text(
-        slide, SLIDE_W - MARGIN - Inches(0.6), SLIDE_H - Inches(0.4), Inches(0.6), Inches(0.3),
+        slide, SLIDE_W - MARGIN - PAGE_NO_W, SLIDE_H - Inches(0.4), PAGE_NO_W, Inches(0.3),
         str(page), size=9, color=MUTED, align=PP_ALIGN.RIGHT,
     )
 
@@ -252,6 +348,14 @@ class _Model:
                 'elements': [],
             })
 
+        # Boomfilter (DOEL-107): alleen deze elementen horen in de presentatie.
+        keep_opt = options.get('visibleElements')
+        self.filtered = isinstance(keep_opt, list)
+        keep = {c for c in (_clean(v) for v in keep_opt if isinstance(v, str)) if c} if self.filtered else set()
+        # Aantal elementen in zichtbare kolommen dat door het filter wegvalt.
+        self.filtered_out = 0
+        skipped: set[str] = set()
+
         # Elementen in boomvolgorde (zoals aangeleverd: sort_order, code).
         self.elements: dict[str, dict[str, Any]] = {}
         self.order: dict[str, int] = {}
@@ -260,10 +364,17 @@ class _Model:
             if not isinstance(raw, dict):
                 continue
             code = _clean(raw.get('code'))
-            if not code or code in self.elements or code in hidden_codes:
+            if not code or code in self.elements or code in hidden_codes or code in skipped:
                 continue
             el_type = _clean(raw.get('type'))
             col = type_to_col.get(el_type)
+            if self.filtered and code not in keep:
+                # Weggefilterd: niet tonen en er ook geen relaties doorheen
+                # trekken (anders dan bij een verborgen kolom).
+                skipped.add(code)
+                if col is not None:
+                    self.filtered_out += 1
+                continue
             if col is None:
                 # Verborgen kolom (of onbekend type): niet tonen, maar wel
                 # onthouden om relaties erdoorheen te kunnen doortrekken.
@@ -283,6 +394,9 @@ class _Model:
             self.columns[col]['elements'].append(code)
 
         self._visible_edges(data.get('edges') or [], hidden_codes)
+        picks_opt = options.get('filterPicks')
+        if self.filtered and isinstance(picks_opt, list):
+            self._prune_to_picks([_clean(v) for v in picks_opt if isinstance(v, str)])
 
         tag_names = {
             _clean(t.get('code')): _clean(t.get('name')) or _clean(t.get('code'))
@@ -363,6 +477,32 @@ class _Model:
             frontier = nxt
         return dist
 
+    def _prune_to_picks(self, picks: list[str]):
+        """Boomfilter: houdt alleen de relaties over die op het pad van een
+        gekozen element liggen -- omhoog vanaf het element of een voorouder,
+        of omlaag vanaf het element of een nakomeling. Zelfde regel als het
+        scherm (computeEffectiveEdges in tree.html). Zonder geldige keuze
+        blijft alles staan."""
+        picks = [p for p in picks if p in self.elements]
+        if not picks:
+            return
+        up, down = set(picks), set(picks)
+        for pick in picks:
+            up.update(self._closure(pick, self.parents))
+            down.update(self._closure(pick, self.children))
+        for child in self.elements:
+            for parent in list(self.parents[child]):
+                if child not in up and parent not in down:
+                    del self.parents[child][parent]
+                    del self.children[parent][child]
+
+    def filter_note(self) -> str:
+        """'Gefilterde boom: 32 van 180 elementen.' of '' zonder filter."""
+        if not self.filtered:
+            return ''
+        shown = len(self.elements)
+        return f'Gefilterde boom: {shown} van {shown + self.filtered_out} elementen.'
+
     def chain(self, code: str) -> dict[str, int]:
         """Het hele pad van één element: alles erboven en alles eronder,
         met de afstand tot het element (het element zelf = 0)."""
@@ -372,6 +512,29 @@ class _Model:
         for other, d in self._closure(code, self.children).items():
             result.setdefault(other, d)
         return result
+
+    def main_parent(self, code: str) -> str | None:
+        """De primaire ouder van een element (DOEL-117): de eerste primaire
+        ouder in boomvolgorde, na doortrekken over verborgen kolommen en na het
+        Boomfilter. Ondersteunende relaties tellen niet mee; zonder primaire
+        ouder: None."""
+        cache = self.__dict__.setdefault('_main_parent', {})
+        if code not in cache:
+            primary = [p for p, is_primary in self.parents.get(code, {}).items() if is_primary]
+            cache[code] = min(primary, key=lambda c: self.order.get(c, 0)) if primary else None
+        return cache[code]
+
+    def sibling_nav(self, code: str) -> _SiblingNav:
+        """Vorige en volgende broertje: elementen in dezelfde kolom met
+        dezelfde primaire ouder, in boomvolgorde."""
+        parent = self.main_parent(code)
+        if parent is None:
+            return _SiblingNav(None, None, None)
+        column = self.columns[self.elements[code]['col']]['elements']
+        siblings = [c for c in column if c == code or self.main_parent(c) == parent]
+        i = siblings.index(code)
+        return _SiblingNav(siblings[i - 1] if i > 0 else None,
+                           siblings[i + 1] if i + 1 < len(siblings) else None, parent, i + 1, len(siblings))
 
     def sorted_codes(self, codes) -> list[str]:
         return sorted(codes, key=lambda c: self.order.get(c, 0))
@@ -384,10 +547,11 @@ class _Model:
         return [c for c in self.columns if c['slides']]
 
     def planned_slides(self) -> int:
-        """Snoer + per gekozen kolom een tussenslide en een slide per element
-        (zonder vervolgslides) -- dezelfde telling als in het dialoogvenster."""
+        """Snoer + de totale boom + per gekozen kolom een tussenslide en een
+        slide per element (zonder vervolgslides) -- dezelfde telling als in
+        het dialoogvenster."""
         snoer_rows = math.ceil(len(self.columns) / self.per_row)
-        total = max(1, math.ceil(snoer_rows / SNOER_MAX_ROWS))
+        total = max(1, math.ceil(snoer_rows / SNOER_MAX_ROWS)) + 1
         for c in self.slide_columns():
             total += 1 + len(c['elements'])
         return total
@@ -399,7 +563,7 @@ def _element_count_text(n: int) -> str:
     return '1 element' if n == 1 else f'{n} elementen'
 
 
-def _slides_snoer(prs, model: _Model, meta: dict[str, Any], page: int) -> int:
+def _slides_snoer(prs, model: _Model, meta: dict[str, Any], page: int, links: '_Links') -> int:
     per_row = model.per_row
     columns = model.columns
     rows = [columns[i:i + per_row] for i in range(0, len(columns), per_row)]
@@ -420,6 +584,8 @@ def _slides_snoer(prs, model: _Model, meta: dict[str, Any], page: int) -> int:
         intro = 'De kolommen van deze doelenboom, in volgorde.'
         if any_slides:
             intro += ' De gemarkeerde kolommen zijn hierna per element uitgewerkt.'
+        if model.filtered:
+            intro += ' ' + model.filter_note()
         _add_text(slide, MARGIN, Inches(1.47), CONTENT_W, Inches(0.3), intro, size=12, color=MUTED)
 
         n_rows = len(page_rows)
@@ -504,7 +670,7 @@ def _slides_snoer(prs, model: _Model, meta: dict[str, Any], page: int) -> int:
                             _add_text(slide, ax + arrow_w + Inches(0.08), ay, label_w, arrow_h, _truncate(label, 30),
                                       size=9, color=MUTED, anchor=MSO_ANCHOR.MIDDLE)
         row_offset += n_rows
-        _footer(slide, meta, page)
+        _footer(slide, meta, page, links)
         page += 1
     return page
 
@@ -516,24 +682,267 @@ def _style_arrow(arrow):
     arrow.line.fill.background()
 
 
+# ---- interne sprongen ------------------------------------------------------
+
+def _col_key(index: int) -> tuple[str, int]:
+    """Sleutel van de tussenslide van een kolom in _Links. Een tuple, zodat
+    hij nooit kan botsen met een elementcode (altijd een str)."""
+    return ('kolom', index)
+
+
+class _Links:
+    """Verzamelt klikbare vormen (blokjes, vakken en kolomkoppen) en koppelt
+    ze na het bouwen aan hun doelslide -- die slide kan immers pas later in
+    de presentatie komen. Een doel is een elementcode of _col_key(kolom).
+    Alleen doelen met een eigen slide (linkable) krijgen een link; alleen
+    interne sprongen (hlinksldjump)."""
+
+    def __init__(self, linkable: set[Any]):
+        self.linkable = linkable
+        self.pending: list[tuple[Any, Any, str]] = []
+        self.slides: dict[Any, Any] = {}
+
+    def add(self, shape, key: Any, tooltip: str) -> bool:
+        if key not in self.linkable:
+            return False
+        self.pending.append((shape, key, _truncate(_clean(tooltip), 200)))
+        return True
+
+    def resolve(self):
+        for shape, key, tooltip in self.pending:
+            target = self.slides.get(key)
+            if target is None:
+                continue
+            shape.click_action.target_slide = target
+            hlink = shape._element.find('.//' + qn('a:hlinkClick'))
+            if hlink is not None and tooltip:
+                hlink.set('tooltip', tooltip)
+
+
+def _goto_tooltip(code: str, name: str) -> str:
+    return f'Ga naar {code} — {name}' if name else f'Ga naar {code}'
+
+
+# ---- slide 2: de totale boom (DOEL-103) -----------------------------------
+
+OVERVIEW_TOP = Inches(1.5)
+OVERVIEW_HEAD_H = Inches(0.34)
+OVERVIEW_NODES_TOP = Inches(1.93)
+OVERVIEW_NODES_BOTTOM = SLIDE_H - Inches(0.82)
+OVERVIEW_MAX_SLOT = Inches(0.5)
+OVERVIEW_MAX_FONT = 9.0
+
+
+def _overview_gap(n_cols: int) -> int:
+    """Ruimte tussen de kolommen: genoeg om de lijnen te kunnen volgen, maar
+    smaller naarmate er meer kolommen naast elkaar moeten."""
+    if n_cols <= 4:
+        return Inches(0.5)
+    if n_cols <= 6:
+        return Inches(0.36)
+    if n_cols <= 9:
+        return Inches(0.24)
+    return Inches(0.14)
+
+
+def _overview_scale(count: int) -> tuple[int, int, float]:
+    """(slothoogte, vakhoogte, lettergrootte) voor een kolom met `count`
+    vakken: zo groot als past, zodat ook een kolom met tientallen elementen
+    binnen de slide blijft."""
+    area = OVERVIEW_NODES_BOTTOM - OVERVIEW_NODES_TOP
+    slot_h = int(min(OVERVIEW_MAX_SLOT, area / max(1, count)))
+    node_h = int(slot_h * 0.86)
+    size = round(min(OVERVIEW_MAX_FONT, (node_h / 12700) / 1.25), 1)
+    return slot_h, node_h, size
+
+
+def _slide_overview(prs, model: _Model, meta: dict[str, Any], page: int, links: _Links) -> int:
+    slide = _blank_slide(prs)
+    links.slides[HOME_KEY] = slide
+    _header(slide, 'Doelenboom — de gefilterde boom' if model.filtered else 'Doelenboom — de totale boom',
+            _clean(meta.get('doelenboom')) or 'Doelenboom')
+
+    n_cols = len(model.columns)
+    gap = _overview_gap(n_cols)
+    col_w = int((CONTENT_W - (n_cols - 1) * gap) / n_cols)
+    area_h = OVERVIEW_NODES_BOTTOM - OVERVIEW_NODES_TOP
+
+    # Posities: per kolom de elementen in boomvolgorde, verticaal gecentreerd.
+    pos: dict[str, tuple[int, int, int, float]] = {}
+    more: dict[int, tuple[int, int, int, float, int]] = {}
+    for index, col in enumerate(model.columns):
+        codes = col['elements']
+        hidden = 0
+        if len(codes) > OVERVIEW_MAX_ROWS:
+            hidden = len(codes) - (OVERVIEW_MAX_ROWS - 1)
+            codes = codes[:OVERVIEW_MAX_ROWS - 1]
+        count = len(codes) + (1 if hidden else 0)
+        slot_h, node_h, size = _overview_scale(count)
+        left = int(MARGIN + index * (col_w + gap))
+        start = int(OVERVIEW_NODES_TOP + (area_h - count * slot_h) / 2)
+        for i, code in enumerate(codes):
+            pos[code] = (left, start + i * slot_h, node_h, size)
+        if hidden:
+            more[index] = (left, start + len(codes) * slot_h, node_h, size, hidden)
+
+    # Eerst de lijnen, zodat de vakken er bovenop liggen. Primaire relaties
+    # eerst: die blijven staan als de bovengrens wordt bereikt.
+    relations = []
+    for child in pos:
+        for parent, primary in model.parents[child].items():
+            if parent in pos and pos[parent][0] != pos[child][0]:
+                relations.append((not primary, model.order.get(child, 0), model.order.get(parent, 0), child, parent))
+    relations.sort()
+    skipped = max(0, len(relations) - OVERVIEW_MAX_LINES)
+    has_supporting = False
+    line_width = 1.0 if len(relations) <= 60 else (0.75 if len(relations) <= 250 else 0.5)
+    for supporting, _, _, child, parent in relations[:OVERVIEW_MAX_LINES]:
+        (cl, ct, ch, _), (pl, pt, ph, _) = pos[child], pos[parent]
+        x1, x2 = (cl + col_w, pl) if cl < pl else (cl, pl + col_w)
+        line = slide.shapes.add_connector(MSO_CONNECTOR.STRAIGHT, x1, ct + ch // 2, x2, pt + ph // 2)
+        line.line.color.rgb = LINE_COLOR
+        line.line.width = Pt(line_width)
+        line.name = f'overzicht-relatie {child} > {parent}' + (' (ondersteunend)' if supporting else '')
+        if supporting:
+            line.line.dash_style = MSO_LINE.DASH
+            has_supporting = True
+
+    # Kolomkoppen: klikbaar naar de tussenslide als de kolom is uitgewerkt.
+    any_col_link = False
+    for index, col in enumerate(model.columns):
+        left = int(MARGIN + index * (col_w + gap))
+        head = _add_rect(slide, left, OVERVIEW_TOP, col_w, OVERVIEW_HEAD_H, col['color'])
+        head.name = f'overzicht-kolom {index + 1}'
+        head_size = 10 if col_w >= Inches(1.6) else 8
+        label = f'{col["title"]} ({len(col["elements"])})'
+        _shape_text(head, _fit(label, col_w - Inches(0.1), OVERVIEW_HEAD_H, head_size), size=head_size, bold=True,
+                    color=_text_on(col['color']), margin=Inches(0.04))
+        if links.add(head, _col_key(index), f'Ga naar de kolom {col["title"]}'):
+            head.line.color.rgb = DARK
+            head.line.width = Pt(2.0)
+            any_col_link = True
+
+    any_el_link = False
+    for code, (left, top, node_h, size) in pos.items():
+        el = model.elements[code]
+        color = model.color_of(el)
+        node = _rounded(slide, left, top, col_w, node_h, _tint(color, 0.8), line=color,
+                        line_width=0.75 if size >= 7 else 0.5)
+        node.name = f'overzicht-element {code}'
+        label = _fit(f'{code} {el["name"]}'.strip(), col_w - Inches(0.08), node_h, size)
+        _shape_text(node, label, size=size, color=DARK, margin=Inches(0.04))
+        node.text_frame.margin_top = node.text_frame.margin_bottom = 0
+        if links.add(node, code, _goto_tooltip(code, el['name'])):
+            any_el_link = True
+    for index, (left, top, node_h, size, hidden) in more.items():
+        node = _rounded(slide, left, top, col_w, node_h, None, line=LINE_COLOR, line_width=0.5, dashed=True)
+        node.name = f'overzicht-meer {index + 1}'
+        _shape_text(node, f'+ {hidden} meer', size=size, color=MUTED, margin=Inches(0.04))
+        node.text_frame.margin_top = node.text_frame.margin_bottom = 0
+
+    legend = model.filter_note() or 'Alle zichtbare kolommen en elementen.'
+    if relations:
+        legend += ' Doorgetrokken lijn = primaire relatie'
+        legend += ', stippellijn = ondersteunende relatie.' if has_supporting else '.'
+    # Een klikbaar element staat altijd in een uitgewerkte kolom, dus dan is
+    # er ook een klikbare kolomkop.
+    if any_el_link:
+        legend += ' Klik op een kolomkop met donkere rand of op een element om naar de eigen slide te gaan.'
+    elif any_col_link:
+        legend += ' Klik op een kolomkop met donkere rand om naar die kolom te gaan.'
+    if skipped:
+        legend += f' Niet alle relaties zijn getekend ({OVERVIEW_MAX_LINES} van {len(relations)}).'
+    _add_text(slide, MARGIN, OVERVIEW_NODES_BOTTOM + Inches(0.06), CONTENT_W, Inches(0.2), legend, size=8, color=MUTED)
+    _footer(slide, meta, page)
+    return page + 1
+
+
 # ---- tussenslide per gekozen kolom ---------------------------------------
 
-def _slide_section(prs, model: _Model, col: dict[str, Any], meta: dict[str, Any], page: int) -> int:
+SECTION_COUNT_W = Inches(2.3)
+SECTION_CHIP_LEFT = MARGIN + SECTION_COUNT_W
+SECTION_CHIP_W = CONTENT_W - SECTION_COUNT_W
+SECTION_CHIP_GAP_X = Inches(0.08)
+SECTION_CHIP_GAP_Y = Inches(0.06)
+SECTION_BOTTOM = SLIDE_H - Inches(0.6)
+# (kolommen, lettergrootte): eerst ruim, zo nodig compacter tot het past.
+SECTION_CHIP_CONFIGS = ((4, 10.0), (5, 9.0), (6, 8.0), (8, 7.0), (10, 6.0))
+# (bovenkant, hoogte, titelgrootte) van het gekleurde blok: gewoon, of
+# compact bovenaan als er veel blokjes onder moeten passen.
+SECTION_BLOCKS = ((Inches(2.1), Inches(2.9), 40), (Inches(0.85), Inches(2.3), 32))
+
+
+def _section_chip_h(size: float) -> int:
+    return int(Pt(size * 1.22) + Inches(0.09))
+
+
+def _section_layout(n: int) -> tuple[tuple[int, int, int], int, float, int]:
+    """Kiest voor n blokjes de ruimste opmaak die past: (blok, kolommen,
+    lettergrootte, aantal getoonde blokjes). Past het zelfs compact niet,
+    dan worden de laatste samengevat als '+ n meer'."""
+    # Onder het gewone blok alleen de twee ruimste opmaken: liever het blok
+    # compact bovenaan dan blokjes waarin de naam nauwelijks nog past.
+    for block, configs in ((SECTION_BLOCKS[0], SECTION_CHIP_CONFIGS[:2]), (SECTION_BLOCKS[1], SECTION_CHIP_CONFIGS)):
+        area_h = SECTION_BOTTOM - (block[0] + block[1] + Inches(0.25))
+        for cols, size in configs:
+            rows = math.ceil(n / cols)
+            if rows * _section_chip_h(size) + (rows - 1) * SECTION_CHIP_GAP_Y <= area_h:
+                return block, cols, size, n
+    block = SECTION_BLOCKS[-1]
+    cols, size = SECTION_CHIP_CONFIGS[-1]
+    area_h = SECTION_BOTTOM - (block[0] + block[1] + Inches(0.25))
+    rows = int((area_h + SECTION_CHIP_GAP_Y) // (_section_chip_h(size) + SECTION_CHIP_GAP_Y))
+    return block, cols, size, min(n, rows * cols, SECTION_MAX_CHIPS) - 1
+
+
+def _slide_section(prs, model: _Model, col: dict[str, Any], meta: dict[str, Any], page: int, links: _Links) -> int:
     slide = _blank_slide(prs)
+    links.slides.setdefault(_col_key(model.columns.index(col)), slide)
     color = col['color']
     on = _text_on(color)
+    codes = col['elements']
+    (block_top, block_h, title_size), cols, size, shown = _section_layout(len(codes))
+    compact = block_h < Inches(2.9)
+
     _add_rect(slide, 0, 0, SLIDE_W, SLIDE_H, LIGHT_BG)
-    block_top, block_h = Inches(2.1), Inches(2.9)
     _add_rect(slide, 0, block_top, SLIDE_W, block_h, color)
-    _add_text(slide, MARGIN, block_top + Inches(0.35), CONTENT_W, Inches(0.35), 'KOLOM', size=13, bold=True, color=on)
-    _add_text(slide, MARGIN, block_top + Inches(0.75), CONTENT_W, Inches(0.9), _truncate(col['title'], 60),
-              size=40, bold=True, color=on)
+    _add_text(slide, MARGIN, block_top + Inches(0.25 if compact else 0.35), CONTENT_W, Inches(0.35), 'KOLOM',
+              size=13, bold=True, color=on)
+    _add_text(slide, MARGIN, block_top + Inches(0.6 if compact else 0.75), CONTENT_W, Inches(0.9),
+              _truncate(col['title'], 60), size=title_size, bold=True, color=on)
     if col['subtitle']:
-        _add_text(slide, MARGIN, block_top + Inches(1.7), CONTENT_W, Inches(0.8), _truncate(col['subtitle'], 220),
-                  size=16, color=on)
-    _add_text(slide, MARGIN, block_top + block_h + Inches(0.25), CONTENT_W, Inches(0.4),
-              _element_count_text(len(col['elements'])), size=16, bold=True, color=DARK)
-    _footer(slide, meta, page)
+        _add_text(slide, MARGIN, block_top + Inches(1.35 if compact else 1.7), CONTENT_W, Inches(0.8),
+                  _truncate(col['subtitle'], 220), size=14 if compact else 16, color=on)
+
+    area_top = int(block_top + block_h + Inches(0.25))
+    _add_text(slide, MARGIN, area_top, SECTION_COUNT_W - Inches(0.2), Inches(0.4),
+              _element_count_text(len(codes)), size=16, bold=True, color=DARK)
+    if codes:
+        _add_text(slide, MARGIN, area_top + Inches(0.42), SECTION_COUNT_W - Inches(0.3), Inches(0.5),
+                  'Klik op een element om naar de eigen slide te gaan.', size=9, color=MUTED)
+
+    # Alle elementen van de kolom als klikbare blokjes, rechts onder het blok.
+    chip_w = int((SECTION_CHIP_W - (cols - 1) * SECTION_CHIP_GAP_X) / cols)
+    chip_h = _section_chip_h(size)
+    items: list[str | None] = list(codes[:shown])
+    if shown < len(codes):
+        items.append(None)
+    for k, code in enumerate(items):
+        row, column = divmod(k, cols)
+        x = int(SECTION_CHIP_LEFT + column * (chip_w + SECTION_CHIP_GAP_X))
+        y = int(area_top + row * (chip_h + SECTION_CHIP_GAP_Y))
+        if code is None:
+            chip = _rounded(slide, x, y, chip_w, chip_h, None, line=LINE_COLOR, line_width=0.75, dashed=True)
+            chip.name = 'kolomelement + meer'
+            _shape_text(chip, f'+ {len(codes) - shown} meer', size=size, color=MUTED)
+            continue
+        el = model.elements[code]
+        el_color = model.color_of(el)
+        chip = _rounded(slide, x, y, chip_w, chip_h, _tint(el_color, 0.8), line=el_color, line_width=1.0)
+        chip.name = f'kolomelement {code}'
+        _chip_text(chip, code, el['name'], size, chip_w, chip_h)
+        links.add(chip, code, _goto_tooltip(code, el['name']))
+    _footer(slide, meta, page, links)
     return page + 1
 
 
@@ -544,10 +953,14 @@ CHAIN_HEAD_H = Inches(0.26)
 CHAIN_NODES_TOP = Inches(1.84)
 CHAIN_NODES_H = Inches(2.36)
 TEXT_TOP = Inches(4.55)
+# Schaduwkaartjes van de broertjes boven/onder het geselecteerde element (DOEL-117).
+SIB_CARD_H = Inches(0.3)
+SIB_CARD_GAP = Inches(0.13)
+SIB_CARD_INSET = 0.08          # kaartje is aan elke kant 8% van de kolombreedte smaller
 TEXT_BOTTOM = SLIDE_H - Inches(0.55)
 
 
-def _draw_chain(slide, model: _Model, code: str):
+def _draw_chain(slide, model: _Model, code: str, links: _Links):
     chain = model.chain(code)
     n_cols = len(model.columns)
     gap = Inches(0.14) if n_cols <= 8 else Inches(0.08)
@@ -594,6 +1007,7 @@ def _draw_chain(slide, model: _Model, code: str):
 
     # Eerst de lijnen, zodat de vakken er bovenop liggen.
     has_supporting = False
+    any_link = False
     for child in pos:
         for parent, primary in model.parents[child].items():
             if parent not in pos:
@@ -626,29 +1040,92 @@ def _draw_chain(slide, model: _Model, code: str):
             node = _rounded(slide, left, top, col_w, node_h, _tint(color, 0.8), line=color, line_width=0.75)
             _shape_text(node, label, size=size, color=DARK, margin=Inches(0.04))
             node.name = f'element {other}'
+            if links.add(node, other, f'Ga naar {other} — {el["name"]}'):
+                any_link = True
     for col, (left, top) in more_pos.items():
         node = _rounded(slide, left, top, col_w, node_h, None, line=LINE_COLOR, line_width=0.75, dashed=True)
         _shape_text(node, f'+ {more[col]} meer', size=size, color=MUTED, margin=Inches(0.04))
 
+    siblings_nav = _draw_sibling_cards(slide, model, code, pos, shown, col_w, node_h, links)
+
+    # Directe verbindingen staan ook als blokjes onder de keten; ook daar
+    # kan een ondersteunende relatie (gestippelde rand) of een link zitten.
+    direct = {**model.parents[code], **model.children[code]}
+    has_supporting = has_supporting or not all(direct.values())
+    any_link = any_link or any(other in links.linkable for other in direct)
+
     legend = 'Het gekleurde vak met donkere rand is dit element.'
     if len(pos) > 1:
-        legend += ' Doorgetrokken lijn = primaire relatie'
-        legend += ', stippellijn = ondersteunende relatie.' if has_supporting else '.'
+        legend += ' Doorgetrokken lijn/rand = primaire relatie'
+        legend += ', stippellijn/gestippelde rand = ondersteunende relatie.' if has_supporting else '.'
+        if any_link:
+            legend += ' Klik op een element om naar de eigen slide te gaan.'
     else:
         legend = 'Dit element heeft (nog) geen verbindingen met andere zichtbare elementen.'
+    if siblings_nav is not None:
+        legend += (f' ▲/▼ = vorig/volgend element onder {siblings_nav.parent}'
+                   f' ({siblings_nav.index} van {siblings_nav.count}).')
     _add_text(slide, MARGIN, CHAIN_NODES_TOP + CHAIN_NODES_H + Inches(0.04), CONTENT_W, Inches(0.2), legend, size=8, color=MUTED)
 
 
-# ---- element-slide: tekst --------------------------------------------------
+def _draw_sibling_cards(slide, model: _Model, code: str, pos: dict[str, tuple[int, int]],
+                        shown: dict[int, list[str]], col_w: int, node_h: int, links: _Links) -> '_SiblingNav | None':
+    """Schaduwkaartjes (DOEL-117): boven het geselecteerde element een vaag,
+    gestippeld kaartje van het vorige broertje (▲), eronder van het volgende
+    (▼), allebei klikbaar. Alleen als het element de enige in zijn kolom is
+    (anders is er geen vrije ruimte) en er een broertje met een eigen slide
+    is. Geeft de navigatie terug als er een kaartje is getekend (voor de
+    positie in de legenda), anders None."""
+    nav = model.sibling_nav(code)
+    col = model.elements[code]['col']
+    if nav.count < 2 or code not in pos or len(shown.get(col, [])) != 1:
+        return None
+    left, top = pos[code]
+    inset = int(col_w * SIB_CARD_INSET)
+    card_w = col_w - 2 * inset
+    color = model.color_of(model.elements[code])
+    drawn = False
+    for target, arrow, card_top, direction in (
+        (nav.prev, '▲', top - SIB_CARD_GAP - SIB_CARD_H, 'Vorige'),
+        (nav.next, '▼', top + node_h + SIB_CARD_GAP, 'Volgende'),
+    ):
+        if target is None or target not in links.linkable:
+            continue
+        if card_top < CHAIN_NODES_TOP - Inches(0.05) or card_top + SIB_CARD_H > CHAIN_NODES_TOP + CHAIN_NODES_H:
+            continue  # past niet in het ketenvlak
+        el = model.elements[target]
+        card = _rounded(slide, left + inset, card_top, card_w, SIB_CARD_H, _tint(color, 0.9),
+                        line=_tint(color, 0.35), line_width=0.75, dashed=True)
+        label = _fit(f'{arrow} {target} {el["name"]}'.strip(), card_w - Inches(0.08), SIB_CARD_H, 7)
+        _shape_text(card, label, size=7, color=MUTED, margin=Inches(0.04))
+        card.name = f'broertje {direction.lower()} {target}'
+        links.add(card, target, f'{direction} onder {nav.parent}: {target} — {el["name"]}' if el['name']
+                  else f'{direction} onder {nav.parent}: {target}')
+        drawn = True
+    return nav if drawn else None
 
-LEFT_W = Inches(6.7)
-RIGHT_LEFT = MARGIN + LEFT_W + Inches(0.5)
-RIGHT_W = CONTENT_W - LEFT_W - Inches(0.5)
-LEFT_CHARS = 88
-RIGHT_CHARS = 60
+
+# ---- element-slide: tekst links, verbindingen als blokjes rechts ----------
+
+TEXT_GAP = Inches(0.3)
+LEFT_W = int(CONTENT_W / 3)            # beschrijving c.s.: maximaal 1/3 (DOEL-100)
+RIGHT_LEFT = MARGIN + LEFT_W + TEXT_GAP
+RIGHT_W = CONTENT_W - LEFT_W - TEXT_GAP
+LEFT_CHARS = 50                        # tekens per regel in de linkerkolom
+FULL_CHARS = 150                       # idem over de hele breedte (vervolgslides)
 BODY_SIZE = 11
 LINE_H = Inches(0.2)
 HEADING_COST = 1.5  # kopje + witruimte ervoor, in regels
+CONT_TOP = Inches(1.6)
+
+# Blokjes: eerst ruim (3 per rij, 10 pt), zo nodig compacter tot het past.
+CHIP_CONFIGS = ((3, 10.0), (3, 9.0), (4, 9.0), (4, 8.0), (5, 8.0), (5, 7.0))
+CHIP_GAP_X = Inches(0.09)
+CHIP_GAP_Y = Inches(0.07)
+CHIP_HEAD_H = Inches(0.24)
+CHIP_SECTION_GAP = Inches(0.15)
+CHIP_MAX_LINES = 3
+CHIP_PAD_X = Inches(0.07)
 
 
 def _lines_for(text: str, chars: int) -> list[str]:
@@ -661,15 +1138,22 @@ def _lines_for(text: str, chars: int) -> list[str]:
     return out
 
 
-def _paginate_blocks(blocks: list[tuple[str, list[str]]], chars: int, capacities: list[float]) -> list[list[tuple[str, str]]]:
+def _paginate_blocks(blocks: list[tuple[str, list[str]]], chars: int | list[int],
+                     capacities: list[float]) -> list[list[tuple[str, str]]]:
     """Verdeelt blokken (kopje + alinea's) over pagina's met elk een
-    capaciteit in regels. Geeft per pagina een lijst ('h'|'p', tekst).
-    Wat op de laatste pagina niet meer past wordt ingekort met '…'."""
+    capaciteit in regels. chars = tekens per regel, of een lijst per pagina
+    (de laatste waarde geldt voor de rest). Geeft per pagina een lijst
+    ('h'|'p', tekst). Wat op de laatste pagina niet meer past wordt ingekort
+    met '…'."""
+    widths = chars if isinstance(chars, list) else [chars]
     pages: list[list[tuple[str, str]]] = [[]]
     used = 0.0
 
     def capacity() -> float:
         return capacities[min(len(pages) - 1, len(capacities) - 1)]
+
+    def width() -> int:
+        return widths[min(len(pages) - 1, len(widths) - 1)]
 
     def last_page() -> bool:
         return len(pages) >= len(capacities)
@@ -680,8 +1164,10 @@ def _paginate_blocks(blocks: list[tuple[str, list[str]]], chars: int, capacities
             break
         first = True
         for para in paragraphs:
-            lines = _lines_for(para, chars)
-            while lines and not truncated:
+            rest = ' '.join(p.strip() for p in para.split('\n') if p.strip())
+            while rest and not truncated:
+                # Opnieuw afbreken per pagina: de regelbreedte kan verschillen.
+                lines = textwrap.wrap(rest, width()) or ['']
                 need_heading = HEADING_COST if first else 0
                 room = int(capacity() - used - need_heading)
                 if room < 1 or (first and room < min(2, len(lines))):
@@ -699,15 +1185,16 @@ def _paginate_blocks(blocks: list[tuple[str, list[str]]], chars: int, capacities
                     used += HEADING_COST
                     first = False
                 take = lines[:room]
-                lines = lines[room:]
+                remaining = lines[room:]
                 text = ' '.join(take)
-                if lines and last_page():
+                if remaining and last_page():
                     text = text.rstrip() + ' …'
-                    lines = []
+                    remaining = []
                     truncated = True
                 pages[-1].append(('p', text))
                 used += len(take)
-                if lines:
+                rest = ' '.join(remaining)
+                if rest:
                     pages.append([])
                     used = 0.0
                     pages[-1].append(('h', f'{heading} (vervolg)'))
@@ -745,19 +1232,9 @@ def _draw_text_column(slide, left, top, width, height, items: list[tuple[str, st
         first = False
 
 
-def _relation_lines(model: _Model, related: dict[str, bool]) -> list[str]:
-    lines = []
-    for other in model.sorted_codes(related):
-        el = model.elements[other]
-        line = f'• {other} — {el["name"]}' if el['name'] else f'• {other}'
-        line = _truncate(line, RIGHT_CHARS * 2 - 20)
-        line += f' ({model.columns[el["col"]]["title"]}'
-        line += ')' if related[other] else ', ondersteunend)'
-        lines.append(line)
-    return lines
-
-
 def _element_blocks(model: _Model, el: dict[str, Any], title_truncated: bool):
+    """Tekstblokken voor de linkerkolom: beschrijving, KPI, tags en
+    organisatieonderdelen. De verbindingen staan rechts als blokjes."""
     left: list[tuple[str, list[str]]] = []
     description = el['description']
     if title_truncated and el['name']:
@@ -767,24 +1244,151 @@ def _element_blocks(model: _Model, el: dict[str, Any], title_truncated: bool):
     left.append(('Beschrijving', paragraphs or ['Geen beschrijving ingevuld.']))
     if el['kpi']:
         left.append(('KPI / indicator', [p.strip() for p in el['kpi'].split('\n') if p.strip()]))
-
-    right: list[tuple[str, list[str]]] = []
-    parents = model.parents[el['code']]
-    children = model.children[el['code']]
-    if parents:
-        right.append((f'Verbonden met — bovenliggend ({len(parents)})', _relation_lines(model, parents)))
-    if children:
-        right.append((f'Verbonden met — onderliggend ({len(children)})', _relation_lines(model, children)))
-    if not parents and not children:
-        right.append(('Verbonden met', ['Geen verbindingen.']))
     if el['tags']:
-        right.append(('Tags', [', '.join(el['tags'])]))
+        left.append(('Tags', [', '.join(el['tags'])]))
     if el['orgs']:
-        right.append(('Organisatieonderdelen', ['; '.join(el['orgs'])]))
-    return left, right
+        left.append(('Organisatieonderdelen', ['; '.join(el['orgs'])]))
+    return left
 
 
-def _slides_element(prs, model: _Model, el: dict[str, Any], meta: dict[str, Any], page: int) -> int:
+def _relation_sections(model: _Model, code: str) -> list[tuple[str, list[tuple[str, bool]]]]:
+    """[(kopje, [(code, primair)])] voor boven- en onderliggend."""
+    sections = []
+    for label, related in (('bovenliggend', model.parents[code]), ('onderliggend', model.children[code])):
+        if related:
+            items = [(other, related[other]) for other in model.sorted_codes(related)]
+            sections.append((f'Verbonden met — {label} ({len(items)})', items))
+    return sections
+
+
+def _chip_label(model: _Model, code: str) -> str:
+    name = model.elements[code]['name']
+    return f'{code}  {name}' if name else code
+
+
+def _chip_size(model: _Model, codes: list[str], cols: int, size: float) -> tuple[int, int]:
+    """Breedte en hoogte van de blokjes van één sectie: zo hoog als het
+    langste label nodig heeft, met een maximum van CHIP_MAX_LINES regels."""
+    chip_w = int((RIGHT_W - (cols - 1) * CHIP_GAP_X) / cols)
+    per_line = max(4, int(((chip_w - 2 * CHIP_PAD_X) / 914400) * 72 / (size * 0.52)))
+    lines = 1
+    for code in codes:
+        lines = max(lines, min(CHIP_MAX_LINES, len(textwrap.wrap(_chip_label(model, code), per_line)) or 1))
+    return chip_w, int(Pt(size * 1.22 * lines) + Inches(0.1))
+
+
+def _section_height(rows: int, chip_h: int) -> int:
+    return int(CHIP_HEAD_H + rows * chip_h + (rows - 1) * CHIP_GAP_Y)
+
+
+def _chip_pages(model: _Model, sections, capacities: list[int]):
+    """Kiest de ruimste opmaak (kolommen, lettergrootte) waarin alle blokjes
+    op de eerste slide passen. Past het zelfs compact niet, dan lopen de
+    blokjes door op vervolgslides (hooguit len(capacities) pagina's); op de
+    laatste pagina wordt de rest samengevat als '+ n meer'.
+    Geeft (kolommen, lettergrootte, pagina's); een pagina is een lijst van
+    (kopje, items, blokhoogte) en een item is (code, primair) of
+    (None, aantal) voor '+ n meer'."""
+    if not sections:
+        return CHIP_CONFIGS[0][0], CHIP_CONFIGS[0][1], [[]]
+    for cols, size in CHIP_CONFIGS:
+        page = []
+        total = 0
+        for heading, items in sections:
+            chip_h = _chip_size(model, [c for c, _ in items], cols, size)[1]
+            total += (CHIP_SECTION_GAP if page else 0) + _section_height(math.ceil(len(items) / cols), chip_h)
+            page.append((heading, items, chip_h))
+        if total <= capacities[0]:
+            return cols, size, [page]
+
+    cols, size = CHIP_CONFIGS[-1]
+    pages: list[list[tuple[str, list, int]]] = [[]]
+    used = 0
+    for heading, items in sections:
+        chip_h = _chip_size(model, [c for c, _ in items], cols, size)[1]
+        remaining = list(items)
+        cont = False
+        while remaining:
+            last = len(pages) >= len(capacities)
+            cap = capacities[min(len(pages) - 1, len(capacities) - 1)]
+            gap = CHIP_SECTION_GAP if pages[-1] else 0
+            avail = cap - used - gap - CHIP_HEAD_H
+            rows = int((avail + CHIP_GAP_Y) // (chip_h + CHIP_GAP_Y)) if avail > 0 else 0
+            if rows < 1:
+                if last:
+                    break
+                pages.append([])
+                used = 0
+                continue
+            slots = rows * cols
+            if len(remaining) > slots and last:
+                take = remaining[:slots - 1] + [(None, len(remaining) - (slots - 1))]
+                remaining = []
+            else:
+                take, remaining = remaining[:slots], remaining[slots:]
+            pages[-1].append((heading + (' (vervolg)' if cont else ''), take, chip_h))
+            used += gap + _section_height(math.ceil(len(take) / cols), chip_h)
+            cont = True
+            if remaining:
+                if last:
+                    break
+                pages.append([])
+                used = 0
+    return cols, size, [p for p in pages if p] or [[]]
+
+
+def _chip_text(shape, code: str, name: str, size: float, width: int, height: int):
+    """Code vet, naam gewoon; ingekort op wat in het blokje past."""
+    tf = shape.text_frame
+    tf.word_wrap = True
+    tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+    tf.margin_left = tf.margin_right = CHIP_PAD_X
+    tf.margin_top = tf.margin_bottom = Inches(0.03)
+    p = tf.paragraphs[0]
+    p.alignment = PP_ALIGN.LEFT
+    label = _fit(f'{code}  {name}' if name else code, width - 2 * CHIP_PAD_X, height, size)
+    parts = [(label, True)]
+    if label.startswith(code) and len(label) > len(code):
+        parts = [(code, True), (label[len(code):], False)]
+    for text, bold in parts:
+        run = p.add_run()
+        run.text = text
+        run.font.size = Pt(size)
+        run.font.bold = bold
+        run.font.color.rgb = DARK
+        run.font.name = 'Calibri'
+
+
+def _draw_chips(slide, model: _Model, top: int, page, cols: int, size: float, links: _Links):
+    y = top
+    for index, (heading, items, chip_h) in enumerate(page):
+        if index:
+            y += CHIP_SECTION_GAP
+        _add_text(slide, RIGHT_LEFT, y, RIGHT_W, CHIP_HEAD_H, heading.upper(), size=10, bold=True, color=ACCENT)
+        y += CHIP_HEAD_H
+        chip_w = int((RIGHT_W - (cols - 1) * CHIP_GAP_X) / cols)
+        for k, (code, primary) in enumerate(items):
+            row, column = divmod(k, cols)
+            x = int(RIGHT_LEFT + column * (chip_w + CHIP_GAP_X))
+            cy = int(y + row * (chip_h + CHIP_GAP_Y))
+            if code is None:
+                more = _rounded(slide, x, cy, chip_w, chip_h, None, line=LINE_COLOR, line_width=0.75, dashed=True)
+                _shape_text(more, f'+ {primary} meer', size=size, color=MUTED)
+                more.name = 'verbinding + meer'
+                continue
+            el = model.elements[code]
+            color = model.color_of(el)
+            chip = _rounded(slide, x, cy, chip_w, chip_h, _tint(color, 0.8), line=color, line_width=1.0,
+                            dashed=not primary)
+            chip.name = f'verbinding {code}' + ('' if primary else ' (ondersteunend)')
+            _chip_text(chip, code, el['name'], size, chip_w, chip_h)
+            tooltip = f'Ga naar {code} — {el["name"]}' if el['name'] else f'Ga naar {code}'
+            links.add(chip, code, tooltip + ('' if primary else ' (ondersteunende relatie)'))
+        rows = math.ceil(len(items) / cols)
+        y += rows * chip_h + (rows - 1) * CHIP_GAP_Y
+
+
+def _slides_element(prs, model: _Model, el: dict[str, Any], meta: dict[str, Any], page: int, links: _Links) -> int:
     col = model.columns[el['col']]
     kicker = col['title']
     if el['type'] != col['typeName']:
@@ -795,27 +1399,41 @@ def _slides_element(prs, model: _Model, el: dict[str, Any], meta: dict[str, Any]
     title = f'{el["code"]} — {el["name"]}' if el['name'] else el['code']
     title_truncated = len(title) > 84
 
-    first_cap = (TEXT_BOTTOM - TEXT_TOP) / LINE_H
-    next_cap = (TEXT_BOTTOM - Inches(1.6)) / LINE_H
-    capacities = [first_cap] + [next_cap] * (MAX_SLIDES_PER_ELEMENT - 1)
-    left_blocks, right_blocks = _element_blocks(model, el, title_truncated)
-    left_pages = _paginate_blocks(left_blocks, LEFT_CHARS, capacities)
-    right_pages = _paginate_blocks(right_blocks, RIGHT_CHARS, capacities)
+    first_h = TEXT_BOTTOM - TEXT_TOP
+    next_h = TEXT_BOTTOM - CONT_TOP
+    heights = [first_h] + [next_h] * (MAX_SLIDES_PER_ELEMENT - 1)
 
-    for index in range(max(len(left_pages), len(right_pages))):
+    sections = _relation_sections(model, el['code'])
+    cols, size, chip_pages = _chip_pages(model, sections, heights)
+
+    # Links maximaal 1/3; op vervolgslides zonder blokjes de hele breedte.
+    widths = [LEFT_CHARS] + [LEFT_CHARS if i < len(chip_pages) else FULL_CHARS
+                             for i in range(1, MAX_SLIDES_PER_ELEMENT)]
+    left_pages = _paginate_blocks(_element_blocks(model, el, title_truncated), widths,
+                                  [h / LINE_H for h in heights])
+
+    nav = model.sibling_nav(el['code'])
+    for index in range(max(len(left_pages), len(chip_pages))):
         slide = _blank_slide(prs)
+        if index == 0:
+            links.slides.setdefault(el['code'], slide)
         _header(slide, kicker + (' — vervolg' if index else ''), title)
         if index == 0:
-            _draw_chain(slide, model, el['code'])
+            _draw_chain(slide, model, el['code'], links)
             top = TEXT_TOP
         else:
-            top = Inches(1.6)
+            top = CONT_TOP
         height = TEXT_BOTTOM - top
+        has_chips = index < len(chip_pages) and chip_pages[index]
         if index < len(left_pages):
-            _draw_text_column(slide, MARGIN, top, LEFT_W, height, left_pages[index])
-        if index < len(right_pages):
-            _draw_text_column(slide, RIGHT_LEFT, top, RIGHT_W, height, right_pages[index])
-        _footer(slide, meta, page)
+            width = LEFT_W if (has_chips or index == 0) else CONTENT_W
+            _draw_text_column(slide, MARGIN, top, width, height, left_pages[index])
+        if index == 0 and not sections:
+            _draw_text_column(slide, RIGHT_LEFT, top, RIGHT_W, height,
+                              [('h', 'Verbonden met'), ('p', 'Geen verbindingen.')])
+        elif has_chips:
+            _draw_chips(slide, model, top, chip_pages[index], cols, size, links)
+        _footer(slide, meta, page, links, nav, model)
         page += 1
     return page
 
@@ -840,11 +1458,17 @@ def build_tree_pptx(data: dict[str, Any], options: dict[str, Any] | None, meta: 
         )
 
     prs = _new_presentation()
-    page = _slides_snoer(prs, model, meta, 1)
+    linkable: set[Any] = {code for col in model.slide_columns() for code in col['elements']}
+    linkable.update(_col_key(i) for i, col in enumerate(model.columns) if col['slides'])
+    linkable.add(HOME_KEY)
+    links = _Links(linkable)
+    page = _slides_snoer(prs, model, meta, 1, links)
+    page = _slide_overview(prs, model, meta, page, links)
     for col in model.slide_columns():
-        page = _slide_section(prs, model, col, meta, page)
+        page = _slide_section(prs, model, col, meta, page, links)
         for code in col['elements']:
-            page = _slides_element(prs, model, model.elements[code], meta, page)
+            page = _slides_element(prs, model, model.elements[code], meta, page, links)
+    links.resolve()
 
     buf = io.BytesIO()
     prs.save(buf)
