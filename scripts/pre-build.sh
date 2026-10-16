@@ -4,12 +4,12 @@
 # en stopt meteen (set -e) zodra er iets faalt, zodat een kapotte build het
 # nooit tot de daadwerkelijke `docker compose build` haalt. Bedoeld als eerste
 # stap vóór een productie-release (het script cd't zelf al naar
-# ~/OneDrive/src/doelenboom, zie hieronder — vanaf welke map je het aanroept
+# ~/src/doelenboom, zie hieronder — vanaf welke map je het aanroept
 # maakt dus niet uit):
 #
-#   ~/OneDrive/src/doelenboom/scripts/pre-build.sh
-#   export BUILD_VERSION="$(~/OneDrive/src/doelenboom/scripts/build-version.sh)"
-#   (cd ~/OneDrive/src/doelenboom && docker compose up --build)
+#   ~/src/doelenboom/scripts/pre-build.sh
+#   export BUILD_VERSION="$(~/src/doelenboom/scripts/build-version.sh)"
+#   (cd ~/src/doelenboom && docker compose up --build)
 #
 # Dekt NIET de handmatige checklist (docs/regressie-checklist.md) — tree.html
 # heeft bewust geen testinfra (zie TESTING.md), dus die moet je zelf blijven
@@ -20,7 +20,7 @@ set -euo pipefail
 # Vaste, veilige locatie i.p.v. dynamische BASH_SOURCE-resolutie — zie
 # doelenboom-cli.sh voor de achtergrond (Charles, 14 september 2026).
 # DOEL-33: overschrijfbaar (DOELENBOOM_DIR) zodat de map buiten OneDrive kan staan.
-REPO_DIR="${DOELENBOOM_DIR:-$HOME/OneDrive/src/doelenboom}"
+REPO_DIR="${DOELENBOOM_DIR:-$HOME/src/doelenboom}"  # DOEL-120: standaard buiten OneDrive
 if [ ! -f "$REPO_DIR/docker-compose.yml" ]; then
   echo "Kan doelenboom niet vinden op $REPO_DIR (geen docker-compose.yml daar)." >&2
   echo "Is de map leeg, verplaatst, of nog niet gesynchroniseerd (bv. door een OneDrive-issue)? Controleer dit eerst." >&2
