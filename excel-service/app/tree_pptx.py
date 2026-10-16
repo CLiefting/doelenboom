@@ -27,7 +27,13 @@ totale boom is een interne hyperlink naar de slide van dat element, mits dat
 element zelf een slide in deze presentatie heeft. Een kolomkop in de totale
 boom springt naar de tussenslide van die kolom, mits die kolom is uitgewerkt.
 Elke slide behalve de totale boom zelf heeft in de voettekst een "Home"-knop
-terug naar de totale boom (DOEL-106).
+terug naar de totale boom (DOEL-106). Elke element-slide (ook een vervolgslide)
+heeft daarnaast "Vorige" en "Volgende": een sprong naar het vorige of volgende
+broertje, dat wil zeggen het element in dezelfde kolom met dezelfde primaire
+ouder, in boomvolgorde (DOEL-117). Zonder zo'n broertje is de knop grijs en
+niet klikbaar. In de keten staan boven en onder het geselecteerde element
+bovendien "schaduwkaartjes" van het vorige (▲) en volgende (▼) broertje; ook
+die zijn klikbaar. De legenda onder de keten noemt de positie ("2 van 7").
 Alleen sprongen binnen de presentatie, nooit een externe link.
 
 Verborgen kolommen (options.visibleColumns) komen nergens in de presentatie
@@ -217,21 +223,65 @@ HOME_KEY = ('home',)
 HOME_W = Inches(0.62)
 HOME_H = Inches(0.24)
 PAGE_NO_W = Inches(0.6)
+# Vorige/Volgende tussen broertjes (DOEL-117), links van de Home-knop.
+NAV_PREV_W = Inches(0.78)
+NAV_NEXT_W = Inches(0.88)
+NAV_GAP = Inches(0.08)
+NAV_OFF_FILL = RGBColor(0xE1, 0xE4, 0xE9)
+NAV_OFF_TEXT = RGBColor(0x9A, 0x9F, 0xA8)
 
 
-def _footer(slide, meta: dict[str, Any], page: int, links: '_Links | None' = None):
+class _SiblingNav:
+    """Vorige en volgende broertje van een element (DOEL-117): codes of None,
+    plus de primaire ouder voor de tooltip."""
+    __slots__ = ('prev', 'next', 'parent', 'index', 'count')
+
+    def __init__(self, prev: str | None, nxt: str | None, parent: str | None, index: int = 1, count: int = 1):
+        self.prev, self.next, self.parent = prev, nxt, parent
+        self.index, self.count = index, count  # positie (1-based) en aantal broertjes incl. zichzelf
+
+
+def _nav_button(slide, left: int, width: int, label: str, name: str, target: str | None,
+                model: '_Model | None', nav: _SiblingNav, links: '_Links', direction: str):
+    """Eén Vorige/Volgende-knop. Zonder doel met een eigen slide: grijs en
+    zonder link."""
+    active = target is not None and target in links.linkable
+    button = _rounded(slide, left, SLIDE_H - Inches(0.44), width, HOME_H,
+                      ACCENT if active else NAV_OFF_FILL, radius=0.3)
+    button.name = name
+    _shape_text(button, label, size=9, bold=True, color=WHITE if active else NAV_OFF_TEXT, margin=Inches(0.02))
+    if active:
+        target_name = model.elements[target]['name'] if model is not None else ''
+        links.add(button, target, f'{direction} onder {nav.parent}: {target} — {target_name}' if target_name
+                  else f'{direction} onder {nav.parent}: {target}')
+
+
+def _footer(slide, meta: dict[str, Any], page: int, links: '_Links | None' = None,
+            nav: _SiblingNav | None = None, model: '_Model | None' = None):
     """Voettekst met paginanummer. Met `links` komt er links van het
     paginanummer een Home-knop terug naar de totale boom; de totale boom zelf
-    roept dit zonder `links` aan."""
+    roept dit zonder `links` aan. Met `nav` (element-slides, DOEL-117) komen
+    links van Home de knoppen Vorige en Volgende."""
     parts = [_clean(meta.get('doelenboom')), _clean(meta.get('tenant'))]
     text = ' — '.join(p for p in parts if p)
     exported = _fmt_date(meta.get('exportedAt'))
     if exported != '-':
         text = f'{text} · {exported}' if text else exported
-    text_w = CONTENT_W - PAGE_NO_W - (HOME_W + Inches(0.2) if links is not None else 0)
-    _add_text(slide, MARGIN, SLIDE_H - Inches(0.4), text_w, Inches(0.3), _truncate(text, 150), size=9, color=MUTED)
+    with_nav = links is not None and nav is not None
+    home_left = SLIDE_W - MARGIN - PAGE_NO_W - HOME_W
+    next_left = home_left - NAV_GAP - NAV_NEXT_W
+    prev_left = next_left - NAV_GAP - NAV_PREV_W
+    if with_nav:
+        text_w = prev_left - Inches(0.2) - MARGIN
+    else:
+        text_w = CONTENT_W - PAGE_NO_W - (HOME_W + Inches(0.2) if links is not None else 0)
+    _add_text(slide, MARGIN, SLIDE_H - Inches(0.4), text_w, Inches(0.3),
+              _truncate(text, 120 if with_nav else 150), size=9, color=MUTED)
+    if with_nav:
+        _nav_button(slide, prev_left, NAV_PREV_W, '◄ Vorige', 'vorige-knop', nav.prev, model, nav, links, 'Vorige')
+        _nav_button(slide, next_left, NAV_NEXT_W, 'Volgende ►', 'volgende-knop', nav.next, model, nav, links, 'Volgende')
     if links is not None:
-        home = _rounded(slide, SLIDE_W - MARGIN - PAGE_NO_W - HOME_W, SLIDE_H - Inches(0.44), HOME_W, HOME_H,
+        home = _rounded(slide, home_left, SLIDE_H - Inches(0.44), HOME_W, HOME_H,
                         ACCENT, radius=0.3)
         home.name = 'home-knop'
         _shape_text(home, 'Home', size=9, bold=True, color=WHITE, margin=Inches(0.02))
@@ -462,6 +512,29 @@ class _Model:
         for other, d in self._closure(code, self.children).items():
             result.setdefault(other, d)
         return result
+
+    def main_parent(self, code: str) -> str | None:
+        """De primaire ouder van een element (DOEL-117): de eerste primaire
+        ouder in boomvolgorde, na doortrekken over verborgen kolommen en na het
+        Boomfilter. Ondersteunende relaties tellen niet mee; zonder primaire
+        ouder: None."""
+        cache = self.__dict__.setdefault('_main_parent', {})
+        if code not in cache:
+            primary = [p for p, is_primary in self.parents.get(code, {}).items() if is_primary]
+            cache[code] = min(primary, key=lambda c: self.order.get(c, 0)) if primary else None
+        return cache[code]
+
+    def sibling_nav(self, code: str) -> _SiblingNav:
+        """Vorige en volgende broertje: elementen in dezelfde kolom met
+        dezelfde primaire ouder, in boomvolgorde."""
+        parent = self.main_parent(code)
+        if parent is None:
+            return _SiblingNav(None, None, None)
+        column = self.columns[self.elements[code]['col']]['elements']
+        siblings = [c for c in column if c == code or self.main_parent(c) == parent]
+        i = siblings.index(code)
+        return _SiblingNav(siblings[i - 1] if i > 0 else None,
+                           siblings[i + 1] if i + 1 < len(siblings) else None, parent, i + 1, len(siblings))
 
     def sorted_codes(self, codes) -> list[str]:
         return sorted(codes, key=lambda c: self.order.get(c, 0))
@@ -880,6 +953,10 @@ CHAIN_HEAD_H = Inches(0.26)
 CHAIN_NODES_TOP = Inches(1.84)
 CHAIN_NODES_H = Inches(2.36)
 TEXT_TOP = Inches(4.55)
+# Schaduwkaartjes van de broertjes boven/onder het geselecteerde element (DOEL-117).
+SIB_CARD_H = Inches(0.3)
+SIB_CARD_GAP = Inches(0.13)
+SIB_CARD_INSET = 0.08          # kaartje is aan elke kant 8% van de kolombreedte smaller
 TEXT_BOTTOM = SLIDE_H - Inches(0.55)
 
 
@@ -969,6 +1046,8 @@ def _draw_chain(slide, model: _Model, code: str, links: _Links):
         node = _rounded(slide, left, top, col_w, node_h, None, line=LINE_COLOR, line_width=0.75, dashed=True)
         _shape_text(node, f'+ {more[col]} meer', size=size, color=MUTED, margin=Inches(0.04))
 
+    siblings_nav = _draw_sibling_cards(slide, model, code, pos, shown, col_w, node_h, links)
+
     # Directe verbindingen staan ook als blokjes onder de keten; ook daar
     # kan een ondersteunende relatie (gestippelde rand) of een link zitten.
     direct = {**model.parents[code], **model.children[code]}
@@ -983,7 +1062,47 @@ def _draw_chain(slide, model: _Model, code: str, links: _Links):
             legend += ' Klik op een element om naar de eigen slide te gaan.'
     else:
         legend = 'Dit element heeft (nog) geen verbindingen met andere zichtbare elementen.'
+    if siblings_nav is not None:
+        legend += (f' ▲/▼ = vorig/volgend element onder {siblings_nav.parent}'
+                   f' ({siblings_nav.index} van {siblings_nav.count}).')
     _add_text(slide, MARGIN, CHAIN_NODES_TOP + CHAIN_NODES_H + Inches(0.04), CONTENT_W, Inches(0.2), legend, size=8, color=MUTED)
+
+
+def _draw_sibling_cards(slide, model: _Model, code: str, pos: dict[str, tuple[int, int]],
+                        shown: dict[int, list[str]], col_w: int, node_h: int, links: _Links) -> '_SiblingNav | None':
+    """Schaduwkaartjes (DOEL-117): boven het geselecteerde element een vaag,
+    gestippeld kaartje van het vorige broertje (▲), eronder van het volgende
+    (▼), allebei klikbaar. Alleen als het element de enige in zijn kolom is
+    (anders is er geen vrije ruimte) en er een broertje met een eigen slide
+    is. Geeft de navigatie terug als er een kaartje is getekend (voor de
+    positie in de legenda), anders None."""
+    nav = model.sibling_nav(code)
+    col = model.elements[code]['col']
+    if nav.count < 2 or code not in pos or len(shown.get(col, [])) != 1:
+        return None
+    left, top = pos[code]
+    inset = int(col_w * SIB_CARD_INSET)
+    card_w = col_w - 2 * inset
+    color = model.color_of(model.elements[code])
+    drawn = False
+    for target, arrow, card_top, direction in (
+        (nav.prev, '▲', top - SIB_CARD_GAP - SIB_CARD_H, 'Vorige'),
+        (nav.next, '▼', top + node_h + SIB_CARD_GAP, 'Volgende'),
+    ):
+        if target is None or target not in links.linkable:
+            continue
+        if card_top < CHAIN_NODES_TOP - Inches(0.05) or card_top + SIB_CARD_H > CHAIN_NODES_TOP + CHAIN_NODES_H:
+            continue  # past niet in het ketenvlak
+        el = model.elements[target]
+        card = _rounded(slide, left + inset, card_top, card_w, SIB_CARD_H, _tint(color, 0.9),
+                        line=_tint(color, 0.35), line_width=0.75, dashed=True)
+        label = _fit(f'{arrow} {target} {el["name"]}'.strip(), card_w - Inches(0.08), SIB_CARD_H, 7)
+        _shape_text(card, label, size=7, color=MUTED, margin=Inches(0.04))
+        card.name = f'broertje {direction.lower()} {target}'
+        links.add(card, target, f'{direction} onder {nav.parent}: {target} — {el["name"]}' if el['name']
+                  else f'{direction} onder {nav.parent}: {target}')
+        drawn = True
+    return nav if drawn else None
 
 
 # ---- element-slide: tekst links, verbindingen als blokjes rechts ----------
@@ -1293,6 +1412,7 @@ def _slides_element(prs, model: _Model, el: dict[str, Any], meta: dict[str, Any]
     left_pages = _paginate_blocks(_element_blocks(model, el, title_truncated), widths,
                                   [h / LINE_H for h in heights])
 
+    nav = model.sibling_nav(el['code'])
     for index in range(max(len(left_pages), len(chip_pages))):
         slide = _blank_slide(prs)
         if index == 0:
@@ -1313,7 +1433,7 @@ def _slides_element(prs, model: _Model, el: dict[str, Any], meta: dict[str, Any]
                               [('h', 'Verbonden met'), ('p', 'Geen verbindingen.')])
         elif has_chips:
             _draw_chips(slide, model, top, chip_pages[index], cols, size, links)
-        _footer(slide, meta, page, links)
+        _footer(slide, meta, page, links, nav, model)
         page += 1
     return page
 

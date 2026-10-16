@@ -17,7 +17,7 @@ type Release = {
 const RELEASES: Release[] = [
   {
     version: '4.4.0',
-    date: '13 oktober 2026',
+    date: '16 oktober 2026', // bij de release bijwerken naar de releasedatum
     title: 'Programma-PowerPoint: meerdere projecten in één presentatie',
     items: [
       'Nieuw onder Bestand: "Programma als PowerPoint". Vink de projecten aan die je wilt meenemen; de eerste slide toont de tijdlijnen van de projecten met een planning op één tijdas, met fasen, mijlpalen, een peildatum-lijn en de RAG-status als kleur. Altijd op één slide, ook bij veel projecten.',
@@ -27,6 +27,16 @@ const RELEASES: Release[] = [
       'Een slide "Bijdrage aan doelen" laat per project zien aan welke elementen het direct bijdraagt en welke doelen het uiteindelijk dient. Daarna volgt per project, alfabetisch, de voortgangsslide uit de project-PowerPoint.',
       'Klik op een project of deliverable om naar de voortgangsslide van dat project te springen; de "Home"-knop brengt je terug naar de tijdlijnen.',
       'Bewaar een selectie onder een eigen naam (bijvoorbeeld "Stuurgroep") en exporteer later met één klik dezelfde set. Een selectie is persoonlijk en alleen voor jou zichtbaar.',
+    ],
+  },
+  {
+    version: '4.3.1',
+    date: '16 oktober 2026',
+    title: 'PowerPoint-export: bladeren tussen broertjes',
+    items: [
+      'PowerPoint van de doelenboom: op elke element-slide staan rechtsonder, naast "Home", de knoppen "◄ Vorige" en "Volgende ►". Daarmee spring je direct naar het vorige of volgende element onder dezelfde ouder, zonder eerst via de ouder te gaan.',
+      'Broertjes zijn elementen in dezelfde kolom met dezelfde primaire ouder, in de volgorde van de boom. Vervolgslides worden overgeslagen; is er geen vorig of volgend broertje, dan is de knop grijs.',
+      'In de boom bovenaan de slide staan boven en onder het geselecteerde element vage kaartjes van het vorige (▲) en volgende (▼) broertje; klik erop om ernaartoe te gaan. De legenda onder de boom laat zien waar je bent, bijvoorbeeld "2 van 7".',
     ],
   },
   {
