@@ -22,6 +22,7 @@ const RELEASES: Release[] = [
     items: [
       'PowerPoint van de doelenboom: op elke element-slide staan rechtsonder, naast "Home", de knoppen "◄ Vorige" en "Volgende ►". Daarmee spring je direct naar het vorige of volgende element onder dezelfde ouder, zonder eerst via de ouder te gaan.',
       'Broertjes zijn elementen in dezelfde kolom met dezelfde primaire ouder, in de volgorde van de boom. Vervolgslides worden overgeslagen; is er geen vorig of volgend broertje, dan is de knop grijs.',
+      'In de boom bovenaan de slide staan boven en onder het geselecteerde element vage kaartjes van het vorige (▲) en volgende (▼) broertje; klik erop om ernaartoe te gaan. De legenda onder de boom laat zien waar je bent, bijvoorbeeld "2 van 7".',
     ],
   },
   {

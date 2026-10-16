@@ -1237,3 +1237,93 @@ class TestBroertjesNavigatie:
         assert model.main_parent('M1') is None
         nav = model.sibling_nav('C3')
         assert (nav.prev, nav.next, nav.parent) == ('C1', None, 'B1')
+
+
+class TestBroertjesInDeKeten:
+    """DOEL-117: in de keten boven het geselecteerde element een schaduwkaartje
+    van het vorige broertje (▲), eronder van het volgende (▼), klikbaar; de
+    positie ("n van m") staat in de legenda, niet op het element."""
+    OPTIONS = {'slideColumns': ['Capability']}
+
+    def data(self):
+        data = make_data()
+        data['elements'].insert(5, el('C0', 'Capability', 'Uitgifte'))
+        data['elements'].insert(7, el('C3', 'Capability', "Camera's"))
+        data['edges'] += [edge('C0', 'B1'), edge('C3', 'B1')]  # onder B1: C0, C1, C3
+        return data
+
+    def slide_of(self, prs, code):
+        return next(s for s in prs.slides if f'{code} — ' in all_text(s) and 'VERVOLG' not in all_text(s))
+
+    def cards(self, slide):
+        return {s.name: s for s in slide.shapes if s.name.startswith('broertje ')}
+
+    def teller(self, slide):
+        m = re.search(r'▲/▼ = vorig/volgend element onder (\S+) \((\d+ van \d+)\)\.', all_text(slide))
+        return m.group(2) if m else None
+
+    def test_geen_teller_meer_op_het_element_zelf(self):
+        slide = self.slide_of(build(self.OPTIONS, self.data()), 'C1')
+        assert not [s for s in slide.shapes if s.name == 'broertjes-teller']
+        assert '▲/▼ = vorig/volgend element onder B1 (2 van 3).' in all_text(slide)
+
+    def test_middelste_broertje_heeft_beide_kaartjes_en_teller(self):
+        prs = build(self.OPTIONS, self.data())
+        slide = self.slide_of(prs, 'C1')
+        cards = self.cards(slide)
+        assert set(cards) == {'broertje vorige C0', 'broertje volgende C3'}
+        assert cards['broertje vorige C0'].text_frame.text == '▲ C0 Uitgifte'
+        assert cards['broertje volgende C3'].text_frame.text == "▼ C3 Camera's"
+        assert cards['broertje vorige C0'].click_action.target_slide.slide_id == self.slide_of(prs, 'C0').slide_id
+        assert cards['broertje volgende C3'].click_action.target_slide.slide_id == self.slide_of(prs, 'C3').slide_id
+        tip = cards['broertje volgende C3']._element.find('.//' + qn('a:hlinkClick')).get('tooltip')
+        assert tip == "Volgende onder B1: C3 — Camera's"
+        assert self.teller(slide) == '2 van 3'
+
+    def test_eerste_en_laatste_hebben_alleen_het_kaartje_aan_de_kant_met_een_broertje(self):
+        prs = build(self.OPTIONS, self.data())
+        assert set(self.cards(self.slide_of(prs, 'C0'))) == {'broertje volgende C1'}
+        assert self.teller(self.slide_of(prs, 'C0')) == '1 van 3'
+        assert set(self.cards(self.slide_of(prs, 'C3'))) == {'broertje vorige C1'}
+        assert self.teller(self.slide_of(prs, 'C3')) == '3 van 3'
+
+    def test_enig_kind_geen_kaartjes_geen_teller_geen_legenda(self):
+        slide = self.slide_of(build(self.OPTIONS, self.data()), 'C2')
+        assert self.cards(slide) == {} and self.teller(slide) is None
+        assert '▲/▼' not in all_text(slide)
+
+    def test_kaartjes_boven_en_onder_het_element_binnen_het_ketenvlak(self):
+        slide = self.slide_of(build(self.OPTIONS, self.data()), 'C1')
+        node = next(s for s in slide.shapes if s.name == 'element C1 (geselecteerd)')
+        cards = self.cards(slide)
+        above, below = cards['broertje vorige C0'], cards['broertje volgende C3']
+        assert above.top + above.height < node.top and below.top > node.top + node.height
+        for c in (above, below):
+            assert node.left < c.left and c.left + c.width < node.left + node.width  # smaller dan het vak
+            assert c.top >= Inches(1.79) and c.top + c.height <= Inches(1.84) + Inches(2.36)
+
+    def test_geen_kaartjes_als_er_meer_vakken_in_de_kolom_van_het_element_staan(self):
+        data = self.data()
+        data['edges'].append(edge('C1', 'C3'))  # relatie binnen de kolom: C3 staat dan in de keten van C1
+        slide = self.slide_of(build(self.OPTIONS, data), 'C1')
+        assert self.cards(slide) == {} and self.teller(slide) is None
+
+    def test_niet_op_vervolgslides(self):
+        data = self.data()
+        next(e for e in data['elements'] if e['code'] == 'C1')['description'] = 'Lange zin met inhoud. ' * 400
+        prs = build(self.OPTIONS, data)
+        vervolg = [s for s in prs.slides if 'C1 — ' in all_text(s) and 'VERVOLG' in all_text(s)]
+        assert vervolg and all(self.cards(s) == {} for s in vervolg)
+
+    def test_owasp_kaartjes_zijn_alleen_interne_sprongen_met_veilige_tekst(self):
+        data = self.data()
+        next(e for e in data['elements'] if e['code'] == 'C3')['name'] = '<img src=x onerror=alert(1)>'
+        content = build_tree_pptx(data, self.OPTIONS, META)
+        with zipfile.ZipFile(io.BytesIO(content)) as z:
+            xml = ''.join(z.read(n).decode('utf-8') for n in z.namelist() if n.startswith('ppt/slides/slide') and n.endswith('.xml'))
+            rels = ''.join(z.read(n).decode('utf-8') for n in z.namelist() if n.endswith('.rels'))
+        assert 'TargetMode="External"' not in rels
+        assert '<img' not in xml
+        for m in re.finditer(r'name="broertje [^"]*"><a:hlinkClick ([^>]*)', xml):
+            assert 'ppaction://hlinksldjump' in m.group(1)
+        assert re.search(r'name="broertje volgende C3"><a:hlinkClick', xml)
