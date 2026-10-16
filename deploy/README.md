@@ -215,14 +215,14 @@ tenant + account aan: de aanvraag wordt eerst bewaard in de tabel
 na het bevestigen ontstaan tenant + account. Zo kan niemand nog met andermans
 e-mailadres accounts aanmaken.
 
-**Vóór het uitrollen van de nieuwe `api`-image** eenmalig de migratie draaien
-(zie ook "Een los migratiebestand draaien" verderop):
+**Vóór het uitrollen van de nieuwe `api`-image** de migratie (0040) draaien.
+Sinds DOEL-99/DOEL-102 gaat dat via `scripts/db-migrate.sh` (zie
+"Databasemigraties" verderop), niet meer los met `psql`:
 
 ```bash
 cd ~/doelenboom
 git pull
-docker compose -f docker-compose.yml -f docker-compose.prod.yml exec -T db \
-  psql -U doelenboom -d doelenboom -v ON_ERROR_STOP=1 < db/migrations/0040_pending_registrations.sql
+scripts/db-migrate.sh --prod
 ```
 
 Vereisten in productie:
@@ -571,14 +571,39 @@ migraties opnieuw, en dat brak zodra een oude migratie (0033) niet meer paste
 bij nieuwere data.
 
 **Eenmalig per bestaande database: baseline.** Een database van vóór DOEL-99
-heeft nog geen `schema_migrations`. Het script weigert dan en voert niets uit.
-Registreer eenmalig tot en met de migratie die daar als laatste is gedraaid,
-zonder iets uit te voeren:
+heeft nog geen `schema_migrations`, of (DOEL-102) wel de tabel maar zonder
+regels. In beide gevallen weigert het script (exit 2), ook bij `--status` en
+`--dry-run`, en voert het niets uit: anders zou het alle migraties opnieuw
+draaien. Registreer eenmalig tot en met de migratie die daar als laatste is
+gedraaid, zonder iets uit te voeren:
 
 ```bash
-scripts/db-migrate.sh --prod --baseline 0049    # VPS: release 4.0.2 eindigt op 0049
 scripts/db-migrate.sh --baseline 0050           # lokaal, als 0050 al met de hand is gedraaid
 ```
+
+Productie heeft deze baseline al: op 11-10-2026 is daar `--prod --baseline 0051`
+gezet (release v4.1.0 had 0050 en 0051 nog los met `psql` gedraaid; sindsdien
+gebruikt `release.sh` zelf `db-migrate.sh`, zie DOEL-102).
+
+**Controle dat de uitrol echt is uitgevoerd (DOEL-108).** `release.sh --deploy`
+eindigt alleen met "Uitgerold" als het uitrolscript op de VPS zijn laatste regel
+(`REMOTE-KLAAR <tag>`) heeft bereikt en de API de versie van de tag meldt. Bij
+release v4.2.0 (11-10-2026) stopte dat script ongemerkt na de migratie-dry-run,
+omdat `db-migrate.sh` de standaardinvoer leeglas waarlangs het script werd
+aangeleverd; productie bleef toen op 4.1.0 staan terwijl er "Uitgerold" stond.
+Zie je de foutmelding "het uitrolscript op de VPS is niet helemaal uitgevoerd",
+controleer dan `https://doelenboom.code072.nl/api/version` en draai hetzelfde
+commando opnieuw.
+
+**Opnieuw draaien na een afgebroken uitrol (DOEL-109).** Staat de tag al op de
+commit van `main`, dan hervat `release.sh` vanzelf: CI, taggen en de GitHub Release
+worden overgeslagen, de images worden opnieuw gebouwd, gekopieerd en uitgerold.
+`--hervat` is alleen nog nodig als je niet op `main` staat. Met `--deploy`
+controleert het script bovendien al in stap 1 of er iemand ingelogd is, vóór er een
+tag wordt gezet. Bij release v4.3.0 (11-10-2026) gebeurde dat pas op het eind: de tag
+en de images waren er al, de uitrol werd geweigerd, en hetzelfde commando gaf daarna
+"Tag bestaat al". De controle vlak voor de herstart blijft bestaan, want tijdens het
+bouwen kan iemand inloggen; draai in dat geval hetzelfde commando opnieuw.
 
 Twijfel je welke migratie de laatste was? Controleer dan de wijziging uit die
 migratie (de toelichting staat bovenaan elk bestand). Bijvoorbeeld 0050: bestaat
@@ -604,6 +629,57 @@ vanuit de repo-map.
 en `_`, idempotent waar dat kan, dezelfde SQL ook in `db/init.sql`, en de
 bestandsnaam toevoegen aan de `schema_migrations`-lijst onderaan
 `db/init.sql`. Dat laatste bewaakt `api/test/dbMigrate.test.ts`.
+
+## Een doelenboom van lokaal naar de VPS kopiëren (DOEL-104)
+
+`scripts/doelenboom-kopieer.sh` (op je Mac) kopieert één doelenboom uit de lokale
+database naar de database op de VPS. Alle parameters: `scripts/doelenboom-kopieer.sh --help`.
+
+```bash
+# Zelfde namen op de VPS als lokaal:
+scripts/doelenboom-kopieer.sh --tenant Demo --boom "Gezond ouder"
+
+# Lokaal tenant "OVpay" / boom "OVpay @ NS" -> VPS tenant "NS" / boom "OVpay":
+scripts/doelenboom-kopieer.sh --tenant OVpay --boom "OVpay @ NS" --naar-tenant NS --naar-boom OVpay
+```
+
+Eenmalig in je shell-profiel (beide staan bewust niet in de publieke repo):
+`export VPS=gebruiker@host` (zelfde als voor `release.sh`) en
+`export DOELENBOOM_ADMIN_EMAIL=...` (het account dat admin wordt van de tenant).
+
+Wat het script doet:
+
+1. Lokaal exporteren naar een tijdelijke bundel (`api/src/scripts/doelenboomExport.ts`;
+   alleen lezen, één momentopname).
+2. De bundel naar de VPS kopiëren (alleen leesbaar voor de eigenaar).
+3. **Proefrun** op de VPS (`doelenboomImport --dry-run`): de import wordt volledig
+   uitgevoerd en teruggedraaid. Je ziet wat er wordt aangemaakt of vervangen.
+4. Na `ja`: de echte import, in één transactie. Bij `--overschrijven` eerst
+   `deploy/backup-database.sh`.
+5. Aantallen per tabel en de controlesom van bron en doel worden vergeleken; de
+   bundel wordt aan beide kanten verwijderd.
+
+Regels:
+
+- Bestaat de tenant of de doelenboom niet op de VPS, dan wordt hij aangemaakt. Een
+  nieuwe tenant krijgt de modules van de lokale tenant en een licentie-einddatum van
+  12 maanden; het admin-account wordt admin van de tenant. Is dat account al lid, dan
+  blijft de bestaande rol staan. Het account moet op de VPS al bestaan.
+- Bestaat de doelenboom al, dan weigert het script, tenzij `--overschrijven` is
+  opgegeven. Dan wordt de inhoud van die ene boom vervangen; naam, slug, alleen-lezen
+  en archiefstatus van de boom op de VPS blijven zoals ze zijn.
+- Niet mee: gebruikers en rollen, importhistorie, projecthistorie en het auditlog.
+  "Bijgewerkt door" wordt leeg, want de lokale accounts bestaan op de VPS niet.
+- Lokaal en de VPS moeten dezelfde migraties hebben (`schema_migrations`); anders
+  weigert de import. Breng dan eerst beide op dezelfde versie.
+- Een nieuwe tabel die aan een doelenboom of element hangt moet in
+  `TRANSFER_TABLES` of `TRANSFER_EXCLUDED_TABLES` (`api/src/doelenboomTransfer.ts`)
+  komen; `api/test/doelenboomTransfer.test.ts` faalt anders.
+- In het auditlog op de VPS staat de kopie als "import gepubliceerd" met in de details
+  `kind: omgeving-kopie`, de bron en de aantallen.
+
+Meldt het script geen `IMPORT-OK`, dan is er op de VPS niets gewijzigd. Terugzetten na
+een onbedoelde `--overschrijven`: de back-up van stap 4 staat in `backups/database/`.
 
 ## Nachtelijke databaseback-up
 

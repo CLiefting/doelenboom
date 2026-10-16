@@ -12,10 +12,39 @@ moet laten zien waar actie nodig is, niet een lange lijst waarin alles
 | Kwetsbaarheden in wat in productie draait | Dagelijkse controle in de app tegen OSV.dev; **mail aan sysadmins** bij een nieuwe bevinding met ernst hoog, kritiek of onbekend (DOEL-70) | Nee, wel melding |
 | Patch- en minor-updates | **Dependabot**, wekelijks één gegroepeerde PR per onderdeel (api, web, excel-service, github-actions), 7 dagen cooldown | Nee; mergen na groene CI |
 | Major-updates | Per stuk via een eigen ticket (zie hieronder) | Nee |
+| Install-scripts van npm-pakketten | Alleen goedgekeurde pakketten, met vaste versie, in `allowScripts` van `package.json`; CI-stap `scripts/check-install-scripts.sh` (DOEL-118) | Ja: CI rood bij een niet-goedgekeurd install-script |
 
 Doelenboom werkt zelf nooit automatisch dependencies bij (zie
 `doelenboom_sbom_ontwerp.md`): Dependabot maakt alleen een voorstel (PR),
 mergen en uitrollen blijft een bewuste handeling.
+
+## Install-scripts: alleen na goedkeuring (DOEL-118)
+
+Sinds npm 11.19 houdt npm per project bij welke pakketten een install-script
+(`preinstall`/`install`/`postinstall`) mogen draaien: het blok `allowScripts`
+in `api/package.json` en `web/package.json`. Nu goedgekeurd, met vaste versie:
+
+| Onderdeel | Pakket | Waarom |
+|---|---|---|
+| api | `esbuild@0.28.2` | Haalt het platformspecifieke binaire bestand op; nodig voor `tsx`. |
+| web | `esbuild@0.25.12` | Idem; nodig voor `vite`. |
+| api, web | `fsevents@2.3.3` | Bestandsbewaking op macOS (optioneel; in Docker/CI op Linux niet geïnstalleerd). |
+
+De CI-stap `scripts/check-install-scripts.sh` faalt zodra er een install-script
+zonder goedkeuring binnenkomt: een nieuw pakket, of een **nieuwe versie** van een
+goedgekeurd pakket (bijvoorbeeld via een Dependabot-PR die vite of tsx bijwerkt).
+Dat is bewust (OWASP A08): een gekaapte nieuwe versie draait dan niet ongemerkt.
+
+Komt er via een Dependabot-PR een nieuwe esbuild-versie binnen, dan in die PR:
+
+```zsh
+cd ~/src/doelenboom/web && npm ci && npm install-scripts ls && npm install-scripts approve esbuild
+```
+
+(of in `api`), het pakket even nalopen (release-notes, wat het script doet) en de
+wijziging in `package.json` meecommitten. Haal daarbij de regel van de oude versie
+uit `allowScripts` weg, zodat alleen goedkeuringen blijven staan voor versies die
+echt gebruikt worden.
 
 ## Wat de pagina telt
 

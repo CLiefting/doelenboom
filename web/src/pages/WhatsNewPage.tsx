@@ -16,6 +16,52 @@ type Release = {
 
 const RELEASES: Release[] = [
   {
+    version: '4.3.1',
+    date: '16 oktober 2026',
+    title: 'PowerPoint-export: bladeren tussen broertjes',
+    items: [
+      'PowerPoint van de doelenboom: op elke element-slide staan rechtsonder, naast "Home", de knoppen "◄ Vorige" en "Volgende ►". Daarmee spring je direct naar het vorige of volgende element onder dezelfde ouder, zonder eerst via de ouder te gaan.',
+      'Broertjes zijn elementen in dezelfde kolom met dezelfde primaire ouder, in de volgorde van de boom. Vervolgslides worden overgeslagen; is er geen vorig of volgend broertje, dan is de knop grijs.',
+      'In de boom bovenaan de slide staan boven en onder het geselecteerde element vage kaartjes van het vorige (▲) en volgende (▼) broertje; klik erop om ernaartoe te gaan. De legenda onder de boom laat zien waar je bent, bijvoorbeeld "2 van 7".',
+    ],
+  },
+  {
+    version: '4.3.0',
+    date: '11 oktober 2026',
+    title: 'Beheer: een doelenboom van de ene omgeving naar de andere kopiëren',
+    items: [
+      'Voor beheerders: een doelenboom die lokaal is opgebouwd kan met één commando naar productie worden gekopieerd, met alle inhoud: kolommen, controleregels, kenmerken, elementen, relaties, tags, organisatieonderdelen, projectstatus, producten en activiteiten.',
+      'De tenant en de doelenboom mogen op productie anders heten dan lokaal. Bestaan ze nog niet, dan worden ze aangemaakt; een bestaande doelenboom wordt alleen vervangen als daar uitdrukkelijk om is gevraagd, na een back-up.',
+      'Eerst een proefrun die laat zien wat er gaat gebeuren. De kopie zelf gebeurt in één keer: lukt er iets niet, dan verandert er niets. Gebruikers, rollen en historie gaan niet mee.',
+    ],
+  },
+  {
+    // 4.2.0 is wel getagd maar nooit in productie gekomen (DOEL-108: het
+    // uitrolscript stopte halverwege); 4.2.1 is dezelfde inhoud, nu wel live.
+    version: '4.2.1',
+    date: '11 oktober 2026',
+    title: 'PowerPoint-export: de totale boom op één slide, ook gefilterd',
+    items: [
+      'PowerPoint van de doelenboom: de tweede slide toont de totale boom, met alle zichtbare kolommen naast elkaar, al hun elementen en de relaties ertussen. De vakken schalen mee, zodat de boom ook bij tientallen elementen per kolom op één slide past.',
+      'Klik in de totale boom op een kolomkop met donkere rand om naar de tussenslide van die kolom te springen, of op een element om naar de eigen slide te gaan.',
+      'De tussenslide van een kolom toont alle elementen van die kolom als klikbare blokjes in de kolomkleur.',
+      'Elke slide heeft rechtsonder een "Home"-knop waarmee je terugspringt naar de totale boom.',
+      'Staat er een Boomfilter aan ("Toon deze bomen"), dan exporteert de PowerPoint standaard alleen die gefilterde boom, met dezelfde lijnen als op het scherm. Met het vinkje "Alleen de gefilterde boom" in het exportvenster kies je toch voor de hele boom.',
+      'Het exportvenster telt de extra slide mee (maximaal 300 slides).',
+    ],
+  },
+  {
+    version: '4.1.0',
+    date: '11 oktober 2026',
+    title: 'Klikbare PowerPoint-export, instelbaar automatisch uitloggen',
+    items: [
+      'PowerPoint van de doelenboom: de beschrijving, KPI, tags en organisatieonderdelen staan links op maximaal een derde van de breedte; de verbonden elementen staan rechts als blokjes in de kleur van hun kolom (gestippelde rand = ondersteunende relatie).',
+      'Klik in de presentatie op een blokje of op een vak in de boom om naar de slide van dat element te springen. Ook elementen die in de boom onder "+ meer" vallen staan als blokje op de slide; vervolgslides voor alleen verbindingen zijn daardoor meestal niet meer nodig.',
+      'Sysadmin: de termijn voor automatisch uitloggen bij inactiviteit is instelbaar (5 tot 480 minuten, standaard 15) onder Accountbeheer → Inlogbeveiliging.',
+      'Filters: "Toon de bomen van deze N" en "Filter op resultaten" wissen daarna de chipfilter of zoekopdracht, zodat het gevonden pad niet meer gedimd blijft.',
+    ],
+  },
+  {
     version: '4.0.1',
     date: '5 oktober 2026',
     title: 'Helppagina bijgewerkt',
