@@ -19,6 +19,7 @@ from .exporter import build_data_workbook, build_template_workbook, is_standard_
 from .mpp_converter import MppConversionError, mpp_to_mspdi_xml
 from .parser import parse_workbook
 from .project_pptx import build_project_pptx
+from .program_pptx import ProgramPptxError, build_program_pptx
 from .project_workbook import build_project_workbook, parse_project_workbook
 from .tree_pptx import TreePptxError, build_tree_pptx
 
@@ -170,6 +171,25 @@ async def tree_pptx(body: dict[str, Any] = Body(...)):
         content=content,
         media_type=PPTX_MEDIA_TYPE,
         headers={'Content-Disposition': 'attachment; filename="Doelenboom.pptx"'},
+    )
+
+
+@app.post('/program-pptx')
+async def program_pptx(body: dict[str, Any] = Body(...)):
+    """Bouwt de programma-PowerPoint voor meerdere projecten tegelijk
+    (DOEL-112, zie program_pptx.py): tijdlijnen, deliverables, bijdrage aan
+    doelen en een voortgangsslide per project. Aangeroepen door
+    api/src/routes/programPptx.ts (POST .../program-pptx), dat de gekozen
+    projecten ('data'), de keuzes uit het dialoogvenster ('options') en
+    'meta' aanlevert. Een ongeldige keuze geeft 422 met een leesbare melding."""
+    try:
+        content = build_program_pptx(body.get('data'), body.get('options'), body.get('meta'))
+    except ProgramPptxError as exc:
+        return JSONResponse(status_code=422, content={'error': str(exc)})
+    return Response(
+        content=content,
+        media_type=PPTX_MEDIA_TYPE,
+        headers={'Content-Disposition': 'attachment; filename="Programma.pptx"'},
     )
 
 

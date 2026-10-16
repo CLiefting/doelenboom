@@ -98,6 +98,7 @@ export const TRANSFER_EXCLUDED_TABLES = [
   'excel_imports', // importhistorie
   'project_history', // historie, verwijst naar gebruikers van de bron
   'audit_log',
+  'program_selections', // persoonlijke selecties van gebruikers van de bron (DOEL-112)
 ];
 
 const TABLE_NAMES = TRANSFER_TABLES.map((t) => t.table);

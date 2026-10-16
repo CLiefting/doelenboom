@@ -530,6 +530,6 @@ source ~/.zshrc
 cd ~/src/doelenboom && git status && scripts/check-secrets.sh
 ```
 
-Zonder `DOELENBOOM_DIR` gebruiken de scripts nog steeds `~/OneDrive/src/doelenboom`. Als de map in OneDrive blijft staan is er geen manier om alleen `.env` van de synchronisatie uit te sluiten (OneDrive kan alleen hele mappen uitsluiten); dan blijft alleen roteren over.
+Zonder `DOELENBOOM_DIR` gebruiken de scripts `~/src/doelenboom` (DOEL-120; daarvoor was dat bij een deel van de scripts nog `~/OneDrive/src/doelenboom`). Als de map in OneDrive blijft staan is er geen manier om alleen `.env` van de synchronisatie uit te sluiten (OneDrive kan alleen hele mappen uitsluiten); dan blijft alleen roteren over.
 
 **SMTP-wachtwoord roteren** (aan te raden als je OneDrive-account op meer apparaten of met meer mensen wordt gedeeld, of als je twijfelt): wijzig het wachtwoord van de mailbox `no-reply@code072.nl` bij Hostnet, voer het nieuwe in met `scripts/set-smtp-env.sh` (lokaal) en pas het ook aan in de `.env` op de VPS (`nano .env`, daarna `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d api`).

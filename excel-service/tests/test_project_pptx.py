@@ -322,3 +322,51 @@ class TestBuildProjectPptx:
         text = full_text(prs)
         assert 'Nog geen deliverables vastgelegd voor dit project.' in text
         assert 'Nog geen activiteiten of deliverables met een doorlooptijd vastgelegd voor dit project.' in text
+
+
+class TestPeildatum:
+    """DOEL-112: de programma-PowerPoint geeft een eigen peildatum mee
+    (meta.referenceDate) die voorgaat op het exportmoment."""
+
+    def test_reference_date_gaat_voor(self):
+        from app.project_pptx import _today_iso
+        assert _today_iso({'exportedAt': '2026-10-13T10:00:00Z'}) == '2026-10-13'
+        assert _today_iso({'exportedAt': '2026-10-13T10:00:00Z', 'referenceDate': '2026-12-01'}) == '2026-12-01'
+        assert _today_iso({'exportedAt': '2026-10-13T10:00:00Z', 'referenceDate': 'onzin'}) == '2026-10-13'
+
+
+class TestTijdlijnOptie3:
+    """DOEL-112: de losse project-PowerPoint gebruikt dezelfde tijdlijn; de
+    geplande datum bij een opgeleverd item volgt daar de schermtoggle."""
+
+    def data(self):
+        return {'project': {'code': 'P1', 'name': 'Project'}, 'products': [
+            {'id': 1, 'name': 'PID', 'type': 'deliverable', 'verwachteDatum': '2026-08-10', 'werkelijkeDatum': '2026-08-12'},
+            {'id': 2, 'name': 'Besluit', 'type': 'mijlpaal', 'verwachteDatum': '2026-12-22'},
+        ], 'activities': []}
+
+    def test_toggle_aan_toont_geplande_datum(self):
+        prs = Presentation(io.BytesIO(build_project_pptx(self.data(), {'exportedAt': '2026-10-14', 'showPlannedForDelivered': True})))
+        t = all_text(prs.slides[0])
+        assert 'Geplande datum (opgeleverd)' in t
+        assert 'Besluit' in t and '1  12 aug  PID' in t
+
+    def test_toggle_uit_verbergt_geplande_datum(self):
+        prs = Presentation(io.BytesIO(build_project_pptx(self.data(), {'exportedAt': '2026-10-14', 'showPlannedForDelivered': False})))
+        assert 'Geplande datum (opgeleverd)' not in all_text(prs.slides[0])
+
+    def test_aandachtspunten_rechts_naast_projectstatus(self):
+        """De aandachtspunten staan bovenin naast de projectstatus; onder de
+        lijst met deliverables blijft de ruimte vrij (voor risico's)."""
+        data = self.data()
+        data['project']['status'] = {'projectstatus': 'Actief', 'toelichting': 'PID op planning'}
+        data['project']['tags'] = ['IGO']
+        prs = Presentation(io.BytesIO(build_project_pptx(data, {'exportedAt': '2026-10-14'})))
+        shapes = {sh.text_frame.text: sh for sh in prs.slides[0].shapes if sh.has_text_frame and sh.text_frame.text.strip()}
+        kop, status = shapes['AANDACHTSPUNTEN'], shapes['PROJECTSTATUS']
+        assert kop.top == status.top and kop.left > status.left
+        assert shapes['PID op planning'].top < shapes['Aug 2026'].top
+        assert shapes['Tags: IGO'].top < shapes['Aug 2026'].top
+        lijst = shapes['1  12 aug  PID  ✓']
+        tekst_eronder = [t for t, sh in shapes.items() if sh.top > lijst.top + Inches(0.3)]
+        assert all(t.startswith('Automatisch gegenereerd') or t.startswith('Project (P1)') or t == '1' for t in tekst_eronder), tekst_eronder

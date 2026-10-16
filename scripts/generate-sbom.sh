@@ -11,7 +11,7 @@
 # SBOM_DIR). Dit script is alleen nog handig om de Softwarecomponenten-pagina
 # uit te proberen met de API BUITEN Docker (`npm run dev` vanuit api/, waar
 # dependencyHealth.ts terugvalt op ../sbom). Het script cd't zelf naar
-# ~/OneDrive/src/doelenboom (zie hieronder), dus vanaf welke map je het
+# ~/src/doelenboom (zie hieronder), dus vanaf welke map je het
 # aanroept maakt niet uit.
 #
 # Vereisten: node/npx (voor cyclonedx-npm, via npx — geen extra
@@ -29,7 +29,7 @@ set -euo pipefail
 # Vaste, veilige locatie i.p.v. dynamische BASH_SOURCE-resolutie — zie
 # doelenboom-cli.sh voor de achtergrond (Charles, 14 september 2026).
 # DOEL-33: overschrijfbaar (DOELENBOOM_DIR) zodat de map buiten OneDrive kan staan.
-REPO_DIR="${DOELENBOOM_DIR:-$HOME/OneDrive/src/doelenboom}"
+REPO_DIR="${DOELENBOOM_DIR:-$HOME/src/doelenboom}"  # DOEL-120: standaard buiten OneDrive
 if [ ! -f "$REPO_DIR/docker-compose.yml" ]; then
   echo "Kan doelenboom niet vinden op $REPO_DIR (geen docker-compose.yml daar)." >&2
   echo "Is de map leeg, verplaatst, of nog niet gesynchroniseerd (bv. door een OneDrive-issue)? Controleer dit eerst." >&2

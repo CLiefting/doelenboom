@@ -48,7 +48,7 @@ type FetchedTree = NonNullable<Awaited<ReturnType<typeof fetchTree>>>;
 // Filtert de al opgehaalde volledige boom (fetchTree) terug tot de gegevens
 // van precies één project-element — geen aparte DB-queries nodig, dezelfde
 // aanpak als exports.ts voor de hele-doelenboom-export.
-function buildProjectExportData(tree: FetchedTree, code: string) {
+export function buildProjectExportData(tree: FetchedTree, code: string) {
   const el = (tree.elements as Array<Record<string, unknown>>).find((e) => e.code === code);
   if (!el) return null;
 

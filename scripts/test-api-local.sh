@@ -15,7 +15,9 @@ set -euo pipefail
 
 # Vaste, veilige locatie i.p.v. dynamische BASH_SOURCE-resolutie — zie
 # doelenboom-cli.sh voor de achtergrond (Charles, 14 september 2026).
-REPO_DIR="$HOME/OneDrive/src/doelenboom"
+# DOEL-120: zelfde regel als doelenboom-cli.sh (DOEL-33) — standaard
+# ~/src/doelenboom (buiten OneDrive), overschrijfbaar met DOELENBOOM_DIR.
+REPO_DIR="${DOELENBOOM_DIR:-$HOME/src/doelenboom}"
 if [ ! -f "$REPO_DIR/docker-compose.yml" ]; then
   echo "Kan doelenboom niet vinden op $REPO_DIR (geen docker-compose.yml daar)." >&2
   echo "Is de map leeg, verplaatst, of nog niet gesynchroniseerd (bv. door een OneDrive-issue)? Controleer dit eerst." >&2
