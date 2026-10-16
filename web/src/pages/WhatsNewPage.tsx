@@ -17,7 +17,7 @@ type Release = {
 const RELEASES: Release[] = [
   {
     version: '4.4.0',
-    date: '16 oktober 2026', // bij de release bijwerken naar de releasedatum
+    date: '16 oktober 2026',
     title: 'Programma-PowerPoint: meerdere projecten in één presentatie',
     items: [
       'Nieuw onder Bestand: "Programma als PowerPoint". Vink de projecten aan die je wilt meenemen; de eerste slide toont de tijdlijnen van de projecten met een planning op één tijdas, met fasen, mijlpalen, een peildatum-lijn en de RAG-status als kleur. Altijd op één slide, ook bij veel projecten.',
