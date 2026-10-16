@@ -16,6 +16,15 @@ type Release = {
 
 const RELEASES: Release[] = [
   {
+    version: '4.3.1',
+    date: '16 oktober 2026',
+    title: 'PowerPoint-export: bladeren tussen broertjes',
+    items: [
+      'PowerPoint van de doelenboom: op elke element-slide staan rechtsonder, naast "Home", de knoppen "◄ Vorige" en "Volgende ►". Daarmee spring je direct naar het vorige of volgende element onder dezelfde ouder, zonder eerst via de ouder te gaan.',
+      'Broertjes zijn elementen in dezelfde kolom met dezelfde primaire ouder, in de volgorde van de boom. Vervolgslides worden overgeslagen; is er geen vorig of volgend broertje, dan is de knop grijs.',
+    ],
+  },
+  {
     version: '4.3.0',
     date: '11 oktober 2026',
     title: 'Beheer: een doelenboom van de ene omgeving naar de andere kopiëren',

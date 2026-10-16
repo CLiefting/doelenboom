@@ -1065,3 +1065,175 @@ class TestEndpoint:
         res = client.post('/tree-pptx', json={'data': {'columns': 'kapot'}})
         assert res.status_code == 422
         assert 'Traceback' not in res.text and 'tree_pptx.py' not in res.text
+
+
+class TestBroertjesNavigatie:
+    """DOEL-117: op elke element-slide (ook vervolgslides) springen Vorige en
+    Volgende naar het vorige/volgende broertje: zelfde kolom, zelfde primaire
+    ouder, boomvolgorde. Zonder broertje grijs en zonder link."""
+    OPTIONS = {'slideColumns': ['Capability']}
+
+    def data(self):
+        data = make_data()
+        # C1 en C3 hangen primair onder B1, C2 alleen onder B2.
+        data['elements'].insert(6, el('C3', 'Capability', 'Camera\'s'))
+        data['edges'].append(edge('C3', 'B1'))
+        return data
+
+    def slide_of(self, prs, code):
+        return next(s for s in prs.slides if f'{code} — ' in all_text(s) and 'VERVOLG' not in all_text(s))
+
+    def button(self, slide, name):
+        found = [s for s in slide.shapes if s.name == name]
+        assert len(found) == 1, f'{name}: {len(found)} keer'
+        return found[0]
+
+    def target(self, slide, name):
+        b = self.button(slide, name)
+        if b._element.find('.//' + qn('a:hlinkClick')) is None:
+            return None
+        assert b.click_action.action == PP_ACTION.NAMED_SLIDE
+        return b.click_action.target_slide
+
+    def assert_nav(self, prs, code, prev, nxt):
+        slide = self.slide_of(prs, code)
+        for name, want in (('vorige-knop', prev), ('volgende-knop', nxt)):
+            got = self.target(slide, name)
+            if want is None:
+                assert got is None, f'{code} {name}: verwacht grijs'
+                assert str(self.button(slide, name).fill.fore_color.rgb) == 'E1E4E9'
+            else:
+                assert got is not None, f'{code} {name}: verwacht link naar {want}'
+                assert got.slide_id == self.slide_of(prs, want).slide_id, f'{code} {name}'
+
+    def test_broertjes_onder_dezelfde_ouder_in_boomvolgorde(self):
+        prs = build(self.OPTIONS, self.data())
+        self.assert_nav(prs, 'C1', None, 'C3')
+        self.assert_nav(prs, 'C3', 'C1', None)
+        self.assert_nav(prs, 'C2', None, None)  # enig kind van B2
+
+    def test_volgorde_is_de_boomvolgorde(self):
+        data = self.data()
+        c3 = data['elements'].pop(6)
+        data['elements'].insert(5, c3)  # C3 vóór C1
+        prs = build(self.OPTIONS, data)
+        self.assert_nav(prs, 'C3', None, 'C1')
+        self.assert_nav(prs, 'C1', 'C3', None)
+
+    def test_knoppen_met_tekst_en_tooltip(self):
+        slide = self.slide_of(build(self.OPTIONS, self.data()), 'C1')
+        assert self.button(slide, 'vorige-knop').text_frame.text == '◄ Vorige'
+        nxt = self.button(slide, 'volgende-knop')
+        assert nxt.text_frame.text == 'Volgende ►'
+        assert nxt._element.find('.//' + qn('a:hlinkClick')).get('tooltip') == "Volgende onder B1: C3 — Camera's"
+
+    def test_vervolgslides_worden_overgeslagen_en_hebben_zelf_ook_de_knoppen(self):
+        data = self.data()
+        next(e for e in data['elements'] if e['code'] == 'C1')['description'] = 'Lange zin met inhoud. ' * 400
+        prs = build(self.OPTIONS, data)
+        c1_slides = [s for s in prs.slides if 'C1 — ' in all_text(s)]
+        assert len(c1_slides) >= 2 and 'VERVOLG' in all_text(c1_slides[1])
+        # C3 springt terug naar de EERSTE slide van C1, niet naar een vervolgslide.
+        assert self.target(self.slide_of(prs, 'C3'), 'vorige-knop').slide_id == c1_slides[0].slide_id
+        for s in c1_slides:
+            assert self.target(s, 'volgende-knop').slide_id == self.slide_of(prs, 'C3').slide_id
+            assert self.target(s, 'vorige-knop') is None
+
+    def test_ondersteunende_relatie_telt_niet_als_ouder(self):
+        data = self.data()
+        data['elements'].append(el('C4', 'Capability', 'Alleen ondersteunend'))
+        data['edges'].append(edge('C4', 'B1', 'ondersteunend'))
+        prs = build(self.OPTIONS, data)
+        self.assert_nav(prs, 'C3', 'C1', None)  # C4 is geen broertje
+        self.assert_nav(prs, 'C4', None, None)  # geen primaire ouder
+
+    def test_bij_meer_primaire_ouders_telt_de_eerste_in_boomvolgorde(self):
+        data = self.data()
+        data['edges'].append(edge('C3', 'B2'))  # B2 staat in de boom vóór B1
+        prs = build(self.OPTIONS, data)
+        self.assert_nav(prs, 'C1', None, None)
+        self.assert_nav(prs, 'C3', None, 'C2')
+        self.assert_nav(prs, 'C2', 'C3', None)
+
+    def test_alias_in_dezelfde_kolom_is_ook_een_broertje(self):
+        data = self.data()
+        data['columns'][1]['aliases'] = [{'typeName': 'Besluit', 'color': '#C0392B'}]
+        data['elements'].append(el('X1', 'Besluit', 'Een besluit'))
+        data['edges'].append(edge('X1', 'B1'))
+        prs = build(self.OPTIONS, data)
+        self.assert_nav(prs, 'C3', 'C1', 'X1')
+        self.assert_nav(prs, 'X1', 'C3', None)
+
+    def test_boomfilter_broertje_buiten_het_filter_wordt_overgeslagen(self):
+        data = self.data()
+        keep = [e['code'] for e in data['elements'] if e['code'] != 'C3']
+        prs = build({**self.OPTIONS, 'visibleElements': keep}, data)
+        self.assert_nav(prs, 'C1', None, None)
+
+    def test_verborgen_ouderkolom_dan_telt_de_eerstvolgende_zichtbare_ouder(self):
+        data = self.data()
+        data['edges'] = [e for e in data['edges'] if not (e['source'] == 'B2' and e['target'] == 'D2')]
+        data['edges'].append(edge('B2', 'D1'))
+        visible = ['Project', 'Capability', 'Doel', 'Missie']  # Benefit verborgen
+        prs = build({**self.OPTIONS, 'visibleColumns': visible}, data)
+        # Alle drie hangen nu (doorgetrokken) onder D1.
+        self.assert_nav(prs, 'C1', None, 'C3')
+        self.assert_nav(prs, 'C3', 'C1', 'C2')
+        self.assert_nav(prs, 'C2', 'C3', None)
+
+    def test_werkt_in_elke_uitgewerkte_kolom(self):
+        # Benefit uitgewerkt: B2 en B1 worden broertjes zodra ze allebei primair onder D1 hangen.
+        data = self.data()
+        data['edges'].append(edge('B2', 'D1'))
+        prs = build({'slideColumns': ['Benefit']}, data)
+        self.assert_nav(prs, 'B2', None, 'B1')
+        self.assert_nav(prs, 'B1', 'B2', None)
+
+    def test_niet_op_snoer_totale_boom_en_kolomslides(self):
+        prs = build(self.OPTIONS, self.data())
+        for slide in prs.slides:
+            names = shape_names(slide)
+            is_element = any(re.search(r'\bC\d — ', line) for line in all_text(slide).split('\n')[:3])
+            has = 'vorige-knop' in names or 'volgende-knop' in names
+            assert has == is_element, all_text(slide)[:80]
+
+    def test_plek_in_de_voettekst_links_van_home_zonder_overlap(self):
+        prs = build(self.OPTIONS, self.data())
+        positions = set()
+        for index, slide in enumerate(prs.slides, start=1):
+            names = shape_names(slide)
+            if 'vorige-knop' not in names:
+                continue
+            prev, nxt = self.button(slide, 'vorige-knop'), self.button(slide, 'volgende-knop')
+            home = self.button(slide, 'home-knop')
+            positions.add((prev.left, nxt.left, home.left))
+            assert prev.left + prev.width <= nxt.left and nxt.left + nxt.width <= home.left
+            assert prev.top == nxt.top == home.top and prev.top + prev.height <= SLIDE_H
+            footer = next(s for s in slide.shapes if s.has_text_frame and 'Bewaken en Beveiligen — CLPK' in s.text_frame.text)
+            assert footer.left + footer.width <= prev.left
+            assert all_text(slide).rstrip().split('\n')[-1] == str(index)
+        assert len(positions) == 1
+
+    def test_owasp_alleen_interne_sprongen_en_veilige_tooltip(self):
+        data = self.data()
+        next(e for e in data['elements'] if e['code'] == 'C3')['name'] = '"/><script>alert(1)</script>'
+        content = build_tree_pptx(data, self.OPTIONS, META)
+        with zipfile.ZipFile(io.BytesIO(content)) as z:
+            for name in z.namelist():
+                if name.endswith('.rels'):
+                    assert 'TargetMode="External"' not in z.read(name).decode('utf-8')
+                if name.startswith('ppt/slides/slide') and name.endswith('.xml'):
+                    xml = z.read(name).decode('utf-8')
+                    assert '<script>' not in xml
+                    for m in re.finditer(r'name="(vorige|volgende)-knop"><a:hlinkClick ([^>]*)', xml):
+                        assert 'ppaction://hlinksldjump' in m.group(2)
+        slide = self.slide_of(load(content), 'C1')
+        tooltip = self.button(slide, 'volgende-knop')._element.find('.//' + qn('a:hlinkClick')).get('tooltip')
+        assert tooltip == 'Volgende onder B1: C3 — "/><script>alert(1)</script>'
+
+    def test_model_hulpfuncties(self):
+        model = _Model(self.data(), self.OPTIONS)
+        assert model.main_parent('C1') == 'B1'
+        assert model.main_parent('M1') is None
+        nav = model.sibling_nav('C3')
+        assert (nav.prev, nav.next, nav.parent) == ('C1', None, 'B1')
