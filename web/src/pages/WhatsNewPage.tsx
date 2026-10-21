@@ -16,6 +16,17 @@ type Release = {
 
 const RELEASES: Release[] = [
   {
+    // DOEL-121
+    version: '4.4.1',
+    date: '21 oktober 2026',
+    title: 'Beveiligingsupdate: kwetsbaarheden in een softwarecomponent opgelost',
+    items: [
+      'De component voor het verwerken van afbeeldingen in de Excel- en PowerPoint-functies (Pillow) is bijgewerkt naar versie 13.0.0. Daarmee zijn één kritieke en zes hoge kwetsbaarheden opgelost die op 20 oktober 2026 bekend werden en door de dagelijkse controle van de softwarecomponenten waren gemeld.',
+      'Die component staat voortaan vast op een veilige versie, zodat een nieuwe build niet ongemerkt een kwetsbare versie kan binnenhalen; een automatische test bewaakt dat.',
+      'Er verandert niets aan hoe je Doelenboom gebruikt.',
+    ],
+  },
+  {
     version: '4.4.0',
     date: '16 oktober 2026',
     title: 'Programma-PowerPoint: meerdere projecten in één presentatie',
