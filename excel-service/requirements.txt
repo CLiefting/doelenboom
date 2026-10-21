@@ -33,3 +33,11 @@ JPype1==1.7.1
 # productie-image parste uploads zonder die bescherming. Expliciet pinnen
 # zodat het er altijd is; tests/test_hardening.py bewaakt dat het actief is.
 defusedxml==0.7.1
+# Pillow (DOEL-121): transitieve dependency van python-pptx (en door openpyxl
+# gebruikt voor afbeeldingen in .xlsx), maar expliciet gepind: ongepind hing de
+# versie af van het bouwmoment — release 4.4.0 (16 oktober 2026) kreeg zo
+# 12.3.0 binnen, met 1 kritieke + 6 hoge kwetsbaarheden (o.a. CVE-2026-112403,
+# heap buffer overflow in ImagingJpegDecode; gepubliceerd 20 oktober 2026),
+# allemaal opgelost in 13.0.0. tests/test_dependency_pins.py bewaakt de
+# ondergrens.
+pillow==13.0.0
