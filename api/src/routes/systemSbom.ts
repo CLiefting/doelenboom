@@ -1,11 +1,15 @@
 import { Router } from 'express';
 import { requireAuth, AuthedRequest } from '../auth.js';
 import { requireSysadmin } from '../rbac.js';
+import { createRateLimiter, envInt } from '../rateLimit.js';
+import { sendVulnerabilityOverviewEmail } from '../email.js';
+import { logAuditEvent } from '../auditLog.js';
 import {
   getSummary,
   getComponents,
   getVulnerabilities,
   getSbomDownloadInfo,
+  getVulnerabilityOverview,
   refreshDependencyHealth,
   RefreshCooldownError,
   NoSbomError,
@@ -135,6 +139,47 @@ systemSbomRouter.post('/refresh', async (req: AuthedRequest, res) => {
 // (zie getSbomDownloadInfo — buildVersion is geschoond tot alleen
 // [A-Za-z0-9._-]) en een expliciete Content-Type i.p.v. Express' eigen
 // gok-op-extensie.
+// DOEL-128: knop "Overzicht mailen" — de volledige stand van alle
+// kwetsbaarheden (alle ernstniveaus, ook al eerder gemelde) naar de sysadmin
+// die erom vraagt, en alleen naar die. Raakt de "één keer melden"-boekhouding
+// van de dagelijkse melding (DOEL-70) niet. A01: router vereist sysadmin.
+// A04: hooguit VULN_OVERVIEW_MAIL_MAX (standaard 5) per uur per gebruiker.
+// A09: auditlog met alleen aantallen. Zonder APP_BASE_URL (lokale dev-stack)
+// geen mail (DOEL-127).
+export const vulnerabilityOverviewMailRateLimit = createRateLimiter({
+  windowMs: () => 60 * 60_000,
+  max: () => envInt('VULN_OVERVIEW_MAIL_MAX', 5),
+  key: (req) => `user:${(req as AuthedRequest).user?.id ?? 'onbekend'}`,
+  message: 'Je hebt het overzicht het afgelopen uur al vaak laten mailen. Probeer het later opnieuw.',
+});
+
+systemSbomRouter.post('/mail-overzicht', vulnerabilityOverviewMailRateLimit, async (req: AuthedRequest, res) => {
+  const user = req.user!;
+  const baseUrl = (process.env.APP_BASE_URL ?? '').trim();
+  if (!baseUrl) {
+    res.status(409).json({ error: 'Mailen is in deze omgeving niet ingesteld (APP_BASE_URL ontbreekt).' });
+    return;
+  }
+  const overview = await getVulnerabilityOverview();
+  if (!overview) {
+    res.status(409).json({ error: 'Er is nog geen SBOM ingelezen; er valt nog niets te melden.' });
+    return;
+  }
+  const link = `${baseUrl.replace(/\/+$/, '')}/system-info`;
+  const sent = await sendVulnerabilityOverviewEmail(user.email, { ...overview, link });
+  if (!sent) {
+    res.status(503).json({ error: 'Er is geen mailserver ingesteld; het overzicht is niet verstuurd.' });
+    return;
+  }
+  await logAuditEvent({
+    eventType: 'dependency_vulnerability_overview_sent',
+    userId: user.id,
+    // Alleen aantallen: geen adres, pakketnamen of kwetsbaarheid-id's.
+    detail: { runtime: overview.runtime, development: overview.development, total: overview.total },
+  });
+  res.json({ sent: true, runtime: overview.runtime, development: overview.development, total: overview.total });
+});
+
 systemSbomRouter.get('/download', (_req, res) => {
   const info = getSbomDownloadInfo();
   if (!info) {

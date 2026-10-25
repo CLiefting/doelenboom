@@ -501,6 +501,15 @@ volgt de volgende dag een nieuwe poging. Vereist migratie
 `0046_dependency_vulnerability_notifications.sql`. Werkwijze rond updates en
 de bewust uitgestelde majors: `docs/dependency-updates.md`.
 
+**Handmatig overzicht (DOEL-128):** op `/system-info` mailt de knop
+"Overzicht mailen" de volledige stand van alle kwetsbaarheden (alle
+ernstniveaus, ook al eerder gemelde) naar de sysadmin die erop drukt. Alleen
+aantallen en de link; de "één keer melden"-boekhouding van de dagelijkse
+melding blijft ongemoeid. Hooguit 5 keer per uur per gebruiker
+(`VULN_OVERVIEW_MAIL_MAX`), elke mail in het auditlog. Zonder `APP_BASE_URL`
+(dev-stack) of zonder SMTP wordt er niets verstuurd en meldt de knop waarom.
+Handig als controle in acceptatie (onderwerp begint dan met "[ACCEPTATIE]").
+
 ### Dagelijkse dependency-audit (DOEL-69)
 
 Naast de SBOM-controle in de app draait er op GitHub een eigen workflow

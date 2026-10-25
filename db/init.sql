@@ -814,7 +814,10 @@ create table if not exists audit_log (
     'elements_bulk_deleted',
     -- DOEL-97: app-instellingen gewijzigd (detail: per gewijzigd veld de oude
     -- en nieuwe waarde — alleen getallen).
-    'app_settings_updated'
+    'app_settings_updated',
+    -- DOEL-128: sysadmin liet het volledige kwetsbaarhedenoverzicht naar
+    -- zichzelf mailen (detail: alleen aantallen).
+    'dependency_vulnerability_overview_sent'
   )),
   user_id bigint references users(id) on delete set null,
   tenant_id bigint references tenants(id) on delete set null,
@@ -1639,5 +1642,6 @@ insert into schema_migrations (filename, method) values
   ('0049_audit_elements_bulk_deleted.sql', 'init'),
   ('0050_app_settings_idle_timeout.sql', 'init'),
   ('0051_schema_migrations.sql', 'init'),
-  ('0052_program_selections.sql', 'init')
+  ('0052_program_selections.sql', 'init'),
+  ('0053_audit_vulnerability_overview_sent.sql', 'init')
 on conflict do nothing;

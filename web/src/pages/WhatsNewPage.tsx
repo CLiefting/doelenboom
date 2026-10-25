@@ -16,6 +16,16 @@ type Release = {
 
 const RELEASES: Release[] = [
   {
+    // DOEL-128
+    version: '4.4.5',
+    date: '25 oktober 2026',
+    title: 'Softwarecomponenten: overzicht van alle kwetsbaarheden per mail opvragen',
+    items: [
+      'Sysadmins kunnen op de pagina Softwarecomponenten met de knop "Overzicht mailen" de volledige stand van alle kwetsbaarheden naar hun eigen e-mailadres laten sturen: alle ernstniveaus, apart voor onderdelen die in productie draaien en ontwikkelonderdelen, ook kwetsbaarheden die al eerder gemeld zijn. Zo kan er nooit een melding tussen wal en schip vallen.',
+      'De mail bevat alleen aantallen en een verwijzing naar de pagina; de details blijven achter de inlog. De dagelijkse automatische melding blijft ongewijzigd.',
+    ],
+  },
+  {
     // DOEL-127
     version: '4.4.4',
     date: '25 oktober 2026',
