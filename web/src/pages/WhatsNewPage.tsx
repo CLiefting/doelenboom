@@ -16,6 +16,16 @@ type Release = {
 
 const RELEASES: Release[] = [
   {
+    // DOEL-125
+    version: '4.4.3',
+    date: '25 oktober 2026',
+    title: 'Onderhoud: componenten van de Excel-, PowerPoint- en MS Project-functies bijgewerkt',
+    items: [
+      'De componenten waarop de Excel-import en -export, de PowerPoint-export en het inlezen van MS Project-bestanden draaien (FastAPI en MPXJ) zijn bijgewerkt naar hun nieuwste versie. Dit is regulier onderhoud met kleine verbeteringen en foutoplossingen; er waren geen kwetsbaarheden.',
+      'Er verandert niets aan hoe je Doelenboom gebruikt.',
+    ],
+  },
+  {
     // DOEL-123
     version: '4.4.2',
     date: '25 oktober 2026',
