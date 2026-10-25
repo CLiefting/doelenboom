@@ -44,6 +44,8 @@ export type AuditEventType =
   // softwarecomponenten. detail = alleen aantallen (per ernst, ontvangers,
   // verstuurd) — nooit pakketnamen, kwetsbaarheid-id's of e-mailadressen.
   | 'dependency_vulnerability_alert_sent'
+  // DOEL-128: handmatig opgevraagd kwetsbaarhedenoverzicht gemaild (alleen aantallen).
+  | 'dependency_vulnerability_overview_sent'
   // DOEL-75: kenmerkdefinities gewijzigd (doelenboom, tenant-default of
   // sjabloon). detail = { scope, templateId?, attributeCount, attributeIds }
   // — bewust NOOIT labels, uitleg of keuzelijstwaarden (vrije tekst).

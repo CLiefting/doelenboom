@@ -318,3 +318,59 @@ export let sendVulnerabilityAlertEmail = async (to: string, alert: Vulnerability
 export function setSendVulnerabilityAlertEmailImpl(fn: typeof sendVulnerabilityAlertEmail): void {
   sendVulnerabilityAlertEmail = fn;
 }
+
+// DOEL-128: handmatig opgevraagd overzicht van ALLE kwetsbaarheden (knop
+// "Overzicht mailen" op /system-info), alleen naar de sysadmin die erom vroeg.
+// Zelfde uitgangspunt als de melding hierboven (DOEL-70): alleen aantallen en
+// de link, geen pakketnamen/versies/id's; alles ge-escaped.
+export interface VulnerabilityOverviewMail {
+  buildVersion: string;
+  runtime: { kritiek: number; hoog: number; onbekend: number; gemiddeld: number; laag: number };
+  development: { kritiek: number; hoog: number; onbekend: number; gemiddeld: number; laag: number };
+  total: number;
+  link: string;
+}
+
+export function renderVulnerabilityOverviewEmail(o: VulnerabilityOverviewMail): { subject: string; text: string; html: string } {
+  const n = (v: unknown) => (Number.isInteger(v) && (v as number) >= 0 ? String(v) : '?');
+  const levels: [keyof VulnerabilityOverviewMail['runtime'], string][] = [
+    ['kritiek', 'Kritiek'], ['hoog', 'Hoog'], ['onbekend', 'Ernst onbekend'], ['gemiddeld', 'Gemiddeld'], ['laag', 'Laag'],
+  ];
+  const subject = 'Doelenboom: overzicht kwetsbaarheden (handmatig opgevraagd)';
+  const block = (title: string, c: VulnerabilityOverviewMail['runtime']) =>
+    `${title}\n` + levels.map(([k, label]) => `* ${label}: ${n(c[k])}`).join('\n');
+  const text =
+    `Je hebt een overzicht opgevraagd van alle kwetsbaarheden in de softwarecomponenten van Doelenboom ` +
+    `(bouwversie ${o.buildVersion}). Dit is de volledige huidige stand, ook kwetsbaarheden die al eerder gemeld zijn.\n\n` +
+    `${block('Onderdelen die in productie draaien:', o.runtime)}\n\n` +
+    `${block('Ontwikkelonderdelen (draaien niet in productie):', o.development)}\n\n` +
+    `Totaal: ${n(o.total)}\n\n` +
+    `Bekijk de details op de pagina Softwarecomponenten (alleen voor sysadmins, na inloggen):\n${o.link}\n\n` +
+    `Je ontvangt deze mail omdat je dit overzicht zelf hebt opgevraagd.`;
+  const htmlBlock = (title: string, c: VulnerabilityOverviewMail['runtime']) =>
+    `<p><strong>${escapeHtml(title)}</strong></p><ul>` +
+    levels.map(([k, label]) => `<li>${escapeHtml(label)}: ${n(c[k])}</li>`).join('') + '</ul>';
+  const html =
+    `<p>Je hebt een overzicht opgevraagd van alle kwetsbaarheden in de softwarecomponenten van Doelenboom ` +
+    `(bouwversie ${escapeHtml(o.buildVersion)}). Dit is de volledige huidige stand, ook kwetsbaarheden die al eerder gemeld zijn.</p>` +
+    htmlBlock('Onderdelen die in productie draaien:', o.runtime) +
+    htmlBlock('Ontwikkelonderdelen (draaien niet in productie):', o.development) +
+    `<p>Totaal: ${n(o.total)}</p>` +
+    `<p>Bekijk de details op de pagina <a href="${escapeHtml(o.link)}">Softwarecomponenten</a> (alleen voor sysadmins, na inloggen).</p>` +
+    `<p style="color:#6c6f76;font-size:13px">Je ontvangt deze mail omdat je dit overzicht zelf hebt opgevraagd.</p>`;
+  return { subject, text, html };
+}
+
+// false = geen SMTP geconfigureerd (niets verstuurd).
+export let sendVulnerabilityOverviewEmail = async (to: string, overview: VulnerabilityOverviewMail): Promise<boolean> => {
+  const transport = getTransporter();
+  if (!transport) return false;
+  assertSafeRecipient(to);
+  const { subject, text, html } = renderVulnerabilityOverviewEmail(overview);
+  await transport.sendMail({ from: SMTP_FROM, to, subject: labelSubject(subject), text, html });
+  return true;
+};
+
+export function setSendVulnerabilityOverviewEmailImpl(fn: typeof sendVulnerabilityOverviewEmail): void {
+  sendVulnerabilityOverviewEmail = fn;
+}

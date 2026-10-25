@@ -119,6 +119,9 @@ function SystemInfoContent({ token }: { token: string }) {
   const [refreshing, setRefreshing] = useState(false);
   const [refreshNotice, setRefreshNotice] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
+  // DOEL-128: knop "Overzicht mailen".
+  const [mailing, setMailing] = useState(false);
+  const [mailNotice, setMailNotice] = useState<{ ok: boolean; text: string } | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
   function loadSummary() {
@@ -160,6 +163,26 @@ function SystemInfoContent({ token }: { token: string }) {
     }
   }
 
+  // DOEL-128: mailt de volledige stand van ALLE kwetsbaarheden (ook al eerder
+  // gemelde) naar je eigen adres; alleen aantallen, details staan hier.
+  async function handleMailOverview() {
+    if (!window.confirm('Het volledige overzicht van alle kwetsbaarheden naar je eigen e-mailadres sturen?')) return;
+    setMailNotice(null);
+    setMailing(true);
+    try {
+      const r = await api.sbomMailOverview(token);
+      const prod = r.runtime.kritiek + r.runtime.hoog + r.runtime.onbekend;
+      setMailNotice({
+        ok: true,
+        text: `Overzicht verstuurd naar je e-mailadres: ${r.total} kwetsbaarhe${r.total === 1 ? 'id' : 'den'} in totaal, waarvan ${prod} kritiek/hoog/onbekend in productieonderdelen.`,
+      });
+    } catch (err) {
+      setMailNotice({ ok: false, text: err instanceof ApiError ? err.message : 'Overzicht mailen mislukt.' });
+    } finally {
+      setMailing(false);
+    }
+  }
+
   async function handleDownload() {
     setDownloadError(null);
     setDownloading(true);
@@ -194,6 +217,9 @@ function SystemInfoContent({ token }: { token: string }) {
           <button onClick={handleRefresh} disabled={refreshing} style={styles.ghostButton}>
             {refreshing ? 'Bezig…' : '↻ Nu controleren'}
           </button>
+          <button onClick={handleMailOverview} disabled={mailing} style={styles.ghostButton} title="Volledige stand van alle kwetsbaarheden naar je eigen e-mailadres (ook al eerder gemelde)">
+            {mailing ? 'Bezig…' : '✉ Overzicht mailen'}
+          </button>
           <button onClick={handleDownload} disabled={downloading} style={styles.ghostButton}>
             {downloading ? 'Bezig…' : '⬇ Download SBOM'}
           </button>
@@ -203,6 +229,13 @@ function SystemInfoContent({ token }: { token: string }) {
 
       {refreshNotice && <p style={{ fontSize: 13, color: '#203864', background: '#EEF2FA', border: '1px solid #D6E0F5', borderRadius: 8, padding: '8px 12px' }}>{refreshNotice}</p>}
       {downloadError && <p style={{ color: '#DC3545' }}>{downloadError}</p>}
+      {mailNotice && (
+        <p style={mailNotice.ok
+          ? { fontSize: 13, color: '#203864', background: '#EEF2FA', border: '1px solid #D6E0F5', borderRadius: 8, padding: '8px 12px' }
+          : { fontSize: 13, color: '#DC3545' }}>
+          {mailNotice.text}
+        </p>
+      )}
 
       <nav style={styles.tabs}>
         <TabButton label="Overzicht" active={tab === 'overzicht'} onClick={() => setTab('overzicht')} />

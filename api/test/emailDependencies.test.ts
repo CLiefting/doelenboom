@@ -147,7 +147,8 @@ describe('DOEL-67: dependencies en e-mailpaden', () => {
   // (DOELENBOOM_OMGEVING), in productie (variabele niet gezet) niet.
   it('DOEL-127: buiten productie krijgt elk mailonderwerp een omgevingslabel, in productie niet', async () => {
     const saved = process.env.DOELENBOOM_OMGEVING;
-    const subjectOf = (i: number) => (/^Subject: (.*)$/m.exec(headerBlock(captured[i].data)) ?? [])[1];
+    // Lange onderwerpen worden in de header over meerdere regels gevouwen (RFC 5322): eerst ontvouwen.
+    const subjectOf = (i: number) => (/^Subject: (.*)$/m.exec(headerBlock(captured[i].data).replace(/\r\n[ \t]+/g, ' ')) ?? [])[1];
     try {
       process.env.DOELENBOOM_OMGEVING = 'acceptatie';
       let before = captured.length;
@@ -157,6 +158,14 @@ describe('DOEL-67: dependencies en e-mailpaden', () => {
       assert.equal(subjectOf(before), '[ACCEPTATIE] Je Doelenboom-inlogcode');
       assert.match(subjectOf(before + 1), /^\[ACCEPTATIE\] Doelenboom: 1 nieuwe kwetsbaarheid /);
       assert.equal(subjectOf(before + 2), '[ACCEPTATIE] Je hebt al een Doelenboom-account');
+      // DOEL-128: ook het handmatig opgevraagde overzicht krijgt het label.
+      before = captured.length;
+      await email.sendVulnerabilityOverviewEmail('beheer@example.test', {
+        buildVersion: '4.4.5', total: 0, link: 'http://localhost:8088/system-info',
+        runtime: { kritiek: 0, hoog: 0, onbekend: 0, gemiddeld: 0, laag: 0 },
+        development: { kritiek: 0, hoog: 0, onbekend: 0, gemiddeld: 0, laag: 0 },
+      });
+      assert.equal(subjectOf(before), '[ACCEPTATIE] Doelenboom: overzicht kwetsbaarheden (handmatig opgevraagd)');
 
       process.env.DOELENBOOM_OMGEVING = 'ontwikkeling';
       before = captured.length;

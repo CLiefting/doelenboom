@@ -842,6 +842,10 @@ export const api = {
   sbomRefresh: (token: string) =>
     request<import('./types').DependencyRefreshResult>('/api/system/sbom/refresh', { method: 'POST' }, token),
 
+  // DOEL-128: volledige stand van alle kwetsbaarheden naar je eigen adres mailen.
+  sbomMailOverview: (token: string) =>
+    request<import('./types').VulnerabilityOverviewMailResult>('/api/system/sbom/mail-overzicht', { method: 'POST' }, token),
+
   // Downloadknop — zelfde blob+Content-Disposition-patroon als
   // downloadAuditLogExport hierboven.
   downloadSbom: async (token: string): Promise<{ blob: Blob; filename: string }> => {

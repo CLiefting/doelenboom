@@ -59,6 +59,7 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   control_rule_deviation_set: 'Afwijking van controleregel gemotiveerd',
   control_rule_deviation_removed: 'Afwijking van controleregel ingetrokken',
   dependency_vulnerability_alert_sent: 'Melding kwetsbaarheden verstuurd',
+  dependency_vulnerability_overview_sent: 'Overzicht kwetsbaarheden gemaild (handmatig)',
   attribute_definitions_updated: 'Kenmerken gewijzigd',
   elements_bulk_deleted: 'Elementen in bulk verwijderd',
   app_settings_updated: 'App-instellingen gewijzigd',

@@ -919,6 +919,10 @@ export type DependencyVulnerabilityRow = {
   checkedAt: string;
 };
 
+// DOEL-128: antwoord van "Overzicht mailen" (alleen aantallen).
+export type SeverityCounts = { kritiek: number; hoog: number; onbekend: number; gemiddeld: number; laag: number };
+export type VulnerabilityOverviewMailResult = { sent: true; runtime: SeverityCounts; development: SeverityCounts; total: number };
+
 export type DependencyRefreshResult = {
   status: 'success' | 'partial' | 'failed';
   componentsChecked: number;

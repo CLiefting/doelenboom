@@ -497,6 +497,40 @@ export async function notifySysadminsOfNewVulnerabilities(buildId: number): Prom
   return { newVulnerabilities: fresh.length, recipients: recipients.rows.length, sent };
 }
 
+// --- Handmatig opgevraagd overzicht (DOEL-128) -----------------------------
+// De volledige stand van ALLE kwetsbaarheden in de actuele build, per ernst en
+// per scope — ook al eerder gemelde (los van de "één keer melden"-regel van
+// notifySysadminsOfNewVulnerabilities hierboven). Alleen aantallen: de mail
+// die hiermee wordt gevuld bevat geen pakketnamen, versies of id's (DOEL-70).
+export type SeverityCounts = { kritiek: number; hoog: number; onbekend: number; gemiddeld: number; laag: number };
+export type VulnerabilityOverview = {
+  buildVersion: string;
+  runtime: SeverityCounts;
+  development: SeverityCounts;
+  total: number;
+};
+
+export async function getVulnerabilityOverview(): Promise<VulnerabilityOverview | null> {
+  const buildId = await latestBuildId();
+  if (buildId === null) return null;
+  const build = await pool.query('select build_version from dependency_sbom_builds where id = $1', [buildId]);
+  const rows = await pool.query(
+    `select c.scope, v.severity
+       from dependency_vulnerabilities v
+       join dependency_components c on c.id = v.component_id
+      where c.build_id = $1`,
+    [buildId]
+  );
+  const empty = (): SeverityCounts => ({ kritiek: 0, hoog: 0, onbekend: 0, gemiddeld: 0, laag: 0 });
+  const runtime = empty();
+  const development = empty();
+  for (const r of rows.rows) {
+    const level = classifySeverityLevel(r.severity) as keyof SeverityCounts;
+    (r.scope === 'runtime' ? runtime : development)[level] += 1;
+  }
+  return { buildVersion: build.rows[0].build_version as string, runtime, development, total: rows.rows.length };
+}
+
 type ComponentRowKey = string; // `${applicationComponent}|${name}|${version}`
 function componentRowKey(c: { applicationComponent: string; name: string; version: string }): ComponentRowKey {
   return `${c.applicationComponent}|${c.name}|${c.version}`;
