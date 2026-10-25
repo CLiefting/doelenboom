@@ -175,6 +175,9 @@ function runRelease(o: { tagAt?: 'head' | 'previous'; usersActive?: boolean; arg
     writeFileSync(path.join(work, '.gitignore'), '*.tar.gz\n');
     script(path.join(work, 'scripts', 'release.sh'), src.replace(/^#!.*\n/, ''));
     script(path.join(work, 'scripts', 'build-version.sh'), `echo "9.9.9 (abc1234, 11-10-2026 17:00)"`);
+    // DOEL-124: release.sh laadt de gedeelde wachtlogica voor de CI.
+    mkdirSync(path.join(work, 'scripts', 'lib'), { recursive: true });
+    writeFileSync(path.join(work, 'scripts', 'lib', 'wait-for-ci.sh'), readFileSync(path.join(repo, 'scripts', 'lib', 'wait-for-ci.sh'), 'utf8'));
     git('add', '-A');
     git('commit', '-q', '-m', 'eerste');
     git('commit', '-q', '--allow-empty', '-m', 'tweede');
@@ -186,7 +189,7 @@ function runRelease(o: { tagAt?: 'head' | 'previous'; usersActive?: boolean; arg
     }
     script(path.join(bin, 'gh'), [
       `echo "gh $*" >> "${log}"`,
-      'case "$1 $2" in "run list") echo 12345 ;; esac',
+      'case "$1 $2" in "run list") echo 12345 ;; "run view") echo "RUN:completed:success" ;; esac',
       'exit 0',
     ].join('\n'));
     script(path.join(bin, 'docker'), `echo "docker $*" >> "${log}"\nexit 0`);
