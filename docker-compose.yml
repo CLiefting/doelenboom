@@ -1,7 +1,7 @@
 services:
   db:
     image: postgres:18-alpine
-    restart: unless-stopped
+    restart: "no"   # DOEL-127: niet vanzelf meestarten met Docker Desktop (productie zet dit zelf)
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-doelenboom}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-doelenboom}
@@ -37,8 +37,8 @@ services:
     # herbruikt kan worden — zie deploy/README.md ("Lokaal bouwen, VPS laadt
     # alleen"). Dit voorkomt dat de VPS zelf npm/pip-builds moet draaien,
     # wat op de gedeelde, resource-krappe server tot ernstige contentie leidde.
-    image: doelenboom-excel-service:latest
-    restart: unless-stopped
+    image: doelenboom-dev-excel-service:latest   # DOEL-127: eigen tag, botst niet met release-/acceptatie-images
+    restart: "no"   # DOEL-127: niet vanzelf meestarten met Docker Desktop (productie zet dit zelf)
     # Geen host-poort-mapping: alleen de api-container praat hiermee, via het
     # interne Docker-netwerk (http://excel-service:8000). Zo voorkomen we
     # conflicten met poort 8000 op de host (bv. AirPlay Receiver op macOS).
@@ -74,8 +74,8 @@ services:
         # deploy/README.md), anders kan een oudere excel-service-image
         # meegenomen worden.
         excel_sbom: service:excel-service
-    image: doelenboom-api:latest
-    restart: unless-stopped
+    image: doelenboom-dev-api:latest   # DOEL-127: eigen tag, botst niet met release-/acceptatie-images
+    restart: "no"   # DOEL-127: niet vanzelf meestarten met Docker Desktop (productie zet dit zelf)
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-doelenboom}:${POSTGRES_PASSWORD:-doelenboom}@db:5432/${POSTGRES_DB:-doelenboom}
       PORT: 4000
@@ -95,6 +95,9 @@ services:
       # en deploy/README.md) — apart instelbaar, gebruikt verder dezelfde
       # SMTP_*-instellingen hierboven.
       SUBSCRIPTION_REQUEST_NOTIFY_EMAIL: ${SUBSCRIPTION_REQUEST_NOTIFY_EMAIL:-info.doelenboom@code072.nl}
+      # DOEL-127: mails uit de dev-stack krijgen "[ONTWIKKELING]" in het onderwerp;
+      # zonder APP_BASE_URL verstuurt de dev-stack geen kwetsbaarhedenmail.
+      DOELENBOOM_OMGEVING: ontwikkeling
     ports:
       - "4000:4000"
     depends_on:
@@ -105,8 +108,8 @@ services:
 
   web:
     build: ./web
-    image: doelenboom-web:latest
-    restart: unless-stopped
+    image: doelenboom-dev-web:latest   # DOEL-127: eigen tag, botst niet met release-/acceptatie-images
+    restart: "no"   # DOEL-127: niet vanzelf meestarten met Docker Desktop (productie zet dit zelf)
     environment:
       VITE_API_URL: http://localhost:4000
     ports:

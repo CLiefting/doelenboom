@@ -384,6 +384,19 @@ ls -R ~/doelenboom/backups | head -50
 Zelfde principe als de eerste deploy (stap 5): bouw de nieuwe images op je
 Mac, zet ze over, laad ze op de VPS, herstart alleen dan.
 
+**Vooraf: acceptatie (DOEL-127).** Een release gaat alleen over een commit die
+eerst in de lokale acceptatieomgeving is goedgekeurd: `bash scripts/acceptatie.sh`
+op een bijgewerkte `main` (zie README, "Drie omgevingen"). `scripts/release.sh`
+controleert `.acceptatie/bewijs-<commit>.txt` en stopt vóór het taggen als het
+bewijs ontbreekt, afgekeurd is, bij een andere commit hoort of ouder is dan
+72 uur. Bij de handmatige route hieronder controleer je dat zelf.
+
+**Productie-compose (DOEL-127):** `docker-compose.prod.yml` legt nu zelf de
+image-namen (`doelenboom-*:latest`), `restart: unless-stopped` en
+`DOELENBOOM_OMGEVING: productie` vast; de dev-stack heeft eigen tags en
+`restart: "no"`. De samengevoegde productieconfiguratie is daardoor ongewijzigd
+(zie `api/test/composeEnvironments.test.ts`).
+
 **Op je Mac:**
 ```bash
 cd ~/pad/naar/doelenboom

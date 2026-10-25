@@ -143,6 +143,45 @@ describe('DOEL-67: dependencies en e-mailpaden', () => {
     assert.match(m.data, /123456/);
   });
 
+  // DOEL-127: buiten productie een omgevingslabel vooraan het onderwerp
+  // (DOELENBOOM_OMGEVING), in productie (variabele niet gezet) niet.
+  it('DOEL-127: buiten productie krijgt elk mailonderwerp een omgevingslabel, in productie niet', async () => {
+    const saved = process.env.DOELENBOOM_OMGEVING;
+    const subjectOf = (i: number) => (/^Subject: (.*)$/m.exec(headerBlock(captured[i].data)) ?? [])[1];
+    try {
+      process.env.DOELENBOOM_OMGEVING = 'acceptatie';
+      let before = captured.length;
+      await email.sendMfaEmail('gebruiker@example.test', '111111', 10);
+      await email.sendVulnerabilityAlertEmail('beheer@example.test', { counts: { kritiek: 0, hoog: 1, onbekend: 0 }, total: 1, link: 'http://localhost:8088/system-info' });
+      await email.sendRegistrationExistingAccountEmail('bestaand@example.test', 'http://localhost:8088/login');
+      assert.equal(subjectOf(before), '[ACCEPTATIE] Je Doelenboom-inlogcode');
+      assert.match(subjectOf(before + 1), /^\[ACCEPTATIE\] Doelenboom: 1 nieuwe kwetsbaarheid /);
+      assert.equal(subjectOf(before + 2), '[ACCEPTATIE] Je hebt al een Doelenboom-account');
+
+      process.env.DOELENBOOM_OMGEVING = 'ontwikkeling';
+      before = captured.length;
+      await email.sendMfaEmail('gebruiker@example.test', '222222', 10);
+      assert.equal(subjectOf(before), '[ONTWIKKELING] Je Doelenboom-inlogcode');
+
+      delete process.env.DOELENBOOM_OMGEVING; // productie
+      before = captured.length;
+      await email.sendMfaEmail('gebruiker@example.test', '333333', 10);
+      assert.equal(subjectOf(before), 'Je Doelenboom-inlogcode');
+    } finally {
+      if (saved === undefined) delete process.env.DOELENBOOM_OMGEVING; else process.env.DOELENBOOM_OMGEVING = saved;
+    }
+  });
+
+  it('DOEL-127 (A03): het label komt alleen letterlijk in de header als het uit kleine letters en "-" bestaat', () => {
+    assert.equal(email.environmentLabel(undefined), '');
+    assert.equal(email.environmentLabel(''), '');
+    assert.equal(email.environmentLabel('productie'), '');
+    assert.equal(email.environmentLabel(' Acceptatie '), '[ACCEPTATIE] ');
+    assert.equal(email.environmentLabel('x\r\nBcc: aanvaller@evil.test'), '[NIET-PRODUCTIE] ');
+    assert.equal(email.environmentLabel('a'.repeat(30)), '[NIET-PRODUCTIE] ');
+    assert.equal(email.labelSubject('Onderwerp', 'acceptatie'), '[ACCEPTATIE] Onderwerp');
+  });
+
   it('registratieverificatie en "account bestaat al" gaan via SMTP', async () => {
     const before = captured.length;
     await email.sendRegistrationVerificationEmail('aanvrager@example.test', 'https://app.example.test/bevestig?t=abc', 'Org', 24);

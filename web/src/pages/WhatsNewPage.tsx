@@ -16,6 +16,17 @@ type Release = {
 
 const RELEASES: Release[] = [
   {
+    // DOEL-127
+    version: '4.4.4',
+    date: '25 oktober 2026',
+    title: 'Kwaliteit: elke nieuwe versie gaat eerst door een acceptatieomgeving',
+    items: [
+      'Elke nieuwe versie van Doelenboom wordt voortaan eerst volledig getest in een aparte acceptatieomgeving, op precies dezelfde onderdelen als de live-omgeving. Pas als daar alles werkt en er geen kritieke of hoge kwetsbaarheden in de gebruikte softwarecomponenten zijn gevonden, wordt de versie uitgerold.',
+      'E-mails uit test- en acceptatieomgevingen zijn voortaan herkenbaar aan een label in het onderwerp, zodat ze nooit verward worden met e-mails uit de live-omgeving.',
+      'Er verandert niets aan hoe je Doelenboom gebruikt.',
+    ],
+  },
+  {
     // DOEL-125
     version: '4.4.3',
     date: '25 oktober 2026',

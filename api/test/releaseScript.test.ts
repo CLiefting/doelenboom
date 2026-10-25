@@ -146,7 +146,10 @@ describe('DOEL-108: het remote deel van release.sh haalt zijn einde', () => {
 //
 // Deze tests draaien het echte release.sh in een wegwerp-repository (met een
 // lokale "origin") en nagemaakte gh/docker/ssh/scp.
-function runRelease(o: { tagAt?: 'head' | 'previous'; usersActive?: boolean; args?: string[] }) {
+// DOEL-127: release.sh eist een goedgekeurd acceptatiebewijs voor HEAD; standaard
+// schrijft de test er een (acceptatie: 'goed'), de andere varianten testen de poortwachter.
+type AccState = 'goed' | 'geen' | 'afgekeurd' | 'oud' | 'andere-commit';
+function runRelease(o: { tagAt?: 'head' | 'previous'; usersActive?: boolean; args?: string[]; acceptatie?: AccState }) {
   const tmp = mkdtempSync(path.join(os.tmpdir(), 'doel109-'));
   const bin = path.join(tmp, 'bin');
   const work = path.join(tmp, 'work');
@@ -172,7 +175,7 @@ function runRelease(o: { tagAt?: 'head' | 'previous'; usersActive?: boolean; arg
     spawnSync('git', ['init', '-q', '--bare', path.join(tmp, 'origin.git')], { env });
     git('init', '-q', '-b', 'main');
     writeFileSync(path.join(work, 'docker-compose.yml'), 'services: {}\n');
-    writeFileSync(path.join(work, '.gitignore'), '*.tar.gz\n');
+    writeFileSync(path.join(work, '.gitignore'), '*.tar.gz\n/.acceptatie/\n');
     script(path.join(work, 'scripts', 'release.sh'), src.replace(/^#!.*\n/, ''));
     script(path.join(work, 'scripts', 'build-version.sh'), `echo "9.9.9 (abc1234, 11-10-2026 17:00)"`);
     // DOEL-124: release.sh laadt de gedeelde wachtlogica voor de CI.
@@ -183,6 +186,20 @@ function runRelease(o: { tagAt?: 'head' | 'previous'; usersActive?: boolean; arg
     git('commit', '-q', '--allow-empty', '-m', 'tweede');
     git('remote', 'add', 'origin', path.join(tmp, 'origin.git'));
     git('push', '-q', '-u', 'origin', 'main');
+    const acc = o.acceptatie ?? 'goed';
+    if (acc !== 'geen') {
+      const head = git('rev-parse', 'HEAD');
+      const now = Math.floor(Date.now() / 1000);
+      mkdirSync(path.join(work, '.acceptatie'), { recursive: true });
+      writeFileSync(path.join(work, '.acceptatie', `bewijs-${head}.txt`), [
+        `commit=${acc === 'andere-commit' ? '0'.repeat(40) : head}`,
+        'build_version=9.9.8 (abc1234, 25-10-2026 11:00)',
+        'gecontroleerd_op=2026-10-25T11:00:00+0100',
+        `gecontroleerd_epoch=${acc === 'oud' ? now - 73 * 3600 : now - 60}`,
+        `kritiek=0`, `hoog=${acc === 'afgekeurd' ? 2 : 0}`, 'onbekend=0', 'gemiddeld=1', 'laag=0',
+        `resultaat=${acc === 'afgekeurd' ? 'AFGEKEURD' : 'GOEDGEKEURD'}`,
+      ].join('\n') + '\n');
+    }
     if (o.tagAt) {
       git('tag', '-a', tag, '-m', tag, o.tagAt === 'head' ? 'HEAD' : 'HEAD~1');
       git('push', '-q', 'origin', tag);
@@ -261,5 +278,48 @@ describe('DOEL-109: release.sh opnieuw draaien na een afgebroken uitrol', () => 
     const early = code(src).indexOf("ssh \"$VPS\" 'cd ~/doelenboom && ./deploy/check-no-active-users.sh'");
     assert.notEqual(early, -1, 'de vroege controle ontbreekt');
     assert.ok(early < code(src).indexOf('git tag -a'), 'de vroege controle hoort vóór het taggen');
+  });
+});
+
+// Regressietests voor DOEL-127: release.sh tagt alleen wat eerst in de lokale
+// acceptatieomgeving is goedgekeurd (scripts/acceptatie.sh). Op de oude
+// release.sh (zonder poortwachter) falen de weigeringstests: die tagde gewoon.
+describe('DOEL-127: release.sh weigert een commit zonder goedgekeurde acceptatie', () => {
+  const refused = (r: ReturnType<typeof runRelease>, pattern: RegExp) => {
+    assert.notEqual(r.status, 0, r.out);
+    assert.match(r.out, pattern);
+    assert.equal(r.tags, '', 'er is toch een tag gezet');
+    for (const c of ['gh run', 'gh release', 'docker compose', 'scp', 'ssh']) {
+      assert.ok(!r.calls.includes(c), `"${c}" had niet mogen gebeuren:\n${r.calls}`);
+    }
+  };
+
+  it('geen acceptatiebewijs: stopt vóór CI, tag, bouwen en de VPS', () => {
+    refused(runRelease({ acceptatie: 'geen' }), /nog niet in acceptatie geweest\. Draai eerst:  bash scripts\/acceptatie\.sh/);
+  });
+
+  it('afgekeurde acceptatie: stopt, met de aantallen', () => {
+    refused(runRelease({ acceptatie: 'afgekeurd' }), /AFGEKEURD \(kritiek 0, hoog 2, onbekend 0\)/);
+  });
+
+  it('bewijs van een andere commit telt niet', () => {
+    refused(runRelease({ acceptatie: 'andere-commit' }), /hoort niet bij commit/);
+  });
+
+  it('bewijs ouder dan 72 uur telt niet (libraries opnieuw controleren)', () => {
+    refused(runRelease({ acceptatie: 'oud' }), /73 uur oud \(maximaal 72\)/);
+  });
+
+  it('goedgekeurd en recent: de release gaat door en meldt de acceptatie', () => {
+    const r = runRelease({ args: [], acceptatie: 'goed' });
+    assert.equal(r.status, 0, r.out);
+    assert.match(r.out, /Acceptatie: GOEDGEKEURD op 2026-10-25T11:00:00\+0100/);
+    assert.equal(r.tags, 'v9.9.9');
+  });
+
+  it('hervatten (tag staat al op deze commit) vraagt niet opnieuw om acceptatie', () => {
+    const r = runRelease({ tagAt: 'head', acceptatie: 'geen' });
+    assert.doesNotMatch(r.out, /nog niet in acceptatie/);
+    assert.match(r.out, /de release wordt hervat/);
   });
 });

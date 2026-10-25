@@ -45,6 +45,11 @@ voor het patroon: kwetsbaarheid eerst aantonen, dan fixen, dan de test die het a
   merge-commit, ruimt de branch op).
 - CI moet groen zijn: API-tests, web-tests, excel-service-tests, de image-smoketest,
   gitleaks en Semgrep (OWASP Top 10) zijn verplichte checks.
+- Volgorde (DOEL-127): branch → PR via `scripts/pr-merge.sh` → **acceptatie** met
+  `scripts/acceptatie.sh` op een bijgewerkte `main` (productie-images, eigen database met
+  testdata, http://localhost:8088, mails "[ACCEPTATIE]") → handmatig testen → release met
+  `scripts/release.sh`. release.sh weigert een commit zonder goedgekeurd acceptatiebewijs
+  (geen kritieke/hoge/onbekende kwetsbaarheden, maximaal 72 uur oud).
 - Scripts die de repository wijzigen draaien één voor één, niet gebundeld — zeker rond
   git-operaties en deploys.
 - Werk vanuit `${DOELENBOOM_DIR:-$HOME/src/doelenboom}` (zie README, "Geheimen en

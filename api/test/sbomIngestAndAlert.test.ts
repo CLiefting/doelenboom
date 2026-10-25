@@ -31,6 +31,7 @@ const OSV_DETAILS: Record<string, unknown> = {
   'GHSA-aaaa-aaaa-0004': { database_specific: { severity: 'CRITICAL' } },
   'GHSA-aaaa-aaaa-0005': { database_specific: { severity: 'CRITICAL' } },
   'GHSA-aaaa-aaaa-0006': { database_specific: { severity: 'MODERATE' } },
+  'GHSA-aaaa-aaaa-0127': { database_specific: { severity: 'HIGH' } }, // DOEL-127
 };
 const externalCalls: string[] = [];
 const realFetch = globalThis.fetch;
@@ -320,4 +321,35 @@ describe('SBOM inlezen na uitrol (DOEL-47) en melding aan sysadmins (DOEL-70)', 
     // Direct én productie: alleen rt-high (dev-crit is direct maar ontwikkel; de rest is transitief).
     assert.deepEqual(s.directRuntimeUpdates, { patch: 0, minor: 0, major: 1 });
   });
+
+  // --- DOEL-127 (geen kwetsbaarhedenmail zonder APP_BASE_URL) ---------------------
+
+  // DOEL-127: de lokale dev-stack (zonder APP_BASE_URL) mailde op 25-10-2026
+  // "23 nieuwe kwetsbaarheden" met een localhost-link. Zonder APP_BASE_URL:
+  // geen mail, en niets als "gemeld" vastgelegd, zodat een omgeving mét
+  // APP_BASE_URL de bevinding later alsnog meldt.
+  it('DOEL-127: zonder APP_BASE_URL geen kwetsbaarhedenmail en niets als gemeld vastgelegd', async () => {
+    const saved = process.env.APP_BASE_URL;
+    try {
+      osvByPackage = { [PKG('rt-high')]: ['GHSA-aaaa-aaaa-0127'] };
+      delete process.env.APP_BASE_URL;
+      await clearRuns();
+      deploy();
+      await sweepDependencyHealthCheck();
+      assert.equal(mails.length, 0, `er ging toch mail uit: ${JSON.stringify(mails.map((m) => m.alert.link))}`);
+      assert.ok(!(await notified()).some((n) => n.includes(':0127:')), 'bevinding is toch als gemeld vastgelegd');
+
+      // Mét APP_BASE_URL (productie/acceptatie) wordt dezelfde bevinding wél gemeld.
+      process.env.APP_BASE_URL = 'https://doelenboom.example.test/';
+      await clearRuns();
+      deploy();
+      await sweepDependencyHealthCheck();
+      assert.ok(mails.length > 0, 'met APP_BASE_URL hoort er wel een mail te komen');
+      assert.equal(mails[0].alert.link, 'https://doelenboom.example.test/system-info');
+      assert.ok((await notified()).includes('rt-high:0127:hoog'));
+    } finally {
+      process.env.APP_BASE_URL = saved ?? 'https://doelenboom.example.test/';
+    }
+  });
+
 });
