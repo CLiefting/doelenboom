@@ -16,6 +16,18 @@ type Release = {
 
 const RELEASES: Release[] = [
   {
+    // DOEL-123
+    version: '4.4.2',
+    date: '25 oktober 2026',
+    title: 'Beveiligingsupdate: kwetsbaarheden in softwarecomponenten van de server opgelost',
+    items: [
+      'Twee componenten in de server die binnenkomende verzoeken en bestandsuploads verwerken (body-parser en multer) zijn bijgewerkt. Daarmee zijn twee hoge kwetsbaarheden opgelost waarmee de server via een speciaal geprepareerd verzoek onbereikbaar gemaakt zou kunnen worden; de dagelijkse controle van de softwarecomponenten had ze op 24 oktober 2026 gemeld.',
+      'De component voor het versturen van e-mail (nodemailer) is in dezelfde ronde bijgewerkt; dat lost drie kwetsbaarheden van gemiddelde ernst op in het verwerken van e-mailadressen.',
+      'Automatische tests bewaken dat deze componenten op een veilige versie blijven.',
+      'Er verandert niets aan hoe je Doelenboom gebruikt.',
+    ],
+  },
+  {
     // DOEL-121
     version: '4.4.1',
     date: '21 oktober 2026',
