@@ -52,6 +52,25 @@ function getTransporter(): Transporter | null {
   return transporter;
 }
 
+// DOEL-127: mails uit een andere omgeving dan productie zijn herkenbaar aan
+// een label vooraan het onderwerp, uit DOELENBOOM_OMGEVING (docker-compose.acc.yml:
+// "acceptatie", docker-compose.yml: "ontwikkeling"). Leeg of "productie" = geen
+// label; productie zet de variabele niet. Aanleiding (25-10-2026): de lokale
+// dev-stack mailde "23 nieuwe kwetsbaarheden" en die mail was niet van een
+// productiemail te onderscheiden. Alleen kleine letters en '-' (max. 20 tekens)
+// komen letterlijk in de header (OWASP A03: geen header-injectie via een
+// omgevingsvariabele); iets anders wordt "[NIET-PRODUCTIE]".
+export function environmentLabel(env: string | undefined = process.env.DOELENBOOM_OMGEVING): string {
+  const v = (env ?? '').trim().toLowerCase();
+  if (v === '' || v === 'productie' || v === 'production') return '';
+  if (!/^[a-z][a-z-]{0,19}$/.test(v)) return '[NIET-PRODUCTIE] ';
+  return `[${v.toUpperCase()}] `;
+}
+
+export function labelSubject(subject: string, env: string | undefined = process.env.DOELENBOOM_OMGEVING): string {
+  return environmentLabel(env) + subject;
+}
+
 function renderMfaEmail(code: string, ttlMinutes: number): { text: string; html: string } {
   const text =
     `Je Doelenboom-inlogcode is: ${code}\n\n` +
@@ -83,7 +102,7 @@ export let sendMfaEmail = async (to: string, code: string, ttlMinutes = 10): Pro
     return;
   }
   assertSafeRecipient(to); // DOEL-67: geen adreslijst/header-injectie via "to"
-  await transport.sendMail({ from: SMTP_FROM, to, subject: 'Je Doelenboom-inlogcode', text, html });
+  await transport.sendMail({ from: SMTP_FROM, to, subject: labelSubject('Je Doelenboom-inlogcode'), text, html });
 };
 
 export function setSendMfaEmailImpl(fn: typeof sendMfaEmail): void {
@@ -155,7 +174,7 @@ export let sendNewSubscriptionRequestEmail = async (
     return;
   }
   assertSafeRecipient(SUBSCRIPTION_REQUEST_NOTIFY_EMAIL);
-  await transport.sendMail({ from: SMTP_FROM, to: SUBSCRIPTION_REQUEST_NOTIFY_EMAIL, subject, text, html });
+  await transport.sendMail({ from: SMTP_FROM, to: SUBSCRIPTION_REQUEST_NOTIFY_EMAIL, subject: labelSubject(subject), text, html });
 };
 
 export function setSendNewSubscriptionRequestEmailImpl(fn: typeof sendNewSubscriptionRequestEmail): void {
@@ -206,7 +225,7 @@ export let sendRegistrationVerificationEmail = async (
     return;
   }
   assertSafeRecipient(to); // DOEL-67: geen adreslijst/header-injectie via "to"
-  await transport.sendMail({ from: SMTP_FROM, to, subject, text, html });
+  await transport.sendMail({ from: SMTP_FROM, to, subject: labelSubject(subject), text, html });
 };
 
 export function setSendRegistrationVerificationEmailImpl(fn: typeof sendRegistrationVerificationEmail): void {
@@ -235,7 +254,7 @@ export let sendRegistrationExistingAccountEmail = async (to: string, loginUrl: s
     return;
   }
   assertSafeRecipient(to); // DOEL-67: geen adreslijst/header-injectie via "to"
-  await transport.sendMail({ from: SMTP_FROM, to, subject, text, html });
+  await transport.sendMail({ from: SMTP_FROM, to, subject: labelSubject(subject), text, html });
 };
 
 export function setSendRegistrationExistingAccountEmailImpl(fn: typeof sendRegistrationExistingAccountEmail): void {
@@ -292,7 +311,7 @@ export let sendVulnerabilityAlertEmail = async (to: string, alert: Vulnerability
   }
   assertSafeRecipient(to);
   const { subject, text, html } = renderVulnerabilityAlertEmail(alert);
-  await transport.sendMail({ from: SMTP_FROM, to, subject, text, html });
+  await transport.sendMail({ from: SMTP_FROM, to, subject: labelSubject(subject), text, html });
   return true;
 };
 

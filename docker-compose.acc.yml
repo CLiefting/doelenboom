@@ -1,0 +1,117 @@
+# docker-compose.acc.yml — lokale ACCEPTATIEOMGEVING (DOEL-127).
+#
+# Besluit Charles 25-10-2026: na de merge eerst lokaal accepteren, op dezelfde
+# productie-images (Dockerfile.prod) als de VPS, met een eigen database met
+# testdata (db/init.sql + db/seed.sql), mails wél versturen maar met
+# "[ACCEPTATIE]" in het onderwerp. scripts/release.sh weigert te releasen als
+# de commit hier niet eerst is goedgekeurd (scripts/acceptatie.sh).
+#
+# Bewust LOSSTAAND (geen laag over docker-compose.yml/-prod.yml):
+#   - eigen projectnaam en image-tags (doelenboom-acc-*): botst niet met de
+#     dev-stack (doelenboom-dev-*) of de release-images (doelenboom-*:latest);
+#   - geen Traefik/code072-net (bestaat alleen op de VPS);
+#   - alles alleen op 127.0.0.1; alleen de web-container heeft een poort
+#     (nginx stuurt /api/ door naar de api-container, zoals in productie).
+#   - restart: "no": start NIET vanzelf mee met Docker Desktop (aanleiding:
+#     de dev-stack deed dat op 25-10-2026 en mailde met een oude build).
+#
+# Gebruik altijd via scripts/acceptatie.sh; dat maakt ook .acceptatie/acc.env
+# aan (willekeurige database- en JWT-geheimen, alleen voor jou leesbaar).
+# Handmatig stoppen:  docker compose -p doelenboom-acc -f docker-compose.acc.yml stop
+name: doelenboom-acc
+
+services:
+  db:
+    image: postgres:18-alpine
+    restart: "no"
+    environment:
+      POSTGRES_USER: doelenboom
+      POSTGRES_PASSWORD: ${ACC_POSTGRES_PASSWORD:?zet ACC_POSTGRES_PASSWORD via scripts/acceptatie.sh}
+      POSTGRES_DB: doelenboom
+    volumes:
+      - acc_db_data:/var/lib/postgresql
+      - ./db:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U doelenboom"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    mem_limit: 512m
+    cpus: 1.0
+
+  excel-service:
+    build:
+      context: ./excel-service
+      additional_contexts:
+        sbom_tools: ./scripts
+    image: doelenboom-acc-excel-service:latest
+    restart: "no"
+    mem_limit: 1g
+    cpus: 1.0
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile.prod
+      args:
+        BUILD_VERSION: ${BUILD_VERSION:-dev}
+      additional_contexts:
+        sbom_tools: ./scripts
+        web_src: ./web
+        excel_sbom: service:excel-service
+    image: doelenboom-acc-api:latest
+    restart: "no"
+    environment:
+      DATABASE_URL: postgres://doelenboom:${ACC_POSTGRES_PASSWORD}@db:5432/doelenboom
+      PORT: 4000
+      NODE_ENV: production
+      JWT_SECRET: ${ACC_JWT_SECRET:?zet ACC_JWT_SECRET via scripts/acceptatie.sh}
+      EXCEL_SERVICE_URL: http://excel-service:8000
+      ALLOWED_ORIGINS: http://localhost:8088,http://127.0.0.1:8088
+      TRUST_PROXY_HOPS: "1"          # alleen nginx (productie: Traefik + nginx = 2)
+      APP_BASE_URL: http://localhost:8088
+      DOELENBOOM_OMGEVING: acceptatie
+      # Zelfde SMTP als in je .env (Hostnet); leeg = mails alleen in de API-log.
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-no-reply.doelenboom@code072.nl}
+      SUBSCRIPTION_REQUEST_NOTIFY_EMAIL: ${SUBSCRIPTION_REQUEST_NOTIFY_EMAIL:-info.doelenboom@code072.nl}
+    depends_on:
+      db:
+        condition: service_healthy
+      excel-service:
+        condition: service_started
+    mem_limit: 512m
+    cpus: 1.0
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile.prod
+      args:
+        VITE_API_URL: ""
+    image: doelenboom-acc-web:latest
+    restart: "no"
+    ports:
+      - "127.0.0.1:8088:8080"
+    depends_on:
+      - api
+    mem_limit: 128m
+    cpus: 0.5
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+volumes:
+  acc_db_data:

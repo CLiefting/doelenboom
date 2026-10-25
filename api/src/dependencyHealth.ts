@@ -456,7 +456,17 @@ export async function notifySysadminsOfNewVulnerabilities(buildId: number): Prom
 
   // Alleen sysadmins, elk een eigen mail (ontvangers zien elkaars adres niet).
   const recipients = await pool.query('select email from users where is_sysadmin = true order by id');
-  const link = `${(process.env.APP_BASE_URL ?? 'http://localhost:5173').replace(/\/+$/, '')}/system-info`;
+  // DOEL-127: alleen mailen met een expliciet gezette APP_BASE_URL (productie,
+  // acceptatie). Zonder (de lokale dev-stack) geen mail en geen terugval op
+  // localhost: op 25-10-2026 mailde zo'n stack met een oude build "23 nieuwe
+  // kwetsbaarheden" met een localhost-link. Niet als "gemeld" vastleggen, de
+  // pagina Softwarecomponenten toont de bevindingen gewoon.
+  const baseUrl = (process.env.APP_BASE_URL ?? '').trim();
+  if (!baseUrl) {
+    console.warn('Kwetsbaarhedenmelding niet verstuurd: APP_BASE_URL is niet gezet (lokale ontwikkelomgeving?).');
+    return { newVulnerabilities: fresh.length, recipients: recipients.rows.length, sent: 0 };
+  }
+  const link = `${baseUrl.replace(/\/+$/, '')}/system-info`;
   let sent = 0;
   for (const r of recipients.rows) {
     try {

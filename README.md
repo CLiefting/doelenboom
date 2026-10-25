@@ -464,6 +464,54 @@ getest.
 Nog niet gebouwd: doelenboom aanmaken vanuit de UI (kan nu alleen via de API),
 behoud van de `Toelichting`-kolom op Element-Tag-relaties.
 
+## Drie omgevingen: ontwikkeling, acceptatie, productie (DOEL-127)
+
+| Omgeving | Bestand | Adres | Images | Mail |
+|---|---|---|---|---|
+| Ontwikkeling | `docker-compose.yml` | http://localhost:5173 | `doelenboom-dev-*` (dev-server) | onderwerp "[ONTWIKKELING] …"; geen kwetsbaarhedenmail |
+| Acceptatie | `docker-compose.acc.yml` | http://localhost:8088 | `doelenboom-acc-*` (productie-Dockerfiles) | onderwerp "[ACCEPTATIE] …" |
+| Productie | `docker-compose.yml` + `docker-compose.prod.yml` | https://doelenboom.code072.nl | `doelenboom-*:latest` | zonder label |
+
+**Werkwijze sinds 25-10-2026:** branch → PR (`scripts/pr-merge.sh`) → **acceptatie** →
+release. Na de merge zet je de stand van `main` in de lokale acceptatieomgeving:
+
+```bash
+(
+set -euo pipefail
+echo ""; echo "----- Stap 1 - Acceptatie van main -----"
+cd ~/src/doelenboom
+git checkout main && git pull --ff-only
+bash scripts/acceptatie.sh
+)
+```
+
+`scripts/acceptatie.sh` bouwt de productie-images (eigen tags, botst niet met de
+dev-stack of de release), start ze met een **eigen database met testdata**
+(`db/init.sql` + `db/seed.sql`), draait de migraties, wacht op de
+componentencontrole van precies deze build en schrijft een bewijs in
+`.acceptatie/bewijs-<commit>.txt`: **GOEDGEKEURD** zonder kritieke, hoge of
+"ernst onbekend"-kwetsbaarheden in productiecomponenten, anders **AFGEKEURD**
+(met de pakketten). Daarna test je handmatig op http://localhost:8088.
+`scripts/release.sh` weigert een commit zonder goedgekeurd bewijs, of met een
+bewijs ouder dan 72 uur (`ACC_MAX_AGE_HOURS`).
+
+- **Inloggen in acceptatie:** bij de eerste start vervangt het script het
+  standaardwachtwoord van de seed-sysadmin door een willekeurig wachtwoord
+  (anders weigert de API in productiemodus te starten, DOEL-23). Je vindt het in
+  `.acceptatie/sysadmin.txt`. Wil je de MFA-mails op je eigen adres, start dan
+  de eerste keer met `ACC_SYSADMIN_EMAIL=jij@example.nl bash scripts/acceptatie.sh`.
+- **Geheimen:** `.acceptatie/acc.env` (database- en JWT-geheim, willekeurig,
+  alleen voor jou leesbaar). De map `.acceptatie/` staat in `.gitignore`.
+- **Stoppen:** `docker compose -p doelenboom-acc -f docker-compose.acc.yml stop`.
+  Opnieuw beginnen met een lege acceptatiedatabase: `... down -v`.
+- **Niet meer vanzelf starten:** dev- en acceptatiestack hebben `restart: "no"`;
+  alleen productie herstart vanzelf. Aanleiding: op 25-10-2026 startte de oude
+  dev-stack mee met Docker Desktop en mailde "23 nieuwe kwetsbaarheden" met een
+  link naar localhost.
+- Acceptatie bouwt voor je Mac (arm64), de release voor de VPS (amd64), uit
+  dezelfde Dockerfiles en lockfiles; de kwetsbaarhedencontrole gaat over die
+  lockfiles (SBOM) en is dus dezelfde.
+
 ## Productie: doelenboom.code072.nl
 
 Draait op dezelfde VPS als WWspeur, als derde app-stack bovenop de al

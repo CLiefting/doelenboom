@@ -38,6 +38,9 @@
 # Vereist Docker Compose >= 2.24 voor de !override-tag (idem WWspeur).
 services:
   db:
+    # DOEL-127: productie legt image-naam en herstartbeleid zelf vast; de
+    # dev-stack (docker-compose.yml) heeft eigen tags en restart: "no".
+    restart: unless-stopped
     ports: !override
       - "127.0.0.1:5432:5432"   # alleen via een SSH-tunnel, niet vanaf internet
     networks:
@@ -50,6 +53,8 @@ services:
     cpus: 1.0
 
   excel-service:
+    image: doelenboom-excel-service:latest
+    restart: unless-stopped
     networks:
       - default
     # Verwerkt geüploade xlsx/mpp (JVM voor mpxj): de zwaarste geheugengebruiker.
@@ -62,6 +67,8 @@ services:
       - ALL
 
   api:
+    image: doelenboom-api:latest
+    restart: unless-stopped
     build:
       context: ./api
       dockerfile: Dockerfile.prod
@@ -97,6 +104,9 @@ services:
       # Basis-URL voor links in e-mails (bevestigingslink van de publieke
       # aanvraag, DOEL-20): <APP_BASE_URL>/aanvraag/bevestigen#<token>.
       APP_BASE_URL: https://doelenboom.code072.nl
+      # DOEL-127: expliciet, want docker-compose.yml zet "ontwikkeling" en die
+      # waarde zou anders doorlopen naar productie (dan "[ONTWIKKELING]" in elke mail).
+      DOELENBOOM_OMGEVING: productie
     ports: !override
       - "127.0.0.1:4000:4000"   # alleen via een SSH-tunnel, niet vanaf internet
     networks:
@@ -120,6 +130,8 @@ services:
       - ./backups:/backups
 
   web:
+    image: doelenboom-web:latest
+    restart: unless-stopped
     build:
       context: ./web
       dockerfile: Dockerfile.prod

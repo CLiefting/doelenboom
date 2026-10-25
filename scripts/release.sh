@@ -2,6 +2,9 @@
 # Doelenboom-release in één keer: CI afwachten -> taggen -> GitHub Release ->
 # images bouwen -> (optioneel) uitrollen naar de VPS.
 #
+# Vooraf (DOEL-127): bash scripts/acceptatie.sh — release.sh weigert een commit
+# zonder goedgekeurd acceptatiebewijs (.acceptatie/bewijs-<commit>.txt, max. 72 uur oud).
+#
 # Gebruik (op je Mac; het script vindt de repo zelf, ook vanuit "Claude outputs/"):
 #   bash "scripts/release.sh" v3.1.1 "beschrijving van de release"             # t/m bouwen + kopiëren
 #   bash "scripts/release.sh" v3.1.1 "beschrijving van de release" --deploy    # ook uitrollen (vraagt bevestiging)
@@ -77,6 +80,25 @@ else
   [ "$(git rev-parse origin/main)" = "$SHA" ] || die "main loopt achter of voor op origin/main; eerst pushen/pullen."
   PREV="$(git describe --tags --abbrev=0 2>/dev/null || true)"
   echo "Release $TAG op commit $SHORT (vorige tag: ${PREV:-geen})"
+
+  # DOEL-127: alleen releasen wat eerst in de lokale acceptatieomgeving is
+  # goedgekeurd (scripts/acceptatie.sh): precies deze commit, zonder kritieke,
+  # hoge of onbekende kwetsbaarheden, en recent genoeg dat de libraries actueel
+  # gecontroleerd zijn. Bij een hervatting (tag staat al) is dit al gebeurd.
+  ACC_EVIDENCE="$REPO/.acceptatie/bewijs-$SHA.txt"
+  ACC_MAX_AGE_HOURS="${ACC_MAX_AGE_HOURS:-72}"
+  [ -f "$ACC_EVIDENCE" ] \
+    || die "Commit $SHORT is nog niet in acceptatie geweest. Draai eerst:  bash scripts/acceptatie.sh  en test op http://localhost:8088. Er is niets gewijzigd: geen tag, geen images."
+  acc_val() { sed -n "s/^$1=//p" "$ACC_EVIDENCE" | head -n 1; }
+  [ "$(acc_val commit)" = "$SHA" ] || die "Het acceptatiebewijs hoort niet bij commit $SHORT. Draai acceptatie opnieuw."
+  [ "$(acc_val resultaat)" = "GOEDGEKEURD" ] \
+    || die "Acceptatie van $SHORT is AFGEKEURD (kritiek $(acc_val kritiek), hoog $(acc_val hoog), onbekend $(acc_val onbekend)). Werk de libraries bij en draai acceptatie opnieuw."
+  ACC_EPOCH="$(acc_val gecontroleerd_epoch)"
+  [[ "$ACC_EPOCH" =~ ^[0-9]+$ ]] || die "Acceptatiebewijs van $SHORT is onleesbaar (geen tijdstip). Draai acceptatie opnieuw."
+  ACC_AGE_H=$(( ($(date +%s) - ACC_EPOCH) / 3600 ))
+  [ "$ACC_AGE_H" -lt "$ACC_MAX_AGE_HOURS" ] \
+    || die "Acceptatie van $SHORT is $ACC_AGE_H uur oud (maximaal $ACC_MAX_AGE_HOURS). Draai acceptatie opnieuw, zodat de libraries actueel gecontroleerd zijn."
+  echo "Acceptatie: GOEDGEKEURD op $(acc_val gecontroleerd_op) (kritiek 0, hoog 0, onbekend 0)."
 fi
 
 # DOEL-109: met --deploy nu al kijken of er iemand ingelogd is, vóórdat er een

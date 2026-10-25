@@ -33,3 +33,6 @@ __pycache__
 # footer-versie laten zetten (zie GET /api/version), ook als de repo zelf
 # verder precies op een release-tag staat.
 /Claude outputs/
+
+# DOEL-127: geheimen en bewijs van de lokale acceptatieomgeving
+/.acceptatie/
