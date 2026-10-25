@@ -23,6 +23,8 @@ step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO"
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "geen git-repository: $REPO"
+# shellcheck source=lib/wait-for-ci.sh
+source "$REPO/scripts/lib/wait-for-ci.sh"
 
 step "1/5 Controles vooraf"
 command -v gh >/dev/null       || die "gh ontbreekt:  brew install gh && gh auth login"
@@ -57,19 +59,13 @@ else
 fi
 
 step "3/5 Wachten op CI voor $SHORT"
-RUN_ID=""
-for _ in $(seq 1 36); do   # maximaal 3 minuten wachten tot de run bestaat
-  RUN_ID="$(gh run list --workflow CI --commit "$SHA" --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
-  [ -n "$RUN_ID" ] && break
-  sleep "${PR_MERGE_POLL_SECONDS:-5}"
-done
-[ -n "$RUN_ID" ] || die "geen CI-run gevonden voor $SHORT. Is de push aangekomen? PR #$PR blijft open."
-gh run watch "$RUN_ID" --exit-status --interval 10 \
-  || die "CI is rood voor $SHORT; niet gemerged. PR #$PR blijft open (gh run view $RUN_ID --log-failed)."
-# Ook de overige checks op de PR (bv. Dependency-audit) moeten groen zijn.
-gh pr checks "$PR" --watch --fail-fast --interval 10 \
-  || die "niet alle checks op PR #$PR zijn groen; niet gemerged."
-echo "CI groen."
+# DOEL-124: wachten via scripts/lib/wait-for-ci.sh; een netwerkfout van gh is
+# daar geen "CI rood" meer, en ook de overige PR-checks (bv. Dependency-audit)
+# moeten groen zijn.
+HINT="niet gemerged; PR #$PR blijft open"
+ci_find_run "$SHA" "$SHORT" "$HINT"
+ci_wait_run "$CI_RUN_ID" "$SHORT" "$HINT"
+ci_wait_pr_checks "$PR" "$HINT"
 
 step "4/5 Mergen (merge-commit)"
 # --match-head-commit: alleen mergen als de PR nog precies op de geteste commit staat.

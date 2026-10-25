@@ -42,6 +42,8 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 [ -f "$REPO/docker-compose.yml" ] || die "Geen doelenboom-repo gevonden op $REPO"
 cd "$REPO"
 export DOELENBOOM_DIR="$REPO"
+# shellcheck source=lib/wait-for-ci.sh
+source "$REPO/scripts/lib/wait-for-ci.sh"
 
 step "1/6 Controles vooraf"
 command -v gh >/dev/null     || die "gh ontbreekt:  brew install gh && gh auth login"
@@ -88,15 +90,10 @@ fi
 
 if [ "$RESUME" != "yes" ]; then
 step "2/6 Wachten op CI voor $SHORT"
-RUN_ID=""
-for _ in $(seq 1 36); do   # maximaal 3 minuten wachten tot de run bestaat
-  RUN_ID="$(gh run list --workflow CI --commit "$SHA" --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
-  [ -n "$RUN_ID" ] && break
-  sleep 5
-done
-[ -n "$RUN_ID" ] || die "Geen CI-run gevonden voor $SHORT. Is de push aangekomen?"
-gh run watch "$RUN_ID" --exit-status --interval 10 || die "CI is rood voor $SHORT; niet taggen."
-echo "CI groen."
+# DOEL-124: wachten via scripts/lib/wait-for-ci.sh; een netwerkfout van gh is
+# daar geen "CI rood" meer (opnieuw proberen, daarna "status onbekend").
+ci_find_run "$SHA" "$SHORT" "niet getagd"
+ci_wait_run "$CI_RUN_ID" "$SHORT" "niet getagd"
 
 step "3/6 Taggen en GitHub Release"
 git tag -a "$TAG" -m "$TAG: $DESC"
