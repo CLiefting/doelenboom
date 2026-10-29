@@ -132,7 +132,7 @@ export BUILD_VERSION="$(./scripts/build-version.sh)"
 echo "BUILD_VERSION = $BUILD_VERSION"
 case "$BUILD_VERSION" in *dirty*) die "BUILD_VERSION is 'dirty'; niet bouwen voor productie." ;; esac
 case "$BUILD_VERSION" in "${TAG#v} ("*) ;; *) die "BUILD_VERSION begint niet met ${TAG#v}." ;; esac
-DOCKER_DEFAULT_PLATFORM=linux/amd64 "${COMPOSE[@]}" build api web excel-service
+DOCKER_DEFAULT_PLATFORM=linux/amd64 "${COMPOSE[@]}" build --pull api web excel-service
 docker save doelenboom-api:latest doelenboom-web:latest doelenboom-excel-service:latest | gzip > doelenboom-images.tar.gz
 
 step "5/6 Naar de VPS kopiëren"

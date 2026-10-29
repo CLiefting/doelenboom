@@ -102,7 +102,7 @@ else
 fi
 
 step "3/7 Images bouwen (productie-Dockerfiles, tags doelenboom-acc-*)"
-compose build
+compose build --pull
 
 step "4/7 Database en migraties"
 compose up -d db
