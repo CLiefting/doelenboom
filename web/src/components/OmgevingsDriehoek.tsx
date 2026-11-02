@@ -13,7 +13,8 @@ import { driehoekVoor, tabTitel, type DriehoekWeergave } from '../omgeving';
 //
 // De omgeving komt van GET /api/version (alleen buiten productie gevuld). De
 // tekst wordt als gewone React-tekst gezet, nooit als HTML (OWASP A03).
-// 64 px; op smalle schermen (telefoon) 48 px, zodat er minder inhoud onder valt.
+// 192 px (3x de eerste versie van 64 px, op verzoek van Charles 02-11-2026: 64 px was te
+// onopvallend); op smalle schermen (telefoon) 96 px, anders valt er te veel inhoud onder.
 const SMAL = '(max-width: 600px)';
 const isSmal = () => typeof window.matchMedia === 'function' && window.matchMedia(SMAL).matches;
 
@@ -45,8 +46,9 @@ export default function OmgevingsDriehoek() {
   }, []);
 
   if (!weergave) return null;
-  const maat = smal ? 48 : 64;
-  const letter = smal ? 10 : 12;
+  const maat = smal ? 96 : 192;
+  // Tekst schaalt mee met de driehoek (36 px bij 192, 18 px bij 96).
+  const letter = Math.round(maat * 0.19);
   // De tekst staat schuin op de lijn door het zwaartepunt van de driehoek (1/3, 1/3).
   const band = Math.round(maat * 0.7);
   return (
@@ -79,7 +81,7 @@ export default function OmgevingsDriehoek() {
           color: weergave.tekstkleur,
           fontFamily: 'system-ui, -apple-system, sans-serif',
           fontWeight: 700,
-          letterSpacing: '0.5px',
+          letterSpacing: '0.08em',
           transform: 'rotate(-45deg)',
           lineHeight: 1,
         }}
