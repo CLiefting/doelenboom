@@ -45,11 +45,19 @@ voor het patroon: kwetsbaarheid eerst aantonen, dan fixen, dan de test die het a
   merge-commit, ruimt de branch op).
 - CI moet groen zijn: API-tests, web-tests, excel-service-tests, de image-smoketest,
   gitleaks en Semgrep (OWASP Top 10) zijn verplichte checks.
-- Volgorde (DOEL-127): branch → PR via `scripts/pr-merge.sh` → **acceptatie** met
+- Volgorde (DOEL-127, DOEL-131), altijd en ook voor een hotfix: ontwikkeling → acceptatie →
+  productie. Branch → PR via `scripts/pr-merge.sh` → **acceptatie** met
   `scripts/acceptatie.sh` op een bijgewerkte `main` (productie-images, eigen database met
-  testdata, http://localhost:8088, mails "[ACCEPTATIE]") → handmatig testen → release met
+  testdata, http://localhost:8088, gele driehoek "ACC", mails "[ACCEPTATIE]") → Charles test
+  handmatig → **akkoord** met `scripts/acceptatie.sh --akkoord` → release met
   `scripts/release.sh`. release.sh weigert een commit zonder goedgekeurd acceptatiebewijs
-  (geen kritieke/hoge/onbekende kwetsbaarheden, maximaal 72 uur oud).
+  met akkoord (geen kritieke/hoge/onbekende kwetsbaarheden, akkoord ná de acceptatierun,
+  maximaal 72 uur oud). Geef Charles nooit commando's die dit omzeilen (geen handmatige
+  `docker load`/`up -d` op de VPS buiten `release.sh`, behalve voor noodherstel zoals in
+  deploy/README.md beschreven).
+- Omgevingen zijn herkenbaar (DOEL-131): groene driehoek "ONT" linksboven in ontwikkeling,
+  gele "ACC" in acceptatie, niets in productie; bron is `DOELENBOOM_OMGEVING`
+  (`api/src/omgeving.ts`, `web/src/components/OmgevingsDriehoek.tsx`).
 - Scripts die de repository wijzigen draaien één voor één, niet gebundeld — zeker rond
   git-operaties en deploys.
 - Werk vanuit `${DOELENBOOM_DIR:-$HOME/src/doelenboom}` (zie README, "Geheimen en

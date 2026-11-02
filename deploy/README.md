@@ -384,12 +384,28 @@ ls -R ~/doelenboom/backups | head -50
 Zelfde principe als de eerste deploy (stap 5): bouw de nieuwe images op je
 Mac, zet ze over, laad ze op de VPS, herstart alleen dan.
 
-**Vooraf: acceptatie (DOEL-127).** Een release gaat alleen over een commit die
-eerst in de lokale acceptatieomgeving is goedgekeurd: `bash scripts/acceptatie.sh`
-op een bijgewerkte `main` (zie README, "Drie omgevingen"). `scripts/release.sh`
-controleert `.acceptatie/bewijs-<commit>.txt` en stopt vóór het taggen als het
-bewijs ontbreekt, afgekeurd is, bij een andere commit hoort of ouder is dan
-72 uur. Bij de handmatige route hieronder controleer je dat zelf.
+**Vooraf: acceptatie en akkoord (DOEL-127, DOEL-131).** Een release gaat alleen over
+een commit die eerst in de lokale acceptatieomgeving is goedgekeurd én die je daar zelf
+hebt getest: `bash scripts/acceptatie.sh` op een bijgewerkte `main`, handmatig testen op
+http://localhost:8088, en dan `bash scripts/acceptatie.sh --akkoord` (zie README, "Drie
+omgevingen"). `scripts/release.sh` controleert `.acceptatie/bewijs-<commit>.txt` en stopt
+vóór het taggen als het bewijs ontbreekt, afgekeurd is, geen akkoord bevat, bij een
+andere commit hoort of ouder is dan 72 uur. Er is geen optie om dit over te slaan, ook
+niet voor een hotfix: een hotfix gaat dezelfde weg, alleen sneller.
+
+**Uitrollen gaat altijd via `scripts/release.sh`.** De handmatige route hieronder is
+alleen voor noodherstel, als `release.sh` zelf kapot is, en ook dan alleen voor een
+commit met een goedgekeurd bewijs mét akkoord. Controleer dat eerst op je Mac:
+
+```bash
+(
+set -euo pipefail
+echo ""; echo "----- Stap 1 - Acceptatiebewijs met akkoord voor HEAD controleren -----"
+cd ~/src/doelenboom
+B=".acceptatie/bewijs-$(git rev-parse HEAD).txt"
+grep -qx 'resultaat=GOEDGEKEURD' "$B" && grep -qx 'akkoord=ja' "$B" && echo "OK: $B"
+)
+```
 
 **Productie-compose (DOEL-127):** `docker-compose.prod.yml` legt nu zelf de
 image-namen (`doelenboom-*:latest`), `restart: unless-stopped` en

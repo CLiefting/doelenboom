@@ -26,7 +26,15 @@
 #      kwetsbaarheden in componenten die in productie draaien (zelfde regel
 #      als de kwetsbaarhedenmail, DOEL-70).
 # Daarna blijft de omgeving draaien op http://localhost:8088 om handmatig te
-# testen. Stoppen: docker compose -p doelenboom-acc -f docker-compose.acc.yml stop
+# testen (linksboven staat een gele driehoek "ACC", DOEL-131). Stoppen:
+#   docker compose -p doelenboom-acc -f docker-compose.acc.yml stop
+#
+# DOEL-131: na het handmatig testen geef je je akkoord voor productie:
+#   bash scripts/acceptatie.sh --akkoord
+# Dat controleert dat acceptatie nog precies deze, goedgekeurde commit draait,
+# vraagt je "akkoord" te typen en zet je akkoord in het bewijsbestand.
+# release.sh weigert een commit zonder dat akkoord. Een nieuwe acceptatierun
+# schrijft het bewijs opnieuw en wist daarmee ook een eerder akkoord.
 #
 # Werkt met de bash 3.2 van macOS. Voor tests instelbaar: ACC_URL,
 # ACC_POLL_SECONDS (10), ACC_MAX_POLLS (120 = 20 min), ACC_HEALTH_TRIES (60).
@@ -35,7 +43,23 @@ set -euo pipefail
 die() { echo "FOUT: $*" >&2; exit 1; }
 step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 
-[ $# -eq 0 ] || die "acceptatie.sh kent geen argumenten."
+usage() {
+  cat <<'USAGE'
+Gebruik:
+  bash scripts/acceptatie.sh             stand van main bouwen, starten en keuren
+  bash scripts/acceptatie.sh --akkoord   na het handmatig testen: akkoord voor productie geven
+  bash scripts/acceptatie.sh -h          deze uitleg
+USAGE
+}
+MODE="keuren"
+if [ $# -gt 0 ]; then
+  [ $# -eq 1 ] || die "acceptatie.sh kent maar één optie tegelijk (zie -h)."
+  case "$1" in
+    --akkoord) MODE="akkoord" ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage >&2; die "Onbekende optie: $1" ;;
+  esac
+fi
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 [ -f "$REPO/docker-compose.acc.yml" ] || die "Geen docker-compose.acc.yml gevonden in $REPO"
@@ -65,6 +89,57 @@ rand() {
   [ "${#v}" -eq "$1" ] || die "kon geen willekeurige waarde van $1 tekens maken."
   printf '%s' "$v"
 }
+
+# DOEL-131: akkoord na het handmatig testen. Alleen voor precies de commit die
+# goedgekeurd is én nu in acceptatie draait; het akkoord komt achteraan in het
+# bewijs (release.sh leest per sleutel de eerste regel, dus een akkoord kan de
+# eerdere regels zoals "resultaat=" niet overschrijven).
+if [ "$MODE" = "akkoord" ]; then
+  step "Akkoord voor productie"
+  command -v curl >/dev/null || die "curl ontbreekt"
+  [ "$(git rev-parse --abbrev-ref HEAD)" = "main" ] || die "Je staat niet op main. Akkoord gaat altijd over de stand van main."
+  [ -z "$(git status --porcelain)" ] || { git status --short >&2; die "Werkmap is niet schoon; commit of stash eerst."; }
+  git fetch -q origin main
+  [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ] || die "main is niet gelijk aan origin/main; eerst:  git pull --ff-only  en daarna opnieuw acceptatie."
+  SHA="$(git rev-parse HEAD)"; SHORT="$(git rev-parse --short HEAD)"
+  EVIDENCE="$ACC_DIR/bewijs-$SHA.txt"
+  [ -f "$EVIDENCE" ] || die "Commit $SHORT is nog niet in acceptatie geweest. Draai eerst:  bash scripts/acceptatie.sh"
+  ev() { sed -n "s/^$1=//p" "$EVIDENCE" | head -n 1; }
+  [ "$(ev commit)" = "$SHA" ] || die "Het acceptatiebewijs hoort niet bij commit $SHORT. Draai acceptatie opnieuw."
+  [ "$(ev resultaat)" = "GOEDGEKEURD" ] || die "Acceptatie van $SHORT is AFGEKEURD; daar kun je geen akkoord op geven."
+  ACC_EPOCH="$(ev gecontroleerd_epoch)"
+  [[ "$ACC_EPOCH" =~ ^[0-9]+$ ]] || die "Acceptatiebewijs van $SHORT is onleesbaar (geen tijdstip). Draai acceptatie opnieuw."
+  MAX_AGE_H="${ACC_MAX_AGE_HOURS:-72}"
+  [ $(( ($(date +%s) - ACC_EPOCH) / 3600 )) -lt "$MAX_AGE_H" ] || die "Acceptatie van $SHORT is ouder dan $MAX_AGE_H uur. Draai acceptatie opnieuw."
+  if [ "$(ev akkoord)" = "ja" ]; then
+    echo "Akkoord voor $SHORT was al gegeven op $(ev akkoord_op). Je kunt releasen met scripts/release.sh."
+    exit 0
+  fi
+  RUNNING="$(curl -fsS "$ACC_URL/api/version" 2>/dev/null)" || die "Acceptatie draait niet op $ACC_URL. Start hem met:  bash scripts/acceptatie.sh  en test eerst."
+  [[ "$RUNNING" == *"$SHORT"* ]] || die "Acceptatie draait niet op commit $SHORT ($RUNNING). Je hebt dus iets anders getest; draai acceptatie opnieuw."
+  [[ "$RUNNING" == *'"omgeving":"acceptatie"'* ]] || die "$ACC_URL meldt zich niet als acceptatieomgeving ($RUNNING)."
+  echo "Acceptatie draait commit $SHORT ($(ev build_version)), goedgekeurd op $(ev gecontroleerd_op)."
+  echo "Kritiek $(ev kritiek), hoog $(ev hoog), onbekend $(ev onbekend), gemiddeld $(ev gemiddeld), laag $(ev laag)."
+  printf 'Heb je deze versie op http://localhost:8088 getest en mag hij naar productie? Typ "akkoord": '
+  ANSWER=""
+  IFS= read -r ANSWER || true
+  [ "$ANSWER" = "akkoord" ] || die "Geen akkoord gegeven (je typte niet precies \"akkoord\"). Er is niets vastgelegd."
+  # Alleen veilige tekens uit de git-naam (OWASP A03: geen extra regels in het bewijs).
+  DOOR="$(git config user.name 2>/dev/null || true)"; [ -n "$DOOR" ] || DOOR="$(id -un)"
+  DOOR="$(printf '%s' "$DOOR" | tr -cd 'A-Za-z0-9 ._@-' | cut -c1-60)"
+  umask 077
+  cp "$EVIDENCE" "$EVIDENCE.tmp"
+  { echo "akkoord=ja"
+    echo "akkoord_op=$(date '+%Y-%m-%dT%H:%M:%S%z')"
+    echo "akkoord_epoch=$(date +%s)"
+    echo "akkoord_door=${DOOR:-onbekend}"
+  } >> "$EVIDENCE.tmp"
+  mv "$EVIDENCE.tmp" "$EVIDENCE"
+  echo
+  echo "Akkoord vastgelegd voor $SHORT in $EVIDENCE."
+  echo "Release nu met:  bash scripts/release.sh vX.Y.Z \"beschrijving\" --deploy"
+  exit 0
+fi
 
 step "1/7 Controles vooraf"
 command -v docker >/dev/null  || die "docker ontbreekt"
@@ -204,5 +279,6 @@ fi
 echo
 echo "Acceptatie GOEDGEKEURD voor $SHORT. De omgeving draait op http://localhost:8088"
 [ -f "$ACC_DIR/sysadmin.txt" ] && echo "Inloggen: zie $ACC_DIR/sysadmin.txt"
-echo "Test handmatig (inloggen, tree.html, een Excel-export) en release daarna met scripts/release.sh."
+echo "Test handmatig (inloggen, de boomweergave, een Excel-export; linksboven hoort een gele driehoek \"ACC\" te staan)."
+echo "Akkoord? Dan:  bash scripts/acceptatie.sh --akkoord   (pas daarna laat scripts/release.sh deze commit door)."
 echo "Stoppen: docker compose -p doelenboom-acc -f docker-compose.acc.yml stop"
