@@ -4,7 +4,15 @@
 // zet "[ONT]"/"[ACC]" voor de tabbladtitel.
 //
 // Bron: DOELENBOOM_OMGEVING, gezet in docker-compose.yml (ontwikkeling),
-// docker-compose.acc.yml (acceptatie) en docker-compose.prod.yml (productie).
+// docker-compose.acc.yml (acceptatie), docker-compose.prod.yml (productie) en
+// docker-compose.kluis.yml (kluis, DOEL-133).
+//
+// DOEL-133: de KLUIS is een lokale omgeving op de Mac van Charles voor
+// doelenbomen met gevoelige(re) informatie. Hij draait altijd dezelfde versie
+// als productie (scripts/release.sh werkt hem bij) en gedraagt zich verder als
+// productie, maar: rode driehoek "VAULT", mails met "[VAULT]", en alles wat
+// eruit geëxporteerd wordt, is gemarkeerd als gevoelig (zie isGevoeligeOmgeving
+// en gevoeligeBestandsnaam hieronder). Andere omgevingen weigeren zulke bestanden.
 // De waarde wordt bij het draaien gelezen, niet bij het bouwen: acceptatie en
 // productie gebruiken dezelfde Dockerfiles.
 //
@@ -14,7 +22,7 @@
 // createApp), zodat je nooit ongemerkt zonder driehoek in acceptatie werkt
 // (OWASP A05, Security Misconfiguration).
 
-export const OMGEVINGEN = ['ontwikkeling', 'acceptatie', 'productie'] as const;
+export const OMGEVINGEN = ['ontwikkeling', 'acceptatie', 'productie', 'kluis'] as const;
 export type Omgeving = (typeof OMGEVINGEN)[number];
 
 export class InvalidOmgevingError extends Error {
@@ -43,6 +51,22 @@ export function currentOmgeving(): Omgeving {
 export function assertValidOmgeving(): void {
   currentOmgeving();
 }
+
+// DOEL-133: alles in de kluis is gevoelig.
+export function isGevoeligeOmgeving(omgeving: Omgeving = currentOmgeving()): boolean {
+  return omgeving === 'kluis';
+}
+
+// DOEL-133: "GEVOELIG_" vóór de bestandsnaam van elke download uit de kluis
+// (Excel en PowerPoint), zodat een los rondslingerend bestand herkenbaar is.
+export function gevoeligeBestandsnaam(filename: string, omgeving: Omgeving = currentOmgeving()): string {
+  return isGevoeligeOmgeving(omgeving) ? `GEVOELIG_${filename}` : filename;
+}
+
+// DOEL-133: melding als een gemarkeerd (gevoelig) bestand buiten de kluis
+// wordt ingelezen.
+export const GEVOELIG_GEWEIGERD =
+  'Dit bestand komt uit de kluis (gevoelige gegevens) en mag alleen in de kluis worden ingelezen. Er is niets ingelezen.';
 
 // Wat GET /api/version meegeeft. In productie niets: daar is geen driehoek, en
 // zo geeft productie geen extra informatie prijs.

@@ -19,6 +19,7 @@
 import { pool } from '../db.js';
 import { fetchTree } from '../routes/tree.js';
 import { isStandardColumns } from '../columnConfig.js';
+import { isGevoeligeOmgeving } from '../omgeving.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -75,6 +76,8 @@ async function exportOneDoelenboom(
     tenant: tree.doelenboom.tenant.name,
     exportedAt: new Date().toISOString(),
     exportedBy: 'nachtelijke-backup',
+    // DOEL-133: back-ups uit de kluis krijgen het kenmerk "gevoelig".
+    gevoelig: isGevoeligeOmgeving(),
   };
   // DOEL-64: motivaties van afwijkingen gaan niet mee in de (nachtelijke) export.
   const body = JSON.stringify({ tree: { ...tree, controlRuleDeviations: undefined, attributes: undefined, attributeValues: undefined }, columns: tree.columns, meta });

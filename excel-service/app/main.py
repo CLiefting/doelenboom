@@ -16,6 +16,7 @@ from fastapi import Body, FastAPI, File, Query, UploadFile
 from fastapi.responses import JSONResponse, Response
 
 from .exporter import build_data_workbook, build_template_workbook, is_standard_columns
+from .gevoelig import is_gevoelig
 from .mpp_converter import MppConversionError, mpp_to_mspdi_xml
 from .parser import parse_workbook
 from .project_pptx import build_project_pptx
@@ -55,7 +56,8 @@ async def parse(file: UploadFile = File(...), valid_types: list[str] = Query(def
     status, report, parsed = parse_workbook(
         content, filename=file.filename or '', valid_types=valid_types or None
     )
-    return {'status': status, 'report': report, 'parsed': parsed}
+    # DOEL-133: komt dit bestand uit de kluis? De API beslist of dat mag.
+    return {'status': status, 'report': report, 'parsed': parsed, 'gevoelig': is_gevoelig(content)}
 
 
 @app.post('/parse-mpp')
@@ -212,4 +214,5 @@ async def project_parse(file: UploadFile = File(...)):
             'parsed': None,
         })
     status, report, parsed = parse_project_workbook(content)
-    return {'status': status, 'report': report, 'parsed': parsed}
+    # DOEL-133: komt dit bestand uit de kluis? De API beslist of dat mag.
+    return {'status': status, 'report': report, 'parsed': parsed, 'gevoelig': is_gevoelig(content)}

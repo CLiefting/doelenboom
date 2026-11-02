@@ -63,6 +63,8 @@ function getTransporter(): Transporter | null {
 export function environmentLabel(env: string | undefined = process.env.DOELENBOOM_OMGEVING): string {
   const v = (env ?? '').trim().toLowerCase();
   if (v === '' || v === 'productie' || v === 'production') return '';
+  // DOEL-133: de kluis heet in de app "VAULT" (rode driehoek), dus ook in mails.
+  if (v === 'kluis') return '[VAULT] ';
   if (!/^[a-z][a-z-]{0,19}$/.test(v)) return '[NIET-PRODUCTIE] ';
   return `[${v.toUpperCase()}] `;
 }

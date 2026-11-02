@@ -22,6 +22,7 @@ import crypto from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { createTenantDefaultConfig } from './columnConfig.js';
 import { computeDefaultLicenseEndDate, incrementLifetimeTreesCreated } from './license.js';
+import { currentOmgeving, isGevoeligeOmgeving, OMGEVINGEN } from './omgeving.js';
 
 export const BUNDLE_FORMAT = 1;
 
@@ -114,6 +115,9 @@ export interface Bundle {
   format: number;
   exportedAt: string;
   schemaVersion: string;
+  // DOEL-133: uit welke omgeving de bundel komt. Een bundel uit de kluis mag
+  // alleen in de kluis worden ingelezen. Oudere bundels hebben dit veld niet.
+  bronOmgeving?: string;
   source: {
     tenant: { slug: string; name: string; modules: string[] };
     doelenboom: { slug: string; name: string; settings: Row };
@@ -263,6 +267,7 @@ export async function exportBundle(client: PoolClient, sel: { tenant: string; bo
     format: BUNDLE_FORMAT,
     exportedAt: new Date().toISOString(),
     schemaVersion: await schemaVersion(client),
+    bronOmgeving: currentOmgeving(),
     source: {
       tenant: { slug: String(tenant.slug), name: String(tenant.name), modules: modules.rows.map((m) => m.key as string) },
       doelenboom: {
@@ -297,6 +302,9 @@ export function validateBundleFile(raw: unknown): BundleFile {
   }
   if (typeof b.schemaVersion !== 'string' || typeof b.exportedAt !== 'string') {
     throw new TransferError('Bundel is onvolledig (schemaVersion of exportedAt ontbreekt).');
+  }
+  if (b.bronOmgeving !== undefined && !(OMGEVINGEN as readonly unknown[]).includes(b.bronOmgeving)) {
+    throw new TransferError('Bundel is ongeldig (onbekende bronomgeving).');
   }
   const source = b.source;
   if (
@@ -389,6 +397,11 @@ export async function importBundle(
     ['De tenant-slug', target.tenantSlug ?? 'x', TRANSFER_LIMITS.slugLength], ['De doelenboom-slug', target.boomSlug ?? 'x', TRANSFER_LIMITS.slugLength],
   ] as const) {
     if (!isName(value, max)) throw new TransferError(`${what} op de doelomgeving is leeg of te lang.`);
+  }
+
+  // DOEL-133: wat uit de kluis komt, blijft in de kluis.
+  if (bundle.bronOmgeving === 'kluis' && !isGevoeligeOmgeving()) {
+    throw new TransferError('Deze bundel komt uit de kluis (gevoelige gegevens) en mag alleen in de kluis worden ingelezen. Er is niets gewijzigd.');
   }
 
   const here = await schemaVersion(client);

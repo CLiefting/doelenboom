@@ -8,9 +8,11 @@
 #   alias doelenboom="${DOELENBOOM_DIR:-$HOME/src/doelenboom}/scripts/doelenboom-cli.sh"
 # Daarna: bron je shell opnieuw (nieuwe terminal, of `source ~/.zshrc`).
 #
-# Lokale omgeving kiezen (DOEL-132): -acc (standaard) of -dev (synoniem: -ont).
+# Lokale omgeving kiezen (DOEL-132): -acc (standaard), -dev (synoniem: -ont) of -kluis.
 #   acceptatie   http://localhost:8088  gele driehoek "ACC"   (docker-compose.acc.yml)
 #   ontwikkeling http://localhost:5173  groene driehoek "ONT" (docker-compose.yml)
+#   kluis        http://localhost:8089  rode driehoek "VAULT" (docker-compose.kluis.yml, DOEL-133):
+#                gevoelige doelenbomen, altijd dezelfde versie als productie
 #
 # Gebruik:
 #   doelenboom -local -open               # acceptatie openen; draait hij niet, dan eerst starten met de
@@ -24,6 +26,11 @@
 #                                         # (alleen wat nog niet gedraaid is, zie scripts/db-migrate.sh)
 #   doelenboom -local -dev -stop          # ontwikkelomgeving stoppen (database-data blijft bewaard)
 #   doelenboom -local -ont ...            # hetzelfde als -dev
+#   doelenboom -local -kluis -open        # kluis openen (zo nodig starten; waarschuwt als hij achterloopt
+#                                         # op productie of als de laatste back-up te oud is)
+#   doelenboom -local -kluis -restart     # kluis herstarten met dezelfde images (bouwt nooit; een nieuwe
+#                                         # versie komt alleen via scripts/release.sh of scripts/kluis.sh --bijwerken)
+#   doelenboom -local -kluis -stop        # kluis stoppen (de database blijft bewaard)
 #   doelenboom -local -dev -restart -open # herbouwen/herstarten, en daarna meteen de browser openen
 #   (Docker Desktop wordt zo nodig automatisch gestart, zie DOEL-57)
 #   doelenboom -zip                       # ~/Downloads/db_backend.zip (api) en db_frontend.zip (web) maken,
@@ -65,7 +72,7 @@ OPEN_BROWSER=""
 
 set_local_env() {
   if [ -n "$LOCAL_ENV" ] && [ "$LOCAL_ENV" != "$1" ]; then
-    echo "Kies één lokale omgeving: -acc of -dev (-ont), niet allebei." >&2
+    echo "Kies één lokale omgeving: -acc, -dev (-ont) of -kluis, niet meerdere." >&2
     exit 1
   fi
   LOCAL_ENV="$1"
@@ -76,6 +83,7 @@ for arg in "$@"; do
     -local) ENVIRONMENT="local" ;;
     -acc) set_local_env acc ;;
     -dev|-ont) set_local_env dev ;;
+    -kluis) set_local_env kluis ;;
     -prod) ENVIRONMENT="prod" ;;
     -restart) ACTION="restart" ;;
     -stop) ACTION="stop" ;;
@@ -85,7 +93,7 @@ for arg in "$@"; do
     -open) OPEN_BROWSER="1" ;;
     *)
       echo "Onbekende optie: $arg" >&2
-      echo "Bekende opties: -local [-acc | -dev | -ont] | -prod, -restart, -stop, -open, -rebuild, -zip [-d]" >&2
+      echo "Bekende opties: -local [-acc | -dev | -ont | -kluis] | -prod, -restart, -stop, -open, -rebuild, -zip [-d]" >&2
       exit 1
       ;;
   esac
@@ -123,11 +131,15 @@ if [ -n "$OPEN_BROWSER" ] && [ "$ENVIRONMENT" != "local" ]; then
 fi
 # DOEL-132: -acc/-dev/-ont kiezen een LOKALE omgeving; standaard acceptatie.
 if [ -n "$LOCAL_ENV" ] && [ "$ENVIRONMENT" != "local" ]; then
-  echo "-acc, -dev en -ont horen bij -local (bv. doelenboom -local -dev -open)." >&2
+  echo "-acc, -dev, -ont en -kluis horen bij -local (bv. doelenboom -local -dev -open)." >&2
   exit 1
 fi
 if [ "$ENVIRONMENT" = "local" ] && [ -z "$LOCAL_ENV" ]; then
   LOCAL_ENV="acc"
+fi
+if [ "$LOCAL_ENV" = "kluis" ] && [ -n "$REBUILD_SCHEMA" ]; then
+  echo "-rebuild hoort niet bij de kluis: die krijgt migraties alleen via scripts/release.sh (scripts/kluis.sh --bijwerken)." >&2
+  exit 1
 fi
 if [ "$LOCAL_ENV" = "acc" ] && [ -n "$REBUILD_SCHEMA" ]; then
   echo "-rebuild hoort bij de ontwikkelomgeving (doelenboom -local -dev -rebuild -restart); acceptatie past de migraties zelf toe." >&2
@@ -206,9 +218,21 @@ acc_compose() {
   args+=(--env-file "$ACC_ENV_FILE")
   "${args[@]}" "$@"
 }
+# DOEL-133: de kluis loopt via scripts/kluis.sh (geheimen in ~/.doelenboom-kluis).
+KLUIS_HOME_DIR="${KLUIS_HOME:-$HOME/.doelenboom-kluis}"
+kluis_compose() {
+  [ -f "$KLUIS_HOME_DIR/kluis.env" ] || return 1
+  local args=(docker compose -p doelenboom-kluis -f "$REPO_DIR/docker-compose.kluis.yml")
+  [ -f "$REPO_DIR/.env" ] && args+=(--env-file "$REPO_DIR/.env")
+  args+=(--env-file "$KLUIS_HOME_DIR/kluis.env")
+  [ -f "$KLUIS_HOME_DIR/versie.env" ] && args+=(--env-file "$KLUIS_HOME_DIR/versie.env")
+  "${args[@]}" "$@"
+}
 # Draait de web-container van deze omgeving al? (lege uitvoer = nee)
 env_running() {
-  if [ "$LOCAL_ENV" = "acc" ]; then
+  if [ "$LOCAL_ENV" = "kluis" ]; then
+    [ -n "$(kluis_compose ps --status running -q web 2>/dev/null)" ]
+  elif [ "$LOCAL_ENV" = "acc" ]; then
     [ -n "$(acc_compose ps --status running -q web 2>/dev/null)" ]
   else
     [ -n "$(docker compose ps --status running -q web 2>/dev/null)" ]
@@ -218,8 +242,16 @@ env_running() {
 # -open zonder -restart/-stop: draait de gekozen omgeving nog niet, dan eerst
 # starten. Ontwikkeling: zoals -restart (bouwen en starten). Acceptatie: de
 # images van de laatste acceptatierun starten, zonder te bouwen.
+if [ "$LOCAL_ENV" = "kluis" ] && [ ! -f "$KLUIS_HOME_DIR/kluis.env" ]; then
+  echo "De kluis is op deze Mac nog niet ingericht ($KLUIS_HOME_DIR/kluis.env ontbreekt)." >&2
+  echo "Inrichten:  KLUIS_SYSADMIN_EMAIL=jij@example.nl bash scripts/kluis.sh --init" >&2
+  exit 1
+fi
 if [ -n "$OPEN_BROWSER" ] && [ -z "$ACTION" ] && ! env_running; then
-  if [ "$LOCAL_ENV" = "dev" ]; then
+  if [ "$LOCAL_ENV" = "kluis" ]; then
+    echo "==> De kluis draait niet; wordt gestart (er wordt niets gebouwd)"
+    bash "$REPO_DIR/scripts/kluis.sh" --start
+  elif [ "$LOCAL_ENV" = "dev" ]; then
     echo "==> De ontwikkelomgeving draait niet; wordt gebouwd en gestart"
     ACTION="restart"
   else
@@ -250,6 +282,22 @@ run_migrations() {
 
   DOELENBOOM_DIR="$REPO_DIR" "$REPO_DIR/scripts/db-migrate.sh"
 }
+
+# DOEL-133: de kluis herstarten/stoppen via scripts/kluis.sh (nooit bouwen).
+if [ "$LOCAL_ENV" = "kluis" ] && [ "$ACTION" = "restart" ]; then
+  bash "$REPO_DIR/scripts/kluis.sh" --stop
+  bash "$REPO_DIR/scripts/kluis.sh" --start
+  ACTION=""
+fi
+if [ "$LOCAL_ENV" = "kluis" ] && [ "$ACTION" = "stop" ]; then
+  bash "$REPO_DIR/scripts/kluis.sh" --stop
+  ACTION=""
+fi
+# DOEL-133: bij het openen van de kluis: loopt hij gelijk met productie, en is
+# de laatste back-up recent genoeg? (alleen waarschuwen, niet tegenhouden)
+if [ "$LOCAL_ENV" = "kluis" ] && [ -n "$OPEN_BROWSER" ]; then
+  bash "$REPO_DIR/scripts/kluis.sh" --status || true
+fi
 
 # DOEL-132: acceptatie herstarten = opnieuw opbouwen en keuren via
 # scripts/acceptatie.sh; stoppen via dezelfde compose-projectnaam.
@@ -367,7 +415,11 @@ esac
 # verversen tot vite/nginx klaar is, is geen fout om voor te stoppen.
 if [ -n "$OPEN_BROWSER" ]; then
   # DOEL-132: acceptatie op 8088 (docker-compose.acc.yml), ontwikkeling op 5173.
-  if [ "$LOCAL_ENV" = "acc" ]; then APP_URL="http://localhost:8088"; else APP_URL="http://localhost:5173"; fi
+  case "$LOCAL_ENV" in
+    acc) APP_URL="http://localhost:8088" ;;
+    kluis) APP_URL="http://localhost:8089" ;;  # DOEL-133
+    *) APP_URL="http://localhost:5173" ;;
+  esac
   echo "==> Browser openen op $APP_URL"
   if ! command -v open >/dev/null 2>&1; then
     echo "Kan de browser niet automatisch openen ('open' ontbreekt — dit is macOS-only)." >&2

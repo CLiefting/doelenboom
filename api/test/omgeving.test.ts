@@ -23,8 +23,8 @@ const restore = () => {
 };
 
 describe('DOEL-131: parseOmgeving', () => {
-  it('kent precies ontwikkeling, acceptatie en productie', () => {
-    assert.deepEqual([...OMGEVINGEN], ['ontwikkeling', 'acceptatie', 'productie']);
+  it('kent precies ontwikkeling, acceptatie, productie en (DOEL-133) kluis', () => {
+    assert.deepEqual([...OMGEVINGEN], ['ontwikkeling', 'acceptatie', 'productie', 'kluis']);
     for (const o of OMGEVINGEN) assert.equal(parseOmgeving(o), o);
   });
 
@@ -100,15 +100,16 @@ describe('DOEL-131: GET /api/version geeft de omgeving buiten productie', () => 
   });
 });
 
-describe('DOEL-131: de compose-bestanden zetten elk een geldige omgeving', () => {
+describe('DOEL-131/133: de compose-bestanden zetten elk een geldige omgeving', () => {
   const omgevingIn = (file: string) => {
     const m = readFileSync(path.join(repo, file), 'utf8').match(/DOELENBOOM_OMGEVING:\s*(\S+)/);
     assert.ok(m, `${file} zet DOELENBOOM_OMGEVING niet`);
     return m[1];
   };
-  it('ontwikkeling, acceptatie, productie', () => {
+  it('ontwikkeling, acceptatie, productie, kluis', () => {
     assert.equal(omgevingIn('docker-compose.yml'), 'ontwikkeling');
     assert.equal(omgevingIn('docker-compose.acc.yml'), 'acceptatie');
     assert.equal(omgevingIn('docker-compose.prod.yml'), 'productie');
+    assert.equal(omgevingIn('docker-compose.kluis.yml'), 'kluis'); // DOEL-133
   });
 });

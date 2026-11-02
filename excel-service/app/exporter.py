@@ -41,6 +41,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from .dependency_format import format_dependency, format_product_dependency
 from .excel_format_version import TREE_EXPORT_FORMAT_VERSION
+from .gevoelig import is_gevoelig_meta, markeer
 from .xlsx_safety import create_safe_sheet
 
 CONFIG_SHEET_NAME = 'Configuratie'
@@ -201,6 +202,9 @@ def _write_configuratie(wb: Workbook, meta: dict[str, Any], format_label: str, m
         ('Geëxporteerd door', meta.get('exportedBy', '')),
         ('Bron', 'Doelenboom platform'),
     ]
+    # DOEL-133: export uit de kluis — zichtbaar voor wie het bestand opent.
+    if is_gevoelig_meta(meta):
+        rows.append(('Gevoelig', 'JA — uit de kluis; alleen in de kluis inlezen'))
     for r in rows:
         ws.append(list(r))
     ws.column_dimensions['A'].width = 22
@@ -329,6 +333,7 @@ def build_template_workbook(
         _apply_data_validation(sheets, ranges)
     _write_kolommen(wb, columns)
     _write_configuratie(wb, meta, 'Nieuw' if format_ == 'nieuw' else 'Oud', 'Lege template')
+    markeer(wb, meta)  # DOEL-133
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
@@ -568,6 +573,7 @@ def build_data_workbook(
         _apply_data_validation(sheets, ranges)
     _write_kolommen(wb, columns)
     _write_configuratie(wb, meta, 'Nieuw' if format_ == 'nieuw' else 'Oud', 'Met huidige data')
+    markeer(wb, meta)  # DOEL-133
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()

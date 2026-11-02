@@ -2,6 +2,9 @@
 # Doelenboom-release in één keer: CI afwachten -> taggen -> GitHub Release ->
 # images bouwen -> (optioneel) uitrollen naar de VPS.
 #
+# Na een geslaagde uitrol (--deploy) wordt ook de lokale kluis bijgewerkt naar
+# dezelfde versie (DOEL-133, scripts/kluis.sh --bijwerken), als die is ingericht.
+#
 # Vooraf (DOEL-127, DOEL-131): altijd ontwikkeling -> acceptatie -> productie.
 #   1. bash scripts/acceptatie.sh             (bouwen, starten, kwetsbaarheden keuren)
 #   2. zelf testen op http://localhost:8088
@@ -230,3 +233,21 @@ grep -qx "REMOTE-KLAAR $TAG" "$REMOTE_LOG" || die "het uitrolscript op de VPS is
 echo
 echo "Uitgerold. Controleer nog: inloggen, tree.html, een Excel-export, en:"
 echo "  curl -sI https://doelenboom.code072.nl/ | grep -iE 'content-security|referrer|permissions'"
+
+# DOEL-133: de lokale kluis draait altijd dezelfde versie als productie. Pas
+# NA een geslaagde uitrol (hierboven gecontroleerd met REMOTE-KLAAR) bijwerken,
+# zodat de kluis nooit vóór loopt op productie. kluis.sh maakt eerst een
+# back-up en neemt precies de goedgekeurde acceptatie-images over (niets bouwen).
+KLUIS_ENV_FILE="${KLUIS_HOME:-$HOME/.doelenboom-kluis}/kluis.env"
+if [ -f "$KLUIS_ENV_FILE" ]; then
+  step "Kluis bijwerken naar $TAG (zelfde versie als productie)"
+  if ! bash "$REPO/scripts/kluis.sh" --bijwerken "$TAG"; then
+    echo
+    echo "LET OP: productie staat op $TAG, maar de KLUIS is NIET bijgewerkt (zie hierboven)."
+    echo "Productie is in orde. Haal de kluis bij met:  bash scripts/kluis.sh --bijwerken $TAG"
+    exit 3
+  fi
+else
+  echo
+  echo "Kluis: niet ingericht op deze Mac (geen $KLUIS_ENV_FILE); overgeslagen."
+fi

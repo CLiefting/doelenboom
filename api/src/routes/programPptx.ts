@@ -7,6 +7,7 @@ import { fetchTree } from './tree.js';
 import { buildProjectExportData } from './projectExcel.js';
 import { columnForTypeName, ColumnDef } from '../columnConfig.js';
 import { sendServerError } from '../errors.js';
+import { gevoeligeBestandsnaam } from '../omgeving.js';
 
 // Programma-PowerPoint (DOEL-112): één presentatie voor meerdere projecten
 // uit dezelfde doelenboom -- tijdlijnen, deliverables, bijdrage aan doelen en
@@ -231,7 +232,7 @@ programPptxRouter.post('/doelenbomen/:id/program-pptx', requireViewer, requirePr
     String(exportedAt.getFullYear() % 100).padStart(2, '0') +
     String(exportedAt.getMonth() + 1).padStart(2, '0') +
     String(exportedAt.getDate()).padStart(2, '0');
-  const filename = `Programma_${sanitizeForFilename(tree.doelenboom.tenant.name)}_${sanitizeForFilename(tree.doelenboom.name)}_${jjmmdd}.pptx`;
+  const filename = gevoeligeBestandsnaam(`Programma_${sanitizeForFilename(tree.doelenboom.tenant.name)}_${sanitizeForFilename(tree.doelenboom.name)}_${jjmmdd}.pptx`); // DOEL-133
   res.setHeader('Content-Type', PPTX_MEDIA_TYPE);
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
   // Binaire pptx-download: vaste Content-Type, Content-Disposition: attachment en een

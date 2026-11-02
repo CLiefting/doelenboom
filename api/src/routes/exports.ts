@@ -5,6 +5,7 @@ import { logAuditEvent } from '../auditLog.js';
 import { fetchTree } from './tree.js';
 import { columnForTypeName, isStandardColumns } from '../columnConfig.js';
 import { sendServerError } from '../errors.js';
+import { gevoeligeBestandsnaam, isGevoeligeOmgeving } from '../omgeving.js';
 
 const EXCEL_SERVICE_URL = process.env.EXCEL_SERVICE_URL ?? 'http://excel-service:8000';
 const XLSX_MEDIA_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -49,6 +50,8 @@ exportsRouter.get('/doelenbomen/:id/export', requireTenantRoleForDoelenboomParam
     tenant: tree.doelenboom.tenant.name,
     exportedAt: exportedAt.toISOString(),
     exportedBy: req.user?.email ?? 'onbekend',
+    // DOEL-133: uit de kluis krijgt het bestand het kenmerk "gevoelig".
+    gevoelig: isGevoeligeOmgeving(),
   };
 
   // columns altijd apart meesturen (ook al zit 'ie ook al in tree.columns bij
@@ -72,7 +75,7 @@ exportsRouter.get('/doelenbomen/:id/export', requireTenantRoleForDoelenboomParam
     String(exportedAt.getFullYear() % 100).padStart(2, '0') +
     String(exportedAt.getMonth() + 1).padStart(2, '0') +
     String(exportedAt.getDate()).padStart(2, '0');
-  const filename = `Doelenboom_${safeTenant}_${safeDoelenboom}_${jjmmdd}.xlsx`;
+  const filename = gevoeligeBestandsnaam(`Doelenboom_${safeTenant}_${safeDoelenboom}_${jjmmdd}.xlsx`); // DOEL-133
 
   let upstream: Response;
   try {
@@ -325,7 +328,7 @@ exportsRouter.post('/doelenbomen/:id/export-pptx', requireTenantRoleForDoelenboo
     String(exportedAt.getFullYear() % 100).padStart(2, '0') +
     String(exportedAt.getMonth() + 1).padStart(2, '0') +
     String(exportedAt.getDate()).padStart(2, '0');
-  const filename = `Doelenboom_${sanitizeForFilename(tree.doelenboom.tenant.name)}_${sanitizeForFilename(tree.doelenboom.name)}_${jjmmdd}.pptx`;
+  const filename = gevoeligeBestandsnaam(`Doelenboom_${sanitizeForFilename(tree.doelenboom.tenant.name)}_${sanitizeForFilename(tree.doelenboom.name)}_${jjmmdd}.pptx`); // DOEL-133
   res.setHeader('Content-Type', PPTX_MEDIA_TYPE);
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
   // Binaire pptx-download: vaste Content-Type, Content-Disposition: attachment en een

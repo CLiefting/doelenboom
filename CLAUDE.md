@@ -57,6 +57,11 @@ voor het patroon: kwetsbaarheid eerst aantonen, dan fixen, dan de test die het a
   deploy/README.md beschreven).
 - Lokale CLI (DOEL-132): `doelenboom -local [-acc | -dev | -ont] -open|-restart|-stop`, standaard
   acceptatie. Geef voor ontwikkelwerk op een branch dus `doelenboom -local -dev -restart`.
+- Kluis (DOEL-133): lokale omgeving voor gevoelige doelenbomen, :8089, rode driehoek "VAULT".
+  Altijd dezelfde versie als productie (release.sh werkt hem bij via `scripts/kluis.sh
+  --bijwerken`); daar wordt nooit gebouwd. Geef nooit commando's die kluisdata (dumps, Excel,
+  bundels) naar een andere omgeving of buiten de Mac brengen, behalve de versleutelde
+  offsite-kopie van `scripts/kluis-backup.sh`.
 - Omgevingen zijn herkenbaar (DOEL-131): groene driehoek "ONT" linksboven in ontwikkeling,
   gele "ACC" in acceptatie, niets in productie; bron is `DOELENBOOM_OMGEVING`
   (`api/src/omgeving.ts`, `web/src/components/OmgevingsDriehoek.tsx`).
