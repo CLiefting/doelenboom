@@ -659,7 +659,7 @@ scripts/db-migrate.sh --prod              # toepassen
 scripts/db-migrate.sh --prod --status     # controle
 ```
 
-**Lokaal** doet `doelenboom -local -rebuild -restart` hetzelfde. Los:
+**Lokaal** doet `doelenboom -local -dev -rebuild -restart` hetzelfde. Los:
 `scripts/db-migrate.sh` (met `--status`, `--dry-run`, `--baseline NNNN`),
 vanuit de repo-map.
 

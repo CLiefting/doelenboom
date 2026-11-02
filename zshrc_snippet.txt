@@ -1,4 +1,6 @@
-# Doelenboom: lokale stack starten/herstarten met "doelenboom -local -restart" en stoppen met "doelenboom -local -stop";
+# Doelenboom: lokale omgeving openen met "doelenboom -local -open" (acceptatie, :8088) of
+# "doelenboom -local -dev -open" (ontwikkeling, :5173; -ont is hetzelfde als -dev);
+# verder -restart en -stop per omgeving (DOEL-132, standaard -acc);
 # broncode zippen voor delen met "doelenboom -zip" (opruimen: "doelenboom -zip -d")
 # (zie scripts/doelenboom-cli.sh voor wat dit precies doet en welke andere
 # vlaggen er zijn — dit is bewust alleen nog maar een dunne alias ernaartoe,

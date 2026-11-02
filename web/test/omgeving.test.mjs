@@ -90,6 +90,12 @@ describe('DOEL-131: plaatsing en veiligheid van het component', () => {
     assert.doesNotMatch(comp, /dangerouslySetInnerHTML|innerHTML/);
   });
 
+  it('groot genoeg om op te vallen: 192 px, op smalle schermen 96 px, tekst schaalt mee', () => {
+    assert.match(comp, /const maat = smal \? 96 : 192;/);
+    assert.match(comp, /const letter = Math\.round\(maat \* 0\.19\);/);
+    assert.match(comp, /width: maat,\s*height: maat,/);
+  });
+
   it('productie: het component rendert niets', () => {
     assert.match(comp, /if \(!weergave\) return null;/);
   });

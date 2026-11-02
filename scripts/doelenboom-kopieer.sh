@@ -76,7 +76,7 @@ VOORBEELDEN
 
 VOORWAARDEN
   Lokaal en de VPS draaien dezelfde versie (zelfde databasemigraties), en de
-  lokale stack draait (doelenboom -local -restart).
+  lokale stack draait (doelenboom -local -dev -restart).
 HELP
 }
 
@@ -214,7 +214,7 @@ field() { grep -o "$1 .*" "$2" | tail -n 1 || true; }
 step "1/5 Controles vooraf"
 command -v docker >/dev/null || die "docker ontbreekt"
 docker info >/dev/null 2>&1 || die "Docker draait niet"
-docker compose exec -T api true < /dev/null 2>/dev/null || die "De lokale stack draait niet. Start hem met: doelenboom -local -restart"
+docker compose exec -T api true < /dev/null 2>/dev/null || die "De lokale stack draait niet. Start hem met: doelenboom -local -dev -restart"
 echo "Van (lokaal): tenant \"$TENANT\", doelenboom \"$BOOM\""
 echo "Naar ($VPS): tenant \"$TO_TENANT\", doelenboom \"$TO_BOOM\"; admin $ADMIN; overschrijven: $OVERWRITE"
 
@@ -225,7 +225,7 @@ EXPORT_RC=0
 docker compose exec -T api sh -c '
   if [ -f dist/scripts/doelenboomExport.js ]; then exec node dist/scripts/doelenboomExport.js "$@"
   elif [ -f src/scripts/doelenboomExport.ts ]; then exec npx tsx src/scripts/doelenboomExport.ts "$@"
-  else echo "[doelenboom-export] FOUT: de lokale image kent het exportcommando nog niet. Herbouw met: doelenboom -local -restart" >&2; exit 3
+  else echo "[doelenboom-export] FOUT: de lokale image kent het exportcommando nog niet. Herbouw met: doelenboom -local -dev -restart" >&2; exit 3
   fi' sh --tenant "$TENANT" --boom "$BOOM" < /dev/null > "$BUNDLE" 2> "$WORK/export.log" || EXPORT_RC=$?
 cat "$WORK/export.log" >&2
 [ "$EXPORT_RC" -eq 0 ] || die "exporteren is mislukt (zie de melding hierboven)."
