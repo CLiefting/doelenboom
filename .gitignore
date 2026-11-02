@@ -36,3 +36,5 @@ __pycache__
 
 # DOEL-127: geheimen en bewijs van de lokale acceptatieomgeving
 /.acceptatie/
+# DOEL-135: wachtwoord van de ontwikkel-sysadmin (doelenboom -local -dev -reset)
+/.ontwikkeling/

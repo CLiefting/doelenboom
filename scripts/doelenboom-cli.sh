@@ -32,6 +32,14 @@
 #                                         # versie komt alleen via scripts/release.sh of scripts/kluis.sh --bijwerken)
 #   doelenboom -local -kluis -stop        # kluis stoppen (de database blijft bewaard)
 #   doelenboom -local -dev -restart -open # herbouwen/herstarten, en daarna meteen de browser openen
+#   doelenboom -local -reset [-email=adres]        # wachtwoord van de sysadmin resetten (DOEL-135),
+#   doelenboom -local -dev -reset [-email=adres]   # per omgeving; nieuw willekeurig wachtwoord in
+#   doelenboom -local -kluis -reset [-email=adres] # het sysadmin.txt van die omgeving (0600).
+#   doelenboom -prod -reset [-email=adres]         # Kluis en productie vragen eerst om bevestiging
+#                                         # (standaard nee); productie toont het wachtwoord
+#                                         # één keer en slaat het nergens op.
+#                                         # Adres: -email=…, anders DOELENBOOM_RESET_EMAIL, anders
+#                                         # het adres uit het sysadmin.txt van die omgeving.
 #   (Docker Desktop wordt zo nodig automatisch gestart, zie DOEL-57)
 #   doelenboom -zip                       # ~/Downloads/db_backend.zip (api) en db_frontend.zip (web) maken,
 #                                         # zonder node_modules, .env en .DS_Store
@@ -69,6 +77,8 @@ ACTION=""
 REBUILD_SCHEMA=""
 DELETE_ZIPS=""
 OPEN_BROWSER=""
+RESET_EMAIL=""
+RESET_REQUESTED=""
 
 set_local_env() {
   if [ -n "$LOCAL_ENV" ] && [ "$LOCAL_ENV" != "$1" ]; then
@@ -91,9 +101,11 @@ for arg in "$@"; do
     -d) DELETE_ZIPS="1" ;;
     -rebuild) REBUILD_SCHEMA="1" ;;
     -open) OPEN_BROWSER="1" ;;
+    -reset) ACTION="reset"; RESET_REQUESTED="1" ;;   # DOEL-135
+    -email=*) RESET_EMAIL="${arg#-email=}" ;;
     *)
       echo "Onbekende optie: $arg" >&2
-      echo "Bekende opties: -local [-acc | -dev | -ont | -kluis] | -prod, -restart, -stop, -open, -rebuild, -zip [-d]" >&2
+      echo "Bekende opties: -local [-acc | -dev | -ont | -kluis] | -prod, -restart, -stop, -open, -rebuild, -reset [-email=adres], -zip [-d]" >&2
       exit 1
       ;;
   esac
@@ -114,7 +126,7 @@ fi
 # en meteen erna de browser openen). Daarom telt een gezette -open hier ook mee
 # als "er is iets te doen", naast de bestaande ACTION-opties.
 if [ -z "$ACTION" ] && [ -z "$OPEN_BROWSER" ]; then
-  echo "Geef een actie op: -restart, -stop, -open of -zip" >&2
+  echo "Geef een actie op: -restart, -stop, -open, -reset of -zip" >&2
   exit 1
 fi
 if [ "$ACTION" != "restart" ] && [ -n "$REBUILD_SCHEMA" ]; then
@@ -150,7 +162,20 @@ if [ "$ACTION" = "stop" ] && [ -n "$OPEN_BROWSER" ]; then
   exit 1
 fi
 
-if [ "$ENVIRONMENT" = "prod" ]; then
+# DOEL-135: -email hoort bij -reset; -reset niet samen met -rebuild of -stop.
+if [ -n "$RESET_EMAIL" ] && [ -z "$RESET_REQUESTED" ]; then
+  echo "-email=… hoort bij -reset." >&2
+  exit 1
+fi
+if [ -n "$RESET_REQUESTED" ]; then
+  [ -z "$REBUILD_SCHEMA" ] || { echo "-rebuild hoort niet bij -reset." >&2; exit 1; }
+  for a in "$@"; do
+    case "$a" in
+      -stop|-restart|-zip) echo "-reset kan niet samen met $a; doe één actie tegelijk." >&2; exit 1 ;;
+    esac
+  done
+fi
+if [ "$ENVIRONMENT" = "prod" ] && [ "$ACTION" != "reset" ]; then
   # Bewust nog niet geautomatiseerd: een productie-restart/-deploy raakt een
   # live omgeving (en soms een schemamigratie, zie db/migrations/) — dat blijft
   # voorlopig het bewuste, stap-voor-stap proces uit deploy/README.md i.p.v.
@@ -198,7 +223,7 @@ ensure_docker_running() {
   echo "    Docker Desktop draait (na ${waited}s)."
 }
 
-if [ "$ACTION" = "restart" ] || [ "$ACTION" = "stop" ] || [ -n "$OPEN_BROWSER" ]; then
+if [ "$ENVIRONMENT" = "local" ] && { [ "$ACTION" = "restart" ] || [ "$ACTION" = "stop" ] || [ "$ACTION" = "reset" ] || [ -n "$OPEN_BROWSER" ]; }; then
   ensure_docker_running
 fi
 
@@ -238,6 +263,110 @@ env_running() {
     [ -n "$(docker compose ps --status running -q web 2>/dev/null)" ]
   fi
 }
+
+# ---- DOEL-135: wachtwoord van de sysadmin resetten -------------------------
+# Zelfde handeling als het handmatige commando voor acceptatie: een willekeurig
+# wachtwoord van 24 tekens (bcrypt, kosten 12), must_change_password = false.
+# - Ontwikkeling en acceptatie: direct. Kluis (VAULT) en productie: eerst
+#   bevestigen, standaard nee.
+# - Het nieuwe wachtwoord komt in het sysadmin.txt van die omgeving (0600);
+#   productie toont het één keer en slaat het nergens op.
+# - OWASP: het adres wordt gecontroleerd (A03), de SQL gaat via de standaard-
+#   invoer naar psql (het wachtwoord staat zo niet in de processenlijst, A02),
+#   en er moet precies één account geraakt zijn, anders wordt niets opgeslagen.
+reset_password() {
+  local label file email pw sql result ans lc
+  case "$ENVIRONMENT/$LOCAL_ENV" in
+    local/dev)   label="Ontwikkel";  file="$REPO_DIR/.ontwikkeling/sysadmin.txt" ;;
+    local/acc)   label="Acceptatie"; file="$REPO_DIR/.acceptatie/sysadmin.txt" ;;
+    local/kluis) label="Kluis";      file="$KLUIS_HOME_DIR/sysadmin.txt" ;;
+    prod/*)      label="Productie";  file="" ;;
+    *) echo "Onbekende omgeving voor -reset." >&2; exit 1 ;;
+  esac
+  lc="$(printf '%s' "$label" | tr '[:upper:]' '[:lower:]')"   # bash 3.2 (macOS) kent ${x,,} niet
+  email="${RESET_EMAIL:-${DOELENBOOM_RESET_EMAIL:-}}"
+  if [ -z "$email" ] && [ -n "$file" ] && [ -f "$file" ]; then
+    email="$(sed -n 's/^[A-Za-z]*-sysadmin: //p' "$file" | head -n 1)"
+  fi
+  if [ -z "$email" ]; then
+    echo "Welk account? Geef het adres op met -email=jij@example.nl (of zet DOELENBOOM_RESET_EMAIL)." >&2
+    exit 1
+  fi
+  if ! [[ "$email" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]]; then
+    echo "Geen geldig e-mailadres: -email=…" >&2
+    exit 1
+  fi
+
+  if [ "$label" = "Kluis" ] || [ "$label" = "Productie" ]; then
+    if [ "$label" = "Kluis" ]; then
+      echo "LET OP: je reset het wachtwoord van $email in de KLUIS (VAULT, gevoelige gegevens)."
+    else
+      [ -n "${VPS:-}" ] || { echo "Zet eerst VPS=gebruiker@host (zoals voor scripts/release.sh)." >&2; exit 1; }
+      echo "LET OP: je reset het wachtwoord van $email in PRODUCTIE (https://doelenboom.code072.nl)."
+    fi
+    printf 'Weet je het zeker? Typ "ja" om door te gaan (standaard: nee): '
+    ans=""
+    IFS= read -r ans || true
+    if [ "$ans" != "ja" ]; then
+      echo
+      echo "Afgebroken; er is niets gewijzigd."
+      exit 1
+    fi
+  fi
+
+  pw="$(openssl rand -base64 48 | tr -dc 'A-Za-z0-9' | cut -c1-24)"
+  if ! [[ "$pw" =~ ^[A-Za-z0-9]{24}$ ]]; then
+    echo "Kon geen wachtwoord maken." >&2
+    exit 1
+  fi
+  sql="update users set password_hash = crypt('$pw', gen_salt('bf', 12)), must_change_password = false where email = '$email' returning email;"
+
+  echo "==> Nieuw wachtwoord voor de $lc-sysadmin $email"
+  case "$label" in
+    Ontwikkel)
+      docker compose up -d db >/dev/null
+      until docker compose exec -T db pg_isready -U "$DB_USER" >/dev/null 2>&1; do sleep 1; done
+      result="$(printf '%s\n' "$sql" | docker compose exec -T db psql -U "$DB_USER" -d "$DB_NAME" -X -q -At -v ON_ERROR_STOP=1)" ;;
+    Acceptatie)
+      acc_compose up -d db >/dev/null
+      until acc_compose exec -T db pg_isready -U doelenboom >/dev/null 2>&1; do sleep 1; done
+      result="$(printf '%s\n' "$sql" | acc_compose exec -T db psql -U doelenboom -d doelenboom -X -q -At -v ON_ERROR_STOP=1)" ;;
+    Kluis)
+      [ -f "$KLUIS_HOME_DIR/kluis.env" ] || { echo "De kluis is nog niet ingericht." >&2; exit 1; }
+      kluis_compose up -d db >/dev/null
+      until kluis_compose exec -T db pg_isready -U doelenboom >/dev/null 2>&1; do sleep 1; done
+      result="$(printf '%s\n' "$sql" | kluis_compose exec -T db psql -U doelenboom -d doelenboom -X -q -At -v ON_ERROR_STOP=1)" ;;
+    Productie)
+      result="$(printf '%s\n' "$sql" | ssh "$VPS" 'cd ~/doelenboom && docker compose -f docker-compose.yml -f docker-compose.prod.yml exec -T db psql -U "${POSTGRES_USER:-doelenboom}" -d "${POSTGRES_DB:-doelenboom}" -X -q -At -v ON_ERROR_STOP=1')" ;;
+  esac
+  if [ "$result" != "$email" ]; then
+    echo "Geen account $email gevonden in $lc; er is niets gewijzigd." >&2
+    exit 1
+  fi
+
+  if [ -z "$file" ]; then
+    echo "Nieuw productiewachtwoord voor $email (wordt nergens opgeslagen, bewaar het in je wachtwoordkluis):"
+    echo "  $pw"
+    return 0
+  fi
+  umask 077
+  mkdir -p "$(dirname "$file")"
+  chmod 700 "$(dirname "$file")"
+  printf '%s-sysadmin: %s\nWachtwoord: %s\n' "$label" "$email" "$pw" > "$file"
+  chmod 600 "$file"
+  echo "Nieuw wachtwoord staat in $file"
+  cat "$file"
+}
+
+if [ "$ACTION" = "reset" ]; then
+  if [ "$LOCAL_ENV" = "kluis" ] && [ ! -f "$KLUIS_HOME_DIR/kluis.env" ]; then
+    echo "De kluis is op deze Mac nog niet ingericht ($KLUIS_HOME_DIR/kluis.env ontbreekt)." >&2
+    exit 1
+  fi
+  reset_password
+  ACTION=""
+  [ -n "$OPEN_BROWSER" ] || { echo; echo "Klaar."; exit 0; }
+fi
 
 # -open zonder -restart/-stop: draait de gekozen omgeving nog niet, dan eerst
 # starten. Ontwikkeling: zoals -restart (bouwen en starten). Acceptatie: de

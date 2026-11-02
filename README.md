@@ -492,6 +492,13 @@ standaard `-acc`; `-ont` is hetzelfde als `-dev`.
 | `-restart` | `bash scripts/acceptatie.sh` (opbouwen en keuren, alleen op een schone, bijgewerkte `main`) | herbouwen en herstarten (`-rebuild` past ook nieuwe migraties toe) |
 | `-stop` | acceptatie stoppen, database blijft | ontwikkeling stoppen, database blijft |
 
+**Wachtwoord van de sysadmin resetten (DOEL-135):** `doelenboom -local [-acc | -dev | -kluis] -reset [-email=adres]`
+of `doelenboom -prod -reset [-email=adres]`. Zet een nieuw willekeurig wachtwoord (24 tekens) en
+schrijft het in het `sysadmin.txt` van die omgeving (`.acceptatie/`, `.ontwikkeling/` of
+`~/.doelenboom-kluis/`, alleen voor jou leesbaar). Kluis en productie vragen eerst om "ja"
+(standaard nee); productie toont het wachtwoord één keer en slaat het nergens op. Zonder
+`-email` geldt `DOELENBOOM_RESET_EMAIL`, anders het adres uit dat `sysadmin.txt`.
+
 Met `-kluis` (DOEL-133): `-open` start de kluis zo nodig met dezelfde images en waarschuwt
 als hij achterloopt op productie of als de laatste back-up te oud is; `-restart` en `-stop`
 bouwen nooit.

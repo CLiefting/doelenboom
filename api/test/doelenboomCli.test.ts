@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,7 +15,9 @@ const cli = path.join(repo, 'scripts', 'doelenboom-cli.sh');
 // DOEL-132: opts.accBuilt = er is al eens een acceptatierun geweest (.acceptatie/acc.env +
 // bewijs); opts.running = de web-container van de gekozen omgeving draait al.
 // Nagebootst: docker, open (browser) en scripts/acceptatie.sh; alles logt in dezelfde log.
-function run(args: string[], opts: { accBuilt?: boolean; running?: boolean; acceptatieFails?: boolean; kluis?: boolean } = {}) {
+// DOEL-135: opts.input = wat je typt (bevestiging), opts.updated = wat psql teruggeeft
+// op "update … returning email" (leeg = geen account), opts.env = extra omgevingsvariabelen.
+function run(args: string[], opts: { accBuilt?: boolean; running?: boolean; acceptatieFails?: boolean; kluis?: boolean; input?: string; updated?: string; env?: Record<string, string> } = {}) {
   const tmp = mkdtempSync(path.join(os.tmpdir(), 'doelenboom-cli-'));
   try {
     const bin = path.join(tmp, 'bin');
@@ -25,9 +27,11 @@ function run(args: string[], opts: { accBuilt?: boolean; running?: boolean; acce
     stub(path.join(bin, 'docker'), [
       'echo "$@" >> "$DOCKER_LOG"',
       'case "$*" in *"ps --status running -q web"*) [ -n "$STUB_RUNNING" ] && echo abc123 ;; esac',
+      'case "$*" in *" psql "*) cat >> "$DOCKER_LOG.stdin"; printf "%s\\n" "$STUB_UPDATED" ;; esac',
       'exit 0',
     ].join('\n'));
     stub(path.join(bin, 'open'), 'echo "open $*" >> "$DOCKER_LOG"');
+    stub(path.join(bin, 'ssh'), 'echo "ssh $*" >> "$DOCKER_LOG"\ncat >> "$DOCKER_LOG.stdin"\nprintf "%s\\n" "$STUB_UPDATED"');
     mkdirSync(path.join(tmp, 'scripts'));
     stub(path.join(tmp, 'scripts', 'acceptatie.sh'), `echo "acceptatie.sh $*" >> "$DOCKER_LOG"\nexit ${opts.acceptatieFails ? 1 : 0}`);
     // DOEL-133: kluis.sh nagebootst; opts.kluis = de kluis is ingericht.
@@ -43,15 +47,28 @@ function run(args: string[], opts: { accBuilt?: boolean; running?: boolean; acce
       mkdirSync(path.join(tmp, '.acceptatie'));
       writeFileSync(path.join(tmp, '.acceptatie', 'acc.env'), 'ACC_POSTGRES_PASSWORD=x\n');
       writeFileSync(path.join(tmp, '.acceptatie', 'bewijs-abc.txt'), 'commit=abc\nbuild_version=4.4.7 (abc1234, 02-11-2026 10:00)\nresultaat=GOEDGEKEURD\n');
+      writeFileSync(path.join(tmp, '.acceptatie', 'sysadmin.txt'), 'Acceptatie-sysadmin: charles@example.nl\nWachtwoord: oudwachtwoord\n');
     }
     const r = spawnSync('bash', [cli, ...args], {
       cwd: tmp,
-      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, DOELENBOOM_DIR: tmp, DOCKER_LOG: log, STUB_RUNNING: opts.running ? '1' : '', KLUIS_HOME: path.join(tmp, 'kluis-home') },
+      env: {
+        ...process.env, PATH: `${bin}:${process.env.PATH}`, DOELENBOOM_DIR: tmp, DOCKER_LOG: log, STUB_RUNNING: opts.running ? '1' : '',
+        KLUIS_HOME: path.join(tmp, 'kluis-home'), STUB_UPDATED: opts.updated ?? '', DOELENBOOM_RESET_EMAIL: '', VPS: '', ...opts.env,
+      },
+      input: opts.input ?? '',
       encoding: 'utf8',
     });
     let calls: string[] = [];
     try { calls = readFileSync(log, 'utf8').trim().split('\n').filter(Boolean); } catch { /* docker niet aangeroepen */ }
-    return { status: r.status, out: r.stdout, err: r.stderr, calls };
+    let stdin = '';
+    try { stdin = readFileSync(`${log}.stdin`, 'utf8'); } catch { /* geen psql */ }
+    const readIf = (rel: string) => { try { return readFileSync(path.join(tmp, rel), 'utf8'); } catch { return null; } };
+    const modeOf = (rel: string) => { try { return statSync(path.join(tmp, rel)).mode & 0o777; } catch { return -1; } };
+    const files = {
+      dev: readIf('.ontwikkeling/sysadmin.txt'), acc: readIf('.acceptatie/sysadmin.txt'), kluis: readIf('kluis-home/sysadmin.txt'),
+      devMode: modeOf('.ontwikkeling/sysadmin.txt'), devDirMode: modeOf('.ontwikkeling'), accMode: modeOf('.acceptatie/sysadmin.txt'),
+    };
+    return { status: r.status, out: r.stdout, err: r.stderr, calls, stdin, files };
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -254,5 +271,129 @@ describe('doelenboom-cli: de kluis (DOEL-133)', () => {
       assert.equal(r.status, 1, other);
       assert.match(r.err, /niet meerdere/);
     }
+  });
+});
+
+// Regressietests voor DOEL-135: `doelenboom … -reset` zet een nieuw willekeurig
+// wachtwoord voor de sysadmin. Ontwikkeling en acceptatie direct; kluis en
+// productie pas na "ja" (standaard nee). Op de oude code falen deze tests:
+// -reset was een onbekende optie.
+describe('doelenboom-cli: -reset (DOEL-135)', () => {
+  const PW = /Wachtwoord: ([A-Za-z0-9]{24})\n/;
+  const sqlFor = (email: string) => new RegExp(
+    `^update users set password_hash = crypt\\('[A-Za-z0-9]{24}', gen_salt\\('bf', 12\\)\\), must_change_password = false where email = '${email.replace(/\./g, '\\.')}' returning email;$`, 'm');
+
+  it('acceptatie (standaard): adres uit .acceptatie/sysadmin.txt, nieuw wachtwoord daarin, getoond', () => {
+    const r = run(['-local', '-reset'], { accBuilt: true, updated: 'charles@example.nl' });
+    assert.equal(r.status, 0, r.err + r.out);
+    assert.match(r.stdin, sqlFor('charles@example.nl'));
+    assert.ok(r.calls.some((c) => /^compose -p doelenboom-acc -f \S+docker-compose\.acc\.yml --env-file \S+acc\.env exec -T db psql -U doelenboom -d doelenboom -X -q -At -v ON_ERROR_STOP=1$/.test(c)), r.calls.join(' | '));
+    const pw = PW.exec(r.files.acc ?? '')?.[1];
+    assert.ok(pw && pw !== 'oudwachtwoord', r.files.acc ?? '');
+    assert.match(r.files.acc!, /^Acceptatie-sysadmin: charles@example\.nl$/m);
+    assert.equal(r.files.accMode, 0o600);
+    assert.match(r.out, new RegExp(`Wachtwoord: ${pw}`));
+  });
+
+  it('(A02) het wachtwoord gaat via de standaardinvoer, niet als argument (processenlijst)', () => {
+    const r = run(['-local', '-reset'], { accBuilt: true, updated: 'charles@example.nl' });
+    const pw = PW.exec(r.files.acc ?? '')![1];
+    assert.ok(r.stdin.includes(pw));
+    assert.ok(!r.calls.some((c) => c.includes(pw)), 'wachtwoord staat in een commandoregel');
+  });
+
+  it('ontwikkeling: -email=… , dev-database, .ontwikkeling/sysadmin.txt (0600 in map 0700)', () => {
+    const r = run(['-local', '-dev', '-reset', '-email=admin@code072.nl'], { updated: 'admin@code072.nl' });
+    assert.equal(r.status, 0, r.err + r.out);
+    assert.match(r.stdin, sqlFor('admin@code072.nl'));
+    assert.ok(r.calls.includes('compose exec -T db psql -U doelenboom -d doelenboom -X -q -At -v ON_ERROR_STOP=1'), r.calls.join(' | '));
+    assert.match(r.files.dev ?? '', /^Ontwikkel-sysadmin: admin@code072\.nl\nWachtwoord: [A-Za-z0-9]{24}\n$/);
+    assert.equal(r.files.devMode, 0o600);
+    assert.equal(r.files.devDirMode, 0o700);
+  });
+
+  it('DOELENBOOM_RESET_EMAIL als er geen -email is', () => {
+    const r = run(['-local', '-dev', '-reset'], { updated: 'x@example.nl', env: { DOELENBOOM_RESET_EMAIL: 'x@example.nl' } });
+    assert.equal(r.status, 0, r.err + r.out);
+    assert.match(r.stdin, sqlFor('x@example.nl'));
+  });
+
+  it('geen adres bekend: vraagt om -email, verandert niets', () => {
+    const r = run(['-local', '-dev', '-reset']);
+    assert.equal(r.status, 1);
+    assert.match(r.err, /-email=/);
+    assert.equal(r.stdin, '');
+  });
+
+  it('(A03) ongeldig adres (SQL-injectie): geweigerd vóór er iets wordt aangeroepen', () => {
+    const r = run(['-local', '-dev', '-reset', "-email=x'; drop table users; --@example.nl"]);
+    assert.equal(r.status, 1);
+    assert.match(r.err, /Geen geldig e-mailadres/);
+    assert.equal(r.stdin, '');
+    assert.equal(r.files.dev, null);
+  });
+
+  it('account bestaat niet: foutmelding en het oude sysadmin.txt blijft staan', () => {
+    const r = run(['-local', '-reset'], { accBuilt: true, updated: '' });
+    assert.equal(r.status, 1);
+    assert.match(r.err, /Geen account charles@example\.nl gevonden in acceptatie/);
+    assert.match(r.files.acc ?? '', /Wachtwoord: oudwachtwoord/);
+  });
+
+  for (const input of ['', '\n', 'nee\n', 'Ja\n', 'j\n']) {
+    it(`kluis: zonder "ja" (${JSON.stringify(input)}) afgebroken, niets gewijzigd`, () => {
+      const r = run(['-local', '-kluis', '-reset', '-email=c@example.nl'], { kluis: true, input, updated: 'c@example.nl' });
+      assert.equal(r.status, 1);
+      assert.match(r.out, /KLUIS \(VAULT/);
+      assert.match(r.out, /standaard: nee/);
+      assert.match(r.out, /Afgebroken; er is niets gewijzigd/);
+      assert.equal(r.stdin, '');
+      assert.equal(r.files.kluis, null);
+    });
+  }
+
+  it('kluis: met "ja" wordt het wachtwoord gereset in ~/.doelenboom-kluis/sysadmin.txt', () => {
+    const r = run(['-local', '-kluis', '-reset', '-email=c@example.nl'], { kluis: true, input: 'ja\n', updated: 'c@example.nl' });
+    assert.equal(r.status, 0, r.err + r.out);
+    assert.ok(r.calls.some((c) => /^compose -p doelenboom-kluis .* exec -T db psql /.test(c)), r.calls.join(' | '));
+    assert.match(r.files.kluis ?? '', /^Kluis-sysadmin: c@example\.nl\nWachtwoord: [A-Za-z0-9]{24}\n$/);
+  });
+
+  it('productie: zonder VPS geweigerd; zonder "ja" afgebroken', () => {
+    const noVps = run(['-prod', '-reset', '-email=c@example.nl'], { input: 'ja\n' });
+    assert.equal(noVps.status, 1);
+    assert.match(noVps.err, /VPS=gebruiker@host/);
+    const no = run(['-prod', '-reset', '-email=c@example.nl'], { env: { VPS: 'beheer@vps.example.test' }, input: '\n' });
+    assert.equal(no.status, 1);
+    assert.match(no.out, /PRODUCTIE/);
+    assert.ok(!no.calls.some((c) => c.startsWith('ssh')), no.calls.join(' | '));
+  });
+
+  it('productie met "ja": via ssh (SQL op de standaardinvoer), wachtwoord één keer getoond, niets opgeslagen', () => {
+    const r = run(['-prod', '-reset', '-email=c@example.nl'], { env: { VPS: 'beheer@vps.example.test' }, input: 'ja\n', updated: 'c@example.nl' });
+    assert.equal(r.status, 0, r.err + r.out);
+    const ssh = r.calls.find((c) => c.startsWith('ssh '))!;
+    assert.match(ssh, /^ssh beheer@vps\.example\.test cd ~\/doelenboom && docker compose -f docker-compose\.yml -f docker-compose\.prod\.yml exec -T db psql /);
+    const pw = /^ {2}([A-Za-z0-9]{24})$/m.exec(r.out)?.[1];
+    assert.ok(pw, r.out);
+    assert.ok(!ssh.includes(pw!));
+    assert.match(r.stdin, sqlFor('c@example.nl'));
+    assert.match(r.out, /wordt nergens opgeslagen/);
+    assert.equal(r.files.dev, null);
+    assert.ok(!r.calls.some((c) => c.startsWith('compose')), 'lokaal is niets aangeraakt');
+  });
+
+  it('-reset samen met -stop/-restart/-rebuild, of -email zonder -reset: geweigerd', () => {
+    for (const args of [['-local', '-reset', '-stop'], ['-local', '-restart', '-reset'], ['-local', '-dev', '-reset', '-rebuild'], ['-local', '-dev', '-open', '-email=c@example.nl']]) {
+      const r = run(args, { accBuilt: true });
+      assert.equal(r.status, 1, args.join(' '));
+      assert.equal(r.stdin, '');
+    }
+  });
+
+  it('-prod zonder -reset blijft geweigerd (productie blijft handwerk)', () => {
+    const r = run(['-prod', '-stop']);
+    assert.equal(r.status, 1);
+    assert.match(r.err, /Productie-acties zijn nog niet geautomatiseerd/);
   });
 });
