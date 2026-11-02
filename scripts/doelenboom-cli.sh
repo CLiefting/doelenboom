@@ -8,14 +8,24 @@
 #   alias doelenboom="${DOELENBOOM_DIR:-$HOME/src/doelenboom}/scripts/doelenboom-cli.sh"
 # Daarna: bron je shell opnieuw (nieuwe terminal, of `source ~/.zshrc`).
 #
+# Lokale omgeving kiezen (DOEL-132): -acc (standaard) of -dev (synoniem: -ont).
+#   acceptatie   http://localhost:8088  gele driehoek "ACC"   (docker-compose.acc.yml)
+#   ontwikkeling http://localhost:5173  groene driehoek "ONT" (docker-compose.yml)
+#
 # Gebruik:
-#   doelenboom -local -restart            # lokale stack herbouwen (gewijzigde images) en herstarten
-#   doelenboom -local -rebuild -restart   # idem, én eerst de nieuwe db/migrations/*.sql toepassen
+#   doelenboom -local -open               # acceptatie openen; draait hij niet, dan eerst starten met de
+#                                         # images van de laatste acceptatierun (er wordt niets gebouwd)
+#   doelenboom -local -restart            # acceptatie opnieuw opbouwen en keuren = bash scripts/acceptatie.sh
+#                                         # (alleen op een bijgewerkte, schone main; schrijft het bewijs)
+#   doelenboom -local -stop               # acceptatie stoppen (de acceptatiedatabase blijft bewaard)
+#   doelenboom -local -dev -open          # ontwikkelomgeving openen; draait hij niet, dan eerst bouwen en starten
+#   doelenboom -local -dev -restart       # ontwikkelomgeving herbouwen (gewijzigde images) en herstarten
+#   doelenboom -local -dev -rebuild -restart  # idem, én eerst de nieuwe db/migrations/*.sql toepassen
 #                                         # (alleen wat nog niet gedraaid is, zie scripts/db-migrate.sh)
-#   doelenboom -local -stop               # lokale containers stoppen (database-data blijft bewaard)
-#   (bij -restart/-stop: Docker Desktop wordt zo nodig automatisch gestart, zie DOEL-57)
-#   doelenboom -local -open               # browser openen op http://localhost:5173 (app draait al)
-#   doelenboom -local -restart -open      # herbouwen/herstarten, en daarna meteen de browser openen
+#   doelenboom -local -dev -stop          # ontwikkelomgeving stoppen (database-data blijft bewaard)
+#   doelenboom -local -ont ...            # hetzelfde als -dev
+#   doelenboom -local -dev -restart -open # herbouwen/herstarten, en daarna meteen de browser openen
+#   (Docker Desktop wordt zo nodig automatisch gestart, zie DOEL-57)
 #   doelenboom -zip                       # ~/Downloads/db_backend.zip (api) en db_frontend.zip (web) maken,
 #                                         # zonder node_modules, .env en .DS_Store
 #   doelenboom -zip -d                    # die twee zips weer verwijderen
@@ -46,14 +56,26 @@ DB_USER="${POSTGRES_USER:-doelenboom}"
 DB_NAME="${POSTGRES_DB:-doelenboom}"
 
 ENVIRONMENT=""
+# DOEL-132: welke lokale omgeving (acc of dev); leeg = standaard acc.
+LOCAL_ENV=""
 ACTION=""
 REBUILD_SCHEMA=""
 DELETE_ZIPS=""
 OPEN_BROWSER=""
 
+set_local_env() {
+  if [ -n "$LOCAL_ENV" ] && [ "$LOCAL_ENV" != "$1" ]; then
+    echo "Kies één lokale omgeving: -acc of -dev (-ont), niet allebei." >&2
+    exit 1
+  fi
+  LOCAL_ENV="$1"
+}
+
 for arg in "$@"; do
   case "$arg" in
     -local) ENVIRONMENT="local" ;;
+    -acc) set_local_env acc ;;
+    -dev|-ont) set_local_env dev ;;
     -prod) ENVIRONMENT="prod" ;;
     -restart) ACTION="restart" ;;
     -stop) ACTION="stop" ;;
@@ -63,7 +85,7 @@ for arg in "$@"; do
     -open) OPEN_BROWSER="1" ;;
     *)
       echo "Onbekende optie: $arg" >&2
-      echo "Bekende opties: -local | -prod, -restart, -stop, -open, -rebuild, -zip [-d]" >&2
+      echo "Bekende opties: -local [-acc | -dev | -ont] | -prod, -restart, -stop, -open, -rebuild, -zip [-d]" >&2
       exit 1
       ;;
   esac
@@ -96,7 +118,19 @@ if [ "$ACTION" = "zip" ] && [ -n "$ENVIRONMENT" ]; then
   exit 1
 fi
 if [ -n "$OPEN_BROWSER" ] && [ "$ENVIRONMENT" != "local" ]; then
-  echo "-open werkt alleen met -local (opent http://localhost:5173)." >&2
+  echo "-open werkt alleen met -local." >&2
+  exit 1
+fi
+# DOEL-132: -acc/-dev/-ont kiezen een LOKALE omgeving; standaard acceptatie.
+if [ -n "$LOCAL_ENV" ] && [ "$ENVIRONMENT" != "local" ]; then
+  echo "-acc, -dev en -ont horen bij -local (bv. doelenboom -local -dev -open)." >&2
+  exit 1
+fi
+if [ "$ENVIRONMENT" = "local" ] && [ -z "$LOCAL_ENV" ]; then
+  LOCAL_ENV="acc"
+fi
+if [ "$LOCAL_ENV" = "acc" ] && [ -n "$REBUILD_SCHEMA" ]; then
+  echo "-rebuild hoort bij de ontwikkelomgeving (doelenboom -local -dev -rebuild -restart); acceptatie past de migraties zelf toe." >&2
   exit 1
 fi
 if [ "$ACTION" = "stop" ] && [ -n "$OPEN_BROWSER" ]; then
@@ -152,8 +186,53 @@ ensure_docker_running() {
   echo "    Docker Desktop draait (na ${waited}s)."
 }
 
-if [ "$ACTION" = "restart" ] || [ "$ACTION" = "stop" ]; then
+if [ "$ACTION" = "restart" ] || [ "$ACTION" = "stop" ] || [ -n "$OPEN_BROWSER" ]; then
   ensure_docker_running
+fi
+
+# DOEL-132: de acceptatieomgeving (docker-compose.acc.yml) met dezelfde
+# projectnaam en env-bestanden als scripts/acceptatie.sh. Gebouwd wordt
+# acceptatie alleen door dat script (bewijs per commit, DOEL-127/131); hier
+# alleen starten (--no-build), stoppen en openen.
+ACC_ENV_FILE="$REPO_DIR/.acceptatie/acc.env"
+acc_compose() {
+  if [ ! -f "$ACC_ENV_FILE" ]; then
+    echo "De acceptatieomgeving is hier nog nooit opgebouwd ($ACC_ENV_FILE ontbreekt)." >&2
+    echo "Bouw en keur hem eerst:  doelenboom -local -acc -restart   (= bash scripts/acceptatie.sh)" >&2
+    exit 1
+  fi
+  local args=(docker compose -p doelenboom-acc -f "$REPO_DIR/docker-compose.acc.yml")
+  [ -f "$REPO_DIR/.env" ] && args+=(--env-file "$REPO_DIR/.env")
+  args+=(--env-file "$ACC_ENV_FILE")
+  "${args[@]}" "$@"
+}
+# Draait de web-container van deze omgeving al? (lege uitvoer = nee)
+env_running() {
+  if [ "$LOCAL_ENV" = "acc" ]; then
+    [ -n "$(acc_compose ps --status running -q web 2>/dev/null)" ]
+  else
+    [ -n "$(docker compose ps --status running -q web 2>/dev/null)" ]
+  fi
+}
+
+# -open zonder -restart/-stop: draait de gekozen omgeving nog niet, dan eerst
+# starten. Ontwikkeling: zoals -restart (bouwen en starten). Acceptatie: de
+# images van de laatste acceptatierun starten, zonder te bouwen.
+if [ -n "$OPEN_BROWSER" ] && [ -z "$ACTION" ] && ! env_running; then
+  if [ "$LOCAL_ENV" = "dev" ]; then
+    echo "==> De ontwikkelomgeving draait niet; wordt gebouwd en gestart"
+    ACTION="restart"
+  else
+    echo "==> De acceptatieomgeving draait niet; wordt gestart met de images van de laatste acceptatierun"
+    if ! acc_compose up -d --no-build; then
+      echo "Starten lukte niet. Zijn de acceptatie-images er wel? Bouw en keur ze met:  doelenboom -local -acc -restart" >&2
+      exit 1
+    fi
+    LAST="$(ls -t "$REPO_DIR"/.acceptatie/bewijs-*.txt 2>/dev/null | head -n 1 || true)"
+    if [ -n "$LAST" ]; then
+      echo "    Laatste acceptatierun: $(sed -n 's/^build_version=//p' "$LAST" | head -n 1) ($(sed -n 's/^resultaat=//p' "$LAST" | head -n 1))"
+    fi
+  fi
 fi
 
 # Nieuwe db/migrations/*.sql toepassen tegen de lopende (of net gestarte)
@@ -171,6 +250,22 @@ run_migrations() {
 
   DOELENBOOM_DIR="$REPO_DIR" "$REPO_DIR/scripts/db-migrate.sh"
 }
+
+# DOEL-132: acceptatie herstarten = opnieuw opbouwen en keuren via
+# scripts/acceptatie.sh; stoppen via dezelfde compose-projectnaam.
+if [ "$LOCAL_ENV" = "acc" ] && [ "$ACTION" = "restart" ]; then
+  echo "==> Acceptatie opnieuw opbouwen en keuren (bash scripts/acceptatie.sh)"
+  echo "    (Voor de ontwikkelomgeving: doelenboom -local -dev -restart)"
+  bash "$REPO_DIR/scripts/acceptatie.sh"
+  ACTION=""
+fi
+if [ "$LOCAL_ENV" = "acc" ] && [ "$ACTION" = "stop" ]; then
+  echo "==> Acceptatieomgeving stoppen (de acceptatiedatabase blijft bewaard)"
+  acc_compose stop
+  echo
+  acc_compose ps -a
+  ACTION=""
+fi
 
 case "$ACTION" in
   restart)
@@ -271,7 +366,8 @@ esac
 # puur een gemakscommando, en een browser die een paar seconden moet
 # verversen tot vite/nginx klaar is, is geen fout om voor te stoppen.
 if [ -n "$OPEN_BROWSER" ]; then
-  APP_URL="http://localhost:5173"
+  # DOEL-132: acceptatie op 8088 (docker-compose.acc.yml), ontwikkeling op 5173.
+  if [ "$LOCAL_ENV" = "acc" ]; then APP_URL="http://localhost:8088"; else APP_URL="http://localhost:5173"; fi
   echo "==> Browser openen op $APP_URL"
   if ! command -v open >/dev/null 2>&1; then
     echo "Kan de browser niet automatisch openen ('open' ontbreekt — dit is macOS-only)." >&2

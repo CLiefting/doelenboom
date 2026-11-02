@@ -115,4 +115,4 @@ echo "SMTP-instellingen bijgewerkt in $ENV_FILE (host=$SMTP_HOST poort=587 gebru
 if [ "$USE_CLIPBOARD" = 1 ]; then
   echo "Tip: leeg het klembord (kopieer iets anders) zodat het wachtwoord er niet blijft staan."
 fi
-echo "Herstart de stack om dit te laten meetellen: unset DOCKER_DEFAULT_PLATFORM && doelenboom -local -restart"
+echo "Herstart de stack om dit te laten meetellen: unset DOCKER_DEFAULT_PLATFORM && doelenboom -local -dev -restart"

@@ -48,7 +48,7 @@ Postgres draait `init.sql` alleen bij de éérste start van een lege volume — 
 hiervoor al een keer `docker compose up` had gedraaid, moet je `docker compose
 down -v` uitvoeren (en dus opnieuw seeden) om deze wijzigingen mee te krijgen. Voor een
 bestaande database gaan schemawijzigingen via `db/migrations/` en `scripts/db-migrate.sh`
-(`doelenboom -local -rebuild -restart`); dat draait alleen migraties die nog niet zijn
+(`doelenboom -local -dev -rebuild -restart`); dat draait alleen migraties die nog niet zijn
 toegepast (DOEL-99, zie deploy/README.md, "Databasemigraties").
 
 ### Inloggen
@@ -472,6 +472,15 @@ behoud van de `Toelichting`-kolom op Element-Tag-relaties.
 | Acceptatie | `docker-compose.acc.yml` | http://localhost:8088 | `doelenboom-acc-*` (productie-Dockerfiles) | gele driehoek "ACC" linksboven, tabblad "[ACC] …" | onderwerp "[ACCEPTATIE] …" |
 | Productie | `docker-compose.yml` + `docker-compose.prod.yml` | https://doelenboom.code072.nl | `doelenboom-*:latest` | geen driehoek | zonder label |
 
+**Lokaal starten en openen met de CLI (DOEL-132):** `doelenboom -local [-acc | -dev] ...`,
+standaard `-acc`; `-ont` is hetzelfde als `-dev`.
+
+| Commando | Acceptatie (`-acc`, standaard) | Ontwikkeling (`-dev` / `-ont`) |
+|---|---|---|
+| `-open` | http://localhost:8088 openen; draait hij niet, dan eerst starten met de images van de laatste acceptatierun (niets bouwen) | http://localhost:5173 openen; draait hij niet, dan eerst bouwen en starten |
+| `-restart` | `bash scripts/acceptatie.sh` (opbouwen en keuren, alleen op een schone, bijgewerkte `main`) | herbouwen en herstarten (`-rebuild` past ook nieuwe migraties toe) |
+| `-stop` | acceptatie stoppen, database blijft | ontwikkeling stoppen, database blijft |
+
 **Omgevingsdriehoek (DOEL-131):** de API leest `DOELENBOOM_OMGEVING`
 (`ontwikkeling`, `acceptatie` of `productie`; leeg = productie) en geeft die buiten
 productie mee in `GET /api/version`. De web-app toont dan op elke pagina linksboven
@@ -589,7 +598,7 @@ Deze map staat in OneDrive. Daardoor worden ook `.env` (met o.a. het SMTP-wachtw
 scripts/check-secrets.sh
 ```
 
-**Aanbevolen: de werkmap buiten OneDrive zetten.** Stop eerst de stack (`doelenboom -local -stop`) en sluit editors die de map open hebben; verplaats dan de hele map en zet één variabele, waarna alle scripts (`doelenboom-cli.sh`, `pre-build.sh`, `build-version.sh`, `generate-sbom.sh`, `set-smtp-env.sh`) de nieuwe plek gebruiken:
+**Aanbevolen: de werkmap buiten OneDrive zetten.** Stop eerst beide lokale stacks (`doelenboom -local -dev -stop` en `doelenboom -local -acc -stop`) en sluit editors die de map open hebben; verplaats dan de hele map en zet één variabele, waarna alle scripts (`doelenboom-cli.sh`, `pre-build.sh`, `build-version.sh`, `generate-sbom.sh`, `set-smtp-env.sh`) de nieuwe plek gebruiken:
 
 ```bash
 mkdir -p ~/src

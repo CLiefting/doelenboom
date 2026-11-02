@@ -55,6 +55,8 @@ voor het patroon: kwetsbaarheid eerst aantonen, dan fixen, dan de test die het a
   maximaal 72 uur oud). Geef Charles nooit commando's die dit omzeilen (geen handmatige
   `docker load`/`up -d` op de VPS buiten `release.sh`, behalve voor noodherstel zoals in
   deploy/README.md beschreven).
+- Lokale CLI (DOEL-132): `doelenboom -local [-acc | -dev | -ont] -open|-restart|-stop`, standaard
+  acceptatie. Geef voor ontwikkelwerk op een branch dus `doelenboom -local -dev -restart`.
 - Omgevingen zijn herkenbaar (DOEL-131): groene driehoek "ONT" linksboven in ontwikkeling,
   gele "ACC" in acceptatie, niets in productie; bron is `DOELENBOOM_OMGEVING`
   (`api/src/omgeving.ts`, `web/src/components/OmgevingsDriehoek.tsx`).
