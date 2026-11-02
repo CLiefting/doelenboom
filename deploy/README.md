@@ -923,24 +923,49 @@ bash scripts/kluis.sh --herstel-test
 
 Inloggen: `~/.doelenboom-kluis/sysadmin.txt`.
 
-**Offsite naar CL-NAS002 inrichten** (thuis, eenmalig):
+**Offsite naar CL-NAS002 inrichten** (thuis, eenmalig; zo ingericht op 02-11-2026):
 
-1. `brew install age`, dan `age-keygen -o ~/kluis-age-sleutel.txt`. Zet de **privésleutel**
-   in je wachtwoordkluis en verwijder het bestand. Zet de publieke sleutel (`age1…`) in
-   `KLUIS_AGE_ONTVANGER` in `~/.doelenboom-kluis/kluis.env`.
-2. Op CL-NAS002 (DSM):
-   - maak een gebruiker `doelenboom-kluis` aan (geen admin) en een gedeelde map waarin
-     alleen die gebruiker mag schrijven;
-   - zet de gebruikers-thuismap aan (nodig voor `authorized_keys`).
-3. Op de Mac de SSH-sleutel en de vingerafdruk van de NAS vastleggen:
-   - `ssh-keygen -t ed25519 -N '' -f ~/.doelenboom-kluis/nas_ed25519`
-   - `ssh-keyscan -p 62022 192.168.178.22 > ~/.doelenboom-kluis/nas_known_hosts`
-   - controleer de vingerafdruk in DSM.
-4. Zet de publieke sleutel op de NAS in `~doelenboom-kluis/.ssh/authorized_keys`, met
-   `restrict` vooraan. Vul `KLUIS_NAS_PAD` in `kluis.env` (pad op de NAS).
-5. Testen met `bash scripts/kluis-backup.sh`: de status moet `offsite_resultaat=ok` tonen.
+1. **age-sleutel (Mac).** `brew install age`, dan `age-keygen -o ~/kluis-age-sleutel.txt`.
+   Zet de **privésleutel** (regel `AGE-SECRET-KEY-1…`) in je wachtwoordkluis en de publieke
+   sleutel (`age1…`) in `KLUIS_AGE_ONTVANGER` in `~/.doelenboom-kluis/kluis.env`. Verwijder
+   het sleutelbestand pas na een geslaagde offsite-kopie én een ontsleuteltest (stap 6).
+2. **DSM op CL-NAS002:**
+   - gedeelde map **`doelenboom-kluis-backup`** (Volume 1);
+   - gebruiker **`backup-doelenboom-kluis`** (groep users, géén beheerder):
+     - **Machtigingen:** lezen/schrijven op alleen die map, geen toegang tot alle andere
+       mappen; `homes` op Standaard laten (nodig voor `.ssh/authorized_keys`);
+     - **Toepassingen:** alles op **Weigeren**, behalve **rsync**;
+   - Gebruiker en groep → Geavanceerd → **gebruikershome-service** aan;
+   - Bestandservices → rsync → **"rsync-service inschakelen"** met
+     **SSH-coderingspoort 62022**.
 
-Herstellen uit een offsite-kopie: `age -d -i <privésleutel> bestand.age > bestand`.
+   Let op: zonder die rsync-service accepteert de NAS de sleutel wel ("Authenticated using
+   publickey"), maar weigert hij daarna elk commando met "Permission denied, please try
+   again". De gebruiker heeft als shell `/sbin/nologin`; DSM laat dan alleen rsync toe, en
+   dat alleen met de rsync-service aan.
+3. **SSH-sleutel en vingerafdruk (Mac):**
+   - `ssh-keygen -q -t ed25519 -N '' -C doelenboom-kluis -f ~/.doelenboom-kluis/nas_ed25519`
+   - `ssh-keyscan -T 5 -p 62022 -t ed25519,ecdsa,rsa 192.168.178.22 > ~/.doelenboom-kluis/nas_known_hosts`
+   - vergelijk met wat de NAS zelf zegt:
+     `ssh cl-nas002 'for f in /etc/ssh/ssh_host_*_key.pub; do ssh-keygen -lf "$f"; done'`
+4. **Publieke sleutel op de NAS** (als beheerder, met `sudo`) in
+   `/var/services/homes/backup-doelenboom-kluis/.ssh/authorized_keys`, met `restrict ` vooraan.
+   Rechten: `.ssh` 700, `authorized_keys` 600, eigenaar `backup-doelenboom-kluis`, thuismap
+   niet schrijfbaar voor groep/anderen.
+5. **kluis.env:** `KLUIS_NAS_USER=backup-doelenboom-kluis` en
+   `KLUIS_NAS_PAD=/volume1/doelenboom-kluis-backup`. Droge test (verstuurt niets):
+
+   ```bash
+   rsync -an -e "ssh -i ~/.doelenboom-kluis/nas_ed25519 -p 62022 -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.doelenboom-kluis/nas_known_hosts" "$(mktemp -d)/" backup-doelenboom-kluis@192.168.178.22:/volume1/doelenboom-kluis-backup/
+   ```
+6. **Eerste kopie en ontsleuteltest:** `bash scripts/kluis-backup.sh` moet
+   `offsite_resultaat=ok` geven. Daarna
+   `age -d -i ~/kluis-age-sleutel.txt <laatste>.sql.gz.age | gzip -t`, en pas dan
+   `rm ~/kluis-age-sleutel.txt`.
+
+Herstellen uit een offsite-kopie: haal het `.age`-bestand van de NAS, zet de privésleutel uit
+je wachtwoordkluis tijdelijk in een bestand (0600) en draai
+`age -d -i <privésleutel> bestand.age > bestand`. Verwijder het sleutelbestand daarna weer.
 
 ## Openstaand aandachtspunt: offsite-kopie
 
