@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 const web = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const { driehoekVoor, tabTitel } = await import(path.join(web, 'src', 'omgeving.ts'));
+const { driehoekVoor, tabTitel, doorzichtig, DRIEHOEK_DEKKING } = await import(path.join(web, 'src', 'omgeving.ts'));
 const read = (rel) => readFileSync(path.join(web, rel), 'utf8');
 
 describe('DOEL-131: driehoek per omgeving', () => {
@@ -29,18 +29,18 @@ describe('DOEL-131: driehoek per omgeving', () => {
     assert.equal(w.omschrijving, 'Acceptatieomgeving');
   });
 
-  it('ontwikkeling: groen met "ONT", witte tekst', () => {
+  it('ontwikkeling: groen met "ONT", donkergroene tekst (DOEL-134)', () => {
     const w = driehoekVoor('ontwikkeling');
     assert.equal(w.label, 'ONT');
     assert.equal(w.achtergrond, '#2E7D32');
-    assert.equal(w.tekstkleur, '#FFFFFF');
+    assert.equal(w.tekstkleur, '#0D3B12');
   });
 
-  it('kluis (DOEL-133): rood met "VAULT", witte tekst', () => {
+  it('kluis (DOEL-133): rood met "VAULT", donkerrode tekst (DOEL-134)', () => {
     const w = driehoekVoor('kluis');
     assert.equal(w.label, 'VAULT');
     assert.equal(w.achtergrond, '#C62828');
-    assert.equal(w.tekstkleur, '#FFFFFF');
+    assert.equal(w.tekstkleur, '#7A0000');
     assert.match(w.omschrijving, /gevoelige gegevens/);
   });
 
@@ -50,17 +50,26 @@ describe('DOEL-131: driehoek per omgeving', () => {
     }
   });
 
-  it('witte tekst op groen is goed leesbaar (contrast ≥ 4,5:1)', () => {
-    const lum = (hex) => {
-      const c = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255)
-        .map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+  it('DOEL-134: tekst leesbaar op de half doorzichtige kleur boven een lichte pagina (contrast ≥ 4,5:1)', () => {
+    const rgb = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+    const lum = ([r, g, b]) => {
+      const c = [r, g, b].map((v) => v / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
       return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
     };
-    for (const o of ['ontwikkeling', 'acceptatie', 'kluis']) {
-      const w = driehoekVoor(o);
-      const [a, b] = [lum(w.achtergrond), lum(w.tekstkleur)].sort((x, y) => y - x);
-      assert.ok((a + 0.05) / (b + 0.05) >= 4.5, `${o}: contrast te laag`);
+    for (const pagina of ['#FFFFFF', '#EEF2F7']) {
+      for (const o of ['ontwikkeling', 'acceptatie', 'kluis']) {
+        const w = driehoekVoor(o);
+        const bg = rgb(w.achtergrond).map((v, i) => v * DRIEHOEK_DEKKING + rgb(pagina)[i] * (1 - DRIEHOEK_DEKKING));
+        const [a, b] = [lum(bg), lum(rgb(w.tekstkleur))].sort((x, y) => y - x);
+        assert.ok((a + 0.05) / (b + 0.05) >= 4.5, `${o} op ${pagina}: contrast ${((a + 0.05) / (b + 0.05)).toFixed(2)}`);
+      }
     }
+  });
+
+  it('DOEL-134: half doorzichtig (ca. 55% doorzichtig)', () => {
+    assert.equal(DRIEHOEK_DEKKING, 0.45);
+    assert.equal(doorzichtig('#C62828'), 'rgba(198, 40, 40, 0.45)');
+    assert.equal(doorzichtig('geen-kleur'), 'geen-kleur');
   });
 });
 
@@ -96,6 +105,11 @@ describe('DOEL-131: plaatsing en veiligheid van het component', () => {
     for (const re of [/position: 'fixed'/, /top: 0/, /left: 0/, /zIndex: 2147483647/, /pointerEvents: 'none'/, /clipPath: 'polygon\(0 0, 100% 0, 0 100%\)'/]) {
       assert.match(comp, re);
     }
+  });
+
+  it('DOEL-134: de driehoek gebruikt de doorzichtige kleur en de letters een halo', () => {
+    assert.match(comp, /background: doorzichtig\(weergave\.achtergrond\)/);
+    assert.match(comp, /textShadow: '0 0 3px rgba\(255, 255, 255/);
   });
 
   it('toegankelijk en zonder HTML-injectie (A03)', () => {

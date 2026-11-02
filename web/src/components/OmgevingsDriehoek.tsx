@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
-import { driehoekVoor, tabTitel, type DriehoekWeergave } from '../omgeving';
+import { doorzichtig, driehoekVoor, tabTitel, type DriehoekWeergave } from '../omgeving';
 
 // DOEL-131: gekleurde driehoek linksboven op ELKE pagina zolang je niet in
 // productie werkt — groen "ONT" in ontwikkeling, geel "ACC" in acceptatie.
@@ -65,7 +65,8 @@ export default function OmgevingsDriehoek() {
         zIndex: 2147483647,
         pointerEvents: 'none',
         userSelect: 'none',
-        background: weergave.achtergrond,
+        // DOEL-134: half doorzichtig, zodat de pagina eronder zichtbaar blijft.
+        background: doorzichtig(weergave.achtergrond),
         clipPath: 'polygon(0 0, 100% 0, 0 100%)',
       }}
     >
@@ -82,6 +83,9 @@ export default function OmgevingsDriehoek() {
           fontFamily: 'system-ui, -apple-system, sans-serif',
           fontWeight: 700,
           letterSpacing: '0.08em',
+          // DOEL-134: lichte halo, zodat de letters ook leesbaar blijven als
+          // er (donkere) inhoud onder de doorzichtige driehoek ligt.
+          textShadow: '0 0 3px rgba(255, 255, 255, 0.95), 0 0 6px rgba(255, 255, 255, 0.8)',
           transform: 'rotate(-45deg)',
           lineHeight: 1,
         }}
