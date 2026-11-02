@@ -401,3 +401,45 @@ test('schemadekking: elke tabel die aan een boom of zijn inhoud hangt is meegeno
   const missing = rows.map((r) => r.tabel as string).filter((t) => !known.has(t));
   assert.deepEqual(missing, [], `Nieuwe tabel(len) ${missing.join(', ')}: neem ze op in TRANSFER_TABLES of TRANSFER_EXCLUDED_TABLES (api/src/doelenboomTransfer.ts)`);
 });
+
+// DOEL-133: een bundel uit de kluis (gevoelige gegevens) mag alleen in de kluis
+// worden ingelezen. Op de oude code falen deze tests: de bundel kende geen
+// bronomgeving en importBundle las hem overal in.
+test('DOEL-133: bundel uit de kluis wordt buiten de kluis geweigerd, zonder iets te wijzigen', async () => {
+  const saved = process.env.DOELENBOOM_OMGEVING;
+  try {
+    process.env.DOELENBOOM_OMGEVING = 'kluis';
+    const file = await exportSource();
+    assert.equal(file.bundle.bronOmgeving, 'kluis');
+    for (const elders of ['productie', 'acceptatie', 'ontwikkeling', '']) {
+      process.env.DOELENBOOM_OMGEVING = elders;
+      await assert.rejects(
+        inTx((c) => importBundle(c, file, { tenant: `${PREFIX}-k-${elders || 'leeg'}`, boom: 'K' }, opts)),
+        /komt uit de kluis .* alleen in de kluis/s
+      );
+      assert.equal((await q(`select 1 from tenants where slug = $1`, [`${PREFIX}-k-${elders || 'leeg'}`])).length, 0);
+    }
+    process.env.DOELENBOOM_OMGEVING = 'kluis';
+    const made = await inTx((c) => importBundle(c, file, { tenant: `${PREFIX}-k-kluis`, boom: 'K' }, opts));
+    assert.ok(made);
+  } finally {
+    if (saved === undefined) delete process.env.DOELENBOOM_OMGEVING; else process.env.DOELENBOOM_OMGEVING = saved;
+  }
+});
+
+test('DOEL-133: een bundel van elders vermeldt zijn bronomgeving; een onbekende bronomgeving is ongeldig', async () => {
+  const saved = process.env.DOELENBOOM_OMGEVING;
+  try {
+    delete process.env.DOELENBOOM_OMGEVING;
+    const base = await exportSource();
+    assert.equal(base.bundle.bronOmgeving, 'productie');
+    const odd = clone(base);
+    (odd.bundle as { bronOmgeving?: string }).bronOmgeving = 'mars';
+    assert.throws(() => validateBundleFile(reseal(odd)), /onbekende bronomgeving/);
+    const old = clone(base);
+    delete (old.bundle as { bronOmgeving?: string }).bronOmgeving;
+    assert.doesNotThrow(() => validateBundleFile(reseal(old)), 'oudere bundels zonder bronomgeving blijven geldig');
+  } finally {
+    if (saved === undefined) delete process.env.DOELENBOOM_OMGEVING; else process.env.DOELENBOOM_OMGEVING = saved;
+  }
+});

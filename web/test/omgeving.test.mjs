@@ -36,6 +36,14 @@ describe('DOEL-131: driehoek per omgeving', () => {
     assert.equal(w.tekstkleur, '#FFFFFF');
   });
 
+  it('kluis (DOEL-133): rood met "VAULT", witte tekst', () => {
+    const w = driehoekVoor('kluis');
+    assert.equal(w.label, 'VAULT');
+    assert.equal(w.achtergrond, '#C62828');
+    assert.equal(w.tekstkleur, '#FFFFFF');
+    assert.match(w.omschrijving, /gevoelige gegevens/);
+  });
+
   it('productie, ontbrekend of onbekend: geen driehoek', () => {
     for (const v of ['productie', undefined, null, '', 'ACC', 'toString', '__proto__', 42, {}]) {
       assert.equal(driehoekVoor(v), null, `onverwacht een driehoek voor ${String(v)}`);
@@ -48,7 +56,7 @@ describe('DOEL-131: driehoek per omgeving', () => {
         .map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
       return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
     };
-    for (const o of ['ontwikkeling', 'acceptatie']) {
+    for (const o of ['ontwikkeling', 'acceptatie', 'kluis']) {
       const w = driehoekVoor(o);
       const [a, b] = [lum(w.achtergrond), lum(w.tekstkleur)].sort((x, y) => y - x);
       assert.ok((a + 0.05) / (b + 0.05) >= 4.5, `${o}: contrast te laag`);
@@ -57,6 +65,12 @@ describe('DOEL-131: driehoek per omgeving', () => {
 });
 
 describe('DOEL-131: tabbladtitel', () => {
+  it('[VAULT] vooraan in de kluis (DOEL-133), en nooit gestapeld', () => {
+    assert.equal(tabTitel('Doelenboom', 'kluis'), '[VAULT] Doelenboom');
+    assert.equal(tabTitel('[VAULT] Doelenboom', 'kluis'), '[VAULT] Doelenboom');
+    assert.equal(tabTitel('[ACC] Doelenboom', 'kluis'), '[VAULT] Doelenboom');
+  });
+
   it('[ACC] en [ONT] vooraan, productie ongewijzigd', () => {
     assert.equal(tabTitel('Doelenboom', 'acceptatie'), '[ACC] Doelenboom');
     assert.equal(tabTitel('Doelenboom', 'ontwikkeling'), '[ONT] Doelenboom');

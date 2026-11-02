@@ -861,6 +861,87 @@ getfacl -p ~/doelenboom/backups/database | grep -E 'pull|mask'
 f=$(ls -t ~/doelenboom/backups/database/*.sql.gz | head -1); getfacl -p "$f" | grep -E 'pull|mask'
 ```
 
+## Kluis: gevoelige doelenbomen alleen op de Mac (DOEL-133)
+
+Doelenbomen met gevoelige(re) informatie staan niet in productie, maar in de lokale
+**kluis** op de Mac: http://localhost:8089 (alleen 127.0.0.1), rode driehoek "VAULT".
+
+**Altijd dezelfde versie als productie.** `scripts/release.sh --deploy` werkt na een
+geslaagde VPS-uitrol ook de kluis bij (`scripts/kluis.sh --bijwerken <tag>`):
+
+1. controles: de kluis is ingericht, HEAD is de commit van de tag, het acceptatiebewijs is
+   GOEDGEKEURD mét akkoord, en de acceptatie-images horen bij precies die commit;
+2. eerst een databaseback-up (`…-voor-update.sql.gz`, 30 dagen bewaard);
+3. de acceptatie-images worden omgetagd naar `doelenboom-kluis-*:<tag>`; er wordt **niets
+   gebouwd of gedownload** (`pull_policy: never`);
+4. migraties (`scripts/db-migrate.sh` op de kluis-database), starten, en controle dat de
+   kluis deze commit draait en zich als kluis meldt.
+
+Mislukt de VPS-uitrol, dan blijft de kluis op de vorige versie (= nog steeds productie).
+Mislukt alleen de kluis, dan stopt release.sh met exitcode 3; productie is dan in orde en
+je haalt de kluis bij met `bash scripts/kluis.sh --bijwerken <tag>`.
+
+**Grendels.** Alles uit de kluis is gevoelig:
+
+- elke Excel-export (doelenboom en project, ook de nachtelijke) krijgt de
+  documenteigenschap `doelenboom_gevoelig=ja` en een regel "Gevoelig" op het tabblad
+  Configuratie; downloads (Excel en PowerPoint) heten `GEVOELIG_…`;
+- ontwikkeling, acceptatie en productie weigeren zo'n Excel-bestand (409, er wordt niets
+  opgeslagen), en weigeren een bundel uit de kluis (`doelenboom-kopieer.sh`).
+
+Dit is een grendel tegen vergissingen, geen bescherming tegen iemand die het kenmerk
+bewust uit een bestand haalt.
+
+**Back-up zoals productie.** `scripts/kluis-backup.sh`, dagelijks 12:30 via launchd. Sliep
+de Mac, dan draait hij zodra de Mac wakker is.
+
+- databasedump, 14 dagen bewaard, met `.sha256` en `gzip -t`;
+- Excel per doelenboom met dezelfde bewaartermijn als productie;
+- in `~/Backups/doelenboom-kluis/` (0700, buiten de repo en buiten iCloud/OneDrive);
+- daarna versleuteld met `age` en met rsync-over-SSH naar **CL-NAS002**, als die bereikbaar is;
+- buiten het thuisnetwerk wordt de offsite-kopie overgeslagen en een volgende keer ingehaald;
+- macOS-melding als de laatste back-up ouder is dan 2 dagen of de laatste offsite-kopie
+  ouder dan 7 dagen; `doelenboom -local -kluis -open` en `kluis.sh --status` tonen dit ook.
+
+**Eenmalig inrichten** (na de release met DOEL-133, op main op die tag):
+
+```bash
+(
+set -euo pipefail
+echo ""; echo "----- Stap 1 - Kluis inrichten (geheimen, mappen, lege database, sysadmin) -----"
+cd ~/src/doelenboom
+KLUIS_SYSADMIN_EMAIL=charles.liefting@gmail.com bash scripts/kluis.sh --init
+echo ""; echo "----- Stap 2 - Kluis op de versie van productie zetten -----"
+bash scripts/kluis.sh --bijwerken
+echo ""; echo "----- Stap 3 - Dagelijkse back-up om 12:30 inplannen -----"
+bash scripts/kluis-backup.sh --installeer-planning
+echo ""; echo "----- Stap 4 - Eerste back-up en hersteltest -----"
+bash scripts/kluis-backup.sh
+bash scripts/kluis.sh --herstel-test
+)
+```
+
+Inloggen: `~/.doelenboom-kluis/sysadmin.txt`.
+
+**Offsite naar CL-NAS002 inrichten** (thuis, eenmalig):
+
+1. `brew install age`, dan `age-keygen -o ~/kluis-age-sleutel.txt`. Zet de **privésleutel**
+   in je wachtwoordkluis en verwijder het bestand. Zet de publieke sleutel (`age1…`) in
+   `KLUIS_AGE_ONTVANGER` in `~/.doelenboom-kluis/kluis.env`.
+2. Op CL-NAS002 (DSM):
+   - maak een gebruiker `doelenboom-kluis` aan (geen admin) en een gedeelde map waarin
+     alleen die gebruiker mag schrijven;
+   - zet de gebruikers-thuismap aan (nodig voor `authorized_keys`).
+3. Op de Mac de SSH-sleutel en de vingerafdruk van de NAS vastleggen:
+   - `ssh-keygen -t ed25519 -N '' -f ~/.doelenboom-kluis/nas_ed25519`
+   - `ssh-keyscan -p 62022 192.168.178.22 > ~/.doelenboom-kluis/nas_known_hosts`
+   - controleer de vingerafdruk in DSM.
+4. Zet de publieke sleutel op de NAS in `~doelenboom-kluis/.ssh/authorized_keys`, met
+   `restrict` vooraan. Vul `KLUIS_NAS_PAD` in `kluis.env` (pad op de NAS).
+5. Testen met `bash scripts/kluis-backup.sh`: de status moet `offsite_resultaat=ok` tonen.
+
+Herstellen uit een offsite-kopie: `age -d -i <privésleutel> bestand.age > bestand`.
+
 ## Openstaand aandachtspunt: offsite-kopie
 
 De databaseback-up hierboven én de nachtelijke Excel-back-up staan beide

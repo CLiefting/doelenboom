@@ -41,6 +41,7 @@ from .dependency_format import parse_dependency_entry as _parse_dependency_entry
 from .dependency_format import parse_product_dependency_entry as _parse_product_dependency_entry
 from .excel_format_version import PROJECT_EXPORT_FORMAT_VERSION
 from .exporter import VALIDATIELIJSTEN
+from .gevoelig import markeer
 from .parser import read_config_value, read_sheet
 from .xlsx_safety import create_safe_sheet
 
@@ -191,6 +192,7 @@ def build_project_workbook(data: dict[str, Any], meta: dict[str, Any]) -> bytes:
     _add_dropdown(act_ws, ['Ja', 'Nee'], 'G2:G10000')
     _set_widths(act_ws, [8, 30, 14, 14, 34, 10, 16, 40])
 
+    markeer(wb, meta)  # DOEL-133
     bio = io.BytesIO()
     wb.save(bio)
     return bio.getvalue()

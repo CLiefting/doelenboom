@@ -471,6 +471,17 @@ behoud van de `Toelichting`-kolom op Element-Tag-relaties.
 | Ontwikkeling | `docker-compose.yml` | http://localhost:5173 | `doelenboom-dev-*` (dev-server) | groene driehoek "ONT" linksboven, tabblad "[ONT] …" | onderwerp "[ONTWIKKELING] …"; geen kwetsbaarhedenmail |
 | Acceptatie | `docker-compose.acc.yml` | http://localhost:8088 | `doelenboom-acc-*` (productie-Dockerfiles) | gele driehoek "ACC" linksboven, tabblad "[ACC] …" | onderwerp "[ACCEPTATIE] …" |
 | Productie | `docker-compose.yml` + `docker-compose.prod.yml` | https://doelenboom.code072.nl | `doelenboom-*:latest` | geen driehoek | zonder label |
+| Kluis (DOEL-133) | `docker-compose.kluis.yml` | http://localhost:8089 | `doelenboom-kluis-*:vX.Y.Z` (= de goedgekeurde acceptatie-images) | rode driehoek "VAULT", tabblad "[VAULT] …" | onderwerp "[VAULT] …" |
+
+**Kluis (DOEL-133):** een vierde, lokale omgeving voor doelenbomen met gevoelige(re)
+informatie. Hij draait altijd dezelfde versie als productie: `scripts/release.sh --deploy`
+werkt hem na een geslaagde uitrol bij met precies de goedgekeurde acceptatie-images (er
+wordt nooit gebouwd). Alles in de kluis is gevoelig: Excel-exports krijgen een kenmerk en
+"GEVOELIG_" in de bestandsnaam, en elke andere omgeving weigert zulke Excel-bestanden en
+kluis-bundels. Back-up dagelijks 12:30 (zoals productie: databasedump + Excel per boom),
+versleuteld naar CL-NAS002. Inrichten en beheren: `scripts/kluis.sh`,
+`scripts/kluis-backup.sh` en `doelenboom -local -kluis -open|-restart|-stop`; zie
+deploy/README.md, "Kluis".
 
 **Lokaal starten en openen met de CLI (DOEL-132):** `doelenboom -local [-acc | -dev] ...`,
 standaard `-acc`; `-ont` is hetzelfde als `-dev`.
@@ -480,6 +491,10 @@ standaard `-acc`; `-ont` is hetzelfde als `-dev`.
 | `-open` | http://localhost:8088 openen; draait hij niet, dan eerst starten met de images van de laatste acceptatierun (niets bouwen) | http://localhost:5173 openen; draait hij niet, dan eerst bouwen en starten |
 | `-restart` | `bash scripts/acceptatie.sh` (opbouwen en keuren, alleen op een schone, bijgewerkte `main`) | herbouwen en herstarten (`-rebuild` past ook nieuwe migraties toe) |
 | `-stop` | acceptatie stoppen, database blijft | ontwikkeling stoppen, database blijft |
+
+Met `-kluis` (DOEL-133): `-open` start de kluis zo nodig met dezelfde images en waarschuwt
+als hij achterloopt op productie of als de laatste back-up te oud is; `-restart` en `-stop`
+bouwen nooit.
 
 **Omgevingsdriehoek (DOEL-131):** de API leest `DOELENBOOM_OMGEVING`
 (`ontwikkeling`, `acceptatie` of `productie`; leeg = productie) en geeft die buiten

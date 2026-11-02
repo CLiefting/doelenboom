@@ -5,6 +5,7 @@ import { requireTenantRoleForDoelenboomParam, requireWritableDoelenboom, require
 import { logAuditEvent } from '../auditLog.js';
 import { fetchTree } from './tree.js';
 import { sendServerError } from '../errors.js';
+import { GEVOELIG_GEWEIGERD, gevoeligeBestandsnaam, isGevoeligeOmgeving } from '../omgeving.js';
 
 // Export/import van de VOLLEDIGE gegevens van één project (Producten,
 // Activiteiten, projectstatus, tags en organisatieonderdelen) als Excel-
@@ -114,6 +115,8 @@ async function downloadProjectDocument(
     exportedAt: exportedAt.toISOString(),
     exportedBy: req.user?.email ?? 'onbekend',
     showPlannedForDelivered,
+    // DOEL-133: uit de kluis krijgt het Excel-bestand het kenmerk "gevoelig".
+    gevoelig: isGevoeligeOmgeving(),
   };
 
   let upstream: Response;
@@ -140,8 +143,8 @@ async function downloadProjectDocument(
     String(exportedAt.getMonth() + 1).padStart(2, '0') + '-' +
     String(exportedAt.getDate()).padStart(2, '0');
   const titlePart = sanitizeForFilename(String(data.project.name || ''));
-  const filename = `Project_${sanitizeForFilename(req.params.code)}` +
-    (titlePart ? `_${titlePart}` : '') + `_${isoDate}.${opts.extension}`;
+  const filename = gevoeligeBestandsnaam(`Project_${sanitizeForFilename(req.params.code)}` +
+    (titlePart ? `_${titlePart}` : '') + `_${isoDate}.${opts.extension}`); // DOEL-133
   // DOEL-29: ook een project-export/-rapportage haalt data uit de applicatie.
   await logAuditEvent({
     eventType: 'doelenboom_exported',
@@ -212,7 +215,12 @@ projectExcelRouter.post(
       return sendServerError(res, text, 'Excel-service gaf een fout terug', 502);
     }
 
-    const result = await upstream.json();
+    const result = (await upstream.json()) as { gevoelig?: boolean };
+    // DOEL-133: een bestand uit de kluis mag alleen in de kluis worden ingelezen.
+    if (result.gevoelig === true && !isGevoeligeOmgeving()) {
+      console.warn(`[DOEL-133] gevoelig project-Excel geweigerd (doelenboom ${req.params.id}, gebruiker ${req.user?.id})`);
+      return res.status(409).json({ error: GEVOELIG_GEWEIGERD });
+    }
     res.json(result);
   }
 );

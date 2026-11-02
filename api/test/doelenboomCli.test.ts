@@ -15,7 +15,7 @@ const cli = path.join(repo, 'scripts', 'doelenboom-cli.sh');
 // DOEL-132: opts.accBuilt = er is al eens een acceptatierun geweest (.acceptatie/acc.env +
 // bewijs); opts.running = de web-container van de gekozen omgeving draait al.
 // Nagebootst: docker, open (browser) en scripts/acceptatie.sh; alles logt in dezelfde log.
-function run(args: string[], opts: { accBuilt?: boolean; running?: boolean; acceptatieFails?: boolean } = {}) {
+function run(args: string[], opts: { accBuilt?: boolean; running?: boolean; acceptatieFails?: boolean; kluis?: boolean } = {}) {
   const tmp = mkdtempSync(path.join(os.tmpdir(), 'doelenboom-cli-'));
   try {
     const bin = path.join(tmp, 'bin');
@@ -30,6 +30,13 @@ function run(args: string[], opts: { accBuilt?: boolean; running?: boolean; acce
     stub(path.join(bin, 'open'), 'echo "open $*" >> "$DOCKER_LOG"');
     mkdirSync(path.join(tmp, 'scripts'));
     stub(path.join(tmp, 'scripts', 'acceptatie.sh'), `echo "acceptatie.sh $*" >> "$DOCKER_LOG"\nexit ${opts.acceptatieFails ? 1 : 0}`);
+    // DOEL-133: kluis.sh nagebootst; opts.kluis = de kluis is ingericht.
+    stub(path.join(tmp, 'scripts', 'kluis.sh'), 'echo "kluis.sh $*" >> "$DOCKER_LOG"');
+    writeFileSync(path.join(tmp, 'docker-compose.kluis.yml'), 'services: {}\n');
+    if (opts.kluis) {
+      mkdirSync(path.join(tmp, 'kluis-home'));
+      writeFileSync(path.join(tmp, 'kluis-home', 'kluis.env'), 'KLUIS_POSTGRES_PASSWORD=x\n');
+    }
     writeFileSync(path.join(tmp, 'docker-compose.yml'), 'services: {}\n');
     writeFileSync(path.join(tmp, 'docker-compose.acc.yml'), 'services: {}\n');
     if (opts.accBuilt) {
@@ -39,7 +46,7 @@ function run(args: string[], opts: { accBuilt?: boolean; running?: boolean; acce
     }
     const r = spawnSync('bash', [cli, ...args], {
       cwd: tmp,
-      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, DOELENBOOM_DIR: tmp, DOCKER_LOG: log, STUB_RUNNING: opts.running ? '1' : '' },
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, DOELENBOOM_DIR: tmp, DOCKER_LOG: log, STUB_RUNNING: opts.running ? '1' : '', KLUIS_HOME: path.join(tmp, 'kluis-home') },
       encoding: 'utf8',
     });
     let calls: string[] = [];
@@ -169,7 +176,7 @@ describe('doelenboom-cli: lokale omgeving kiezen (DOEL-132)', () => {
     for (const args of [['-local', '-acc', '-dev', '-open'], ['-local', '-ont', '-acc', '-open']]) {
       const r = run(args);
       assert.equal(r.status, 1);
-      assert.match(r.err, /niet allebei/);
+      assert.match(r.err, /niet meerdere/);
       assert.equal(r.calls.length, 0);
     }
   });
@@ -197,6 +204,55 @@ describe('doelenboom-cli: lokale omgeving kiezen (DOEL-132)', () => {
 
   it('de foutmelding bij een onbekende optie noemt -acc, -dev en -ont', () => {
     const r = run(['-local', '-test']);
-    assert.match(r.err, /-local \[-acc \| -dev \| -ont\]/);
+    assert.match(r.err, /-local \[-acc \| -dev \| -ont \| -kluis\]/);
+  });
+});
+
+// Regressietests voor DOEL-133: `doelenboom -local -kluis ...` (rode driehoek
+// VAULT, :8089). Op de oude code falen deze tests: -kluis was een onbekende optie.
+describe('doelenboom-cli: de kluis (DOEL-133)', () => {
+  it('-kluis -open, kluis draait niet: starten via kluis.sh --start (niets bouwen), status tonen, :8089 openen', () => {
+    const r = run(['-local', '-kluis', '-open'], { kluis: true });
+    assert.equal(r.status, 0, r.err + r.out);
+    const at = (s: string) => { const i = r.calls.indexOf(s); assert.notEqual(i, -1, `${s}: ${r.calls.join(' | ')}`); return i; };
+    assert.ok(at('kluis.sh --start') < at('kluis.sh --status'));
+    assert.ok(at('kluis.sh --status') < at('open http://localhost:8089'));
+    assert.ok(!r.calls.some((c) => /build|acceptatie\.sh/.test(c)), r.calls.join(' | '));
+  });
+
+  it('-kluis -open, kluis draait al: alleen status en openen', () => {
+    const r = run(['-local', '-kluis', '-open'], { kluis: true, running: true });
+    assert.equal(r.status, 0, r.err + r.out);
+    assert.ok(!r.calls.includes('kluis.sh --start'), r.calls.join(' | '));
+    assert.ok(r.calls.includes('open http://localhost:8089'));
+  });
+
+  it('-kluis -restart = stoppen en starten met dezelfde images; -kluis -stop = alleen stoppen', () => {
+    const r = run(['-local', '-kluis', '-restart'], { kluis: true });
+    assert.equal(r.status, 0, r.err + r.out);
+    assert.ok(r.calls.indexOf('kluis.sh --stop') < r.calls.indexOf('kluis.sh --start'), r.calls.join(' | '));
+    const s = run(['-local', '-kluis', '-stop'], { kluis: true });
+    assert.equal(s.status, 0, s.err + s.out);
+    assert.ok(s.calls.includes('kluis.sh --stop') && !s.calls.includes('kluis.sh --start'), s.calls.join(' | '));
+    assert.ok(!s.calls.includes('compose stop'), 'de ontwikkelomgeving hoort niet gestopt te worden');
+  });
+
+  it('kluis niet ingericht: duidelijke melding, niets gestart of geopend', () => {
+    const r = run(['-local', '-kluis', '-open']);
+    assert.equal(r.status, 1);
+    assert.match(r.err, /nog niet ingericht/);
+    assert.match(r.err, /scripts\/kluis\.sh --init/);
+    assert.ok(!r.calls.some((c) => c.startsWith('open ') || c.startsWith('kluis.sh')), r.calls.join(' | '));
+  });
+
+  it('-rebuild bij de kluis en -kluis samen met -acc/-dev: geweigerd', () => {
+    const rb = run(['-local', '-kluis', '-rebuild', '-restart'], { kluis: true });
+    assert.equal(rb.status, 1);
+    assert.match(rb.err, /-rebuild hoort niet bij de kluis/);
+    for (const other of ['-acc', '-dev', '-ont']) {
+      const r = run(['-local', '-kluis', other, '-open'], { kluis: true });
+      assert.equal(r.status, 1, other);
+      assert.match(r.err, /niet meerdere/);
+    }
   });
 });

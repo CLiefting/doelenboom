@@ -14,6 +14,7 @@ import { getColumnsForDoelenboom, allValidTypeNames } from '../columnConfig.js';
 import { hasModule } from '../license.js';
 import { logAuditEvent } from '../auditLog.js';
 import { sendServerError } from '../errors.js';
+import { GEVOELIG_GEWEIGERD, isGevoeligeOmgeving } from '../omgeving.js';
 
 // Voor routes met :id = import-id (niet doelenboom-id): eerst de doelenboom van
 // deze import opzoeken, dan pas de tenant daarvan.
@@ -61,7 +62,7 @@ importsRouter.post(
     const validTypes = allValidTypeNames(await getColumnsForDoelenboom(req.params.doelenboomId));
     const parseQuery = validTypes.map((t) => `valid_types=${encodeURIComponent(t)}`).join('&');
 
-    let parseResult: { status: string; report: unknown; parsed: unknown };
+    let parseResult: { status: string; report: unknown; parsed: unknown; gevoelig?: boolean };
     try {
       const upstream = await fetch(`${EXCEL_SERVICE_URL}/parse?${parseQuery}`, { method: 'POST', body: form });
       if (!upstream.ok) {
@@ -71,6 +72,13 @@ importsRouter.post(
       parseResult = (await upstream.json()) as typeof parseResult;
     } catch (err) {
       return sendServerError(res, err, 'Excel-service niet bereikbaar', 502);
+    }
+
+    // DOEL-133: een bestand uit de kluis (kenmerk "gevoelig") mag alleen in de
+    // kluis worden ingelezen; elders wordt er niets van opgeslagen.
+    if (parseResult.gevoelig === true && !isGevoeligeOmgeving()) {
+      console.warn(`[DOEL-133] gevoelig Excel-bestand geweigerd (doelenboom ${req.params.doelenboomId}, gebruiker ${req.user?.id})`);
+      return res.status(409).json({ error: GEVOELIG_GEWEIGERD });
     }
 
     // In een try/catch: excel-service is een los, door ons niet volledig

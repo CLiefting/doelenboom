@@ -16,6 +16,17 @@ type Release = {
 
 const RELEASES: Release[] = [
   {
+    // DOEL-133
+    version: '4.5.0',
+    date: '2 november 2026',
+    title: 'Beveiliging: gevoelige gegevens blijven in een afgeschermde omgeving',
+    items: [
+      'Doelenbomen met gevoelige informatie kunnen voortaan in een aparte, afgeschermde omgeving worden verwerkt, die altijd dezelfde versie van Doelenboom draait als de live-omgeving en net zo zorgvuldig (en versleuteld) wordt geback-upt.',
+      'Excel-bestanden uit die afgeschermde omgeving zijn gemarkeerd als gevoelig en kunnen niet in de live-omgeving worden ingelezen. Zo komen gevoelige gegevens er niet per ongeluk terecht.',
+      'Voor het gebruik van de live-omgeving verandert er niets.',
+    ],
+  },
+  {
     // DOEL-131
     version: '4.4.7',
     date: '2 november 2026',

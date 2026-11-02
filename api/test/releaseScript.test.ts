@@ -343,3 +343,29 @@ describe('DOEL-127: release.sh weigert een commit zonder goedgekeurde acceptatie
     assert.match(r.out, /de release wordt hervat/);
   });
 });
+
+// DOEL-133: na een geslaagde uitrol werkt release.sh ook de lokale kluis bij,
+// zodat die altijd dezelfde versie draait als productie. Op de oude code falen
+// deze tests: release.sh kende de kluis niet.
+describe('DOEL-133: release.sh werkt de kluis bij na een geslaagde uitrol', () => {
+  const c = () => code(src);
+  it('pas na de controle op REMOTE-KLAAR en de melding "Uitgerold"', () => {
+    const kluis = c().indexOf('scripts/kluis.sh" --bijwerken "$TAG"');
+    assert.notEqual(kluis, -1, 'de kluis wordt niet bijgewerkt');
+    assert.ok(c().indexOf('grep -qx "REMOTE-KLAAR $TAG"') < kluis, 'eerst de uitrol controleren');
+    assert.ok(c().indexOf('echo "Uitgerold.') < kluis, 'eerst productie, dan de kluis');
+  });
+  it('alleen als de kluis is ingericht; anders een melding', () => {
+    assert.match(c(), /KLUIS_ENV_FILE="\$\{KLUIS_HOME:-\$HOME\/\.doelenboom-kluis\}\/kluis\.env"/);
+    assert.match(c(), /if \[ -f "\$KLUIS_ENV_FILE" \]; then/);
+    assert.match(src, /Kluis: niet ingericht op deze Mac/);
+  });
+  it('mislukt het bijwerken van de kluis: duidelijke melding en exitcode 3 (productie is wel in orde)', () => {
+    assert.match(src, /de KLUIS is NIET bijgewerkt/);
+    assert.match(src, /Haal de kluis bij met:  bash scripts\/kluis\.sh --bijwerken \$TAG/);
+    assert.match(c(), /exit 3/);
+  });
+  it('zonder --deploy wordt de kluis niet aangeraakt (die stopt al eerder met exit 0)', () => {
+    assert.ok(c().indexOf('if [ "$DEPLOY" != "yes" ]; then') < c().indexOf('scripts/kluis.sh" --bijwerken'));
+  });
+});
