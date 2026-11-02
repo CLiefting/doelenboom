@@ -40,11 +40,13 @@ const CURL_STUB = `#!/usr/bin/env bash
 echo "curl $*" >> "$CALLS"
 case "$*" in
   */api/health*) echo '{"status":"ok"}' ;;
-  */api/version*) echo "{\\"version\\":\\"9.9.9 (\${STUB_VERSION_COMMIT}, 25-10-2026 11:00)\\",\\"gitRef\\":null}" ;;
+  */api/version*) echo "{\\"version\\":\\"9.9.9 (\${STUB_VERSION_COMMIT}, 25-10-2026 11:00)\\",\\"gitRef\\":null,\\"omgeving\\":\\"\${STUB_OMGEVING:-acceptatie}\\"}" ;;
 esac
 `;
 
-type Opts = { branch?: string; dirty?: boolean; env?: Record<string, string>; secondRun?: boolean; versionCommit?: string; sbomCommit?: string };
+// DOEL-131: akkoord = daarna nog een run met --akkoord (input = wat je typt).
+type Akkoord = { input?: string; env?: Record<string, string>; twice?: boolean; withoutFirstRun?: boolean };
+type Opts = { branch?: string; dirty?: boolean; env?: Record<string, string>; secondRun?: boolean; versionCommit?: string; sbomCommit?: string; akkoord?: Akkoord; args?: string[] };
 
 function runAcceptatie(o: Opts = {}) {
   const tmp = mkdtempSync(path.join(os.tmpdir(), 'doel127-'));
@@ -87,18 +89,20 @@ function runAcceptatie(o: Opts = {}) {
     const sha = git('rev-parse', 'HEAD');
     const short = git('rev-parse', '--short', 'HEAD');
     const env = { ...baseEnv, STUB_VERSION_COMMIT: o.versionCommit ?? short, STUB_SBOM_COMMIT: o.sbomCommit ?? short, ...o.env };
-    const exec = (extra: Record<string, string> = {}) => {
-      const res = spawnSync('bash', [path.join(work, 'scripts', 'acceptatie.sh')], { cwd: work, encoding: 'utf8', env: { ...env, ...extra }, timeout: 60000 });
+    const exec = (extra: Record<string, string> = {}, args: string[] = [], input = '') => {
+      const res = spawnSync('bash', [path.join(work, 'scripts', 'acceptatie.sh'), ...args], { cwd: work, encoding: 'utf8', env: { ...env, ...extra }, timeout: 60000, input });
       return { status: res.status, out: `${res.stdout}\n${res.stderr}` };
     };
-    const first = exec();
+    const first = o.akkoord?.withoutFirstRun ? { status: 0, out: '' } : exec({}, o.args ?? []);
     const accEnvBefore = existsSync(path.join(work, '.acceptatie', 'acc.env')) ? readFileSync(path.join(work, '.acceptatie', 'acc.env'), 'utf8') : '';
     const second = o.secondRun ? exec({ STUB_DEFAULTS: '0' }) : null;
+    const akkoordRun = o.akkoord ? exec(o.akkoord.env ?? {}, ['--akkoord'], o.akkoord.input ?? 'akkoord\n') : null;
+    const akkoordAgain = o.akkoord?.twice ? exec(o.akkoord.env ?? {}, ['--akkoord'], '') : null;
     const file = (rel: string) => path.join(work, '.acceptatie', rel);
     const readIf = (rel: string) => (existsSync(file(rel)) ? readFileSync(file(rel), 'utf8') : null);
     const mode = (rel: string) => (existsSync(file(rel)) ? (statSync(file(rel)).mode & 0o777) : -1);
     return {
-      ...first, second, sha, short, accEnvBefore,
+      ...first, second, akkoordRun, akkoordAgain, sha, short, accEnvBefore,
       calls: existsSync(calls) ? readFileSync(calls, 'utf8') : '',
       evidence: readIf(`bewijs-${sha}.txt`), accEnv: readIf('acc.env'), sysadmin: readIf('sysadmin.txt'),
       modes: { evidence: mode(`bewijs-${sha}.txt`), accEnv: mode('acc.env'), sysadmin: mode('sysadmin.txt'), dir: existsSync(path.join(work, '.acceptatie')) ? statSync(path.join(work, '.acceptatie')).mode & 0o777 : -1 },
@@ -217,5 +221,84 @@ describe('DOEL-127: scripts/acceptatie.sh', () => {
     assert.notEqual(bad.status, 0);
     assert.match(bad.out, /geen geldig e-mailadres/);
     assert.doesNotMatch(bad.calls, /drop table/);
+  });
+});
+
+// Regressietests voor DOEL-131: na het handmatig testen geef je met
+// `acceptatie.sh --akkoord` je akkoord voor productie. Op de oude code falen
+// deze tests: die kende geen argumenten ("acceptatie.sh kent geen argumenten").
+describe('DOEL-131: scripts/acceptatie.sh --akkoord', () => {
+  const ok = (r: { status: number | null; out: string } | null) => { assert.ok(r); assert.equal(r.status, 0, r.out); };
+  const refused = (r: { status: number | null; out: string } | null, re: RegExp) => { assert.ok(r); assert.notEqual(r.status, 0, r.out); assert.match(r.out, re); };
+
+  it('na een goedgekeurde run en "akkoord" typen: akkoord achteraan in het bewijs, eerdere regels ongewijzigd', () => {
+    const r = runAcceptatie({ akkoord: {}, env: { GIT_COMMITTER_NAME: 't' } });
+    ok(r);
+    ok(r.akkoordRun);
+    assert.match(r.akkoordRun!.out, /Akkoord vastgelegd voor/);
+    assert.match(r.evidence!, /^resultaat=GOEDGEKEURD$/m);
+    assert.match(r.evidence!, /^akkoord=ja$/m);
+    assert.match(r.evidence!, /^akkoord_epoch=\d+$/m);
+    assert.match(r.evidence!, /^akkoord_door=[A-Za-z0-9 ._@-]+$/m);
+    const lines = r.evidence!.trim().split('\n');
+    assert.equal(lines.at(-4), 'akkoord=ja', 'akkoord hoort achteraan te staan');
+    assert.equal(r.modes.evidence, 0o600);
+  });
+
+  it('nog een keer --akkoord: meldt dat het al gegeven is, vraagt niets', () => {
+    const r = runAcceptatie({ akkoord: { twice: true } });
+    ok(r.akkoordAgain);
+    assert.match(r.akkoordAgain!.out, /was al gegeven/);
+    assert.equal((r.evidence!.match(/^akkoord=ja$/gm) || []).length, 1);
+  });
+
+  it('iets anders dan precies "akkoord" (of niets) typen: geen akkoord', () => {
+    for (const input of ['ja\n', 'Akkoord\n', '\n', '']) {
+      const r = runAcceptatie({ akkoord: { input } });
+      refused(r.akkoordRun, /Geen akkoord gegeven/);
+      assert.doesNotMatch(r.evidence!, /^akkoord=/m, `akkoord vastgelegd na ${JSON.stringify(input)}`);
+    }
+  });
+
+  it('zonder acceptatierun: geen akkoord mogelijk', () => {
+    const r = runAcceptatie({ akkoord: { withoutFirstRun: true } });
+    refused(r.akkoordRun, /nog niet in acceptatie geweest/);
+    assert.equal(r.evidence, null);
+  });
+
+  it('afgekeurde acceptatie: geen akkoord mogelijk', () => {
+    const r = runAcceptatie({ env: { STUB_COUNTS: '0|1|0|0|0' }, akkoord: {} });
+    refused(r.akkoordRun, /AFGEKEURD; daar kun je geen akkoord op geven/);
+    assert.doesNotMatch(r.evidence!, /^akkoord=/m);
+  });
+
+  it('acceptatie draait inmiddels iets anders: geen akkoord (je hebt iets anders getest)', () => {
+    const r = runAcceptatie({ akkoord: { env: { STUB_VERSION_COMMIT: 'abc1234' } } });
+    refused(r.akkoordRun, /draait niet op commit/);
+    assert.doesNotMatch(r.evidence!, /^akkoord=/m);
+  });
+
+  it('het adres meldt zich niet als acceptatie (bv. de dev-stack): geen akkoord', () => {
+    const r = runAcceptatie({ akkoord: { env: { STUB_OMGEVING: 'ontwikkeling' } } });
+    refused(r.akkoordRun, /niet als acceptatieomgeving/);
+  });
+
+  it('(A03) een git-naam met een regeleinde kan geen extra regel in het bewijs zetten', () => {
+    // git config user.name wordt in de test via GIT_CONFIG_* op /dev/null gezet; we
+    // controleren daarom het filter zelf in de brontekst én dat de uitkomst één regel is.
+    const src = readFileSync(path.join(repo, 'scripts', 'acceptatie.sh'), 'utf8');
+    assert.match(src, /tr -cd 'A-Za-z0-9 \._@-'/);
+    const r = runAcceptatie({ akkoord: {} });
+    assert.equal((r.evidence!.match(/^resultaat=/gm) || []).length, 1);
+  });
+
+  it('onbekende optie of twee opties: weigert, niets gebouwd', () => {
+    const r = runAcceptatie({ args: ['--overslaan'] });
+    assert.notEqual(r.status, 0);
+    assert.match(r.out, /Onbekende optie: --overslaan/);
+    assert.doesNotMatch(r.calls, /compose .*(build|up)/);
+    const h = runAcceptatie({ args: ['-h'] });
+    assert.equal(h.status, 0, h.out);
+    assert.match(h.out, /--akkoord/);
   });
 });

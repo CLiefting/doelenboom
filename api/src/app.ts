@@ -34,6 +34,7 @@ import { systemSbomRouter } from './routes/systemSbom.js';
 import { customerManagementRouter } from './routes/customerManagement.js';
 import { pool } from './db.js';
 import { errorHandler, installAsyncErrorSupport, newErrorId } from './errors.js';
+import { assertValidOmgeving, omgevingVoorWeb } from './omgeving.js';
 
 // Bouwt de Express-app zonder 'm te starten (geen app.listen, geen idle-sweep-
 // interval) — losgetrokken uit index.ts zodat de regressietest-suite (api/test/)
@@ -68,6 +69,9 @@ export function createApp() {
   // assertJwtSecretIsSafe in auth.ts) — een productie-opstart met een publiek
   // bekend JWT-geheim mag nooit ook maar één request kunnen beantwoorden.
   assertCurrentJwtSecretIsSafe();
+  // DOEL-131: alleen ontwikkeling, acceptatie of productie (leeg = productie);
+  // iets anders is een configuratiefout en dan start de API niet.
+  assertValidOmgeving();
 
   // Express 4 vangt de rejection van een async handler/middleware niet af
   // (request bleef hangen, zie errors.ts / DOEL-22) — vóór het mounten van
@@ -156,7 +160,9 @@ export function createApp() {
   // BUILD_VERSION, dus de footer kan "vdev" en de actuele git-stand
   // tegelijk tonen.
   app.get('/api/version', (_req, res) => {
-    res.json({ version: process.env.BUILD_VERSION || 'dev', gitRef: process.env.GIT_REF || null });
+    // DOEL-131: buiten productie ook de omgeving (voor de gekleurde driehoek
+    // linksboven); in productie ontbreekt dat veld.
+    res.json({ version: process.env.BUILD_VERSION || 'dev', gitRef: process.env.GIT_REF || null, ...omgevingVoorWeb() });
   });
 
   // announcementRouter vóór alle hieronder op de kale prefix '/api' gemounte

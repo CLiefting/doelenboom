@@ -16,6 +16,17 @@ type Release = {
 
 const RELEASES: Release[] = [
   {
+    // DOEL-131
+    version: '4.4.7',
+    date: '2 november 2026',
+    title: 'Kwaliteit: elke nieuwe versie wordt eerst handmatig goedgekeurd in de acceptatieomgeving',
+    items: [
+      'Een nieuwe versie gaat voortaan pas naar de live-omgeving als hij in de acceptatieomgeving niet alleen automatisch is gecontroleerd, maar daar ook met de hand is getest en uitdrukkelijk is goedgekeurd. Die stap kan niet worden overgeslagen, ook niet voor een spoedreparatie.',
+      'In de test- en acceptatieomgeving staat linksboven op elke pagina een gekleurde driehoek (groen "ONT" voor ontwikkeling, geel "ACC" voor acceptatie) en het browsertabblad begint met [ONT] of [ACC]. Zo is altijd duidelijk dat je niet in de live-omgeving werkt.',
+      'In de live-omgeving verandert er niets aan hoe je Doelenboom gebruikt.',
+    ],
+  },
+  {
     // DOEL-128
     version: '4.4.5',
     date: '25 oktober 2026',

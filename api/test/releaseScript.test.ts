@@ -148,7 +148,8 @@ describe('DOEL-108: het remote deel van release.sh haalt zijn einde', () => {
 // lokale "origin") en nagemaakte gh/docker/ssh/scp.
 // DOEL-127: release.sh eist een goedgekeurd acceptatiebewijs voor HEAD; standaard
 // schrijft de test er een (acceptatie: 'goed'), de andere varianten testen de poortwachter.
-type AccState = 'goed' | 'geen' | 'afgekeurd' | 'oud' | 'andere-commit';
+// DOEL-131: 'goed' bevat ook het akkoord; 'zonder-akkoord' en 'akkoord-te-vroeg' testen dat deel.
+type AccState = 'goed' | 'geen' | 'afgekeurd' | 'oud' | 'andere-commit' | 'zonder-akkoord' | 'akkoord-te-vroeg';
 function runRelease(o: { tagAt?: 'head' | 'previous'; usersActive?: boolean; args?: string[]; acceptatie?: AccState }) {
   const tmp = mkdtempSync(path.join(os.tmpdir(), 'doel109-'));
   const bin = path.join(tmp, 'bin');
@@ -198,6 +199,10 @@ function runRelease(o: { tagAt?: 'head' | 'previous'; usersActive?: boolean; arg
         `gecontroleerd_epoch=${acc === 'oud' ? now - 73 * 3600 : now - 60}`,
         `kritiek=0`, `hoog=${acc === 'afgekeurd' ? 2 : 0}`, 'onbekend=0', 'gemiddeld=1', 'laag=0',
         `resultaat=${acc === 'afgekeurd' ? 'AFGEKEURD' : 'GOEDGEKEURD'}`,
+        ...(acc === 'zonder-akkoord' ? [] : [
+          'akkoord=ja', 'akkoord_op=2026-10-25T12:00:00+0100',
+          `akkoord_epoch=${acc === 'akkoord-te-vroeg' ? now - 3600 : now - 30}`, 'akkoord_door=t',
+        ]),
       ].join('\n') + '\n');
     }
     if (o.tagAt) {
@@ -313,8 +318,23 @@ describe('DOEL-127: release.sh weigert een commit zonder goedgekeurde acceptatie
   it('goedgekeurd en recent: de release gaat door en meldt de acceptatie', () => {
     const r = runRelease({ args: [], acceptatie: 'goed' });
     assert.equal(r.status, 0, r.out);
-    assert.match(r.out, /Acceptatie: GOEDGEKEURD op 2026-10-25T11:00:00\+0100/);
+    assert.match(r.out, /Acceptatie: GOEDGEKEURD op 2026-10-25T11:00:00\+0100 \(kritiek 0, hoog 0, onbekend 0\); akkoord op 2026-10-25T12:00:00\+0100/);
     assert.equal(r.tags, 'v9.9.9');
+  });
+
+  // DOEL-131: daarnaast het akkoord na het handmatig testen.
+  it('goedgekeurd maar zonder akkoord: stopt, met de opdracht om akkoord te geven', () => {
+    refused(runRelease({ acceptatie: 'zonder-akkoord' }), /je akkoord na het testen ontbreekt\. Test op http:\/\/localhost:8088 en draai daarna:  bash scripts\/acceptatie\.sh --akkoord/);
+  });
+
+  it('akkoord van vóór de acceptatierun telt niet', () => {
+    refused(runRelease({ acceptatie: 'akkoord-te-vroeg' }), /ouder dan de acceptatierun/);
+  });
+
+  it('er is geen optie om acceptatie over te slaan', () => {
+    for (const opt of ['--zonder-acceptatie', '--force', '--skip-acceptatie']) {
+      refused(runRelease({ acceptatie: 'geen', args: [opt] }), /Onbekende optie/);
+    }
   });
 
   it('hervatten (tag staat al op deze commit) vraagt niet opnieuw om acceptatie', () => {

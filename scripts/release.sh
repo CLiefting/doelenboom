@@ -2,8 +2,13 @@
 # Doelenboom-release in één keer: CI afwachten -> taggen -> GitHub Release ->
 # images bouwen -> (optioneel) uitrollen naar de VPS.
 #
-# Vooraf (DOEL-127): bash scripts/acceptatie.sh — release.sh weigert een commit
-# zonder goedgekeurd acceptatiebewijs (.acceptatie/bewijs-<commit>.txt, max. 72 uur oud).
+# Vooraf (DOEL-127, DOEL-131): altijd ontwikkeling -> acceptatie -> productie.
+#   1. bash scripts/acceptatie.sh             (bouwen, starten, kwetsbaarheden keuren)
+#   2. zelf testen op http://localhost:8088
+#   3. bash scripts/acceptatie.sh --akkoord   (jouw akkoord vastleggen)
+# release.sh weigert een commit zonder goedgekeurd acceptatiebewijs MET akkoord
+# (.acceptatie/bewijs-<commit>.txt, max. 72 uur oud). Er is geen optie om dit
+# over te slaan, ook niet voor een hotfix.
 #
 # Gebruik (op je Mac; het script vindt de repo zelf, ook vanuit "Claude outputs/"):
 #   bash "scripts/release.sh" v3.1.1 "beschrijving van de release"             # t/m bouwen + kopiëren
@@ -98,7 +103,14 @@ else
   ACC_AGE_H=$(( ($(date +%s) - ACC_EPOCH) / 3600 ))
   [ "$ACC_AGE_H" -lt "$ACC_MAX_AGE_HOURS" ] \
     || die "Acceptatie van $SHORT is $ACC_AGE_H uur oud (maximaal $ACC_MAX_AGE_HOURS). Draai acceptatie opnieuw, zodat de libraries actueel gecontroleerd zijn."
-  echo "Acceptatie: GOEDGEKEURD op $(acc_val gecontroleerd_op) (kritiek 0, hoog 0, onbekend 0)."
+  # DOEL-131: daarnaast jouw akkoord na het handmatig testen, gegeven ná deze
+  # acceptatierun (scripts/acceptatie.sh --akkoord).
+  [ "$(acc_val akkoord)" = "ja" ] \
+    || die "Commit $SHORT is in acceptatie goedgekeurd, maar je akkoord na het testen ontbreekt. Test op http://localhost:8088 en draai daarna:  bash scripts/acceptatie.sh --akkoord  Er is niets gewijzigd: geen tag, geen images."
+  ACC_OK_EPOCH="$(acc_val akkoord_epoch)"
+  [[ "$ACC_OK_EPOCH" =~ ^[0-9]+$ ]] && [ "$ACC_OK_EPOCH" -ge "$ACC_EPOCH" ] \
+    || die "Het akkoord in het acceptatiebewijs van $SHORT is onleesbaar of ouder dan de acceptatierun. Geef opnieuw akkoord:  bash scripts/acceptatie.sh --akkoord"
+  echo "Acceptatie: GOEDGEKEURD op $(acc_val gecontroleerd_op) (kritiek 0, hoog 0, onbekend 0); akkoord op $(acc_val akkoord_op)."
 fi
 
 # DOEL-109: met --deploy nu al kijken of er iemand ingelogd is, vóórdat er een

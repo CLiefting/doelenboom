@@ -1,6 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+import OmgevingsDriehoek from './components/OmgevingsDriehoek';
 import DbStatPage from './pages/DbStatPage';
 import SessionsPage from './pages/SessionsPage';
 import AuditLogPage from './pages/AuditLogPage';
@@ -24,5 +25,7 @@ const Root = ROUTES[window.location.pathname] ?? App;
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <Root />
+    {/* DOEL-131: groene (ontwikkeling) of gele (acceptatie) driehoek linksboven, op elke pagina. */}
+    <OmgevingsDriehoek />
   </React.StrictMode>
 );

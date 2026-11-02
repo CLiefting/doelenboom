@@ -464,16 +464,23 @@ getest.
 Nog niet gebouwd: doelenboom aanmaken vanuit de UI (kan nu alleen via de API),
 behoud van de `Toelichting`-kolom op Element-Tag-relaties.
 
-## Drie omgevingen: ontwikkeling, acceptatie, productie (DOEL-127)
+## Drie omgevingen: ontwikkeling, acceptatie, productie (DOEL-127, DOEL-131)
 
-| Omgeving | Bestand | Adres | Images | Mail |
-|---|---|---|---|---|
-| Ontwikkeling | `docker-compose.yml` | http://localhost:5173 | `doelenboom-dev-*` (dev-server) | onderwerp "[ONTWIKKELING] …"; geen kwetsbaarhedenmail |
-| Acceptatie | `docker-compose.acc.yml` | http://localhost:8088 | `doelenboom-acc-*` (productie-Dockerfiles) | onderwerp "[ACCEPTATIE] …" |
-| Productie | `docker-compose.yml` + `docker-compose.prod.yml` | https://doelenboom.code072.nl | `doelenboom-*:latest` | zonder label |
+| Omgeving | Bestand | Adres | Images | Herkenbaar aan | Mail |
+|---|---|---|---|---|---|
+| Ontwikkeling | `docker-compose.yml` | http://localhost:5173 | `doelenboom-dev-*` (dev-server) | groene driehoek "ONT" linksboven, tabblad "[ONT] …" | onderwerp "[ONTWIKKELING] …"; geen kwetsbaarhedenmail |
+| Acceptatie | `docker-compose.acc.yml` | http://localhost:8088 | `doelenboom-acc-*` (productie-Dockerfiles) | gele driehoek "ACC" linksboven, tabblad "[ACC] …" | onderwerp "[ACCEPTATIE] …" |
+| Productie | `docker-compose.yml` + `docker-compose.prod.yml` | https://doelenboom.code072.nl | `doelenboom-*:latest` | geen driehoek | zonder label |
 
-**Werkwijze sinds 25-10-2026:** branch → PR (`scripts/pr-merge.sh`) → **acceptatie** →
-release. Na de merge zet je de stand van `main` in de lokale acceptatieomgeving:
+**Omgevingsdriehoek (DOEL-131):** de API leest `DOELENBOOM_OMGEVING`
+(`ontwikkeling`, `acceptatie` of `productie`; leeg = productie) en geeft die buiten
+productie mee in `GET /api/version`. De web-app toont dan op elke pagina linksboven
+de gekleurde driehoek en zet het label vóór de tabbladtitel. Bij een andere waarde
+weigert de API te starten, zodat je nooit ongemerkt zonder driehoek werkt.
+
+**Werkwijze (altijd, ook voor een hotfix):** branch → PR (`scripts/pr-merge.sh`) →
+**acceptatie** → **jouw akkoord** → release. Na de merge zet je de stand van `main` in
+de lokale acceptatieomgeving:
 
 ```bash
 (
@@ -485,6 +492,19 @@ bash scripts/acceptatie.sh
 )
 ```
 
+Daarna test je zelf op http://localhost:8088 (gele driehoek "ACC" linksboven). Klopt
+alles, dan geef je je akkoord (DOEL-131). Het script controleert dat acceptatie nog
+precies deze goedgekeurde commit draait en vraagt je `akkoord` te typen:
+
+```bash
+(
+set -euo pipefail
+echo ""; echo "----- Stap 2 - Akkoord na het handmatig testen -----"
+cd ~/src/doelenboom
+bash scripts/acceptatie.sh --akkoord
+)
+```
+
 `scripts/acceptatie.sh` bouwt de productie-images (eigen tags, botst niet met de
 dev-stack of de release), start ze met een **eigen database met testdata**
 (`db/init.sql` + `db/seed.sql`), draait de migraties, wacht op de
@@ -492,8 +512,11 @@ componentencontrole van precies deze build en schrijft een bewijs in
 `.acceptatie/bewijs-<commit>.txt`: **GOEDGEKEURD** zonder kritieke, hoge of
 "ernst onbekend"-kwetsbaarheden in productiecomponenten, anders **AFGEKEURD**
 (met de pakketten). Daarna test je handmatig op http://localhost:8088.
-`scripts/release.sh` weigert een commit zonder goedgekeurd bewijs, of met een
-bewijs ouder dan 72 uur (`ACC_MAX_AGE_HOURS`).
+`scripts/release.sh` weigert een commit zonder goedgekeurd bewijs, zonder jouw
+akkoord (of met een akkoord van vóór de laatste acceptatierun), of met een bewijs ouder
+dan 72 uur (`ACC_MAX_AGE_HOURS`). Er is geen optie om dit over te slaan. Een nieuwe
+acceptatierun van dezelfde commit schrijft het bewijs opnieuw; dan geef je ook
+opnieuw akkoord.
 
 - **Inloggen in acceptatie:** bij de eerste start vervangt het script het
   standaardwachtwoord van de seed-sysadmin door een willekeurig wachtwoord
