@@ -41,6 +41,10 @@ services:
     # DOEL-127: productie legt image-naam en herstartbeleid zelf vast; de
     # dev-stack (docker-compose.yml) heeft eigen tags en restart: "no".
     restart: unless-stopped
+    # DOEL-139: de VPS reboot automatisch na updates (INFRA-29, 02:45 UTC).
+    # Docker killt een container standaard na 10 s; zo krijgt Postgres de
+    # tijd voor een nette shutdown/checkpoint i.p.v. crash-recovery.
+    stop_grace_period: 60s
     ports: !override
       - "127.0.0.1:5432:5432"   # alleen via een SSH-tunnel, niet vanaf internet
     networks:
