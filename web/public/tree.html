@@ -3437,24 +3437,8 @@ function runApp(data) {
   // dan lijkt het filter daar onterecht "gaten" te hebben. Zo blijft het
   // filter een zuivere boomstructuur-vraag, los van wat er nu net in beeld is.
   function computeElementFilterKeepSet(ids) {
-    const forward = {}, backward = {};
-    EDGES.forEach(e => {
-      (forward[e.source] = forward[e.source] || []).push(e.target);
-      (backward[e.target] = backward[e.target] || []).push(e.source);
-    });
-    const keep = new Set();
-    function walkFwd(cur) {
-      (forward[cur] || []).forEach(next => { if (!keep.has(next)) { keep.add(next); walkFwd(next); } });
-    }
-    function walkBack(cur) {
-      (backward[cur] || []).forEach(prev => { if (!keep.has(prev)) { keep.add(prev); walkBack(prev); } });
-    }
-    ids.forEach(id => {
-      keep.add(id);
-      walkFwd(id);
-      walkBack(id);
-    });
-    return keep;
+    // DOEL-141: de traversal zelf staat in filterKeepSet (top-level, getest).
+    return filterKeepSet(EDGES, DETAILS, ids);
   }
 
   function updateColumnEmptyNotes() {
@@ -5732,32 +5716,8 @@ function runApp(data) {
 
   // ---- Double-click focus mode: element + 1 level up + all levels of children ----
   function computeFocusSet(id) {
-    const forward = {}, backward = {};
-    EDGES.forEach(e => {
-      (forward[e.source] = forward[e.source] || []).push(e.target);
-      (backward[e.target] = backward[e.target] || []).push(e.source);
-    });
-
-    const keep = new Set([id]);
-    (forward[id] || []).forEach(parent => keep.add(parent));
-    (function walk(cur) {
-      (backward[cur] || []).forEach(child => {
-        if (!keep.has(child)) { keep.add(child); walk(child); }
-      });
-    })(id);
-    // DOEL-140: een geheel en zijn delen horen bij elkaar: focus op een
-    // geheel toont zijn delen, focus op een deel ook de kop van zijn geheel.
-    const partsByWhole = {};
-    Object.keys(DETAILS).forEach((c) => {
-      const w = DETAILS[c].partOf;
-      if (w) (partsByWhole[w] = partsByWhole[w] || []).push(c);
-    });
-    Array.from(keep).forEach((code) => {
-      const d = DETAILS[code];
-      if (d && d.partOf) keep.add(d.partOf);
-      (partsByWhole[code] || []).forEach((c) => keep.add(c));
-    });
-    return keep;
+    // DOEL-141: de traversal zelf staat in focusKeepSet (top-level, getest).
+    return focusKeepSet(EDGES, DETAILS, id);
   }
 
   function enterFocus(node, returnTarget) {
@@ -11952,6 +11912,85 @@ function reconcileFrames(root, collapsed) {
     }
     frame.classList.toggle('frame-empty', !wholeShown && !anyPart);
   });
+}
+
+// DOEL-141: samengestelde elementen in boomfilter en focusmodus.
+// Een deel draagt via zijn geheel bij aan wat erboven ligt: heeft het deel
+// zelf geen relatie naar rechts, dan loopt de keten via de relaties van het
+// geheel. Omgekeerd bestaat een geheel uit zijn delen: wat de delen
+// ondersteunt, ondersteunt ook het geheel. Edges lopen van source (links,
+// ondersteunend) naar target (rechts, ondersteund). Beide functies lopen over
+// de rúwe edges, los van verborgen kolommen (zie computeElementFilterKeepSet).
+function compositionIndex(edges, details) {
+  const forward = {}, backward = {}, partsByWhole = {};
+  edges.forEach((e) => {
+    (forward[e.source] = forward[e.source] || []).push(e.target);
+    (backward[e.target] = backward[e.target] || []).push(e.source);
+  });
+  Object.keys(details).forEach((c) => {
+    const w = details[c] && details[c].partOf;
+    if (w && details[w] && w !== c) (partsByWhole[w] = partsByWhole[w] || []).push(c);
+  });
+  const wholeOf = (c) => {
+    const d = details[c];
+    return d && d.partOf && details[d.partOf] && d.partOf !== c ? d.partOf : null;
+  };
+  return { forward, backward, partsByWhole, wholeOf };
+}
+
+// Boomfilter: alles wat een gekozen element (in)direct ondersteunt en alles
+// wat het (in)direct ondersteunt. Omhoog gaat een deel door naar zijn geheel
+// (niet naar zijn zusterdelen); omlaag gaat een geheel door naar zijn delen.
+// Elke richting heeft een eigen "bezocht"-administratie, zodat een element
+// dat al omhoog is bereikt toch nog omlaag wordt uitgelopen.
+function filterKeepSet(edges, details, ids) {
+  const { forward, backward, partsByWhole, wholeOf } = compositionIndex(edges, details);
+  const keep = new Set();
+  const upSeen = new Set(), downSeen = new Set();
+  function up(cur) {
+    if (upSeen.has(cur)) return;
+    upSeen.add(cur); keep.add(cur);
+    (forward[cur] || []).forEach(up);
+    const w = wholeOf(cur);
+    if (w) up(w);
+  }
+  function down(cur) {
+    if (downSeen.has(cur)) return;
+    downSeen.add(cur); keep.add(cur);
+    (backward[cur] || []).forEach(down);
+    (partsByWhole[cur] || []).forEach(down);
+  }
+  ids.forEach((id) => { up(id); down(id); });
+  return keep;
+}
+
+// Focusmodus (dubbelklik): het element, één niveau omhoog en alle niveaus
+// omlaag. Voor een deel telt het niveau boven zijn geheel als "één omhoog";
+// voor een geheel lopen de niveaus omlaag ook via zijn delen. Is een
+// bovenliggend element een geheel, dan komen zijn delen erbij (niet hun
+// keten); van elk getoond deel blijft de kop van het geheel als context.
+function focusKeepSet(edges, details, id) {
+  const { forward, backward, partsByWhole, wholeOf } = compositionIndex(edges, details);
+  const keep = new Set([id]);
+  const ownWhole = wholeOf(id);
+  const ups = new Set(forward[id] || []);
+  if (ownWhole) (forward[ownWhole] || []).forEach((p) => ups.add(p));
+  ups.forEach((p) => {
+    keep.add(p);
+    (partsByWhole[p] || []).forEach((c) => keep.add(c));
+  });
+  const downSeen = new Set();
+  (function down(cur) {
+    if (downSeen.has(cur)) return;
+    downSeen.add(cur); keep.add(cur);
+    (backward[cur] || []).forEach(down);
+    (partsByWhole[cur] || []).forEach(down);
+  })(id);
+  Array.from(keep).forEach((c) => {
+    const w = wholeOf(c);
+    if (w) keep.add(w);
+  });
+  return keep;
 }
 
 // DOEL-140: op welk zichtbaar vak sluit een lijn van dit element aan? Het

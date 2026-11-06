@@ -335,6 +335,11 @@ puur de UI-doorloop.
       doel); stand blijft bewaard na F5.
 - [ ] Pad markeren op een deel: het geheel blijft gedempt zichtbaar. Focus
       (dubbelklik) op een geheel toont zijn delen.
+- [ ] Boomfilter en focus op een deel zonder eigen relatie naar rechts: het
+      geheel en de keten erboven (via het geheel) zijn zichtbaar, met lijn
+      geheel → bovenliggend element; zusterdelen niet (DOEL-141).
+- [ ] Boomfilter op een geheel: de delen en wat die ondersteunt komen mee;
+      PowerPoint-export van de gefilterde boom toont hetzelfde (DOEL-141).
 - [ ] Type van een deel wijzigen naar een andere kolom: melding vooraf, daarna
       los.
 - [ ] Geheel verwijderen: keuze "Delen losmaken" (standaard) / "Delen ook
