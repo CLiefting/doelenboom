@@ -319,6 +319,30 @@ puur de UI-doorloop.
       kolomconfiguratie van de bron mee (niet de huidige tenant-default, ook
       als die inmiddels afwijkt).
 
+## 11a. Aliasgroepen en samengestelde elementen (DOEL-136, DOEL-140)
+
+- [ ] Kolom met aliassen: eerst het basistype, daarna elke alias met een klein
+      label erboven; een kolom zonder aliassen ziet er ongewijzigd uit.
+- [ ] Filter/zoeken waardoor een aliasgroep leeg wordt: label en ruimte
+      verdwijnen; relatielijnen sluiten netjes aan.
+- [ ] "Plaats na…" en omhoog/omlaag: alleen binnen de eigen groep; een deel
+      alleen binnen zijn kader.
+- [ ] Bewerkvenster "Onderdeel van": alleen elementen uit dezelfde kolom;
+      nieuw deel krijgt code `<geheel>.n`; opslaan toont het kader.
+- [ ] "Selecteren" → "Samenvoegen tot…" met een bestaand en met een nieuw
+      geheel; selectie over twee kolommen geeft een melding.
+- [ ] Kader inklappen/uitklappen: "n delen", lijnen naar het geheel (één per
+      doel); stand blijft bewaard na F5.
+- [ ] Pad markeren op een deel: het geheel blijft gedempt zichtbaar. Focus
+      (dubbelklik) op een geheel toont zijn delen.
+- [ ] Type van een deel wijzigen naar een andere kolom: melding vooraf, daarna
+      los.
+- [ ] Geheel verwijderen: keuze "Delen losmaken" (standaard) / "Delen ook
+      verwijderen" (alleen admin); ook in "Selecteren" → "Verwijderen…".
+- [ ] SVG-, HTML-, PowerPoint- en Excel-export (nieuw formaat, kolom
+      "Onderdeel van") tonen de kaders/koppelingen; Excel heen-en-terug houdt
+      de koppelingen.
+
 ## 12. Algemeen / cross-cutting
 
 - [ ] Geen JavaScript-fouten in de browserconsole tijdens een normale sessie

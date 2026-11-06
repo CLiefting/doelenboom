@@ -297,7 +297,21 @@ const SECTIONS: { id: string; title: string; content: JSX.Element }[] = [
           <strong>Volgorde.</strong> De volgorde van elementen binnen een kolom wordt opgeslagen en is voor
           iedereen gelijk. Een nieuw element komt op codevolgorde te staan (B9 vóór B10). Verplaatsen doe je
           onderaan het detailpaneel; een hele kolom sorteren kan een admin via het pijltjes-knopje boven de
-          kolomkop.
+          kolomkop. Heeft een kolom aliassen, dan staan eerst de elementen van het basistype en daarna die van
+          elke alias, elk met een klein label erboven. Verplaatsen gaat binnen zo'n groep.
+        </p>
+        <p style={styles.p}>
+          <strong>Samengestelde elementen.</strong> Een element kan bestaan uit deelelementen in dezelfde kolom,
+          bijvoorbeeld een capability "Klantenservice" met de delen "Telefonisch", "Chat" en "Balie". In de boom
+          staat het geheel dan als kader, met de delen erin. Geheel en delen blijven gewone elementen met hun
+          eigen relaties, kenmerken en status. Zo maak je er een: kies in het bewerkvenster bij "Onderdeel van"
+          het geheel (een nieuw deel krijgt dan een code als C01.1 voorgesteld), of selecteer de delen met
+          "Selecteren" en kies "Samenvoegen tot…" met een bestaand of nieuw geheel. Met het knopje linksboven
+          klap je een kader in; je ziet dan "3 delen" en de lijnen van de delen lopen naar het geheel. In het
+          detailpaneel maak je een deel weer los. Bij het verwijderen van een geheel kies je of de delen
+          losgemaakt worden of (alleen admin) mee verwijderd. Een samengesteld element is één niveau diep: een
+          deel kan zelf geen delen hebben, en hoort bij één geheel. Krijgt een element een type uit een andere
+          kolom, dan vervalt de koppeling (je krijgt vooraf een melding).
         </p>
         <p style={styles.p}>
           <strong>Tags en organisatieonderdelen.</strong> Koppelen aan een element kan met de rol editor; de
@@ -505,7 +519,9 @@ const SECTIONS: { id: string; title: string; content: JSX.Element }[] = [
           "Configuratie"-tab (waar het vandaan komt) en een "Kolommen"-tab (de kolomconfiguratie van deze
           doelenboom op het moment van exporteren). Het oude formaat is alleen beschikbaar zolang een
           doelenboom nog de 8 standaardkolommen heeft; bij een aangepaste kolomconfiguratie gebruik je het
-          nieuwe formaat.
+          nieuwe formaat. In het nieuwe formaat staat in de Referentietabel de kolom "Onderdeel van": de code
+          van het geheel als een element een deelelement is. Bij het inlezen wordt een ongeldige verwijzing
+          overgeslagen, met een melding.
         </p>
         <p style={styles.p}>
           <strong>PowerPoint van de doelenboom.</strong> Via <strong>Bestand → Exporteer als PowerPoint</strong>{' '}
