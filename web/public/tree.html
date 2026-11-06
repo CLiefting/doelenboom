@@ -1200,6 +1200,15 @@
     flex: 1; width: 150px; margin-top: 14px;
   }
   .column.narrow .col-nodes { width: 180px; gap: 5px; }
+  /* DOEL-136: label boven een aliasgroep. De margin-top plus de gap van
+     .col-nodes geeft samen ongeveer één vakhoogte (34px) ruimte tussen de
+     groepen; klein en gedempt, zodat het de vakken niet overstemt. */
+  .col-group-label {
+    font-size: 10px; font-style: italic; color: #7a8699; line-height: 1.2;
+    margin-top: 22px; padding-left: 2px; text-align: left;
+  }
+  .col-group-label.group-first { margin-top: 0; }
+  .col-group-label.group-empty { display: none; }
   .node {
     border: 1px solid var(--navy); border-radius: 6px;
     display: flex; align-items: center; justify-content: center; text-align: center;
@@ -3038,6 +3047,7 @@ function runApp(data) {
   }
 
   function drawEdges() {
+    updateGroupLabels(columnsEl);
     const boardRect = boardEl.getBoundingClientRect();
     svg.setAttribute('width', boardRect.width);
     svg.setAttribute('height', boardRect.height);
@@ -6361,6 +6371,28 @@ function runApp(data) {
       content.appendChild(t);
     });
 
+    // DOEL-136: groepslabels boven aliasgroepen, op hun plek in de boom. Bij
+    // een gemarkeerd pad alleen het label van een groep met een vak op dat pad.
+    document.querySelectorAll('.col-group-label').forEach(label => {
+      const col = label.closest('.column');
+      if (col.classList.contains('hidden') || label.classList.contains('group-empty')) return;
+      if (selectedId !== null) {
+        const wrap = label.closest('.col-nodes');
+        const onPath = Array.from(wrap.querySelectorAll('.node'))
+          .some((n) => n.dataset.group === label.dataset.group && activeNodeIds.has(n.dataset.id));
+        if (!onPath) return;
+      }
+      const r = label.getBoundingClientRect();
+      const t = document.createElementNS(SVG_NS, 'text');
+      t.setAttribute('x', r.left - boardRect.left + 2);
+      t.setAttribute('y', r.bottom - boardRect.top - 2);
+      t.setAttribute('font-size', '10');
+      t.setAttribute('font-style', 'italic');
+      t.setAttribute('fill', '#7a8699');
+      t.textContent = label.textContent;
+      content.appendChild(t);
+    });
+
     // Nodes: rect + wrapped, vertically centered text + RAG/tag corner markers.
     document.querySelectorAll('.node').forEach(node => {
       const col = node.closest('.column');
@@ -7275,11 +7307,16 @@ function runApp(data) {
   let columnSortKey = null;
   let moveAfterCode = null;
 
-  // Codes van de kolom waarin dit element staat, in de volgorde van de boom.
+  // Codes van de groep waarin dit element staat (DOEL-136: zelfde kolom én
+  // zelfde type), in de volgorde van de boom. Verplaatsen kan alleen binnen
+  // die groep; de server dwingt hetzelfde af (routes/elements.ts, /move).
   function columnCodesOf(code) {
     const node = columnsEl.querySelector('.node[data-id="' + CSS.escape(code) + '"]');
     const wrap = node ? node.closest('.col-nodes') : null;
-    return wrap ? Array.from(wrap.querySelectorAll('.node')).map((n) => n.dataset.id) : [];
+    if (!wrap) return [];
+    return Array.from(wrap.querySelectorAll('.node'))
+      .filter((n) => n.dataset.group === node.dataset.group)
+      .map((n) => n.dataset.id);
   }
 
   function openColumnSortModal(columnKey) {
@@ -11273,16 +11310,55 @@ function buildColumnsHtml(details, columns) {
 
   return columns.map((col, idx) => {
     const fontSize = col.nodeFontSize || 8;
-    const nodesHtml = byCol[col.typeName].map((d) =>
-      '<div class="node" data-id="' + escapeHtml(d.code) + '" style="background:' + (aliasColor[d.type] || col.color) +
-      '; color:#FFFFFF; font-size:' + fontSize + 'px;">' + nodeInnerHtml(col, idx, columns.length, d) + '</div>'
-    ).join('');
+    const nodeHtml = (d) =>
+      '<div class="node" data-id="' + escapeHtml(d.code) + '" data-group="' + escapeHtml(d.type) +
+      '" style="background:' + (aliasColor[d.type] || col.color) +
+      '; color:#FFFFFF; font-size:' + fontSize + 'px;">' + nodeInnerHtml(col, idx, columns.length, d) + '</div>';
+    // DOEL-136: eerst het basistype, daarna elke alias in de volgorde van
+    // col.aliases. Binnen een groep blijft de volgorde van details (sort_order,
+    // daarna code). Een aliasgroep krijgt een klein label met de typenaam; het
+    // basistype niet, zodat een kolom zonder aliassen er precies zo uitziet als
+    // vóór DOEL-136. Lege groepen krijgen geen label (en dus geen ruimte); welke
+    // labels zichtbaar zijn na filters/verbergen regelt updateGroupLabels().
+    const groupOrder = [col.typeName].concat((col.aliases || []).map((a) => a.typeName));
+    const nodesHtml = groupOrder.map((typeName, gi) => {
+      const members = byCol[col.typeName].filter((d) => d.type === typeName);
+      if (!members.length) return '';
+      const label = gi === 0 ? '' :
+        '<div class="col-group-label" data-group="' + escapeHtml(typeName) + '">' + escapeHtml(typeName) + '</div>';
+      return label + members.map(nodeHtml).join('');
+    }).join('');
     const narrowCls = col.isNarrow ? ' narrow' : '';
     return '<div class="column' + narrowCls + '" data-key="' + escapeHtml(col.typeName) + '" data-order="' + idx + '">' +
       '<div class="col-header" style="border-top-color:' + col.color + ';">' + escapeHtml(col.title) +
       '<span class="col-hint">' + escapeHtml(col.subtitle || '') + '</span></div>' +
       '<div class="col-nodes">' + nodesHtml + '</div></div>';
   }).join('');
+}
+
+// DOEL-136: een aliaslabel is alleen zichtbaar als er in zijn groep minstens
+// één zichtbaar vak staat (filters, zoeken en focus verbergen vakken met
+// .filter-hidden/.node-hidden). Het eerste zichtbare label van een kolom krijgt
+// .group-first: staat er boven hem geen zichtbaar vak, dan vervalt de extra
+// ruimte erboven. Wordt vóór elke meting in drawEdges() aangeroepen, zodat de
+// relatielijnen op de definitieve posities rekenen.
+function isNodeShown(node) {
+  return !node.classList.contains('filter-hidden') && !node.classList.contains('node-hidden');
+}
+function updateGroupLabels(root) {
+  root.querySelectorAll('.col-nodes').forEach((wrap) => {
+    let seenVisibleNode = false;
+    Array.from(wrap.children).forEach((child) => {
+      if (child.classList.contains('col-group-label')) {
+        const group = child.dataset.group;
+        const any = Array.from(wrap.querySelectorAll('.node')).some((n) => n.dataset.group === group && isNodeShown(n));
+        child.classList.toggle('group-empty', !any);
+        child.classList.toggle('group-first', any && !seenVisibleNode);
+      } else if (child.classList.contains('node') && isNodeShown(child)) {
+        seenVisibleNode = true;
+      }
+    });
+  });
 }
 
 function buildLegendHtml(columns) {

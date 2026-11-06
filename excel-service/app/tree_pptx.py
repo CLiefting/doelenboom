@@ -342,6 +342,9 @@ class _Model:
                 'subtitle': _clean(c.get('subtitle')),
                 'color': _rgb(c.get('color')),
                 'aliasColors': alias_colors,
+                # DOEL-136: groepsvolgorde in de kolom (basistype, dan de
+                # aliassen zoals in de kolomconfiguratie).
+                'groupOrder': [name] + [_clean(a.get('typeName')) for a in aliases],
                 'relationLabel': _clean(c.get('relationLabelToNext')),
                 'originalIndex': original_index,
                 'slides': name in slide_wanted,
@@ -393,6 +396,7 @@ class _Model:
             }
             self.columns[col]['elements'].append(code)
 
+        self._group_columns()
         self._visible_edges(data.get('edges') or [], hidden_codes)
         picks_opt = options.get('filterPicks')
         if self.filtered and isinstance(picks_opt, list):
@@ -420,6 +424,30 @@ class _Model:
                 relatietype = _clean(rel.get('relatietype'))
                 orgs.append(f'{name} ({relatietype})' if relatietype else name)
             el['orgs'] = orgs
+
+    def _group_columns(self):
+        """DOEL-136: binnen elke kolom eerst het basistype, dan elke alias in
+        configuratievolgorde; binnen een groep blijft de boomvolgorde. De
+        volgnummers in self.order worden binnen de kolom opnieuw uitgedeeld
+        (dezelfde getallen, nu in groepsvolgorde), zodat sorteren op volgorde
+        ook de groepen volgt en de volgorde tussen kolommen gelijk blijft."""
+        for col in self.columns:
+            rank = {t: i for i, t in enumerate(col['groupOrder'])}
+            codes = col['elements']
+            grouped = sorted(codes, key=lambda c: (rank.get(self.elements[c]['type'], len(rank)), self.order[c]))
+            slots = sorted(self.order[c] for c in codes)
+            for code, slot in zip(grouped, slots):
+                self.order[code] = slot
+            col['elements'] = grouped
+
+    def groups_of(self, col: dict[str, Any]) -> list[tuple[str, list[str]]]:
+        """(typenaam, codes) per niet-lege groep van een kolom, in volgorde."""
+        out = []
+        for type_name in col['groupOrder']:
+            codes = [c for c in col['elements'] if self.elements[c]['type'] == type_name]
+            if codes:
+                out.append((type_name, codes))
+        return out
 
     def _visible_edges(self, raw_edges: list[Any], hidden_codes: set[str]):
         """Bouwt parents/children tussen zichtbare elementen. Een relatie
@@ -770,20 +798,33 @@ def _slide_overview(prs, model: _Model, meta: dict[str, Any], page: int, links: 
     # Posities: per kolom de elementen in boomvolgorde, verticaal gecentreerd.
     pos: dict[str, tuple[int, int, int, float]] = {}
     more: dict[int, tuple[int, int, int, float, int]] = {}
+    group_labels: list[tuple[int, int, int, float, str]] = []
     for index, col in enumerate(model.columns):
-        codes = col['elements']
+        # DOEL-136: rijen = per groep een label (niet bij het basistype) en
+        # daarna de vakken van die groep; een label neemt één rij in.
+        rows: list[tuple[str, str]] = []
+        for type_name, codes_in_group in model.groups_of(col):
+            if type_name != col['typeName']:
+                rows.append(('label', type_name))
+            rows.extend(('el', c) for c in codes_in_group)
         hidden = 0
-        if len(codes) > OVERVIEW_MAX_ROWS:
-            hidden = len(codes) - (OVERVIEW_MAX_ROWS - 1)
-            codes = codes[:OVERVIEW_MAX_ROWS - 1]
-        count = len(codes) + (1 if hidden else 0)
+        if len(rows) > OVERVIEW_MAX_ROWS:
+            kept = rows[:OVERVIEW_MAX_ROWS - 1]
+            if kept and kept[-1][0] == 'label':
+                kept = kept[:-1]
+            hidden = sum(1 for kind, _ in rows[len(kept):] if kind == 'el')
+            rows = kept
+        count = len(rows) + (1 if hidden else 0)
         slot_h, node_h, size = _overview_scale(count)
         left = int(MARGIN + index * (col_w + gap))
         start = int(OVERVIEW_NODES_TOP + (area_h - count * slot_h) / 2)
-        for i, code in enumerate(codes):
-            pos[code] = (left, start + i * slot_h, node_h, size)
+        for i, (kind, value) in enumerate(rows):
+            if kind == 'el':
+                pos[value] = (left, start + i * slot_h, node_h, size)
+            else:
+                group_labels.append((left, start + i * slot_h, node_h, size, value))
         if hidden:
-            more[index] = (left, start + len(codes) * slot_h, node_h, size, hidden)
+            more[index] = (left, start + len(rows) * slot_h, node_h, size, hidden)
 
     # Eerst de lijnen, zodat de vakken er bovenop liggen. Primaire relaties
     # eerst: die blijven staan als de bovengrens wordt bereikt.
@@ -834,6 +875,10 @@ def _slide_overview(prs, model: _Model, meta: dict[str, Any], page: int, links: 
         node.text_frame.margin_top = node.text_frame.margin_bottom = 0
         if links.add(node, code, _goto_tooltip(code, el['name'])):
             any_el_link = True
+    for left, top, node_h, size, type_name in group_labels:
+        box = _add_text(slide, left, top, col_w, node_h, _fit(type_name, col_w - Inches(0.04), node_h, size),
+                        size=size, color=MUTED, anchor=MSO_ANCHOR.BOTTOM)
+        box.name = f'overzicht-groep {type_name}'
     for index, (left, top, node_h, size, hidden) in more.items():
         node = _rounded(slide, left, top, col_w, node_h, None, line=LINE_COLOR, line_width=0.5, dashed=True)
         node.name = f'overzicht-meer {index + 1}'

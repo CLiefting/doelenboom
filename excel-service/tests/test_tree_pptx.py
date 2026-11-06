@@ -514,6 +514,30 @@ class TestTotaleBoom:
         assert 'overzicht-element P2' in shape_names(slide)
         assert not any('P2' in n for n in shape_names(slide) if n.startswith('overzicht-relatie '))
 
+    def test_doel_136_kolom_gegroepeerd_per_type_met_label(self):
+        data = make_data()
+        data['columns'][2]['aliases'] = [{'typeName': 'Randvoorwaarde', 'color': None}]
+        # In boomvolgorde staat R1 vóór de benefits; getoond komt hij erna.
+        data['elements'].insert(0, el('R1', 'Randvoorwaarde'))
+        slide = self.overview(build(self.OPTIONS, data))
+        top = lambda name: self.shape(slide, name).top  # noqa: E731
+        label = self.shape(slide, 'overzicht-groep Randvoorwaarde')
+        assert top('overzicht-element B2') < top('overzicht-element B1') < label.top < top('overzicht-element R1')
+        assert 'Randvoorwaarde' in label.text_frame.text
+        # Het basistype krijgt geen label; een kolom zonder aliassen ook niet.
+        names = shape_names(slide)
+        assert [n for n in names if n.startswith('overzicht-groep ')] == ['overzicht-groep Randvoorwaarde']
+
+    def test_doel_136_groepsvolgorde_ook_in_het_model(self):
+        data = make_data()
+        data['columns'][2]['aliases'] = [{'typeName': 'Z-alias', 'color': None}, {'typeName': 'A-alias', 'color': None}]
+        data['elements'][:0] = [el('A1', 'A-alias'), el('Z1', 'Z-alias')]
+        model = _Model(data, {})
+        benefit = model.columns[2]
+        assert benefit['elements'] == ['B2', 'B1', 'Z1', 'A1']
+        assert model.sorted_codes(['A1', 'B1', 'Z1', 'B2']) == ['B2', 'B1', 'Z1', 'A1']
+        assert [t for t, _ in model.groups_of(benefit)] == ['Benefit', 'Z-alias', 'A-alias']
+
     def test_vak_in_kolomkleur_en_alias_in_eigen_kleur(self):
         data = make_data()
         data['columns'][2]['aliases'] = [{'typeName': 'Randvoorwaarde', 'color': '#111111'}]

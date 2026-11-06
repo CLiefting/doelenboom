@@ -669,8 +669,11 @@ elementsRouter.post('/doelenbomen/:id/elements/:code/move', requireEditor, async
     const all = await lockElementsInOrder(client, doelenboomId);
     const element = all.find((row) => row.code === req.params.code);
     if (!element) return await fail(404, 'Element niet gevonden.');
-    const columnKey = columnKeyOf(columns, element.type);
-    const inColumn = (row: OrderedRow) => columnKeyOf(columns, row.type) === columnKey;
+    // DOEL-136: de boom toont een kolom gegroepeerd per type (basistype, dan
+    // elke alias). Verplaatsen gebeurt daarom binnen de groep: alleen
+    // elementen van hetzelfde type tellen mee. Zonder aliassen is dat de hele
+    // kolom, net als vóór DOEL-136.
+    const inColumn = (row: OrderedRow) => row.type === element.type;
     const columnRows = all.filter(inColumn);
     const from = columnRows.indexOf(element);
     const rest = columnRows.filter((row) => row !== element);
@@ -685,7 +688,10 @@ elementsRouter.post('/doelenbomen/:id/elements/:code/move', requireEditor, async
       if (afterCode === element.code) return await fail(400, 'Een element kan niet na zichzelf worden geplaatst.');
       const target = all.find((row) => row.code === afterCode);
       if (!target) return await fail(404, 'Het element om na te plaatsen bestaat niet in deze doelenboom.');
-      if (!inColumn(target)) return await fail(400, 'Het element om na te plaatsen staat in een andere kolom.');
+      if (columnKeyOf(columns, target.type) !== columnKeyOf(columns, element.type)) {
+        return await fail(400, 'Het element om na te plaatsen staat in een andere kolom.');
+      }
+      if (!inColumn(target)) return await fail(400, 'Het element om na te plaatsen is van een ander type; verplaatsen kan alleen binnen de eigen groep.');
       to = rest.indexOf(target) + 1;
     }
     const reordered = [...rest.slice(0, to), element, ...rest.slice(to)];
