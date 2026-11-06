@@ -14,6 +14,7 @@ import { getColumnsForDoelenboom, allValidTypeNames } from '../columnConfig.js';
 import { hasModule } from '../license.js';
 import { logAuditEvent } from '../auditLog.js';
 import { sendServerError } from '../errors.js';
+import { linkPartsByCode } from '../elementParts.js';
 import { GEVOELIG_GEWEIGERD, isGevoeligeOmgeving } from '../omgeving.js';
 
 // Voor routes met :id = import-id (niet doelenboom-id): eerst de doelenboom van
@@ -157,7 +158,7 @@ importsRouter.post(
   const parsed = imp.parsed_json as {
     elements: Array<{
       code: string; type: string; name: string; description: string;
-      parentText: string; kpi: string; taakveld: string; subtaakveld: string; sortOrder: number;
+      parentText: string; kpi: string; taakveld: string; subtaakveld: string; sortOrder: number; partOf?: string;
     }>;
     edges: Array<{ source: string; target: string; weight: string | null; toelichting: string }>;
     projectStatus: Record<string, { projectstatus: string; rag: string; toelichting: string; gerapporteerdOp: string | null; clusterPpt?: string }>;
@@ -215,6 +216,13 @@ importsRouter.post(
     }
     await restoreDeviations(client, doelenboomId, deviationSnapshot, elementIdByCode);
     await restoreAttributeValues(client, doelenboomId, attributeValueSnapshot, elementIdByCode);
+    // DOEL-140: samengestelde elementen uit de kolom "Onderdeel van". Wat niet
+    // mag (andere kolom, nesting) wordt overgeslagen en gemeld, niet geweigerd.
+    const partWarnings = await linkPartsByCode(
+      client, doelenboomId, await getColumnsForDoelenboom(doelenboomId),
+      parsed.elements.filter((el) => el.partOf).map((el) => ({ part: el.code, whole: el.partOf as string })),
+      elementIdByCode, new Map(parsed.elements.map((el) => [el.code, el.type] as [string, string]))
+    );
 
     for (const e of parsed.edges) {
       const sourceId = elementIdByCode.get(e.source);
@@ -375,7 +383,10 @@ importsRouter.post(
       doelenboomId,
       detail: { importId: Number(req.params.id), elementCount: parsed.elements.length, edgeCount: parsed.edges.length },
     });
-    res.json({ status: 'published', elementCount: parsed.elements.length, edgeCount: parsed.edges.length });
+    res.json({
+      status: 'published', elementCount: parsed.elements.length, edgeCount: parsed.edges.length,
+      ...(partWarnings.length ? { partWarnings } : {}),
+    });
   } catch (err) {
     await client.query('rollback');
     sendServerError(res, err, 'Publiceren mislukt');

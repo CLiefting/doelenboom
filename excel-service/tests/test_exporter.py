@@ -110,7 +110,17 @@ class TestDataWorkbookNieuw:
         headers = [c.value for c in wb['Referentietabel'][1]]
         assert headers == NIEUW_SHEET_HEADERS['Referentietabel']
         row = next(wb['Referentietabel'].iter_rows(min_row=2, values_only=True))
-        assert row[-1] == 'Ja'  # Actief
+        assert row[headers.index('Actief')] == 'Ja'
+
+    def test_doel_140_onderdeel_van_kolom(self):
+        tree = make_tree()
+        tree['elements'][0]['part_of'] = 'C9'
+        wb = load(build_data_workbook('nieuw', tree))
+        headers = [c.value for c in wb['Referentietabel'][1]]
+        assert headers[-1] == 'Onderdeel van'
+        rows = list(wb['Referentietabel'].iter_rows(min_row=2, values_only=True))
+        assert rows[0][-1] == 'C9'
+        assert all(r[-1] in (None, '') for r in rows[1:]), 'zonder geheel blijft de cel leeg'
 
 
 class TestProductenHangtAfVan:

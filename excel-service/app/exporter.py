@@ -85,6 +85,8 @@ NIEUW_SHEET_HEADERS: dict[str, list[str]] = {
     'Referentietabel': [
         'ID', 'Type', 'Element', 'Uitgebreide beschrijving',
         'Mogelijke KPI / indicator', 'Taakveld', 'Sub-taakveld', 'Volgorde', 'Actief',
+        # DOEL-140: code van het geheel als dit element een deelelement is.
+        'Onderdeel van',
     ],
     'Relaties': ['Bron-ID', 'Doel-ID', 'Relatietype', 'Toelichting'],
     'Projecten': [
@@ -506,7 +508,7 @@ def _fill_nieuw(sheets: dict[str, Worksheet], tree: dict[str, Any]) -> None:
         ref_ws.append([
             el.get('code', ''), el.get('type', ''), el.get('name', ''), el.get('description', ''),
             el.get('kpi', ''), el.get('taakveld', ''), el.get('subtaakveld', ''),
-            el.get('sort_order', 0), 'Ja',
+            el.get('sort_order', 0), 'Ja', el.get('part_of') or '',
         ])
 
     # Relaties: één generieke tab i.p.v. Capability-OB/Project-Capability/vrije tekst (§2).

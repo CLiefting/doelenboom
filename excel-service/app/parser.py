@@ -195,6 +195,8 @@ def parse_workbook(
         'gerapporteerd_op': ('status gerapporteerd op', 'gerapporteerd op'),
         'volgorde': ('volgorde',),
         'actief': ('actief',),
+        # DOEL-140: samengestelde elementen (alleen nieuw formaat).
+        'onderdeel_van': ('onderdeel van',),
     })
     track('Referentietabel', ref_found)
     if not ref_found:
@@ -281,6 +283,9 @@ def parse_workbook(
             'subtaakveld': clean_text(row.get('subtaakveld')),
             'sortOrder': sort_order,
         })
+        part_of = clean_text(row.get('onderdeel_van'))
+        if part_of:
+            elements[-1]['partOf'] = part_of
 
         # Referentietabel kan (sinds v15, voor Project-rijen) ook statuskolommen
         # bevatten — die krijgen voorrang boven de Projecten-tab (zie §2a).
@@ -293,6 +298,26 @@ def parse_workbook(
                 'projectstatus': ps_val, 'rag': rag_val,
                 'toelichting': toel_val, 'gerapporteerdOp': datum_val,
             }
+
+    # DOEL-140: "Onderdeel van" moet naar een element in dit bestand wijzen,
+    # niet naar zichzelf, en maar één niveau diep. Ongeldig = koppeling
+    # weglaten met een waarschuwing (het element zelf blijft). Dezelfde kolom
+    # controleert de API bij het publiceren (die kent de kolomconfiguratie).
+    wholes_wanted = {el['partOf'] for el in elements if el.get('partOf')}
+    for el in elements:
+        whole = el.get('partOf')
+        if not whole:
+            continue
+        reason = None
+        if whole == el['code']:
+            reason = 'een element kan geen deel van zichzelf zijn'
+        elif whole not in code_set:
+            reason = f'het geheel "{whole}" staat niet in de Referentietabel'
+        elif el['code'] in wholes_wanted:
+            reason = 'dit element heeft zelf delen (maximaal één niveau)'
+        if reason:
+            warnings.append(f'"Onderdeel van" bij element {el["code"]} genegeerd: {reason}.')
+            del el['partOf']
 
     if skipped_historisch:
         warnings.append(

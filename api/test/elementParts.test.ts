@@ -13,6 +13,8 @@
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { pool } from '../src/db.js';
+import { linkPartsByCode } from '../src/elementParts.js';
+import { getColumnsForDoelenboom } from '../src/columnConfig.js';
 import {
   startTestServer, stopTestServer, closePool, req, unique, createSysadminUser, login, cleanupByPrefix,
   setupWritableDoelenboom,
@@ -321,6 +323,33 @@ describe('samengestelde elementen (DOEL-140)', () => {
     assert.equal(r.status, 201);
     const tree = (await req('GET', `${base()}/tree`, { token: adminToken })).body;
     assert.equal((tree.elements as Array<{ code: string; name: string }>).find((e) => e.code === 'H1')!.name, '<img src=x onerror=alert(1)>');
+  });
+
+  it('linkPartsByCode (Excel-import, sjablonen): geldige koppelingen gelegd, de rest overgeslagen met melding', async () => {
+    await reset();
+    const rows = (await pool.query('select id, code, type from elements where doelenboom_id = $1', [doelenboomId])).rows;
+    const idByCode = new Map(rows.map((r) => [r.code as string, r.id as number]));
+    const typeByCode = new Map(rows.map((r) => [r.code as string, r.type as string]));
+    const client = await pool.connect();
+    let warnings: string[] = [];
+    try {
+      await client.query('begin');
+      warnings = await linkPartsByCode(client, doelenboomId, await getColumnsForDoelenboom(doelenboomId), [
+        { part: 'C2', whole: 'C1' },
+        { part: 'V1', whole: 'C1' },
+        { part: 'C3', whole: 'P1' },      // andere kolom
+        { part: 'C4', whole: 'ONBEKEND' },
+        { part: 'C1', whole: 'C3' },      // C1 heeft al delen
+        { part: 'C2', whole: 'C3' },      // tweede geheel
+      ], idByCode, typeByCode);
+      await client.query('commit');
+    } finally {
+      client.release();
+    }
+    const links = await partOf();
+    assert.deepEqual([links.C2, links.V1, links.C3, links.C4, links.C1], ['C1', 'C1', null, null, null]);
+    assert.equal(warnings.length, 4);
+    assert.ok(warnings.some((w) => /andere kolom/.test(w)) && warnings.some((w) => /onbekend element/.test(w)));
   });
 
   it('dupliceren neemt de koppelingen mee', async () => {
