@@ -55,7 +55,13 @@ export type AuditEventType =
   | 'elements_bulk_deleted'
   // DOEL-97: app-instellingen gewijzigd (inlogblokkade, inactiviteitstermijn).
   // detail = { changes: { <veld>: { from, to } } } — alleen getallen.
-  | 'app_settings_updated';
+  | 'app_settings_updated'
+  // DOEL-140: samengestelde elementen. detail = { whole, parts } (codes) bij
+  // samenvoegen/losmaken, en { whole, parts, partsAction: 'detach' | 'delete' }
+  // bij het verwijderen van een geheel — bewust NOOIT namen of vrije tekst.
+  | 'element_parts_composed'
+  | 'element_parts_detached'
+  | 'element_whole_deleted';
 
 export interface LogAuditEventInput {
   eventType: AuditEventType;

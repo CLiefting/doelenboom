@@ -1,6 +1,7 @@
 import { PoolClient } from 'pg';
 import { pool } from './db.js';
 import { insertColumns, validateColumnsInput, ColumnDef, allValidTypeNames } from './columnConfig.js';
+import { linkPartsByCode } from './elementParts.js';
 import {
   ControlRule, brokenRulesByAttributesMessage, brokenRulesMessage, findRulesBrokenByAttributes, findRulesBrokenByColumns,
   rulesFromDb, validateControlRulesInput,
@@ -45,6 +46,9 @@ interface ElementSnapshot {
   taakveld: string;
   subtaakveld: string;
   sortOrder: number;
+  // DOEL-140: code van het geheel als dit een deelelement is (oudere
+  // sjablonen hebben dit veld niet).
+  partOf?: string | null;
 }
 interface EdgeSnapshot {
   sourceCode: string;
@@ -132,9 +136,12 @@ async function buildSnapshotFromDoelenboom(
   );
 
   const elementsResult = await pool.query(
-    `select code, type, name, description, parent_text as "parentText", kpi, taakveld, subtaakveld,
-            sort_order as "sortOrder"
-     from elements where doelenboom_id = $1 order by sort_order, id`,
+    `select e.code, e.type, e.name, e.description, e.parent_text as "parentText", e.kpi, e.taakveld, e.subtaakveld,
+            e.sort_order as "sortOrder", w.code as "partOf"
+     from elements e
+     left join element_parts ep on ep.part_element_id = e.id
+     left join elements w on w.id = ep.whole_element_id
+     where e.doelenboom_id = $1 order by e.sort_order, e.id`,
     [doelenboomId]
   );
 
@@ -297,6 +304,15 @@ export async function applyTemplateToNewDoelenboom(
     );
     codeToId.set(el.code, r.rows[0].id);
   }
+
+  // DOEL-140: samengestelde elementen terugzetten (ongeldige koppelingen in
+  // een oud of aangepast sjabloon worden stil overgeslagen).
+  const typeByCode = new Map(elements.map((el) => [el.code, el.type] as [string, string]));
+  await linkPartsByCode(
+    client, doelenboomId, columns as ColumnDef[],
+    elements.filter((el) => el.partOf).map((el) => ({ part: el.code, whole: el.partOf as string })),
+    codeToId, typeByCode
+  );
 
   const edges = tmpl.rows[0].edges_snapshot as EdgeSnapshot[];
   for (const e of edges) {
