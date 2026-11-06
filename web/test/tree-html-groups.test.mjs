@@ -30,7 +30,8 @@ const grab = (name) => {
 function loadHelpers() {
   // eslint-disable-next-line no-new-func
   return new Function(
-    ['escapeHtml', 'nodeInnerHtml', 'buildColumnsHtml', 'isNodeShown', 'updateGroupLabels'].map(grab).join('\n') +
+    ['escapeHtml', 'nodeInnerHtml', 'buildColumnsHtml', 'composedPartsOf', 'partsCountText', 'isNodeShown', 'isChildShown', 'updateGroupLabels']
+      .map(grab).join('\n') +
       '\nreturn { buildColumnsHtml, updateGroupLabels };'
   )();
 }

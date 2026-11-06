@@ -1209,6 +1209,33 @@
   }
   .col-group-label.group-first { margin-top: 0; }
   .col-group-label.group-empty { display: none; }
+  /* DOEL-140: samengesteld element = kader met het geheel als kop en de
+     delen erin. Ingeklapt toont het kader "n delen" en verbergt de delen;
+     .frame-context = de kop blijft als context zichtbaar (gedempt) als
+     alleen een deel aan filter/zoeken/focus voldoet. */
+  .node-frame {
+    position: relative; display: flex; flex-direction: column; gap: 5px;
+    border: 1.5px solid var(--navy); border-radius: 9px; padding: 4px;
+    background: rgba(0, 40, 85, 0.05);
+  }
+  .node-frame.frame-empty { display: none; }
+  .frame-parts { display: flex; flex-direction: column; gap: 5px; padding-left: 8px; }
+  .node-frame.collapsed .frame-parts { display: none; }
+  .frame-count { display: none; font-size: 10px; color: #4a5a70; padding: 0 2px 1px 10px; }
+  .node-frame.collapsed .frame-count { display: block; }
+  .frame-toggle {
+    position: absolute; top: -9px; left: -9px; z-index: 2;
+    width: 18px; height: 18px; padding: 0; border-radius: 50%;
+    border: 1px solid var(--navy); background: #fff; color: var(--navy);
+    font-size: 10px; line-height: 16px; cursor: pointer;
+  }
+  .frame-toggle:focus-visible { outline: 2px solid var(--navy); outline-offset: 1px; }
+  .node.filter-hidden.frame-context, .node.node-hidden.frame-context { display: flex; opacity: 0.45; }
+  .node.dimmed.frame-context { opacity: 0.55; }
+  .parts-choice { border: 1px solid #dde1e7; border-radius: 8px; padding: 8px 12px; margin: 8px 0 12px; }
+  .parts-choice legend { font-size: 12px; font-weight: 600; color: var(--navy); padding: 0 4px; }
+  .element-modal .parts-choice-item { display: flex; align-items: center; gap: 8px; font-size: 13px; margin: 4px 0; font-weight: 400; }
+  .element-modal .parts-choice-item input { width: auto; margin: 0; }
   .node {
     border: 1px solid var(--navy); border-radius: 6px;
     display: flex; align-items: center; justify-content: center; text-align: center;
@@ -1687,6 +1714,8 @@
       <button class="btn ghost btn-xs" id="select-add-filter-btn" type="button" style="display:none;">+ Boomfilter-selectie</button>
       <span class="select-actions" id="select-actions">
         <button class="btn ghost btn-xs" id="select-edit-btn" type="button" disabled>Bewerken&hellip;</button>
+        <!-- DOEL-140: geselecteerde elementen uit één kolom samenvoegen tot een samengesteld element. -->
+        <button class="btn ghost btn-xs" id="select-compose-btn" type="button" disabled>Samenvoegen tot&hellip;</button>
         <!-- Bulk-verwijderen is alleen voor admins (DOEL-82); de API dwingt dat af. -->
         <button class="btn danger btn-xs admin-only" id="select-delete-btn" type="button" disabled>Verwijderen&hellip;</button>
       </span>
@@ -1816,6 +1845,12 @@
                configureerbaar (zie docs/kolommen-configuratie-ontwerp.md), dus
                geen vaste lijst meer hier. -->
           <select id="element-field-type"></select>
+        </label>
+        <!-- DOEL-140: samengesteld element. Alleen elementen uit dezelfde kolom
+             die zelf geen deelelement zijn; zie populatePartOfOptions(). -->
+        <label>Onderdeel van <span class="field-note">(optioneel: maakt dit een deelelement)</span>
+          <select id="element-field-partof"></select>
+          <span class="field-note" id="element-partof-note" style="display:none;"></span>
         </label>
         <label>Code <span class="req-mark">*</span> <span class="field-note">(automatisch voorgesteld, mag je aanpassen)</span>
           <input type="text" id="element-field-code" autocomplete="off" required>
@@ -1948,6 +1983,13 @@
       <h3>Selectie verwijderen</h3>
       <p class="bulk-delete-summary" id="bulk-delete-summary"></p>
       <div class="bulk-delete-list" id="bulk-delete-list"></div>
+      <!-- DOEL-140: alleen zichtbaar als de selectie samengestelde elementen
+           bevat waarvan niet alle delen geselecteerd zijn. -->
+      <fieldset class="parts-choice" id="bulk-delete-parts" style="display:none;">
+        <legend id="bulk-delete-parts-legend">Deelelementen</legend>
+        <label class="parts-choice-item"><input type="radio" name="bulk-delete-parts" value="detach" checked> Delen losmaken (ze blijven als gewone elementen staan)</label>
+        <label class="parts-choice-item"><input type="radio" name="bulk-delete-parts" value="delete"> Delen ook verwijderen</label>
+      </fieldset>
       <p class="bulk-delete-warning">Dit is definitief: er is geen prullenbak en geen ongedaan maken. Maak zo nodig eerst een export.</p>
       <label>Typ het aantal elementen (<span id="bulk-delete-count"></span>) om te bevestigen
         <input type="text" id="bulk-delete-confirm-input" inputmode="numeric" autocomplete="off">
@@ -1957,6 +1999,56 @@
         <button type="button" class="btn ghost" id="bulk-delete-cancel">Annuleren</button>
         <button type="button" class="btn ghost" id="bulk-delete-export">Eerst exporteren</button>
         <button type="button" class="btn danger" id="bulk-delete-ok" disabled>Definitief verwijderen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- DOEL-140: "Samenvoegen tot…": de selectie (één kolom) wordt deel van
+       een bestaand element of van een nieuw geheel. De server toetst alle
+       regels opnieuw (api/src/elementParts.ts). -->
+  <div class="element-modal-backdrop" id="compose-modal-backdrop">
+    <div class="element-modal">
+      <h3>Samenvoegen tot een samengesteld element</h3>
+      <p class="element-modal-hint" id="compose-hint"></p>
+      <form id="compose-form">
+        <fieldset class="parts-choice">
+          <legend>Geheel</legend>
+          <label class="parts-choice-item"><input type="radio" name="compose-mode" value="existing" checked> Bestaand element</label>
+          <label class="parts-choice-item"><input type="radio" name="compose-mode" value="new"> Nieuw element</label>
+        </fieldset>
+        <div id="compose-existing">
+          <label>Element als geheel <select id="compose-whole"></select></label>
+        </div>
+        <div id="compose-new" style="display:none;">
+          <label>Type <span class="req-mark">*</span> <select id="compose-new-type"></select></label>
+          <label>Code <span class="req-mark">*</span> <input type="text" id="compose-new-code" autocomplete="off" maxlength="200"></label>
+          <label>Naam <span class="req-mark">*</span> <input type="text" id="compose-new-name" autocomplete="off" maxlength="500"></label>
+        </div>
+        <p class="element-modal-status" id="compose-status"></p>
+        <div class="element-modal-actions">
+          <button type="button" class="btn ghost" id="compose-cancel">Annuleren</button>
+          <button type="submit" class="btn" id="compose-save">Samenvoegen</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- DOEL-140: verwijderen van een samengesteld element: wat gebeurt er met
+       de delen? "Delen ook verwijderen" alleen voor een admin (de server
+       dwingt dat af, net als bij bulk-verwijderen). -->
+  <div class="element-modal-backdrop" id="whole-delete-modal-backdrop">
+    <div class="element-modal">
+      <h3 id="whole-delete-title">Samengesteld element verwijderen</h3>
+      <p class="element-modal-hint" id="whole-delete-hint"></p>
+      <fieldset class="parts-choice">
+        <legend>Deelelementen</legend>
+        <label class="parts-choice-item"><input type="radio" name="whole-delete-parts" value="detach" checked> Delen losmaken (ze blijven als gewone elementen staan)</label>
+        <label class="parts-choice-item admin-only"><input type="radio" name="whole-delete-parts" value="delete"> Delen ook verwijderen</label>
+      </fieldset>
+      <p class="element-modal-status" id="whole-delete-status"></p>
+      <div class="element-modal-actions">
+        <button type="button" class="btn ghost" id="whole-delete-cancel">Annuleren</button>
+        <button type="button" class="btn danger" id="whole-delete-ok">Verwijderen</button>
       </div>
     </div>
   </div>
@@ -2521,6 +2613,25 @@ const CS_EXPORT_CSS = [
 // true = omgedraaid (laatste kolom links) — per doelenboom onthouden in
 // localStorage (colDirectionStorageKey()), gelezen aan het begin van boot().
 let columnsReversed = false;
+// DOEL-140: inklapstand van samengestelde elementen, per doelenboom.
+// localStorage kan ontbreken of geblokkeerd zijn: dan alles open en niets
+// bewaard. Alleen codes (tekst), maximaal 500, nooit HTML.
+function frameCollapseStorageKey() {
+  return 'doelenboom-frames-collapsed-' + (doelenboomId || '');
+}
+function loadCollapsedFrames() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(frameCollapseStorageKey()) || '[]');
+    return new Set(Array.isArray(raw) ? raw.filter((c) => typeof c === 'string').slice(0, 500) : []);
+  } catch (err) {
+    return new Set();
+  }
+}
+function saveCollapsedFrames(set) {
+  try {
+    localStorage.setItem(frameCollapseStorageKey(), JSON.stringify(Array.from(set).slice(0, 500)));
+  } catch (err) { /* geblokkeerd: alleen deze sessie */ }
+}
 function colDirectionStorageKey() {
   return 'doelenboom-cols-reversed-' + (doelenboomId || '');
 }
@@ -2714,9 +2825,13 @@ function runApp(data) {
   const selectAddFilterBtn = document.getElementById('select-add-filter-btn');
   const selectClearBtn = document.getElementById('select-clear-btn');
   const selectEditBtn = document.getElementById('select-edit-btn');
+  const selectComposeBtn = document.getElementById('select-compose-btn');
   const selectDeleteBtn = document.getElementById('select-delete-btn');
   let selectMode = false;
   let bulkSelection = new Set(); // element-codes; de bulkacties (DOEL-81/82) lezen deze verzameling
+  // DOEL-140: ingeklapte samengestelde elementen (codes van het geheel), per
+  // boom in de browser bewaard — net als de kolomrichting. Standaard open.
+  const collapsedFrames = loadCollapsedFrames();
   // Zie de toelichting bij #filter-chips-apply-btn hierboven — gevuld door
   // applyTagFilter() met de elementen die de actieve tag/org/verouderd-chips
   // matchen, zodat je die in één klik naar de echte boomfilter kunt overzetten.
@@ -3047,6 +3162,7 @@ function runApp(data) {
   }
 
   function drawEdges() {
+    reconcileFrames(columnsEl, collapsedFrames);
     updateGroupLabels(columnsEl);
     const boardRect = boardEl.getBoundingClientRect();
     svg.setAttribute('width', boardRect.width);
@@ -3058,6 +3174,9 @@ function runApp(data) {
     document.querySelectorAll('.node').forEach(n => {
       const col = n.closest('.column');
       if (col.classList.contains('hidden') || n.classList.contains('node-hidden') || n.classList.contains('filter-hidden')) return;
+      // DOEL-140: een deel in een ingeklapt kader is niet zichtbaar; zijn
+      // lijnen sluiten aan op het geheel (edgeAnchorId hieronder).
+      if (n.dataset.partOf && n.closest('.node-frame.collapsed')) return;
       const r = n.getBoundingClientRect();
       nodeRects[n.dataset.id] = {
         right: r.right - boardRect.left,
@@ -3082,9 +3201,19 @@ function runApp(data) {
         })
       : currentEffectiveEdges;
 
+    const drawnAnchorPairs = new Set();
     orderedEdges.forEach(e => {
-      const s = nodeRects[e.source];
-      const t = nodeRects[e.target];
+      // DOEL-140: bij een ingeklapt kader lopen de lijnen van de delen naar
+      // het geheel; meerdere lijnen naar hetzelfde doel worden er één.
+      const sId = edgeAnchorId(e.source, DETAILS, collapsedFrames);
+      const tId = edgeAnchorId(e.target, DETAILS, collapsedFrames);
+      if (sId === tId) return;
+      if (sId !== e.source || tId !== e.target) {
+        if (drawnAnchorPairs.has(sId + '|' + tId)) return;
+        drawnAnchorPairs.add(sId + '|' + tId);
+      }
+      const s = nodeRects[sId];
+      const t = nodeRects[tId];
       if (!s || !t) return;
       // Altijd verbinden van de fysiek meest linkse kant naar de meest
       // rechtse (i.p.v. altijd source->target) — bij een omgedraaide
@@ -3573,6 +3702,7 @@ function runApp(data) {
     selectStatusTextEl.textContent = bulkSelectionStatusText(bulkSelection.size, bulkSelectionHiddenCount());
     selectClearBtn.disabled = bulkSelection.size === 0;
     selectEditBtn.disabled = bulkSelection.size === 0;
+    selectComposeBtn.disabled = bulkSelection.size === 0;
     selectDeleteBtn.disabled = bulkSelection.size === 0;
     selectAddSearchBtn.style.display = lastSearchMatchIds.length > 0 ? '' : 'none';
     selectAddFilterBtn.style.display = filterSelection.size > 0 ? '' : 'none';
@@ -3646,6 +3776,15 @@ function runApp(data) {
     if (ev.metaKey || ev.ctrlKey) toggleFilterPick(node.dataset.id);
   });
   columnsEl.addEventListener('click', (ev) => {
+    // DOEL-140: kader in- of uitklappen (per boom onthouden in de browser).
+    const frameToggle = ev.target.closest('.frame-toggle');
+    if (frameToggle) {
+      const whole = frameToggle.dataset.whole;
+      if (collapsedFrames.has(whole)) collapsedFrames.delete(whole); else collapsedFrames.add(whole);
+      saveCollapsedFrames(collapsedFrames);
+      drawEdges();
+      return;
+    }
     const node = ev.target.closest('.node');
     if (!node) {
       if (selectMode) {
@@ -5580,6 +5719,8 @@ function runApp(data) {
             editingRuleId: deviationEditing && deviationEditing.code === id ? deviationEditing.ruleId : null,
           })
         : '') +
+      // DOEL-140: samenhang met geheel of delen, met losmaken.
+      compositionPanelHtml(d, DETAILS) +
       '<div class="dp-crud-actions crud-only">' +
         // DOEL-86: plek binnen de kolom wijzigen.
         elementMoveButtonsHtml(d.code, columnPositionOf(columnCodesOf(d.code), d.code)) +
@@ -5604,6 +5745,18 @@ function runApp(data) {
         if (!keep.has(child)) { keep.add(child); walk(child); }
       });
     })(id);
+    // DOEL-140: een geheel en zijn delen horen bij elkaar: focus op een
+    // geheel toont zijn delen, focus op een deel ook de kop van zijn geheel.
+    const partsByWhole = {};
+    Object.keys(DETAILS).forEach((c) => {
+      const w = DETAILS[c].partOf;
+      if (w) (partsByWhole[w] = partsByWhole[w] || []).push(c);
+    });
+    Array.from(keep).forEach((code) => {
+      const d = DETAILS[code];
+      if (d && d.partOf) keep.add(d.partOf);
+      (partsByWhole[code] || []).forEach((c) => keep.add(c));
+    });
     return keep;
   }
 
@@ -6393,16 +6546,49 @@ function runApp(data) {
       content.appendChild(t);
     });
 
+    // DOEL-140: kaders van samengestelde elementen (onder de vakken), met bij
+    // een ingeklapt kader de tekst "n delen". Bij een gemarkeerd pad alleen
+    // kaders met een vak op dat pad.
+    document.querySelectorAll('.node-frame').forEach(frame => {
+      const col = frame.closest('.column');
+      if (col.classList.contains('hidden') || frame.classList.contains('frame-empty')) return;
+      if (selectedId !== null && !Array.from(frame.querySelectorAll('.node')).some((n) => activeNodeIds.has(n.dataset.id))) return;
+      const r = frame.getBoundingClientRect();
+      const rect = document.createElementNS(SVG_NS, 'rect');
+      rect.setAttribute('x', r.left - boardRect.left); rect.setAttribute('y', r.top - boardRect.top);
+      rect.setAttribute('width', r.width); rect.setAttribute('height', r.height);
+      rect.setAttribute('rx', 9);
+      rect.setAttribute('fill', '#002855'); rect.setAttribute('fill-opacity', '0.05');
+      rect.setAttribute('stroke', '#002855'); rect.setAttribute('stroke-width', '1.5');
+      content.appendChild(rect);
+      const count = frame.querySelector('.frame-count');
+      if (frame.classList.contains('collapsed') && count) {
+        const cr = count.getBoundingClientRect();
+        const t = document.createElementNS(SVG_NS, 'text');
+        t.setAttribute('x', cr.left - boardRect.left + 10);
+        t.setAttribute('y', cr.bottom - boardRect.top - 2);
+        t.setAttribute('font-size', '10');
+        t.setAttribute('fill', '#4a5a70');
+        t.textContent = count.textContent;
+        content.appendChild(t);
+      }
+    });
+
     // Nodes: rect + wrapped, vertically centered text + RAG/tag corner markers.
     document.querySelectorAll('.node').forEach(node => {
       const col = node.closest('.column');
-      if (col.classList.contains('hidden') || node.classList.contains('node-hidden') || node.classList.contains('filter-hidden')) return;
+      // DOEL-140: een kop die alleen als context zichtbaar is (frame-context)
+      // gaat mee; delen in een ingeklapt kader niet.
+      if (node.dataset.partOf && node.closest('.node-frame.collapsed')) return;
+      const hiddenByFilter = node.classList.contains('node-hidden') || node.classList.contains('filter-hidden');
+      if (col.classList.contains('hidden') || (hiddenByFilter && !node.classList.contains('frame-context'))) return;
       if (selectedId !== null && !activeNodeIds.has(node.dataset.id)) return;
       const r = node.getBoundingClientRect();
       const x = r.left - boardRect.left, y = r.top - boardRect.top;
       const w = r.width, h = r.height;
 
       const g = document.createElementNS(SVG_NS, 'g');
+      if (node.classList.contains('frame-context')) g.setAttribute('opacity', '0.45');
 
       const rect = document.createElementNS(SVG_NS, 'rect');
       rect.setAttribute('x', x); rect.setAttribute('y', y);
@@ -7027,6 +7213,8 @@ function runApp(data) {
   const elementFieldSubtaakveld = document.getElementById('element-field-subtaakveld');
   const elementFieldTagsList = document.getElementById('element-field-tags');
   const elementFieldOrgUnitsList = document.getElementById('element-field-orgunits');
+  const elementFieldPartOf = document.getElementById('element-field-partof');
+  const elementPartOfNote = document.getElementById('element-partof-note');
   let elementModalMode = 'create';
   let elementModalOriginalCode = null;
   let elementCodeAutoFilled = false;
@@ -7104,10 +7292,37 @@ function runApp(data) {
   const elementSubtaakveldPickerBtn = document.getElementById('element-subtaakveld-picker-btn');
   if (elementSubtaakveldPickerBtn) attachValuePicker(elementFieldSubtaakveld, elementSubtaakveldPickerBtn, () => uniqueDetailValues('subtaakveld'));
 
+  // DOEL-140: keuzelijst "Onderdeel van": elementen uit dezelfde kolom als
+  // het gekozen type die zelf geen deel zijn (één niveau). Heeft dit element
+  // zelf delen, dan kan het geen deel worden: veld uit, met uitleg.
+  function populatePartOfOptions(type, selfCode, current) {
+    const col = TYPE_TO_COLUMN[type];
+    const ownParts = selfCode ? Object.keys(DETAILS).filter((c) => DETAILS[c].partOf === selfCode).length : 0;
+    const candidates = col ? partOfCandidates(DETAILS, TYPE_TO_COLUMN, col.typeName, selfCode) : [];
+    elementFieldPartOf.innerHTML = partOfOptionsHtml(candidates, DETAILS, candidates.includes(current) ? current : '');
+    elementFieldPartOf.disabled = ownParts > 0;
+    elementPartOfNote.style.display = ownParts > 0 ? '' : 'none';
+    elementPartOfNote.textContent = ownParts > 0
+      ? 'Dit element bestaat zelf uit ' + partsCountText(ownParts) + ' en kan daarom geen deelelement zijn.'
+      : '';
+  }
+
   elementFieldCode.addEventListener('input', () => { elementCodeAutoFilled = false; });
   elementFieldType.addEventListener('change', () => {
+    populatePartOfOptions(elementFieldType.value, elementModalOriginalCode, elementFieldPartOf.value);
     if (elementModalMode === 'create' && (elementCodeAutoFilled || !elementFieldCode.value.trim())) {
-      elementFieldCode.value = suggestElementCode(elementFieldType.value);
+      elementFieldCode.value = elementFieldPartOf.value
+        ? suggestPartCode(elementFieldPartOf.value, DETAILS)
+        : suggestElementCode(elementFieldType.value);
+      elementCodeAutoFilled = true;
+    }
+  });
+  elementFieldPartOf.addEventListener('change', () => {
+    // Codevoorstel <geheel>.1, .2 … voor een nieuw deel; zelf aan te passen.
+    if (elementModalMode === 'create' && (elementCodeAutoFilled || !elementFieldCode.value.trim())) {
+      elementFieldCode.value = elementFieldPartOf.value
+        ? suggestPartCode(elementFieldPartOf.value, DETAILS)
+        : suggestElementCode(elementFieldType.value);
       elementCodeAutoFilled = true;
     }
   });
@@ -7151,6 +7366,7 @@ function runApp(data) {
       elementFieldKpi.value = d.kpi || '';
       elementFieldTaakveld.value = d.taakveld || '';
       elementFieldSubtaakveld.value = d.subtaakveld || '';
+      populatePartOfOptions(d.type, code, d.partOf || '');
       populateElementTagOrgCheckboxes(code);
     } else {
       elementModalTitle.textContent = 'Nieuw element';
@@ -7158,6 +7374,7 @@ function runApp(data) {
       elementFieldType.value = CANONICAL_COL_ORDER[0] || '';
       elementFieldCode.value = suggestElementCode(elementFieldType.value);
       elementCodeAutoFilled = true;
+      populatePartOfOptions(elementFieldType.value, null, '');
       populateElementTagOrgCheckboxes(null);
     }
     elementModalBackdrop.classList.add('visible');
@@ -7188,6 +7405,21 @@ function runApp(data) {
     if (!payload.code || !payload.name) {
       setElementModalStatus('Code en naam zijn verplicht.');
       return;
+    }
+    // DOEL-140: "Onderdeel van" (leeg = geen geheel / losmaken). Een element
+    // met eigen delen stuurt niets mee (het veld staat dan uit).
+    if (!elementFieldPartOf.disabled) {
+      if (elementModalMode === 'edit') payload.partOf = elementFieldPartOf.value || null;
+      else if (elementFieldPartOf.value) payload.partOf = elementFieldPartOf.value;
+    }
+    // Melding vooraf: een type in een andere kolom maakt de koppelingen los.
+    if (elementModalMode === 'edit' && DETAILS[elementModalOriginalCode]) {
+      const lost = linksLostByTypeChange(DETAILS, TYPE_TO_COLUMN, elementModalOriginalCode, payload.type);
+      if (lost.length) {
+        const ok = await showConfirm('Met dit type komt het element in een andere kolom. De koppeling met ' +
+          lost.join(', ') + ' wordt dan losgemaakt. Doorgaan?', 'Doorgaan');
+        if (!ok) return;
+      }
     }
     setElementModalStatus('Bezig met opslaan…', 'busy');
     try {
@@ -7266,8 +7498,91 @@ function runApp(data) {
     }
   });
 
+  // DOEL-140: één deel losmaken (PUT met partOf: null; de overige velden
+  // blijven zoals ze zijn) of alle delen van een geheel.
+  async function detachPart(code) {
+    const d = DETAILS[code];
+    if (!d || !d.partOf) return;
+    const ok = await showConfirm('Element "' + code + '" losmaken van "' + d.partOf + '"? Het blijft als gewoon element in de kolom staan.', 'Losmaken');
+    if (!ok) return;
+    try {
+      const res = await fetch(apiUrl + '/api/doelenbomen/' + doelenboomId + '/elements/' + encodeURIComponent(code), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + authToken },
+        body: JSON.stringify({
+          type: d.type, name: d.name, description: d.desc || '', kpi: d.kpi || '',
+          taakveld: d.taakveld || '', subtaakveld: d.subtaakveld || '', partOf: null,
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || ('Losmaken mislukt (HTTP ' + res.status + ')'));
+      }
+      reloadTreeKeepingFocus();
+    } catch (err) {
+      showToast(err && err.message ? err.message : 'Onbekende fout bij losmaken.', 'error');
+    }
+  }
+
+  async function detachAllParts(code) {
+    const n = Object.keys(DETAILS).filter((c) => DETAILS[c].partOf === code).length;
+    if (!n) return;
+    const ok = await showConfirm('Alle ' + partsCountText(n) + ' van "' + code + '" losmaken? Ze blijven als gewone elementen in de kolom staan.', 'Losmaken');
+    if (!ok) return;
+    try {
+      await postBulk(encodeURIComponent(code) + '/detach-parts', {});
+      reloadTreeKeepingFocus();
+    } catch (err) {
+      showToast(err && err.message ? err.message : 'Onbekende fout bij losmaken.', 'error');
+    }
+  }
+
+  const wholeDeleteBackdrop = document.getElementById('whole-delete-modal-backdrop');
+  const wholeDeleteHint = document.getElementById('whole-delete-hint');
+  const wholeDeleteStatus = document.getElementById('whole-delete-status');
+  const wholeDeleteOkBtn = document.getElementById('whole-delete-ok');
+  let wholeDeleteCode = null;
+  document.getElementById('whole-delete-cancel').addEventListener('click', () => wholeDeleteBackdrop.classList.remove('visible'));
+  wholeDeleteBackdrop.addEventListener('click', (ev) => { if (ev.target === wholeDeleteBackdrop) wholeDeleteBackdrop.classList.remove('visible'); });
+  wholeDeleteOkBtn.addEventListener('click', async () => {
+    if (!wholeDeleteCode) return;
+    const picked = wholeDeleteBackdrop.querySelector('input[name="whole-delete-parts"]:checked');
+    const parts = picked && picked.value === 'delete' ? 'delete' : 'detach';
+    wholeDeleteOkBtn.disabled = true;
+    setBulkStatus(wholeDeleteStatus, 'Bezig met verwijderen\u2026', 'busy');
+    try {
+      const res = await fetch(
+        apiUrl + '/api/doelenbomen/' + doelenboomId + '/elements/' + encodeURIComponent(wholeDeleteCode) + '?parts=' + parts,
+        { method: 'DELETE', headers: { Authorization: 'Bearer ' + authToken } }
+      );
+      if (!res.ok && res.status !== 204) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || ('Verwijderen mislukt (HTTP ' + res.status + ')'));
+      }
+      wholeDeleteBackdrop.classList.remove('visible');
+      reloadTreeKeepingFocus();
+    } catch (err) {
+      wholeDeleteOkBtn.disabled = false;
+      setBulkStatus(wholeDeleteStatus, err && err.message ? err.message : 'Onbekende fout bij verwijderen.');
+    }
+  });
+
   async function deleteElementByCode(code) {
     if (!code) return;
+    // DOEL-140: een geheel met delen krijgt een venster met de keuze wat er
+    // met de delen gebeurt.
+    const ownParts = Object.keys(DETAILS).filter((c) => DETAILS[c].partOf === code);
+    if (ownParts.length) {
+      wholeDeleteCode = code;
+      wholeDeleteHint.textContent = 'Element "' + code + '" bestaat uit ' + partsCountText(ownParts.length) + ' (' + ownParts.join(', ') +
+        '). Relaties, projectstatus, producten en tag-/organisatiekoppelingen van wat je verwijdert gaan ook weg.';
+      const detach = wholeDeleteBackdrop.querySelector('input[value="detach"]');
+      if (detach) detach.checked = true;
+      wholeDeleteOkBtn.disabled = false;
+      setBulkStatus(wholeDeleteStatus, '');
+      wholeDeleteBackdrop.classList.add('visible');
+      return;
+    }
     const ok = await showConfirm(
       'Element "' + code + '" verwijderen? Eventuele relaties, projectstatus, producten en tag-/organisatiekoppelingen ' +
       'van dit element worden dan ook verwijderd.'
@@ -7314,8 +7629,14 @@ function runApp(data) {
     const node = columnsEl.querySelector('.node[data-id="' + CSS.escape(code) + '"]');
     const wrap = node ? node.closest('.col-nodes') : null;
     if (!wrap) return [];
+    // DOEL-140: een deel verplaatst binnen zijn kader; een ander element
+    // tussen de elementen van zijn groep die zelf geen deel zijn.
+    if (node.dataset.partOf) {
+      const parts = node.closest('.frame-parts');
+      return parts ? Array.from(parts.querySelectorAll('.node')).map((n) => n.dataset.id) : [];
+    }
     return Array.from(wrap.querySelectorAll('.node'))
-      .filter((n) => n.dataset.group === node.dataset.group)
+      .filter((n) => n.dataset.group === node.dataset.group && !n.dataset.partOf)
       .map((n) => n.dataset.id);
   }
 
@@ -7423,6 +7744,8 @@ function runApp(data) {
   const bulkDeleteOkBtn = document.getElementById('bulk-delete-ok');
   const bulkDeleteCancelBtn = document.getElementById('bulk-delete-cancel');
   const bulkDeleteExportBtn = document.getElementById('bulk-delete-export');
+  const bulkDeletePartsBox = document.getElementById('bulk-delete-parts');
+  const bulkDeletePartsLegend = document.getElementById('bulk-delete-parts-legend');
   let bulkEditAttrDefs = [];
 
   function bulkSelectedCodes() {
@@ -7592,6 +7915,12 @@ function runApp(data) {
     if (!codes.length) return;
     bulkDeleteSummary.textContent = bulkDeleteSummaryText(bulkDeleteImpact(codes, EDGES, PRODUCTS, ACTIVITIES, PROJECT_STATUS));
     bulkDeleteList.innerHTML = bulkDeleteListHtml(codes, DETAILS);
+    // DOEL-140: delen van geselecteerde gehelen die zelf niet geselecteerd zijn.
+    const looseParts = unselectedPartsOf(codes, DETAILS);
+    bulkDeletePartsBox.style.display = looseParts.length ? '' : 'none';
+    bulkDeletePartsLegend.textContent = 'Deelelementen die niet geselecteerd zijn (' + looseParts.length + ')';
+    const detachRadio = bulkDeletePartsBox.querySelector('input[value="detach"]');
+    if (detachRadio) detachRadio.checked = true;
     bulkDeleteCount.textContent = String(codes.length);
     bulkDeleteInput.value = '';
     bulkDeleteOkBtn.disabled = true;
@@ -7619,13 +7948,95 @@ function runApp(data) {
     bulkDeleteOkBtn.disabled = true;
     setBulkStatus(bulkDeleteStatus, 'Bezig met verwijderen\u2026', 'busy');
     try {
-      const result = await postBulk('bulk-delete', { codes: codes });
+      const picked = bulkDeletePartsBox.querySelector('input[name="bulk-delete-parts"]:checked');
+      const parts = bulkDeletePartsBox.style.display !== 'none' && picked && picked.value === 'delete' ? 'delete' : 'detach';
+      const result = await postBulk('bulk-delete', { codes: codes, parts: parts });
       const n = typeof result.deleted === 'number' ? result.deleted : codes.length;
       setBulkStatus(bulkDeleteStatus, 'Verwijderd, boom wordt herladen\u2026', 'ok');
       reloadWithBulkToast(n + (n === 1 ? ' element' : ' elementen') + ' verwijderd.');
     } catch (err) {
       bulkDeleteOkBtn.disabled = false;
       setBulkStatus(bulkDeleteStatus, err && err.message ? err.message : 'Onbekende fout bij verwijderen.');
+    }
+  });
+
+  // ---- Samenvoegen tot een samengesteld element (DOEL-140) ----
+  const composeBackdrop = document.getElementById('compose-modal-backdrop');
+  const composeForm = document.getElementById('compose-form');
+  const composeHint = document.getElementById('compose-hint');
+  const composeWhole = document.getElementById('compose-whole');
+  const composeExisting = document.getElementById('compose-existing');
+  const composeNew = document.getElementById('compose-new');
+  const composeNewType = document.getElementById('compose-new-type');
+  const composeNewCode = document.getElementById('compose-new-code');
+  const composeNewName = document.getElementById('compose-new-name');
+  const composeStatus = document.getElementById('compose-status');
+  const composeSaveBtn = document.getElementById('compose-save');
+
+  function composeMode() {
+    const r = composeForm.querySelector('input[name="compose-mode"]:checked');
+    return r ? r.value : 'existing';
+  }
+  function syncComposeMode() {
+    const isNew = composeMode() === 'new';
+    composeExisting.style.display = isNew ? 'none' : '';
+    composeNew.style.display = isNew ? '' : 'none';
+  }
+
+  function openComposeModal() {
+    const codes = bulkSelectedCodes();
+    if (!codes.length) return;
+    const check = composeSelectionCheck(codes, DETAILS, TYPE_TO_COLUMN);
+    setBulkStatus(composeStatus, check.error || '');
+    composeSaveBtn.disabled = !!check.error;
+    composeHint.textContent = check.error ? '' :
+      'De ' + codes.length + (codes.length === 1 ? ' geselecteerde element wordt' : ' geselecteerde elementen worden') +
+      ' deel van het gekozen geheel, in de kolom "' + (check.column.title || check.column.typeName) + '".';
+    if (!check.error) {
+      // Bestaand geheel: elk element in die kolom dat zelf geen deel is.
+      const candidates = partOfCandidates(DETAILS, TYPE_TO_COLUMN, check.column.typeName, null);
+      composeWhole.innerHTML = composeWholeOptionsHtml(candidates, DETAILS);
+      const types = [check.column.typeName].concat((check.column.aliases || []).map((a) => a.typeName));
+      composeNewType.innerHTML = composeTypeOptionsHtml(types);
+      composeNewCode.value = suggestElementCode(types[0]);
+      composeNewName.value = '';
+    }
+    const existingRadio = composeForm.querySelector('input[value="existing"]');
+    if (existingRadio) existingRadio.checked = true;
+    syncComposeMode();
+    composeBackdrop.classList.add('visible');
+  }
+  function closeComposeModal() { composeBackdrop.classList.remove('visible'); }
+
+  selectComposeBtn.addEventListener('click', openComposeModal);
+  document.getElementById('compose-cancel').addEventListener('click', closeComposeModal);
+  composeBackdrop.addEventListener('click', (ev) => { if (ev.target === composeBackdrop) closeComposeModal(); });
+  composeForm.addEventListener('change', (ev) => { if (ev.target.name === 'compose-mode') syncComposeMode(); });
+  composeNewType.addEventListener('change', () => { composeNewCode.value = suggestElementCode(composeNewType.value); });
+  composeForm.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const codes = bulkSelectedCodes();
+    let body;
+    if (composeMode() === 'new') {
+      const code = composeNewCode.value.trim();
+      const name = composeNewName.value.trim();
+      if (!code || !name) { setBulkStatus(composeStatus, 'Code en naam van het nieuwe geheel zijn verplicht.'); return; }
+      body = { parts: codes, newWhole: { code: code, type: composeNewType.value, name: name } };
+    } else {
+      const whole = composeWhole.value;
+      if (!whole) { setBulkStatus(composeStatus, 'Kies een element als geheel.'); return; }
+      body = { whole: whole, parts: codes.filter((c) => c !== whole) };
+      if (!body.parts.length) { setBulkStatus(composeStatus, 'Selecteer naast het geheel minstens één ander element.'); return; }
+    }
+    composeSaveBtn.disabled = true;
+    setBulkStatus(composeStatus, 'Bezig met samenvoegen\u2026', 'busy');
+    try {
+      const result = await postBulk('compose', body);
+      setBulkStatus(composeStatus, 'Samengevoegd, boom wordt herladen\u2026', 'ok');
+      reloadWithBulkToast(partsCountText((result.parts || body.parts).length) + ' samengevoegd tot "' + (result.whole || '') + '".');
+    } catch (err) {
+      composeSaveBtn.disabled = false;
+      setBulkStatus(composeStatus, err && err.message ? err.message : 'Onbekende fout bij samenvoegen.');
     }
   });
 
@@ -9549,6 +9960,13 @@ function runApp(data) {
     if (editBtn) { openElementModal('edit', editBtn.dataset.code); return; }
     const delBtn = ev.target.closest('.dp-delete-btn');
     if (delBtn) { deleteElementByCode(delBtn.dataset.code); return; }
+    // DOEL-140: losmaken vanuit het detailpaneel; een chip opent dat element.
+    const detachBtn = ev.target.closest('.dp-detach-btn');
+    if (detachBtn) { detachPart(detachBtn.dataset.code); return; }
+    const detachAllBtn = ev.target.closest('.dp-detach-all-btn');
+    if (detachAllBtn) { detachAllParts(detachAllBtn.dataset.code); return; }
+    const partChip = ev.target.closest('.dp-part-chip');
+    if (partChip && DETAILS[partChip.dataset.code]) { selectNode(partChip.dataset.code); return; }
     const addConnBtn = ev.target.closest('.dp-add-conn-btn');
     if (addConnBtn) { openCreateEdgeModal(addConnBtn.dataset.code); return; }
     const connEditBtn = ev.target.closest('.conn-edit-btn');
@@ -10310,6 +10728,107 @@ function elementMoveButtonsHtml(code, position) {
 
 // Keuzelijst voor "Plaats na…": bovenaan, of na elk ander element van de
 // kolom. De huidige plek is voorgeselecteerd.
+// DOEL-140: blok in het detailpaneel. Een deel: "Onderdeel van <geheel>" met
+// "Losmaken"; een geheel: "Bestaat uit" met zijn delen en "Alle delen
+// losmaken". Codes en namen altijd ge-escaped (vrije tekst).
+function compositionPanelHtml(d, details) {
+  const esc = escapeHtml;
+  const chip = (code) => {
+    const x = details[code] || {};
+    return '<span class="dp-chip dp-part-chip" data-code="' + esc(code) + '">' + esc(code) + (x.name ? ' \u2014 ' + esc(x.name) : '') + '</span>';
+  };
+  const field = (label, btnHtml, chipsHtml) =>
+    '<div class="dp-field dp-composition"><div class="dp-field-header"><label>' + label + '</label>' + btnHtml + '</div>' +
+    '<div class="dp-chip-row">' + chipsHtml + '</div></div>';
+  if (d.partOf && details[d.partOf]) {
+    return field('Onderdeel van',
+      '<button type="button" class="btn ghost btn-xs crud-only dp-detach-btn" data-code="' + esc(d.code) + '">Losmaken</button>',
+      chip(d.partOf));
+  }
+  const parts = Object.keys(details).filter((c) => details[c].partOf === d.code);
+  if (!parts.length) return '';
+  return field('Bestaat uit (' + esc(partsCountText(parts.length)) + ')',
+    '<button type="button" class="btn ghost btn-xs crud-only dp-detach-all-btn" data-code="' + esc(d.code) + '">Alle delen losmaken</button>',
+    parts.map(chip).join(''));
+}
+
+// DOEL-140: kandidaten voor "Onderdeel van": elementen in dezelfde kolom
+// (basistype of alias), niet het element zelf en geen deelelement.
+function partOfCandidates(details, typeToColumn, columnKey, selfCode) {
+  return Object.keys(details).filter((c) => {
+    const d = details[c];
+    const col = typeToColumn[d.type];
+    return c !== selfCode && !d.partOf && col && col.typeName === columnKey;
+  });
+}
+function partOfOptionsHtml(codes, details, current) {
+  return '<option value=""' + (current ? '' : ' selected') + '>Geen (gewoon element)</option>' +
+    codes.map((c) => {
+      const d = details[c] || {};
+      return '<option value="' + escapeHtml(c) + '"' + (c === current ? ' selected' : '') + '>' +
+        escapeHtml(c) + (d.name ? ' \u2014 ' + escapeHtml(d.name) : '') + '</option>';
+    }).join('');
+}
+// Eerstvolgende vrije code <geheel>.n (n = 1, 2, …).
+function suggestPartCode(wholeCode, details) {
+  let n = 1;
+  while (details[wholeCode + '.' + n]) n++;
+  return wholeCode + '.' + n;
+}
+// Welke koppelingen vervallen als dit element dit nieuwe type krijgt?
+// (Zelfde regel als de server: geheel en deel in dezelfde kolom.)
+function linksLostByTypeChange(details, typeToColumn, code, newType) {
+  const d = details[code];
+  const newCol = typeToColumn[newType];
+  const colOf = (c) => (details[c] && typeToColumn[details[c].type] ? typeToColumn[details[c].type].typeName : null);
+  const newKey = newCol ? newCol.typeName : null;
+  const linked = [];
+  if (d.partOf && colOf(d.partOf) !== newKey) linked.push(d.partOf);
+  Object.keys(details).forEach((c) => {
+    if (details[c].partOf === code && colOf(c) !== newKey) linked.push(c);
+  });
+  return linked;
+}
+
+// DOEL-140: keuzelijsten van "Samenvoegen tot…" (codes, namen en typenamen
+// zijn vrije tekst: altijd ge-escaped).
+function composeWholeOptionsHtml(codes, details) {
+  return codes.map((c) => {
+    const d = details[c] || {};
+    return '<option value="' + escapeHtml(c) + '">' + escapeHtml(c) + (d.name ? ' \u2014 ' + escapeHtml(d.name) : '') + '</option>';
+  }).join('');
+}
+function composeTypeOptionsHtml(types) {
+  return types.map((t) => '<option value="' + escapeHtml(t) + '">' + escapeHtml(t) + '</option>').join('');
+}
+
+// DOEL-140: mag deze selectie worden samengevoegd? Alles in één kolom, en
+// geen element dat zelf delen heeft (één niveau). Een deel van een ander
+// geheel weigert de server met een duidelijke melding.
+function composeSelectionCheck(codes, details, typeToColumn) {
+  const cols = new Set();
+  let column = null;
+  for (const c of codes) {
+    const d = details[c];
+    const col = d && typeToColumn[d.type];
+    if (!col) return { error: 'Element ' + c + ' hoort bij geen enkele kolom.' };
+    cols.add(col.typeName);
+    column = col;
+  }
+  if (cols.size > 1) return { error: 'Samenvoegen kan alleen met elementen uit één kolom; de selectie beslaat ' + cols.size + ' kolommen.' };
+  const withParts = codes.filter((c) => Object.keys(details).some((p) => details[p].partOf === c));
+  if (withParts.length > 1) {
+    return { error: 'De selectie bevat meer dan één samengesteld element (' + withParts.join(', ') + '); een samengesteld element kan geen deel zijn.' };
+  }
+  return { error: null, column: column };
+}
+
+// DOEL-140: delen van geselecteerde gehelen die zelf niet in de selectie zitten.
+function unselectedPartsOf(codes, details) {
+  const selected = new Set(codes);
+  return Object.keys(details).filter((c) => details[c].partOf && selected.has(details[c].partOf) && !selected.has(c));
+}
+
 function moveAfterOptionsHtml(codes, details, selfCode) {
   const others = (codes || []).filter((c) => c !== selfCode);
   const selfIndex = (codes || []).indexOf(selfCode);
@@ -11312,6 +11831,7 @@ function buildColumnsHtml(details, columns) {
     const fontSize = col.nodeFontSize || 8;
     const nodeHtml = (d) =>
       '<div class="node" data-id="' + escapeHtml(d.code) + '" data-group="' + escapeHtml(d.type) +
+      (d.partOfCode ? '" data-part-of="' + escapeHtml(d.partOfCode) : '') +
       '" style="background:' + (aliasColor[d.type] || col.color) +
       '; color:#FFFFFF; font-size:' + fontSize + 'px;">' + nodeInnerHtml(col, idx, columns.length, d) + '</div>';
     // DOEL-136: eerst het basistype, daarna elke alias in de volgorde van
@@ -11321,12 +11841,25 @@ function buildColumnsHtml(details, columns) {
     // vóór DOEL-136. Lege groepen krijgen geen label (en dus geen ruimte); welke
     // labels zichtbaar zijn na filters/verbergen regelt updateGroupLabels().
     const groupOrder = [col.typeName].concat((col.aliases || []).map((a) => a.typeName));
+    // DOEL-140: een samengesteld element staat als kader in de groep van het
+    // type van het geheel; zijn delen (ongeacht hun eigen type) staan erin.
+    const partsOf = composedPartsOf(byCol[col.typeName]);
     const nodesHtml = groupOrder.map((typeName, gi) => {
-      const members = byCol[col.typeName].filter((d) => d.type === typeName);
+      const members = byCol[col.typeName].filter((d) => d.type === typeName && !partsOf.isPart[d.code]);
       if (!members.length) return '';
       const label = gi === 0 ? '' :
         '<div class="col-group-label" data-group="' + escapeHtml(typeName) + '">' + escapeHtml(typeName) + '</div>';
-      return label + members.map(nodeHtml).join('');
+      return label + members.map((d) => {
+        const parts = partsOf.parts[d.code];
+        if (!parts) return nodeHtml(d);
+        return '<div class="node-frame" data-whole="' + escapeHtml(d.code) + '" data-group="' + escapeHtml(d.type) + '">' +
+          '<button type="button" class="frame-toggle" data-whole="' + escapeHtml(d.code) + '" title="Delen inklappen" aria-label="Delen van ' +
+            escapeHtml(d.code) + ' in- of uitklappen" aria-expanded="true">&#9662;</button>' +
+          nodeHtml(d) +
+          '<div class="frame-count">' + escapeHtml(partsCountText(parts.length)) + '</div>' +
+          '<div class="frame-parts">' + parts.map((p) => nodeHtml(Object.assign({}, p, { partOfCode: d.code }))).join('') + '</div>' +
+          '</div>';
+      }).join('');
     }).join('');
     const narrowCls = col.isNarrow ? ' narrow' : '';
     return '<div class="column' + narrowCls + '" data-key="' + escapeHtml(col.typeName) + '" data-order="' + idx + '">' +
@@ -11336,29 +11869,97 @@ function buildColumnsHtml(details, columns) {
   }).join('');
 }
 
+// DOEL-140: welke elementen van één kolom zijn een geheel met delen, en
+// welke zijn een deel? Alleen koppelingen binnen dezelfde kolom tellen (de
+// server dwingt dat af; een oud of geknutseld export-bestand niet). Delen
+// staan in de volgorde van de boom (sort_order, daarna code).
+function composedPartsOf(columnDetails) {
+  const inColumn = {};
+  columnDetails.forEach((d) => { inColumn[d.code] = d; });
+  const parts = {};
+  const isPart = {};
+  columnDetails.forEach((d) => {
+    const whole = d.partOf && inColumn[d.partOf];
+    if (!whole || whole.partOf || d.code === d.partOf) return;
+    (parts[whole.code] = parts[whole.code] || []).push(d);
+    isPart[d.code] = true;
+  });
+  return { parts, isPart };
+}
+
+function partsCountText(n) {
+  return n === 1 ? '1 deel' : n + ' delen';
+}
+
 // DOEL-136: een aliaslabel is alleen zichtbaar als er in zijn groep minstens
 // één zichtbaar vak staat (filters, zoeken en focus verbergen vakken met
 // .filter-hidden/.node-hidden). Het eerste zichtbare label van een kolom krijgt
 // .group-first: staat er boven hem geen zichtbaar vak, dan vervalt de extra
 // ruimte erboven. Wordt vóór elke meting in drawEdges() aangeroepen, zodat de
-// relatielijnen op de definitieve posities rekenen.
+// relatielijnen op de definitieve posities rekenen. Een groep loopt van zijn
+// label tot het volgende label; een kader (DOEL-140) telt als zichtbaar als er
+// iets in zichtbaar is.
 function isNodeShown(node) {
   return !node.classList.contains('filter-hidden') && !node.classList.contains('node-hidden');
 }
+function isChildShown(child) {
+  if (child.classList.contains('node')) return isNodeShown(child);
+  if (child.classList.contains('node-frame')) return !child.classList.contains('frame-empty');
+  return false;
+}
 function updateGroupLabels(root) {
   root.querySelectorAll('.col-nodes').forEach((wrap) => {
-    let seenVisibleNode = false;
-    Array.from(wrap.children).forEach((child) => {
-      if (child.classList.contains('col-group-label')) {
-        const group = child.dataset.group;
-        const any = Array.from(wrap.querySelectorAll('.node')).some((n) => n.dataset.group === group && isNodeShown(n));
-        child.classList.toggle('group-empty', !any);
-        child.classList.toggle('group-first', any && !seenVisibleNode);
-      } else if (child.classList.contains('node') && isNodeShown(child)) {
-        seenVisibleNode = true;
+    const children = Array.from(wrap.children);
+    let seenVisible = false;
+    children.forEach((child, i) => {
+      if (!child.classList.contains('col-group-label')) {
+        if (isChildShown(child)) seenVisible = true;
+        return;
       }
+      let any = false;
+      for (let j = i + 1; j < children.length && !children[j].classList.contains('col-group-label'); j++) {
+        if (isChildShown(children[j])) { any = true; break; }
+      }
+      child.classList.toggle('group-empty', !any);
+      child.classList.toggle('group-first', any && !seenVisible);
     });
   });
+}
+
+// DOEL-140: zichtbaarheid van kaders na filters, zoeken, focus en dimmen.
+// - Voldoet een deel en het geheel niet, dan blijft de kop van het geheel
+//   staan als context (.frame-context: zichtbaar maar gedempt; zijn eigen
+//   relaties tekent drawEdges() niet, want hij heeft nog filter-hidden).
+// - Is er niets in het kader zichtbaar, dan verdwijnt het hele kader.
+// - Ingeklapt: de delen zijn verborgen, het kader toont "n delen".
+function reconcileFrames(root, collapsed) {
+  root.querySelectorAll('.node-frame').forEach((frame) => {
+    const whole = frame.querySelector(':scope > .node');
+    const parts = Array.from(frame.querySelectorAll('.frame-parts > .node'));
+    const isCollapsed = !!(collapsed && collapsed.has(frame.dataset.whole));
+    frame.classList.toggle('collapsed', isCollapsed);
+    const toggle = frame.querySelector('.frame-toggle');
+    if (toggle) {
+      toggle.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
+      toggle.innerHTML = isCollapsed ? '&#9656;' : '&#9662;';
+      toggle.title = isCollapsed ? 'Delen uitklappen' : 'Delen inklappen';
+    }
+    const anyPart = parts.some(isNodeShown);
+    const anyPartLit = parts.some((p) => isNodeShown(p) && !p.classList.contains('dimmed'));
+    const wholeShown = whole && isNodeShown(whole);
+    if (whole) {
+      whole.classList.toggle('frame-context', (!wholeShown && anyPart) || (whole.classList.contains('dimmed') && anyPartLit));
+    }
+    frame.classList.toggle('frame-empty', !wholeShown && !anyPart);
+  });
+}
+
+// DOEL-140: op welk zichtbaar vak sluit een lijn van dit element aan? Het
+// eigen vak, of bij een ingeklapt kader het vak van het geheel.
+function edgeAnchorId(id, details, collapsed) {
+  const d = details[id];
+  if (d && d.partOf && collapsed && collapsed.has(d.partOf)) return d.partOf;
+  return id;
 }
 
 function buildLegendHtml(columns) {
@@ -11406,6 +12007,8 @@ function adaptTreeResponse(tree) {
     DETAILS[el.code] = {
       code: el.code, type: el.type, name: el.name, desc: el.description || '',
       parent: el.parent_text || '', kpi: el.kpi || '', taakveld: el.taakveld || '', subtaakveld: el.subtaakveld || '',
+      // DOEL-140: code van het geheel als dit een deelelement is.
+      partOf: el.part_of || null,
     };
   });
 
