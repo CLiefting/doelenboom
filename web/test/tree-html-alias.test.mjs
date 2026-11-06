@@ -33,6 +33,8 @@ function loadHelpers() {
   // eslint-disable-next-line no-new-func
   return new Function(
     `${grab('escapeHtml')}\n${grab('nodeInnerHtml')}\n${grab('buildColumnsHtml')}\n` +
+      // DOEL-140: buildColumnsHtml tekent ook kaders.
+      `${grab('composedPartsOf')}\n${grab('partsCountText')}\n` +
       'return { escapeHtml, nodeInnerHtml, buildColumnsHtml };'
   )();
 }

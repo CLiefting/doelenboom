@@ -230,7 +230,9 @@ describe('DOEL-81/82 A03: namen, codes en waarden worden ge-escaped', () => {
     const code = bulkDom.split('\n').filter((line) => !/^\s*\/\//.test(line)).join('\n');
     const assignments = code.match(/\.innerHTML = [^\n]*/g) || [];
     assert.ok(assignments.length >= 4);
-    assignments.forEach((a) => assert.match(a, /bulkLinkRowsHtml\(|bulkDeleteListHtml\(|bulkAttributeRowsHtml\(|typeOptionsHtml|bulkEditAttrDefs\.length/, a));
+    // DOEL-140: ook de keuzelijsten van "Samenvoegen tot…" (composeWholeOptionsHtml/
+    // composeTypeOptionsHtml, getest in tree-html-composite.test.mjs).
+    assignments.forEach((a) => assert.match(a, /bulkLinkRowsHtml\(|bulkDeleteListHtml\(|bulkAttributeRowsHtml\(|typeOptionsHtml|bulkEditAttrDefs\.length|composeWholeOptionsHtml\(|composeTypeOptionsHtml\(/, a));
     assert.match(code, /bulkDeleteSummary\.textContent = bulkDeleteSummaryText\(/);
     assert.doesNotMatch(code, /insertAdjacentHTML|outerHTML|document\.write|eval\(/);
     const html = extract(/<div class="element-modal-backdrop" id="bulk-edit-modal-backdrop">[\s\S]*?id="bulk-delete-ok"[^\n]*/, 'dialoog-HTML')[0];

@@ -32,8 +32,14 @@ export async function fetchTree(doelenboomId: string) {
   }
 
   const elementsResult = await pool.query(
-    `select code, type, name, description, parent_text, kpi, taakveld, subtaakveld, sort_order
-     from elements where doelenboom_id = $1 order by sort_order, code`,
+    // DOEL-140: part_of = code van het geheel als dit element een deelelement
+    // is (element_parts), anders null.
+    `select e.code, e.type, e.name, e.description, e.parent_text, e.kpi, e.taakveld, e.subtaakveld, e.sort_order,
+            w.code as part_of
+     from elements e
+     left join element_parts ep on ep.part_element_id = e.id
+     left join elements w on w.id = ep.whole_element_id
+     where e.doelenboom_id = $1 order by e.sort_order, e.code`,
     [doelenboomId]
   );
 

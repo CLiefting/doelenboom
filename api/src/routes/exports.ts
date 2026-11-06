@@ -274,6 +274,8 @@ exportsRouter.post('/doelenbomen/:id/export-pptx', requireTenantRoleForDoelenboo
       kpi: str(el.kpi),
       taakveld: str(el.taakveld),
       subtaakveld: str(el.subtaakveld),
+      // DOEL-140: code van het geheel (samengesteld element) of null.
+      partOf: el.part_of == null ? null : str(el.part_of),
     })),
     edges: tree.edges.map((e) => ({ source: e.source, target: e.target, weight: e.weight })),
     tags: (tree.tags as Array<Record<string, unknown>>).map((t) => ({ code: str(t.code), name: str(t.name) })),

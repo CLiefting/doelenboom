@@ -77,6 +77,8 @@ async function seedSource(slug: string) {
        ($1, $2, $3, 'primair', 'a-b'), ($1, $3, $4, 'ondersteunend', ''), ($1, $3, $5, null, '')`,
     [boom.id, el.A1, el.B1, el.P1, el.P2]
   );
+  // DOEL-140: P1 is deel van P2 — het deel staat in sort_order vóór zijn geheel.
+  await q(`insert into element_parts (doelenboom_id, whole_element_id, part_element_id) values ($1, $2, $3)`, [boom.id, el.P2, el.P1]);
   const tags = await q(`insert into tags (doelenboom_id, code, name) values ($1, 'T1', 'Tag één'), ($1, 'T2', 'Tag twee') returning id`, [boom.id]);
   const orgs = await q(`insert into org_units (doelenboom_id, code, name) values ($1, 'O1', 'Afdeling') returning id`, [boom.id]);
   await q(`insert into element_tags (element_id, tag_id, toelichting) values ($1, $2, 'x'), ($3, $4, '')`, [el.A1, tags[0].id, el.P1, tags[1].id]);
@@ -130,6 +132,10 @@ async function fingerprint(boomId: number) {
       `select s.code as van, t.code as naar, e.weight, e.toelichting from edges e
        join elements s on s.id = e.source_element_id join elements t on t.id = e.target_element_id
        where e.doelenboom_id = $1 order by 1, 2`),
+    parts: await one(
+      `select w.code as geheel, p.code as deel from element_parts ep
+       join elements w on w.id = ep.whole_element_id join elements p on p.id = ep.part_element_id
+       where ep.doelenboom_id = $1 order by 2`),
     tags: await one(`select code, name from tags where doelenboom_id = $1 order by code`),
     orgs: await one(`select code, name from org_units where doelenboom_id = $1 order by code`),
     elementTags: await one(

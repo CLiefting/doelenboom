@@ -305,6 +305,44 @@ create index if not exists idx_edges_doelenboom on edges(doelenboom_id);
 create index if not exists idx_edges_source on edges(source_element_id);
 create index if not exists idx_edges_target on edges(target_element_id);
 
+-- Samengestelde elementen (DOEL-140, gespiegeld uit
+-- db/migrations/0054_element_parts.sql — zie daar de toelichting): een
+-- geheel met een of meer deelelementen in dezelfde kolom, één niveau diep,
+-- een element hoort bij hooguit één geheel.
+create table if not exists element_parts (
+  id bigserial primary key,
+  doelenboom_id bigint not null references doelenbomen(id) on delete cascade,
+  whole_element_id bigint not null references elements(id) on delete cascade,
+  part_element_id bigint not null references elements(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  unique (part_element_id),
+  check (whole_element_id <> part_element_id)
+);
+create index if not exists idx_element_parts_whole on element_parts(whole_element_id);
+create index if not exists idx_element_parts_doelenboom on element_parts(doelenboom_id);
+
+create or replace function element_parts_guard() returns trigger language plpgsql as $$
+begin
+  if (select doelenboom_id from elements where id = new.whole_element_id) is distinct from new.doelenboom_id
+     or (select doelenboom_id from elements where id = new.part_element_id) is distinct from new.doelenboom_id then
+    raise exception 'element_parts: geheel en deel horen niet bij dezelfde doelenboom'
+      using errcode = '23514';
+  end if;
+  if exists (select 1 from element_parts where part_element_id = new.whole_element_id and id is distinct from new.id) then
+    raise exception 'element_parts: het geheel is zelf een deelelement (maximaal één niveau)'
+      using errcode = '23514';
+  end if;
+  if exists (select 1 from element_parts where whole_element_id = new.part_element_id and id is distinct from new.id) then
+    raise exception 'element_parts: het deelelement heeft zelf delen (maximaal één niveau)'
+      using errcode = '23514';
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists element_parts_guard on element_parts;
+create trigger element_parts_guard before insert or update on element_parts
+  for each row execute function element_parts_guard();
+
 -- Doelenboom-sjablonen (zie db/migrations/0014_doelenboom_templates.sql):
 -- een herbruikbare momentopname van een kolomconfiguratie + voorbeeldelementen
 -- + hun onderlinge relaties, waarmee een NIEUWE doelenboom snel met een
@@ -817,7 +855,10 @@ create table if not exists audit_log (
     'app_settings_updated',
     -- DOEL-128: sysadmin liet het volledige kwetsbaarhedenoverzicht naar
     -- zichzelf mailen (detail: alleen aantallen).
-    'dependency_vulnerability_overview_sent'
+    'dependency_vulnerability_overview_sent',
+    -- DOEL-140: samengestelde elementen samengevoegd, losgemaakt of een geheel
+    -- verwijderd (detail: alleen codes en de gekozen actie).
+    'element_parts_composed', 'element_parts_detached', 'element_whole_deleted'
   )),
   user_id bigint references users(id) on delete set null,
   tenant_id bigint references tenants(id) on delete set null,
@@ -1643,5 +1684,6 @@ insert into schema_migrations (filename, method) values
   ('0050_app_settings_idle_timeout.sql', 'init'),
   ('0051_schema_migrations.sql', 'init'),
   ('0052_program_selections.sql', 'init'),
-  ('0053_audit_vulnerability_overview_sent.sql', 'init')
+  ('0053_audit_vulnerability_overview_sent.sql', 'init'),
+  ('0054_element_parts.sql', 'init')
 on conflict do nothing;

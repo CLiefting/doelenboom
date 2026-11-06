@@ -16,6 +16,18 @@ type Release = {
 
 const RELEASES: Release[] = [
   {
+    // DOEL-136, DOEL-140 — datum bij de release bijwerken
+    version: '4.6.0',
+    date: '6 november 2026',
+    title: 'Samengestelde elementen en ordening per alias in een kolom',
+    items: [
+      'Een element kan nu bestaan uit deelelementen in dezelfde kolom. Het geheel staat in de boom als kader met de delen erin; geheel en delen houden hun eigen relaties, kenmerken en status. Je maakt er een via "Onderdeel van" in het bewerkvenster, of door elementen te selecteren en "Samenvoegen tot…" te kiezen.',
+      'Een kader kun je inklappen tot één vak met het aantal delen; de lijnen van de delen lopen dan naar het geheel. Bij het verwijderen van een geheel kies je of de delen blijven staan of mee verwijderd worden (dat laatste alleen als beheerder).',
+      'Heeft een kolom aliassen, dan staan de elementen nu per type bij elkaar: eerst het basistype, daarna elke alias met een klein label erboven.',
+      'De PowerPoint- en Excel-export (nieuw formaat) nemen samengestelde elementen mee; in Excel staat de kolom "Onderdeel van".',
+    ],
+  },
+  {
     // DOEL-133
     version: '4.5.0',
     date: '2 november 2026',

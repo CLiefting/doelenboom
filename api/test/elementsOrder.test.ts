@@ -150,13 +150,59 @@ describe('volgorde van elementen (DOEL-84 invoegen, DOEL-85 kolom sorteren, DOEL
     }
     assert.equal((await add('P2', 'Project 1', adminToken, id)).status, 201);
     assert.deepEqual(await order(['Project', 'Project 1'], id), ['P1', 'P2', 'P3']);
-    // Sorteren en verplaatsen rekenen de alias ook tot de kolom.
+    // DOEL-136: verplaatsen gebeurt binnen de groep (zelfde type). "Bovenaan"
+    // is dus bovenaan de groep "Project 1", niet boven het basistype P1.
     assert.equal((await move('P3', { after: null }, editorToken, id)).status, 200);
-    assert.deepEqual(await order(['Project', 'Project 1'], id), ['P3', 'P1', 'P2']);
-    assert.deepEqual((await sortColumn({ column: 'Project', by: 'code' }, adminToken, id)).body, { sorted: 3, moved: 3 });
+    assert.deepEqual(await order(['Project', 'Project 1'], id), ['P1', 'P3', 'P2']);
+    // Sorteren rekent de alias wel tot de kolom (de boom groepeert bij het tonen).
+    assert.deepEqual((await sortColumn({ column: 'Project', by: 'code' }, adminToken, id)).body, { sorted: 3, moved: 2 });
     assert.deepEqual(await order(['Project', 'Project 1'], id), ['P1', 'P2', 'P3']);
     // De aliasnaam zelf is geen kolom.
     assert.equal((await sortColumn({ column: 'Project 1', by: 'code' }, adminToken, id)).status, 400);
+  });
+
+  it('DOEL-136: verplaatsen blijft binnen de groep van het eigen type', async () => {
+    const boom = await req('POST', `/api/tenants/${tenantId}/doelenbomen`, { token: adminToken, body: { slug: 'groep', name: 'Groepboom' } });
+    assert.equal(boom.status, 201);
+    const id = boom.body.id as number;
+    await wipe(id);
+    const col = { subtitle: '', color: '#3E6FA6', isNarrow: false, nodeFontSize: null, relationLabelToNext: null };
+    const put = await req('PUT', `${base(id)}/column-config`, {
+      token: adminToken,
+      body: { columns: [
+        { ...col, typeName: 'Project', title: 'Project', isProjectRole: true, aliases: [{ typeName: 'Voorziening', color: null }] },
+        { ...col, typeName: 'Capability', title: 'Capability', isProjectRole: false },
+      ] },
+    });
+    assert.equal(put.status, 200);
+    // Bewust door elkaar aangemaakt: in sort_order lopen de typen gemengd.
+    for (const [code, type] of [['P1', 'Project'], ['V1', 'Voorziening'], ['P2', 'Project'], ['V2', 'Voorziening']]) {
+      assert.equal((await add(code, type, adminToken, id)).status, 201);
+    }
+    const groups = async () => ({
+      project: await order(['Project'], id),
+      voorziening: await order(['Voorziening'], id),
+    });
+
+    // Na een element van een ander type plaatsen: geweigerd, niets gewijzigd.
+    const beforeOrders = await sortOrders(id);
+    const cross = await move('V1', { after: 'P1' }, editorToken, id);
+    assert.equal(cross.status, 400);
+    assert.match(cross.body.error, /ander type/);
+    assert.deepEqual(await sortOrders(id), beforeOrders);
+
+    // Omhoog/omlaag stapt over elementen van een ander type heen.
+    assert.equal((await move('V2', { direction: 'up' }, editorToken, id)).status, 200);
+    assert.deepEqual(await groups(), { project: ['P1', 'P2'], voorziening: ['V2', 'V1'] });
+    const atTop = await move('V2', { direction: 'up' }, editorToken, id);
+    assert.equal(atTop.status, 200);
+    assert.equal(atTop.body.moved, false, 'bovenaan de groep: geen verplaatsing');
+    assert.deepEqual(atTop.body, { moved: false, position: 1, of: 2 });
+
+    // Na een element van hetzelfde type: toegestaan.
+    assert.equal((await move('V2', { after: 'V1' }, editorToken, id)).status, 200);
+    assert.deepEqual(await groups(), { project: ['P1', 'P2'], voorziening: ['V1', 'V2'] });
+    await assertContiguous(id);
   });
 
   it('DOEL-84: een expliciete sortOrder wordt opgeslagen zoals hij is; een dubbele code geeft 409 en wijzigt niets', async () => {

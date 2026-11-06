@@ -479,3 +479,45 @@ class TestProjectstatus:
         _, _, parsed = parse_workbook(content)
         assert parsed['projectStatus']['P1']['projectstatus'] == 'On-hold'
         assert parsed['projectStatus']['P1']['rag'] == 'Groen'
+
+
+class TestOnderdeelVan:
+    """DOEL-140: kolom "Onderdeel van" in de Referentietabel (nieuw formaat)."""
+
+    def row(self, code, part_of='', type_='Capability'):
+        return [code, type_, f'Naam {code}', '', '', '', '', '', 'Ja', part_of]
+
+    def test_geldige_koppeling_wordt_partOf(self):
+        status, report, parsed = parse_workbook(nieuw_workbook(ref_rows=[self.row('C2', 'C1'), self.row('C1')]))
+        assert status != 'failed'
+        by_code = {e['code']: e for e in parsed['elements']}
+        assert by_code['C2']['partOf'] == 'C1'
+        assert 'partOf' not in by_code['C1']
+
+    def test_ongeldige_koppelingen_worden_weggelaten_met_waarschuwing(self):
+        status, report, parsed = parse_workbook(nieuw_workbook(ref_rows=[
+            self.row('C1'),
+            self.row('C2', 'C2'),         # zichzelf
+            self.row('C3', 'ONBEKEND'),   # bestaat niet
+            self.row('C4', 'C1'),
+            self.row('C5', 'C4'),         # C4 is al deel -> C4 heeft zelf delen
+        ]))
+        by_code = {e['code']: e for e in parsed['elements']}
+        assert 'partOf' not in by_code['C2'] and 'partOf' not in by_code['C3']
+        assert by_code['C5']['partOf'] == 'C4'
+        assert 'partOf' not in by_code['C4'], 'een element met eigen delen kan geen deel zijn'
+        joined = ' '.join(report['warnings'])
+        assert 'C2' in joined and 'zichzelf' in joined
+        assert 'ONBEKEND' in joined
+        assert 'C4' in joined and 'één niveau' in joined
+        assert len(parsed['elements']) == 5, 'de elementen zelf blijven allemaal'
+
+    def test_a03_formule_achtige_waarde_is_gewone_tekst(self):
+        status, report, parsed = parse_workbook(nieuw_workbook(ref_rows=[self.row('C1', '=HYPERLINK("x")')]))
+        assert 'partOf' not in parsed['elements'][0]
+
+    def test_partOfColumn_meldt_of_de_kolom_er_staat(self):
+        _, _, met = parse_workbook(nieuw_workbook(ref_rows=[self.row('C1')]))
+        assert met['partOfColumn'] is True
+        _, _, zonder = parse_workbook(oud_workbook(ref_rows=[['P1', 'Project', 'Project 1', '', '', '', '', '']]))
+        assert zonder['partOfColumn'] is False

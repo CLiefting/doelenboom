@@ -342,6 +342,9 @@ class _Model:
                 'subtitle': _clean(c.get('subtitle')),
                 'color': _rgb(c.get('color')),
                 'aliasColors': alias_colors,
+                # DOEL-136: groepsvolgorde in de kolom (basistype, dan de
+                # aliassen zoals in de kolomconfiguratie).
+                'groupOrder': [name] + [_clean(a.get('typeName')) for a in aliases],
                 'relationLabel': _clean(c.get('relationLabelToNext')),
                 'originalIndex': original_index,
                 'slides': name in slide_wanted,
@@ -390,9 +393,11 @@ class _Model:
                 'kpi': _clean(raw.get('kpi')),
                 'taakveld': _clean(raw.get('taakveld')),
                 'subtaakveld': _clean(raw.get('subtaakveld')),
+                'partOf': _clean(raw.get('partOf')) or None,
             }
             self.columns[col]['elements'].append(code)
 
+        self._group_columns()
         self._visible_edges(data.get('edges') or [], hidden_codes)
         picks_opt = options.get('filterPicks')
         if self.filtered and isinstance(picks_opt, list):
@@ -420,6 +425,56 @@ class _Model:
                 relatietype = _clean(rel.get('relatietype'))
                 orgs.append(f'{name} ({relatietype})' if relatietype else name)
             el['orgs'] = orgs
+
+    def _link_parts(self):
+        """DOEL-140: geldige geheel-deelkoppelingen tussen getoonde elementen:
+        zelfde kolom, één niveau, niet naar zichzelf. Een deel waarvan het
+        geheel niet getoond wordt (verborgen kolom, Boomfilter) is hier een
+        gewoon element."""
+        self.whole_of: dict[str, str] = {}
+        self.parts_of: dict[str, list[str]] = {}
+        for code, el in self.elements.items():
+            whole = el.get('partOf')
+            if not whole or whole == code or whole not in self.elements:
+                continue
+            if self.elements[whole]['col'] != el['col'] or self.elements[whole].get('partOf') in self.elements:
+                continue
+            self.whole_of[code] = whole
+        for code in sorted(self.whole_of, key=lambda c: self.order[c]):
+            self.parts_of.setdefault(self.whole_of[code], []).append(code)
+
+    def _group_columns(self):
+        """DOEL-136: binnen elke kolom eerst het basistype, dan elke alias in
+        configuratievolgorde; binnen een groep blijft de boomvolgorde. De
+        volgnummers in self.order worden binnen de kolom opnieuw uitgedeeld
+        (dezelfde getallen, nu in groepsvolgorde), zodat sorteren op volgorde
+        ook de groepen volgt en de volgorde tussen kolommen gelijk blijft."""
+        self._link_parts()
+        for col in self.columns:
+            rank = {t: i for i, t in enumerate(col['groupOrder'])}
+            codes = col['elements']
+            heads = [c for c in codes if c not in self.whole_of]
+            heads.sort(key=lambda c: (rank.get(self.elements[c]['type'], len(rank)), self.order[c]))
+            # DOEL-140: de delen direct na hun geheel (zoals in het kader).
+            grouped = []
+            for c in heads:
+                grouped.append(c)
+                grouped.extend(self.parts_of.get(c, []))
+            slots = sorted(self.order[c] for c in codes)
+            for code, slot in zip(grouped, slots):
+                self.order[code] = slot
+            col['elements'] = grouped
+
+    def groups_of(self, col: dict[str, Any]) -> list[tuple[str, list[str]]]:
+        """(typenaam, codes) per niet-lege groep van een kolom, in volgorde."""
+        out = []
+        for type_name in col['groupOrder']:
+            # DOEL-140: een deel hoort bij de groep van zijn geheel.
+            codes = [c for c in col['elements']
+                     if self.elements[self.whole_of.get(c, c)]['type'] == type_name]
+            if codes:
+                out.append((type_name, codes))
+        return out
 
     def _visible_edges(self, raw_edges: list[Any], hidden_codes: set[str]):
         """Bouwt parents/children tussen zichtbare elementen. Een relatie
@@ -527,6 +582,13 @@ class _Model:
     def sibling_nav(self, code: str) -> _SiblingNav:
         """Vorige en volgende broertje: elementen in dezelfde kolom met
         dezelfde primaire ouder, in boomvolgorde."""
+        # DOEL-140: de broertjes van een deel zijn de delen van hetzelfde geheel.
+        whole = self.whole_of.get(code)
+        if whole is not None:
+            siblings = self.parts_of[whole]
+            i = siblings.index(code)
+            return _SiblingNav(siblings[i - 1] if i > 0 else None,
+                               siblings[i + 1] if i + 1 < len(siblings) else None, whole, i + 1, len(siblings))
         parent = self.main_parent(code)
         if parent is None:
             return _SiblingNav(None, None, None)
@@ -733,6 +795,10 @@ OVERVIEW_MAX_SLOT = Inches(0.5)
 OVERVIEW_MAX_FONT = 9.0
 
 
+# DOEL-140: inspringing van een deel onder zijn geheel op de overzichtsslide.
+OVERVIEW_PART_INDENT = Inches(0.12)
+
+
 def _overview_gap(n_cols: int) -> int:
     """Ruimte tussen de kolommen: genoeg om de lijnen te kunnen volgen, maar
     smaller naarmate er meer kolommen naast elkaar moeten."""
@@ -770,27 +836,58 @@ def _slide_overview(prs, model: _Model, meta: dict[str, Any], page: int, links: 
     # Posities: per kolom de elementen in boomvolgorde, verticaal gecentreerd.
     pos: dict[str, tuple[int, int, int, float]] = {}
     more: dict[int, tuple[int, int, int, float, int]] = {}
+    group_labels: list[tuple[int, int, int, float, str]] = []
     for index, col in enumerate(model.columns):
-        codes = col['elements']
+        # DOEL-136: rijen = per groep een label (niet bij het basistype) en
+        # daarna de vakken van die groep; een label neemt één rij in.
+        rows: list[tuple[str, str]] = []
+        for type_name, codes_in_group in model.groups_of(col):
+            if type_name != col['typeName']:
+                rows.append(('label', type_name))
+            # DOEL-140: een deel staat ingesprongen onder zijn geheel.
+            rows.extend(('part' if c in model.whole_of else 'el', c) for c in codes_in_group)
         hidden = 0
-        if len(codes) > OVERVIEW_MAX_ROWS:
-            hidden = len(codes) - (OVERVIEW_MAX_ROWS - 1)
-            codes = codes[:OVERVIEW_MAX_ROWS - 1]
-        count = len(codes) + (1 if hidden else 0)
+        if len(rows) > OVERVIEW_MAX_ROWS:
+            kept = rows[:OVERVIEW_MAX_ROWS - 1]
+            if kept and kept[-1][0] == 'label':
+                kept = kept[:-1]
+            hidden = sum(1 for kind, _ in rows[len(kept):] if kind == 'el')
+            rows = kept
+        count = len(rows) + (1 if hidden else 0)
         slot_h, node_h, size = _overview_scale(count)
         left = int(MARGIN + index * (col_w + gap))
         start = int(OVERVIEW_NODES_TOP + (area_h - count * slot_h) / 2)
-        for i, code in enumerate(codes):
-            pos[code] = (left, start + i * slot_h, node_h, size)
+        for i, (kind, value) in enumerate(rows):
+            if kind == 'el':
+                pos[value] = (left, start + i * slot_h, node_h, size)
+            elif kind == 'part':
+                pos[value] = (left + OVERVIEW_PART_INDENT, start + i * slot_h, node_h, size)
+            else:
+                group_labels.append((left, start + i * slot_h, node_h, size, value))
         if hidden:
-            more[index] = (left, start + len(codes) * slot_h, node_h, size, hidden)
+            more[index] = (left, start + len(rows) * slot_h, node_h, size, hidden)
+
+    def node_w(code: str) -> int:
+        return col_w - OVERVIEW_PART_INDENT if code in model.whole_of else col_w
+
+    # DOEL-140: kader om een geheel en zijn delen (onder de lijnen en vakken).
+    for whole, parts in model.parts_of.items():
+        shown = [c for c in [whole] + parts if c in pos]
+        if whole not in pos or len(shown) < 2:
+            continue
+        left, top, _, _ = pos[whole]
+        last = pos[shown[-1]]
+        pad = Inches(0.03)
+        frame = _rounded(slide, left - pad, top - pad, col_w + 2 * pad, last[1] + last[2] - top + 2 * pad,
+                         _tint(model.color_of(model.elements[whole]), 0.92), line=DARK, line_width=0.75)
+        frame.name = f'overzicht-kader {whole}'
 
     # Eerst de lijnen, zodat de vakken er bovenop liggen. Primaire relaties
     # eerst: die blijven staan als de bovengrens wordt bereikt.
     relations = []
     for child in pos:
         for parent, primary in model.parents[child].items():
-            if parent in pos and pos[parent][0] != pos[child][0]:
+            if parent in pos and model.elements[parent]['col'] != model.elements[child]['col']:
                 relations.append((not primary, model.order.get(child, 0), model.order.get(parent, 0), child, parent))
     relations.sort()
     skipped = max(0, len(relations) - OVERVIEW_MAX_LINES)
@@ -798,7 +895,8 @@ def _slide_overview(prs, model: _Model, meta: dict[str, Any], page: int, links: 
     line_width = 1.0 if len(relations) <= 60 else (0.75 if len(relations) <= 250 else 0.5)
     for supporting, _, _, child, parent in relations[:OVERVIEW_MAX_LINES]:
         (cl, ct, ch, _), (pl, pt, ph, _) = pos[child], pos[parent]
-        x1, x2 = (cl + col_w, pl) if cl < pl else (cl, pl + col_w)
+        cw, pw = node_w(child), node_w(parent)
+        x1, x2 = (cl + cw, pl) if cl < pl else (cl, pl + pw)
         line = slide.shapes.add_connector(MSO_CONNECTOR.STRAIGHT, x1, ct + ch // 2, x2, pt + ph // 2)
         line.line.color.rgb = LINE_COLOR
         line.line.width = Pt(line_width)
@@ -826,14 +924,18 @@ def _slide_overview(prs, model: _Model, meta: dict[str, Any], page: int, links: 
     for code, (left, top, node_h, size) in pos.items():
         el = model.elements[code]
         color = model.color_of(el)
-        node = _rounded(slide, left, top, col_w, node_h, _tint(color, 0.8), line=color,
+        node = _rounded(slide, left, top, node_w(code), node_h, _tint(color, 0.8), line=color,
                         line_width=0.75 if size >= 7 else 0.5)
         node.name = f'overzicht-element {code}'
-        label = _fit(f'{code} {el["name"]}'.strip(), col_w - Inches(0.08), node_h, size)
+        label = _fit(f'{code} {el["name"]}'.strip(), node_w(code) - Inches(0.08), node_h, size)
         _shape_text(node, label, size=size, color=DARK, margin=Inches(0.04))
         node.text_frame.margin_top = node.text_frame.margin_bottom = 0
         if links.add(node, code, _goto_tooltip(code, el['name'])):
             any_el_link = True
+    for left, top, node_h, size, type_name in group_labels:
+        box = _add_text(slide, left, top, col_w, node_h, _fit(type_name, col_w - Inches(0.04), node_h, size),
+                        size=size, color=MUTED, anchor=MSO_ANCHOR.BOTTOM)
+        box.name = f'overzicht-groep {type_name}'
     for index, (left, top, node_h, size, hidden) in more.items():
         node = _rounded(slide, left, top, col_w, node_h, None, line=LINE_COLOR, line_width=0.5, dashed=True)
         node.name = f'overzicht-meer {index + 1}'
@@ -1254,6 +1356,12 @@ def _element_blocks(model: _Model, el: dict[str, Any], title_truncated: bool):
 def _relation_sections(model: _Model, code: str) -> list[tuple[str, list[tuple[str, bool]]]]:
     """[(kopje, [(code, primair)])] voor boven- en onderliggend."""
     sections = []
+    # DOEL-140: samengesteld element — als klikbare blokjes, vóór de relaties.
+    if code in model.whole_of:
+        sections.append(('Onderdeel van', [(model.whole_of[code], True)]))
+    parts = model.parts_of.get(code)
+    if parts:
+        sections.append((f'Bestaat uit ({len(parts)})', [(p, True) for p in parts]))
     for label, related in (('bovenliggend', model.parents[code]), ('onderliggend', model.children[code])):
         if related:
             items = [(other, related[other]) for other in model.sorted_codes(related)]

@@ -514,6 +514,30 @@ class TestTotaleBoom:
         assert 'overzicht-element P2' in shape_names(slide)
         assert not any('P2' in n for n in shape_names(slide) if n.startswith('overzicht-relatie '))
 
+    def test_doel_136_kolom_gegroepeerd_per_type_met_label(self):
+        data = make_data()
+        data['columns'][2]['aliases'] = [{'typeName': 'Randvoorwaarde', 'color': None}]
+        # In boomvolgorde staat R1 vóór de benefits; getoond komt hij erna.
+        data['elements'].insert(0, el('R1', 'Randvoorwaarde'))
+        slide = self.overview(build(self.OPTIONS, data))
+        top = lambda name: self.shape(slide, name).top  # noqa: E731
+        label = self.shape(slide, 'overzicht-groep Randvoorwaarde')
+        assert top('overzicht-element B2') < top('overzicht-element B1') < label.top < top('overzicht-element R1')
+        assert 'Randvoorwaarde' in label.text_frame.text
+        # Het basistype krijgt geen label; een kolom zonder aliassen ook niet.
+        names = shape_names(slide)
+        assert [n for n in names if n.startswith('overzicht-groep ')] == ['overzicht-groep Randvoorwaarde']
+
+    def test_doel_136_groepsvolgorde_ook_in_het_model(self):
+        data = make_data()
+        data['columns'][2]['aliases'] = [{'typeName': 'Z-alias', 'color': None}, {'typeName': 'A-alias', 'color': None}]
+        data['elements'][:0] = [el('A1', 'A-alias'), el('Z1', 'Z-alias')]
+        model = _Model(data, {})
+        benefit = model.columns[2]
+        assert benefit['elements'] == ['B2', 'B1', 'Z1', 'A1']
+        assert model.sorted_codes(['A1', 'B1', 'Z1', 'B2']) == ['B2', 'B1', 'Z1', 'A1']
+        assert [t for t, _ in model.groups_of(benefit)] == ['Benefit', 'Z-alias', 'A-alias']
+
     def test_vak_in_kolomkleur_en_alias_in_eigen_kleur(self):
         data = make_data()
         data['columns'][2]['aliases'] = [{'typeName': 'Randvoorwaarde', 'color': '#111111'}]
@@ -1327,3 +1351,76 @@ class TestBroertjesInDeKeten:
         for m in re.finditer(r'name="broertje [^"]*"><a:hlinkClick ([^>]*)', xml):
             assert 'ppaction://hlinksldjump' in m.group(1)
         assert re.search(r'name="broertje volgende C3"><a:hlinkClick', xml)
+
+
+class TestSamengesteldeElementen:
+    """DOEL-140: een geheel met delen in dezelfde kolom. Op de totale boom een
+    kader met de delen ingesprongen eronder; op de elementslide "Onderdeel van"
+    en "Bestaat uit" als klikbare blokjes; de broertjes van een deel zijn de
+    delen van hetzelfde geheel."""
+    OPTIONS = {'slideColumns': ['Capability']}
+
+    def data(self):
+        data = make_data()
+        # C3 en C4 zijn delen van C1; C3 staat in boomvolgorde vóór zijn geheel.
+        data['elements'].insert(5, el('C3', 'Capability', 'Telefonisch', partOf='C1'))
+        data['elements'].append(el('C4', 'Capability', 'Chat', partOf='C1'))
+        return data
+
+    def slide_of(self, prs, code):
+        return next(s for s in prs.slides if f'{code} — ' in all_text(s) and 'VERVOLG' not in all_text(s))
+
+    def shape(self, slide, name):
+        return next(s for s in slide.shapes if s.name == name)
+
+    def test_model_koppelt_alleen_geldige_delen(self):
+        data = self.data()
+        data['elements'].append(el('C5', 'Capability', 'Genest', partOf='C3'))     # nesting
+        data['elements'].append(el('C6', 'Capability', 'Elders', partOf='B1'))     # andere kolom
+        data['elements'].append(el('C7', 'Capability', 'Weg', partOf='ONBEKEND'))  # onbekend geheel
+        data['elements'].append(el('C8', 'Capability', 'Zelf', partOf='C8'))       # zichzelf
+        model = _Model(data, {})
+        assert model.parts_of == {'C1': ['C3', 'C4']}
+        assert model.columns[1]['elements'][:3] == ['C1', 'C3', 'C4']
+        # Geheel in een verborgen kolom: het deel is een gewoon element.
+        hidden = _Model(data, {'visibleColumns': ['Project', 'Benefit', 'Doel', 'Missie']})
+        assert hidden.parts_of == {}
+
+    def test_totale_boom_toont_een_kader_met_ingesprongen_delen(self):
+        slide = build(self.OPTIONS, self.data()).slides[1]
+        frame = self.shape(slide, 'overzicht-kader C1')
+        whole = self.shape(slide, 'overzicht-element C1')
+        parts = [self.shape(slide, f'overzicht-element {c}') for c in ('C3', 'C4')]
+        assert whole.top < parts[0].top < parts[1].top
+        assert all(p.left > whole.left and p.width < whole.width for p in parts)
+        assert frame.top < whole.top and frame.top + frame.height > parts[1].top + parts[1].height
+        # Het kader ligt onder de vakken en lijnen (eerder in de z-volgorde).
+        names = shape_names(slide)
+        assert names.index('overzicht-kader C1') < names.index('overzicht-element C1')
+        assert not [n for n in names if n.startswith('overzicht-kader ') and n != 'overzicht-kader C1']
+
+    def test_elementslides_noemen_geheel_en_delen_als_klikbare_blokjes(self):
+        prs = build(self.OPTIONS, self.data())
+        whole = self.slide_of(prs, 'C1')
+        text = all_text(whole)
+        assert 'BESTAAT UIT (2)' in text.upper()
+        part = self.slide_of(prs, 'C3')
+        assert 'ONDERDEEL VAN' in all_text(part).upper()
+        links = [s for s in part.shapes if s._element.find('.//' + qn('a:hlinkClick')) is not None
+                 and s.click_action.action == PP_ACTION.NAMED_SLIDE
+                 and s.click_action.target_slide.slide_id == whole.slide_id]
+        assert links, 'het blokje met het geheel springt naar de slide van het geheel'
+
+    def test_broertjes_van_een_deel_zijn_de_delen_van_hetzelfde_geheel(self):
+        prs = build(self.OPTIONS, self.data())
+        part = self.slide_of(prs, 'C3')
+        nxt = next(s for s in part.shapes if s.name == 'volgende-knop')
+        assert nxt.click_action.target_slide.slide_id == self.slide_of(prs, 'C4').slide_id
+        prev = next(s for s in part.shapes if s.name == 'vorige-knop')
+        assert prev._element.find('.//' + qn('a:hlinkClick')) is None
+
+    def test_a03_vrije_tekst_in_een_deel_blijft_tekst(self):
+        data = self.data()
+        data['elements'].append(el('C9', 'Capability', '<img src=x onerror=alert(1)>', partOf='C1'))
+        prs = build(self.OPTIONS, data)
+        assert '<img src=x onerror=alert(1)>' in all_text(self.slide_of(prs, 'C9'))

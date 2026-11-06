@@ -14,6 +14,7 @@ import { logAuditEvent } from '../auditLog.js';
 import { applyTemplateToNewDoelenboom } from '../doelenboomTemplates.js';
 import { assertCanCreateBoom, incrementLifetimeTreesCreated, isLicenseExpired, LicenseLimitError } from '../license.js';
 import { sendServerError } from '../errors.js';
+import { copyElementParts } from '../elementParts.js';
 
 function isUniqueViolation(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { code?: string }).code === '23505';
@@ -510,6 +511,9 @@ doelenbomenRouter.post('/doelenbomen/:id/duplicate', requireSysadmin, async (req
         [newDoelenboomId, newSource, newTarget, e.weight, e.toelichting]
       );
     }
+
+    // DOEL-140: samengestelde elementen gaan mee.
+    await copyElementParts(client, req.params.id, newDoelenboomId, elementIdMap);
 
     const psResult = await client.query(
       `select element_id, projectstatus, rag, toelichting, gerapporteerd_op, cluster_ppt, updated_at, updated_by

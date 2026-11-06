@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { pool } from '../db.js';
 import { AuthedRequest, requireAuth } from '../auth.js';
-import { requireWritableDoelenboom, tenantIdForDoelenboom } from '../rbac.js';
+import { getEffectiveRoleForDoelenboom, requireWritableDoelenboom, tenantIdForDoelenboom } from '../rbac.js';
 import { ColumnDef, getColumnsForDoelenboom, allValidTypeNames, columnForTypeName } from '../columnConfig.js';
 import { attributesFromDb, findAttributesBrokenByColumns } from '../elementAttributes.js';
 import { applyElementValueChanges, validateElementValuesInput, ParsedValue } from '../elementAttributeValues.js';
@@ -9,6 +9,9 @@ import { CONTROLE_REGELS_MODULE } from '../controlRules.js';
 import { hasModule } from '../license.js';
 import { logAuditEvent } from '../auditLog.js';
 import { sendServerError } from '../errors.js';
+import {
+  detachAfterTypeChange, insertParts, isPartRuleViolation, partLinksFor, readPartAction, validateCompose,
+} from '../elementParts.js';
 
 // CRUD voor losse elementen (fase 1 van de CRUD-uitbreiding — zie ook de latere
 // fases voor tags/organisatieonderdelen en relaties). Dit bestaat naast, en is
@@ -78,6 +81,41 @@ function readElementBody(body: unknown, { requireCode = true }: { requireCode?: 
   };
 }
 
+// DOEL-140: "Onderdeel van" uit de body. undefined = niet meegegeven (niets
+// wijzigen), null of '' = losmaken, tekst = code van het geheel.
+function readPartOf(body: unknown): { error: string } | { partOf: string | null | undefined } {
+  const b = (body ?? {}) as Record<string, unknown>;
+  if (!Object.prototype.hasOwnProperty.call(b, 'partOf') || b.partOf === undefined) return { partOf: undefined };
+  if (b.partOf === null || b.partOf === '') return { partOf: null };
+  if (typeof b.partOf !== 'string' || !b.partOf.trim() || b.partOf.length > 200) return { error: 'Ongeldig geheel bij "Onderdeel van".' };
+  return { partOf: b.partOf.trim() };
+}
+
+// Zet (of wist) het geheel van één element binnen de transactie van de
+// aanroeper. Geeft een foutmelding of null.
+async function applyPartOf(
+  client: import('pg').PoolClient,
+  doelenboomId: string,
+  columns: ColumnDef[],
+  element: { id: number | string; code: string; type: string },
+  partOf: string | null
+): Promise<string | null> {
+  if (partOf === null) {
+    await client.query('delete from element_parts where part_element_id = $1', [element.id]);
+    return null;
+  }
+  const r = await client.query('select id, code, type from elements where doelenboom_id = $1 and code = $2 for update', [doelenboomId, partOf]);
+  if (!r.rows.length) return `Het geheel "${partOf}" bestaat niet in deze doelenboom.`;
+  const whole = r.rows[0];
+  // Naar een ander geheel verplaatsen: de oude koppeling eerst weg. Faalt de
+  // nieuwe, dan draait de aanroeper de transactie terug (oude blijft staan).
+  await client.query('delete from element_parts where part_element_id = $1 and whole_element_id <> $2', [element.id, whole.id]);
+  const error = await validateCompose(client, columns, whole, [element]);
+  if (error) return error;
+  await insertParts(client, doelenboomId, whole.id, [element.id]);
+  return null;
+}
+
 function isUniqueViolation(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { code?: string }).code === '23505';
 }
@@ -95,6 +133,8 @@ const ELEMENT_SELECT_FIELDS =
 elementsRouter.post('/doelenbomen/:id/elements', requireEditor, async (req, res) => {
   const input = readElementBody(req.body);
   if (input.errors.length) return res.status(400).json({ error: input.errors.join(' ') });
+  const partOfInput = readPartOf(req.body);
+  if ('error' in partOfInput) return res.status(400).json({ error: partOfInput.error });
 
   const doelenboomId = req.params.id;
   const columns = await getColumnsForDoelenboom(doelenboomId);
@@ -111,7 +151,7 @@ elementsRouter.post('/doelenbomen/:id/elements', requireEditor, async (req, res)
     [doelenboomId, input.code, input.type, input.name, input.description, input.kpi, input.taakveld, input.subtaakveld, sortOrder];
   const duplicate = () => res.status(409).json({ error: `Element met code "${input.code}" bestaat al in deze doelenboom.` });
 
-  if (explicitOrder !== null) {
+  if (explicitOrder !== null && !partOfInput.partOf) {
     try {
       const result = await pool.query(`${insertSql} returning ${ELEMENT_SELECT_FIELDS}`, insertValues(explicitOrder));
       return res.status(201).json(result.rows[0]);
@@ -137,14 +177,25 @@ elementsRouter.post('/doelenbomen/:id/elements', requireEditor, async (req, res)
     const globalIndex = !columnRows.length
       ? all.length
       : at > 0 ? all.indexOf(columnRows[at - 1]) + 1 : all.indexOf(columnRows[0]);
-    await writeOrder(client, [...all.slice(0, globalIndex), newRow, ...all.slice(globalIndex)]);
+    if (explicitOrder === null) await writeOrder(client, [...all.slice(0, globalIndex), newRow, ...all.slice(globalIndex)]);
+    else await client.query('update elements set sort_order = $2 where id = $1', [newRow.id, explicitOrder]);
+
+    // DOEL-140: meteen als deelelement aanmaken ("Onderdeel van").
+    if (partOfInput.partOf) {
+      const error = await applyPartOf(client, doelenboomId, columns, { id: newRow.id, code: input.code, type: input.type }, partOfInput.partOf);
+      if (error) {
+        await client.query('rollback');
+        return res.status(400).json({ error });
+      }
+    }
 
     const result = await client.query(`select ${ELEMENT_SELECT_FIELDS} from elements where id = $1`, [newRow.id]);
     await client.query('commit');
-    res.status(201).json(result.rows[0]);
+    res.status(201).json({ ...result.rows[0], part_of: partOfInput.partOf ?? null });
   } catch (err) {
     await client.query('rollback');
     if (isUniqueViolation(err)) return duplicate();
+    if (isPartRuleViolation(err)) return res.status(400).json({ error: 'Deze koppeling met een geheel is niet toegestaan.' });
     sendServerError(res, err, 'Aanmaken van element mislukt');
   } finally {
     client.release();
@@ -155,44 +206,124 @@ elementsRouter.post('/doelenbomen/:id/elements', requireEditor, async (req, res)
 // mee wijzigen; er wordt niets anders naar code verwezen dan puur tekstueel in
 // parent_text, dus hernoemen is veilig t.o.v. edges/tags/producten die via het
 // interne numerieke id gekoppeld zijn).
-elementsRouter.put('/doelenbomen/:id/elements/:code', requireEditor, async (req, res) => {
+elementsRouter.put('/doelenbomen/:id/elements/:code', requireEditor, async (req: AuthedRequest, res) => {
   const input = readElementBody(req.body, { requireCode: false });
   if (input.errors.length) return res.status(400).json({ error: input.errors.join(' ') });
   const newCode = input.code || req.params.code;
+  const partOfInput = readPartOf(req.body);
+  if ('error' in partOfInput) return res.status(400).json({ error: partOfInput.error });
 
-  const validTypes = await validTypeNames(req.params.id);
+  const doelenboomId = req.params.id;
+  const columns = await getColumnsForDoelenboom(doelenboomId);
+  const validTypes = allValidTypeNames(columns);
   if (!validTypes.includes(input.type)) {
     return res.status(400).json({ error: `Type moet één van de volgende zijn: ${validTypes.join(', ')}.` });
   }
 
+  const client = await pool.connect();
   try {
-    const result = await pool.query(
+    await client.query('begin');
+    const result = await client.query(
       `update elements
        set code = $1, type = $2, name = $3, description = $4, kpi = $5, taakveld = $6, subtaakveld = $7, updated_at = now()
        where doelenboom_id = $8 and code = $9
-       returning ${ELEMENT_SELECT_FIELDS}`,
-      [newCode, input.type, input.name, input.description, input.kpi, input.taakveld, input.subtaakveld, req.params.id, req.params.code]
+       returning id, ${ELEMENT_SELECT_FIELDS}`,
+      [newCode, input.type, input.name, input.description, input.kpi, input.taakveld, input.subtaakveld, doelenboomId, req.params.code]
     );
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Element niet gevonden.' });
-    res.json(result.rows[0]);
+    if (result.rows.length === 0) {
+      await client.query('rollback');
+      return res.status(404).json({ error: 'Element niet gevonden.' });
+    }
+    const { id, ...row } = result.rows[0];
+
+    // DOEL-140: een typewissel naar een andere kolom maakt de koppelingen
+    // met geheel/delen los; daarna eventueel het nieuwe "Onderdeel van".
+    const detached = await detachAfterTypeChange(client, columns, [id]);
+    if (partOfInput.partOf !== undefined) {
+      const error = await applyPartOf(client, doelenboomId, columns, { id, code: newCode, type: input.type }, partOfInput.partOf);
+      if (error) {
+        await client.query('rollback');
+        return res.status(400).json({ error });
+      }
+    }
+    const { wholeOf } = await partLinksFor(client, [id]);
+    await client.query('commit');
+    if (detached.length) await logDetached(req, doelenboomId, detached);
+    res.json({ ...row, part_of: wholeOf.get(String(id))?.code ?? null, detached });
   } catch (err) {
+    await client.query('rollback');
     if (isUniqueViolation(err)) {
       return res.status(409).json({ error: `Element met code "${newCode}" bestaat al in deze doelenboom.` });
     }
+    if (isPartRuleViolation(err)) return res.status(400).json({ error: 'Deze koppeling met een geheel is niet toegestaan.' });
     sendServerError(res, err, 'Bijwerken van element mislukt');
+  } finally {
+    client.release();
   }
 });
+
+// Auditregels voor losgemaakte koppelingen, per geheel gebundeld.
+async function logDetached(req: AuthedRequest, doelenboomId: string, links: Array<{ whole: string; part: string }>) {
+  const byWhole = new Map<string, string[]>();
+  for (const l of links) byWhole.set(l.whole, [...(byWhole.get(l.whole) ?? []), l.part]);
+  const tenantId = await tenantIdForDoelenboom(doelenboomId);
+  for (const [whole, parts] of byWhole) {
+    await logAuditEvent({
+      eventType: 'element_parts_detached', userId: req.user!.id, tenantId, doelenboomId,
+      detail: { whole, parts: parts.sort() },
+    });
+  }
+}
 
 // DELETE /api/doelenbomen/:id/elements/:code — verwijdert het element en (via
 // on delete cascade in db/init.sql) alles wat eraan hangt: relaties, projectstatus,
 // producten, tag- en organisatie-koppelingen.
-elementsRouter.delete('/doelenbomen/:id/elements/:code', requireEditor, async (req, res) => {
-  const result = await pool.query(
-    'delete from elements where doelenboom_id = $1 and code = $2 returning id',
-    [req.params.id, req.params.code]
-  );
-  if (result.rowCount === 0) return res.status(404).json({ error: 'Element niet gevonden.' });
-  res.status(204).send();
+//
+// DOEL-140: ?parts=detach (standaard) | delete bepaalt wat er met de delen van
+// een samengesteld element gebeurt: losmaken (ze blijven als gewone
+// elementen staan) of mee verwijderen. Een deelelement verwijderen haalt
+// alleen dat deel weg. Het verwijderen van een geheel komt in het auditlog.
+elementsRouter.delete('/doelenbomen/:id/elements/:code', requireEditor, async (req: AuthedRequest, res) => {
+  const partsAction = readPartAction(req.query.parts);
+  if (!partsAction) return res.status(400).json({ error: 'Ongeldige keuze voor de deelelementen (detach of delete).' });
+  const doelenboomId = req.params.id;
+  const client = await pool.connect();
+  try {
+    await client.query('begin');
+    const found = await client.query(
+      'select id, code from elements where doelenboom_id = $1 and code = $2 for update',
+      [doelenboomId, req.params.code]
+    );
+    if (!found.rows.length) {
+      await client.query('rollback');
+      return res.status(404).json({ error: 'Element niet gevonden.' });
+    }
+    const element = found.rows[0];
+    const { partsOf } = await partLinksFor(client, [element.id]);
+    const parts = partsOf.get(String(element.id)) ?? [];
+    // Delen mee verwijderen is meerdere elementen tegelijk verwijderen: net
+    // als bulk-verwijderen (DOEL-82) alleen voor een admin.
+    if (partsAction === 'delete' && parts.length && (await getEffectiveRoleForDoelenboom(req.user!.id, doelenboomId)) !== 'admin') {
+      await client.query('rollback');
+      return res.status(403).json({ error: 'Alleen een beheerder kan de deelelementen mee verwijderen; kies "Delen losmaken".' });
+    }
+    const ids = [String(element.id), ...(partsAction === 'delete' ? parts.map((p) => p.id) : [])];
+    await client.query('delete from elements where id = any($1::bigint[])', [ids]);
+    await client.query('commit');
+    if (parts.length) {
+      await logAuditEvent({
+        eventType: 'element_whole_deleted', userId: req.user!.id,
+        tenantId: await tenantIdForDoelenboom(doelenboomId), doelenboomId,
+        detail: { whole: element.code, parts: parts.map((p) => p.code).sort(), partsAction },
+      });
+    }
+    res.status(204).send();
+  } catch (err) {
+    await client.query('rollback');
+    sendServerError(res, err, 'Verwijderen van element mislukt');
+  } finally {
+    client.release();
+  }
 });
 
 // ---- Bulkacties op een selectie van elementen (DOEL-81 bewerken, DOEL-82
@@ -431,9 +562,13 @@ elementsRouter.post('/doelenbomen/:id/elements/bulk-update', requireEditor, asyn
         await applyElementValueChanges(client, doelenboomId, elementId, req.user!.id, attributeChanges);
       }
     }
+    // DOEL-140: elementen die door de typewissel in een andere kolom komen
+    // dan hun geheel of delen, worden daarvan losgemaakt.
+    const detached = newType !== null ? await detachAfterTypeChange(client, columns, elementIds) : [];
 
     await client.query('commit');
-    res.json({ updated: elements.length });
+    if (detached.length) await logDetached(req, doelenboomId, detached);
+    res.json(detached.length ? { updated: elements.length, detached } : { updated: elements.length });
   } catch (err) {
     await client.query('rollback');
     sendServerError(res, err, 'Bulk-bewerken van elementen mislukt');
@@ -455,9 +590,14 @@ elementsRouter.post('/doelenbomen/:id/elements/bulk-update', requireEditor, asyn
 // tekst.
 const requireAdminForBulkDelete = requireWritableDoelenboom('id', 'admin');
 
+// DOEL-140: { parts: 'detach' (standaard) | 'delete' } bepaalt wat er met de
+// delen van geselecteerde samengestelde elementen gebeurt die zelf niet
+// geselecteerd zijn.
 elementsRouter.post('/doelenbomen/:id/elements/bulk-delete', requireAdminForBulkDelete, async (req: AuthedRequest, res) => {
   const codes = readBulkElementCodes(asRecord(req.body));
   if ('error' in codes) return res.status(400).json({ error: codes.error });
+  const partsAction = readPartAction(asRecord(req.body).parts);
+  if (!partsAction) return res.status(400).json({ error: 'Ongeldige keuze voor de deelelementen (detach of delete).' });
 
   const doelenboomId = req.params.id;
   const client = await pool.connect();
@@ -468,20 +608,143 @@ elementsRouter.post('/doelenbomen/:id/elements/bulk-delete', requireAdminForBulk
       await client.query('rollback');
       return res.status(404).json({ error: missingElementsMessage('verwijderd') });
     }
-    await client.query('delete from elements where id = any($1::bigint[])', [elements.map((e) => e.id)]);
+    const { partsOf } = await partLinksFor(client, elements.map((e) => e.id));
+    const selected = new Set(elements.map((e) => String(e.id)));
+    const wholes = elements
+      .map((e) => ({ code: e.code, parts: partsOf.get(String(e.id)) ?? [] }))
+      .filter((w) => w.parts.length);
+    const extra = partsAction === 'delete'
+      ? [...new Map(wholes.flatMap((w) => w.parts).filter((p) => !selected.has(p.id)).map((p) => [p.id, p])).values()]
+      : [];
+    const deletedCodes = [...elements.map((e) => e.code), ...extra.map((p) => p.code)].sort();
+    await client.query('delete from elements where id = any($1::bigint[])', [[...selected, ...extra.map((p) => p.id)]]);
     await client.query('commit');
 
+    const tenantId = await tenantIdForDoelenboom(doelenboomId);
     await logAuditEvent({
       eventType: 'elements_bulk_deleted',
       userId: req.user!.id,
-      tenantId: await tenantIdForDoelenboom(doelenboomId),
+      tenantId,
       doelenboomId,
-      detail: { count: elements.length, codes: elements.map((e) => e.code).sort() },
+      detail: { count: deletedCodes.length, codes: deletedCodes },
     });
-    res.json({ deleted: elements.length });
+    for (const w of wholes) {
+      await logAuditEvent({
+        eventType: 'element_whole_deleted', userId: req.user!.id, tenantId, doelenboomId,
+        detail: { whole: w.code, parts: w.parts.map((p) => p.code).sort(), partsAction },
+      });
+    }
+    res.json({ deleted: deletedCodes.length });
   } catch (err) {
     await client.query('rollback');
     sendServerError(res, err, 'Bulk-verwijderen van elementen mislukt');
+  } finally {
+    client.release();
+  }
+});
+
+// ---- Samengestelde elementen (DOEL-140) ----
+//
+// POST /api/doelenbomen/:id/elements/compose — "Samenvoegen tot…" uit de
+// selectiemodus. Body: { parts: [codes], whole: <code> } om bij een bestaand
+// element onder te brengen, óf { parts: [codes], newWhole: { code, type, name } }
+// om een nieuw geheel aan te maken. Alles of niets in één transactie; de
+// regels staan in api/src/elementParts.ts. Rechten als het bewerken van een
+// element (editor of admin, schrijfbare boom). Auditregel met alleen codes.
+elementsRouter.post('/doelenbomen/:id/elements/compose', requireEditor, async (req: AuthedRequest, res) => {
+  const body = asRecord(req.body);
+  const parts = readBulkElementCodes({ codes: body.parts });
+  if ('error' in parts) return res.status(400).json({ error: parts.error.replace('De selectie', 'De deelelementen') });
+  const hasWhole = typeof body.whole === 'string' && body.whole.trim() !== '';
+  const hasNew = body.newWhole !== undefined;
+  if (hasWhole === hasNew) return res.status(400).json({ error: 'Kies óf een bestaand element als geheel, óf maak een nieuw geheel aan.' });
+  if (hasWhole && (body.whole as string).length > BULK_MAX_CODE_LENGTH) return res.status(400).json({ error: 'Ongeldig geheel.' });
+  let newWhole: ElementInput | null = null;
+  if (hasNew) {
+    newWhole = readElementBody(asRecord(body.newWhole));
+    if (newWhole.errors.length) return res.status(400).json({ error: newWhole.errors.join(' ') });
+  }
+
+  const doelenboomId = req.params.id;
+  const columns = await getColumnsForDoelenboom(doelenboomId);
+  if (newWhole && !allValidTypeNames(columns).includes(newWhole.type)) {
+    return res.status(400).json({ error: `Type moet één van de volgende zijn: ${allValidTypeNames(columns).join(', ')}.` });
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('begin');
+    const fail = async (status: number, error: string) => {
+      await client.query('rollback');
+      return res.status(status).json({ error });
+    };
+    const all = await lockElementsInOrder(client, doelenboomId);
+    const partRows = all.filter((row) => parts.codes.includes(row.code));
+    if (partRows.length !== parts.codes.length) return await fail(404, missingElementsMessage('samengevoegd'));
+
+    let whole: OrderedRow;
+    if (newWhole) {
+      if (all.some((row) => row.code === newWhole!.code)) return await fail(409, `Element met code "${newWhole.code}" bestaat al in deze doelenboom.`);
+      // Het nieuwe geheel komt op de plek van het eerste deel in de boom.
+      const first = all.findIndex((row) => parts.codes.includes(row.code));
+      const inserted = await client.query(
+        `insert into elements (doelenboom_id, code, type, name, description, kpi, taakveld, subtaakveld, sort_order)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning id`,
+        [doelenboomId, newWhole.code, newWhole.type, newWhole.name, newWhole.description, newWhole.kpi,
+          newWhole.taakveld, newWhole.subtaakveld, all.length + 1]
+      );
+      whole = { id: String(inserted.rows[0].id), code: newWhole.code, type: newWhole.type, sort_order: -1 };
+      await writeOrder(client, [...all.slice(0, first), whole, ...all.slice(first)]);
+    } else {
+      const found = all.find((row) => row.code === (body.whole as string).trim());
+      if (!found) return await fail(404, 'Het gekozen geheel bestaat niet in deze doelenboom.');
+      whole = found;
+    }
+
+    const error = await validateCompose(client, columns, whole, partRows);
+    if (error) return await fail(400, error);
+    await insertParts(client, doelenboomId, whole.id, partRows.map((p) => p.id));
+    await client.query('commit');
+
+    await logAuditEvent({
+      eventType: 'element_parts_composed', userId: req.user!.id,
+      tenantId: await tenantIdForDoelenboom(doelenboomId), doelenboomId,
+      detail: { whole: whole.code, parts: partRows.map((p) => p.code).sort(), newWhole: !!newWhole },
+    });
+    res.status(newWhole ? 201 : 200).json({ whole: whole.code, parts: partRows.map((p) => p.code) });
+  } catch (err) {
+    await client.query('rollback');
+    if (isUniqueViolation(err)) return res.status(409).json({ error: 'Dit element bestaat al of is al deel van een geheel.' });
+    if (isPartRuleViolation(err)) return res.status(400).json({ error: 'Deze samenstelling is niet toegestaan.' });
+    sendServerError(res, err, 'Samenvoegen van elementen mislukt');
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/doelenbomen/:id/elements/:code/detach-parts — "Alle delen
+// losmaken" op een geheel. De delen blijven als gewone elementen staan.
+elementsRouter.post('/doelenbomen/:id/elements/:code/detach-parts', requireEditor, async (req: AuthedRequest, res) => {
+  const doelenboomId = req.params.id;
+  const client = await pool.connect();
+  try {
+    await client.query('begin');
+    const found = await client.query('select id, code from elements where doelenboom_id = $1 and code = $2 for update', [doelenboomId, req.params.code]);
+    if (!found.rows.length) {
+      await client.query('rollback');
+      return res.status(404).json({ error: 'Element niet gevonden.' });
+    }
+    const removed = await client.query(
+      `delete from element_parts ep using elements p
+       where ep.whole_element_id = $1 and p.id = ep.part_element_id returning p.code`,
+      [found.rows[0].id]
+    );
+    await client.query('commit');
+    const partCodes = removed.rows.map((r) => r.code as string).sort();
+    if (partCodes.length) await logDetached(req, doelenboomId, partCodes.map((part) => ({ whole: found.rows[0].code, part })));
+    res.json({ detached: partCodes.length, parts: partCodes });
+  } catch (err) {
+    await client.query('rollback');
+    sendServerError(res, err, 'Losmaken van de deelelementen mislukt');
   } finally {
     client.release();
   }
@@ -669,8 +932,22 @@ elementsRouter.post('/doelenbomen/:id/elements/:code/move', requireEditor, async
     const all = await lockElementsInOrder(client, doelenboomId);
     const element = all.find((row) => row.code === req.params.code);
     if (!element) return await fail(404, 'Element niet gevonden.');
-    const columnKey = columnKeyOf(columns, element.type);
-    const inColumn = (row: OrderedRow) => columnKeyOf(columns, row.type) === columnKey;
+    // DOEL-136: de boom toont een kolom gegroepeerd per type (basistype, dan
+    // elke alias). Verplaatsen gebeurt daarom binnen de groep: alleen
+    // elementen van hetzelfde type tellen mee. Zonder aliassen is dat de hele
+    // kolom, net als vóór DOEL-136.
+    // DOEL-140: een deelelement verplaatst binnen zijn kader (tussen de delen
+    // van hetzelfde geheel); een ander element tussen de elementen van zijn
+    // groep die zelf geen deel zijn (het kader verhuist met zijn geheel).
+    const links = await client.query(
+      `select ep.part_element_id, ep.whole_element_id from element_parts ep where ep.doelenboom_id = $1`,
+      [doelenboomId]
+    );
+    const wholeOfId = new Map(links.rows.map((r) => [String(r.part_element_id), String(r.whole_element_id)]));
+    const myWhole = wholeOfId.get(element.id) ?? null;
+    const inColumn = myWhole !== null
+      ? (row: OrderedRow) => wholeOfId.get(row.id) === myWhole
+      : (row: OrderedRow) => row.type === element.type && !wholeOfId.has(row.id);
     const columnRows = all.filter(inColumn);
     const from = columnRows.indexOf(element);
     const rest = columnRows.filter((row) => row !== element);
@@ -685,7 +962,14 @@ elementsRouter.post('/doelenbomen/:id/elements/:code/move', requireEditor, async
       if (afterCode === element.code) return await fail(400, 'Een element kan niet na zichzelf worden geplaatst.');
       const target = all.find((row) => row.code === afterCode);
       if (!target) return await fail(404, 'Het element om na te plaatsen bestaat niet in deze doelenboom.');
-      if (!inColumn(target)) return await fail(400, 'Het element om na te plaatsen staat in een andere kolom.');
+      if (columnKeyOf(columns, target.type) !== columnKeyOf(columns, element.type)) {
+        return await fail(400, 'Het element om na te plaatsen staat in een andere kolom.');
+      }
+      if (myWhole !== null && !inColumn(target)) {
+        return await fail(400, 'Een deelelement kan alleen binnen zijn eigen samengestelde element worden verplaatst.');
+      }
+      if (target.type !== element.type) return await fail(400, 'Het element om na te plaatsen is van een ander type; verplaatsen kan alleen binnen de eigen groep.');
+      if (!inColumn(target)) return await fail(400, 'Het element om na te plaatsen is een deelelement; kies een element buiten een samengesteld element.');
       to = rest.indexOf(target) + 1;
     }
     const reordered = [...rest.slice(0, to), element, ...rest.slice(to)];

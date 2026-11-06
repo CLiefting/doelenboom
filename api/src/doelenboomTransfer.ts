@@ -70,6 +70,12 @@ export const TRANSFER_TABLES: TableSpec[] = [
     table: 'edges', where: OF_BOOM, orderBy: 't.id',
     fk: { doelenboom_id: 'doelenboom', source_element_id: 'element', target_element_id: 'element' },
   },
+  // DOEL-140: geheel-deelkoppelingen; ná elements, zodat beide ids vertaald
+  // kunnen worden (daarom een koppeltabel en geen kolom op elements).
+  {
+    table: 'element_parts', where: OF_BOOM, orderBy: 't.id',
+    fk: { doelenboom_id: 'doelenboom', whole_element_id: 'element', part_element_id: 'element' },
+  },
   { table: 'tags', where: OF_BOOM, orderBy: 't.id', fk: { doelenboom_id: 'doelenboom' }, map: 'tag' },
   { table: 'org_units', where: OF_BOOM, orderBy: 't.id', fk: { doelenboom_id: 'doelenboom' }, map: 'org' },
   { table: 'element_tags', where: OF_ELEMENT, orderBy: 't.element_id, t.tag_id', fk: { element_id: 'element', tag_id: 'tag' }, noId: true },
