@@ -107,6 +107,9 @@ async function applyPartOf(
   const r = await client.query('select id, code, type from elements where doelenboom_id = $1 and code = $2 for update', [doelenboomId, partOf]);
   if (!r.rows.length) return `Het geheel "${partOf}" bestaat niet in deze doelenboom.`;
   const whole = r.rows[0];
+  // Naar een ander geheel verplaatsen: de oude koppeling eerst weg. Faalt de
+  // nieuwe, dan draait de aanroeper de transactie terug (oude blijft staan).
+  await client.query('delete from element_parts where part_element_id = $1 and whole_element_id <> $2', [element.id, whole.id]);
   const error = await validateCompose(client, columns, whole, [element]);
   if (error) return error;
   await insertParts(client, doelenboomId, whole.id, [element.id]);

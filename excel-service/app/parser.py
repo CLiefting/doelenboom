@@ -199,6 +199,13 @@ def parse_workbook(
         'onderdeel_van': ('onderdeel van',),
     })
     track('Referentietabel', ref_found)
+    # DOEL-140: staat de kolom "Onderdeel van" in het bestand? Zo niet (oud
+    # formaat, of een export van vóór 4.6.0), dan houdt de API bij publiceren
+    # de bestaande koppelingen aan i.p.v. ze te wissen.
+    has_part_of_column = False
+    if ref_found:
+        first_row = next(wb['Referentietabel'].iter_rows(values_only=True, max_row=1), None)
+        has_part_of_column = first_row is not None and find_col(list(first_row), 'onderdeel van') is not None
     if not ref_found:
         errors.append('Tabblad "Referentietabel" ontbreekt — dit is de enige verplichte bron voor elementen.')
         return 'failed', {
@@ -745,6 +752,7 @@ def parse_workbook(
 
     parsed = {
         'elements': elements,
+        'partOfColumn': has_part_of_column,
         'edges': edges,
         'projectStatus': project_status,
         'products': dict(products),

@@ -17,8 +17,9 @@ import { linkPartsByCode } from '../src/elementParts.js';
 import { getColumnsForDoelenboom } from '../src/columnConfig.js';
 import {
   startTestServer, stopTestServer, closePool, req, unique, createSysadminUser, login, cleanupByPrefix,
-  setupWritableDoelenboom,
+  setupWritableDoelenboom, rawReq, getBaseUrl,
 } from './helpers.js';
+import ExcelJS from 'exceljs';
 
 const PREFIX = unique('delen');
 
@@ -206,6 +207,14 @@ describe('samengestelde elementen (DOEL-140)', () => {
     assert.equal((await add('C7', 'Capability', editorToken, doelenboomId, { partOf: 'ONBEKEND' })).status, 400);
     assert.ok(!(await codesIn()).includes('C6') && !(await codesIn()).includes('C7'));
     assert.equal((await put('C2', { partOf: 42 })).status, 400);
+    // Naar een ander geheel verplaatsen via het bewerkvenster (niet eerst losmaken).
+    r = await put('C2', { partOf: 'C3' });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.part_of, 'C3');
+    assert.equal((await partOf()).C5, 'C1');
+    // Mislukt het verplaatsen (ongeldig nieuw geheel), dan blijft de oude koppeling staan.
+    assert.equal((await put('C2', { partOf: 'P1' })).status, 400);
+    assert.equal((await partOf()).C2, 'C3');
     // Losmaken
     r = await put('C2', { partOf: null });
     assert.equal(r.status, 200);
@@ -350,6 +359,54 @@ describe('samengestelde elementen (DOEL-140)', () => {
     assert.deepEqual([links.C2, links.V1, links.C3, links.C4, links.C1], ['C1', 'C1', null, null, null]);
     assert.equal(warnings.length, 4);
     assert.ok(warnings.some((w) => /andere kolom/.test(w)) && warnings.some((w) => /onbekend element/.test(w)));
+  });
+
+  it('Excel (nieuw formaat): koppelingen gaan heen en terug; zonder kolom "Onderdeel van" blijven ze behouden', async (t) => {
+    const health = await fetch(`${process.env.EXCEL_SERVICE_URL ?? 'http://localhost:8000'}/health`).catch(() => null);
+    if (!health || !health.ok) return t.skip('excel-service niet bereikbaar — zie EXCEL_SERVICE_URL');
+    await reset();
+    assert.equal((await compose({ whole: 'C1', parts: ['C2', 'V1'] })).status, 200);
+
+    const exported = await rawReq('GET', `${base()}/export?format=nieuw&mode=data`, { token: adminToken });
+    assert.equal(exported.status, 200);
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await exported.arrayBuffer());
+    const ref = wb.getWorksheet('Referentietabel')!;
+    const headers = (ref.getRow(1).values as unknown[]).map((v) => (v == null ? '' : String(v)));
+    const col = headers.indexOf('Onderdeel van');
+    const idCol = headers.indexOf('ID');
+    assert.ok(col > 0, 'kolom "Onderdeel van" staat in de export');
+
+    const publish = async (book: ExcelJS.Workbook) => {
+      const form = new FormData();
+      form.append('file', new Blob([await book.xlsx.writeBuffer()]), 'export.xlsx');
+      const up = await fetch(`${getBaseUrl()}${base()}/imports`, { method: 'POST', headers: { Authorization: `Bearer ${adminToken}` }, body: form });
+      const upload = await up.json();
+      assert.equal(up.status, 201, JSON.stringify(upload));
+      const pub = await fetch(`${getBaseUrl()}/api/imports/${upload.id}/publish`, { method: 'POST', headers: { Authorization: `Bearer ${adminToken}` } });
+      const body = await pub.json();
+      assert.equal(pub.status, 200, JSON.stringify(body));
+      return body;
+    };
+
+    // 1. Met de kolom: C3 in Excel aan C1 gehangen, C2 losgemaakt; P1 naar een andere kolom → overgeslagen.
+    ref.eachRow((row, n) => {
+      if (n === 1) return;
+      const code = String(row.getCell(idCol).value);
+      if (code === 'C3') row.getCell(col).value = 'C1';
+      if (code === 'C2') row.getCell(col).value = null;
+      if (code === 'C4') row.getCell(col).value = 'P1';
+    });
+    const first = await publish(wb);
+    assert.ok((first.partWarnings ?? []).some((w: string) => /C4/.test(w) && /andere kolom/.test(w)), JSON.stringify(first));
+    let links = await partOf();
+    assert.deepEqual([links.C2, links.C3, links.V1, links.C4], [null, 'C1', 'C1', null]);
+
+    // 2. Zonder de kolom (bv. een export van vóór 4.6.0): bestaande koppelingen blijven.
+    ref.spliceColumns(col, 1);
+    await publish(wb);
+    links = await partOf();
+    assert.deepEqual([links.C3, links.V1], ['C1', 'C1']);
   });
 
   it('dupliceren neemt de koppelingen mee', async () => {

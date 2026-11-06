@@ -515,3 +515,9 @@ class TestOnderdeelVan:
     def test_a03_formule_achtige_waarde_is_gewone_tekst(self):
         status, report, parsed = parse_workbook(nieuw_workbook(ref_rows=[self.row('C1', '=HYPERLINK("x")')]))
         assert 'partOf' not in parsed['elements'][0]
+
+    def test_partOfColumn_meldt_of_de_kolom_er_staat(self):
+        _, _, met = parse_workbook(nieuw_workbook(ref_rows=[self.row('C1')]))
+        assert met['partOfColumn'] is True
+        _, _, zonder = parse_workbook(oud_workbook(ref_rows=[['P1', 'Project', 'Project 1', '', '', '', '', '']]))
+        assert zonder['partOfColumn'] is False

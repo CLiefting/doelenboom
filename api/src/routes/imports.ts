@@ -160,6 +160,8 @@ importsRouter.post(
       code: string; type: string; name: string; description: string;
       parentText: string; kpi: string; taakveld: string; subtaakveld: string; sortOrder: number; partOf?: string;
     }>;
+    // DOEL-140: true als de Referentietabel de kolom "Onderdeel van" heeft.
+    partOfColumn?: boolean;
     edges: Array<{ source: string; target: string; weight: string | null; toelichting: string }>;
     projectStatus: Record<string, { projectstatus: string; rag: string; toelichting: string; gerapporteerdOp: string | null; clusterPpt?: string }>;
     products: Record<string, Array<{
@@ -200,6 +202,17 @@ importsRouter.post(
     // DOEL-76: idem voor de ingevulde kenmerkwaarden.
     const attributeValueSnapshot = await snapshotAttributeValues(client, doelenboomId);
 
+    // DOEL-140: bestaande geheel-deelkoppelingen op code vastleggen. Heeft het
+    // bestand geen kolom "Onderdeel van" (oud formaat of een export van vóór
+    // 4.6.0), dan worden ze na het opnieuw aanmaken teruggezet, net als de
+    // afwijkingen en kenmerkwaarden hierboven.
+    const partSnapshot = (await client.query(
+      `select p.code as part, w.code as whole from element_parts ep
+       join elements p on p.id = ep.part_element_id join elements w on w.id = ep.whole_element_id
+       where ep.doelenboom_id = $1`,
+      [doelenboomId]
+    )).rows as Array<{ part: string; whole: string }>;
+
     // Volledige vervanging: eerst alles weg wat aan deze doelenboom hangt.
     await client.query('delete from elements where doelenboom_id = $1', [doelenboomId]); // cascade → edges/project_status/products/element_tags/ob_org_relations
     await client.query('delete from tags where doelenboom_id = $1', [doelenboomId]); // cascade → element_tags
@@ -218,10 +231,14 @@ importsRouter.post(
     await restoreAttributeValues(client, doelenboomId, attributeValueSnapshot, elementIdByCode);
     // DOEL-140: samengestelde elementen uit de kolom "Onderdeel van". Wat niet
     // mag (andere kolom, nesting) wordt overgeslagen en gemeld, niet geweigerd.
+    const partLinks = parsed.partOfColumn
+      ? parsed.elements.filter((el) => el.partOf).map((el) => ({ part: el.code, whole: el.partOf as string }))
+      // Kolom ontbreekt: bestaande koppelingen behouden, voor zover beide
+      // elementen nog in het bestand staan (de rest stil overslaan).
+      : partSnapshot.filter((l) => elementIdByCode.has(l.part) && elementIdByCode.has(l.whole));
     const partWarnings = await linkPartsByCode(
       client, doelenboomId, await getColumnsForDoelenboom(doelenboomId),
-      parsed.elements.filter((el) => el.partOf).map((el) => ({ part: el.code, whole: el.partOf as string })),
-      elementIdByCode, new Map(parsed.elements.map((el) => [el.code, el.type] as [string, string]))
+      partLinks, elementIdByCode, new Map(parsed.elements.map((el) => [el.code, el.type] as [string, string]))
     );
 
     for (const e of parsed.edges) {
